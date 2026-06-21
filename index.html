@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FSOS — المساعد الميداني الذكي</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/tabler-icons.min.css">
+<style>
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Cairo',sans-serif;direction:rtl;background:#070d18;min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px;}
+
+.app{width:100%;max-width:420px;border:1px solid #F5B04133;border-radius:16px;overflow:hidden;display:flex;flex-direction:column;height:calc(100vh - 24px);max-height:700px;}
+
+.header{background:linear-gradient(135deg,#0B1F3A,#102A43);border-bottom:1px solid #F5B04155;padding:12px 16px;display:flex;align-items:center;gap:10px;flex-shrink:0;}
+.logo{width:38px;height:38px;background:linear-gradient(135deg,#F5B041,#E67E22);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
+.logo i{font-size:20px;color:#0B1F3A;}
+.brand{flex:1;}
+.brand-name{font-size:13px;font-weight:700;color:#F5B041;}
+.brand-sub{font-size:10px;color:#4A90E2;letter-spacing:1px;}
+.status{display:flex;align-items:center;gap:5px;}
+.dot{width:7px;height:7px;border-radius:50%;background:#1D9E75;}
+.status-txt{font-size:10px;color:#1D9E75;}
+
+.chat{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:12px;background:#070d18;}
+.chat::-webkit-scrollbar{width:4px;}
+.chat::-webkit-scrollbar-track{background:transparent;}
+.chat::-webkit-scrollbar-thumb{background:#F5B04133;border-radius:4px;}
+
+.msg-user{align-self:flex-end;background:linear-gradient(135deg,#1A365D,#102A43);border:1px solid #4A90E244;color:#D9E2EC;border-radius:12px 12px 3px 12px;padding:10px 14px;font-size:13px;max-width:85%;line-height:1.7;}
+
+.msg-ai{display:flex;gap:8px;align-self:flex-start;max-width:95%;}
+.ai-avatar{width:30px;height:30px;min-width:30px;background:linear-gradient(135deg,#F5B041,#E67E22);border-radius:50%;display:flex;align-items:center;justify-content:center;margin-top:2px;}
+.ai-avatar i{font-size:15px;color:#0B1F3A;}
+.bubbles{display:flex;flex-direction:column;gap:6px;}
+
+.bubble{background:#0d1929;border:1px solid #F5B04133;border-radius:3px 12px 12px 12px;padding:10px 13px;font-size:13px;line-height:1.7;color:#D9E2EC;}
+.blbl{font-size:11px;font-weight:700;color:#F5B041;margin-bottom:5px;display:flex;align-items:center;gap:4px;}
+.blbl i{font-size:13px;}
+.bubble.action{background:#0a1f10;border-color:#1D9E7555;}
+.bubble.action .blbl{color:#1D9E75;}
+.bubble.action p{color:#9FE1CB;}
+.bubble.warn{background:#1a1000;border-color:#F5B04144;}
+.bubble.warn .blbl{color:#FFB347;}
+.bubble.warn p{color:#FAC775;}
+
+.typing-wrap{display:flex;gap:8px;align-self:flex-start;}
+.typing{background:#0d1929;border:1px solid #F5B04133;border-radius:3px 12px 12px 12px;padding:12px 16px;display:flex;gap:5px;align-items:center;}
+.tdot{width:7px;height:7px;border-radius:50%;background:#F5B041;animation:td 1.2s infinite;}
+.tdot:nth-child(2){animation-delay:.2s;}
+.tdot:nth-child(3){animation-delay:.4s;}
+@keyframes td{0%,60%,100%{opacity:.3;transform:scale(1);}30%{opacity:1;transform:scale(1.3);}}
+
+.input-area{background:#0B1F3A;padding:10px 12px;border-top:1px solid #F5B04133;flex-shrink:0;}
+.input-box{display:flex;gap:8px;align-items:flex-end;background:#070d18;border:1px solid #F5B04144;border-radius:10px;padding:8px 10px;}
+.icons{display:flex;gap:8px;align-items:center;}
+.icons i{font-size:18px;color:#4A90E2;opacity:.8;}
+textarea{flex:1;border:none;background:transparent;font-size:13px;color:#D9E2EC;resize:none;outline:none;min-height:36px;max-height:80px;font-family:'Cairo',sans-serif;direction:rtl;line-height:1.5;}
+textarea::placeholder{color:#4A90E266;}
+.send{width:36px;height:36px;background:linear-gradient(135deg,#F5B041,#E67E22);border:none;border-radius:8px;display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0;}
+.send:disabled{opacity:.4;cursor:not-allowed;}
+.send i{font-size:16px;color:#0B1F3A;}
+
+.divider{display:flex;align-items:center;gap:8px;margin-top:8px;}
+.div-line{flex:1;height:1px;background:#F5B04122;}
+.div-txt{font-size:10px;color:#F5B04155;}
+
+.quick-row{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;}
+.qbtn{font-size:11px;font-family:'Cairo',sans-serif;padding:5px 10px;border-radius:20px;border:1px solid #F5B04144;background:#0d1929;color:#FFB347;cursor:pointer;}
+.qbtn:hover{background:#F5B04122;}
+
+.tagline{text-align:center;font-size:10px;color:#F5B04155;margin-top:6px;letter-spacing:1px;font-weight:600;}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="header">
+    <div class="logo"><i class="ti ti-chart-bar"></i></div>
+    <div class="brand">
+      <div class="brand-name">FMCG Sales Analytics Lab</div>
+      <div class="brand-sub">FSOS · من الميدان للداتا</div>
+    </div>
+    <div class="status"><div class="dot"></div><span class="status-txt">مباشر</span></div>
+  </div>
+
+  <div class="chat" id="chat">
+    <div class="msg-ai">
+      <div class="ai-avatar"><i class="ti ti-robot"></i></div>
+      <div class="bubbles">
+        <div class="bubble">
+          <div class="blbl"><i class="ti ti-sparkles"></i> FSOS جاهز</div>
+          <p>مرحباً — أنا مساعدك الميداني الذكي. اكتب موقفك أو سؤالك وهعطيك قرار فوري.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="input-area">
+    <div class="input-box">
+      <div class="icons">
+        <i class="ti ti-paperclip"></i>
+        <i class="ti ti-camera"></i>
+        <i class="ti ti-map-pin"></i>
+      </div>
+      <textarea id="inp" placeholder="اكتب موقفك الميداني هنا..." rows="1"></textarea>
+      <button class="send" id="sb"><i class="ti ti-send"></i></button>
+    </div>
+    <div class="divider"><div class="div-line"></div><span class="div-txt">مواقف سريعة</span><div class="div-line"></div></div>
+    <div class="quick-row">
+      <button class="qbtn" onclick="qs('العميل رفض الطلبية وقال السوق واقف')">رفض الطلبية</button>
+      <button class="qbtn" onclick="qs('المنافس عنده سعر أرخص مني')">المنافس أرخص</button>
+      <button class="qbtn" onclick="qs('الصنف اختفى من الرف عند العميل')">صنف مختفي</button>
+      <button class="qbtn" onclick="qs('العميل طلب أجل وعنده رصيد متأخر')">طلب أجل</button>
+      <button class="qbtn" onclick="qs('العميل قلل الكمية من غير سبب')">تقليل الكمية</button>
+    </div>
+    <div class="tagline">المندوب المحترف يدير بالبيانات ويكسب بالثقة</div>
+  </div>
+</div>
+
+<script>
+const API_KEY = 'AIzaSyAQ.Ab8RN6IzTelX9TqQ0dACK-oynpmqLS3hGPPR7Yk6EG8L0IWOOQ';
+const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${API_KEY}`;
+
+const SYSTEM = `أنت FSOS Rep GPT — مساعد مبيعات ميداني متخصص لمندوبي الكاش فان في قطاع FMCG من FMCG Sales Analytics Lab.
+هويتك: خبير ميداني، لغتك عربية بسيطة وعملية، ردودك قصيرة ومباشرة.
+الفلسفة: لا تعطِ المندوب معلومات أكثر — أعطه قراراً أفضل.
+عند أي موقف ميداني رد بهذا الشكل الثابت فقط:
+🎯 المهارة: [اسم المهارة]
+✅ القرار الفوري: [ما يفعله الآن — جملة أو جملتان]
+💬 الجملة: [جملة واحدة يقولها للعميل]
+⚡ تجنب: [الخطأ الشائع]
+قواعد: ردود قصيرة دائماً، لا شرح نظري، كل رد ينتهي بإجراء عملي، لغة ميدانية مباشرة.`;
+
+const chat = document.getElementById('chat');
+const inp = document.getElementById('inp');
+const sb = document.getElementById('sb');
+const hist = [];
+
+inp.addEventListener('input',()=>{inp.style.height='auto';inp.style.height=Math.min(inp.scrollHeight,80)+'px';});
+inp.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}});
+sb.addEventListener('click',send);
+function qs(t){inp.value=t;send();}
+
+function addUser(t){
+  const d=document.createElement('div');d.className='msg-user';d.textContent=t;
+  chat.appendChild(d);chat.scrollTop=chat.scrollHeight;
+}
+
+function addTyping(){
+  const w=document.createElement('div');w.className='typing-wrap';w.id='typ';
+  w.innerHTML=`<div class="ai-avatar"><i class="ti ti-robot"></i></div><div class="typing"><div class="tdot"></div><div class="tdot"></div><div class="tdot"></div></div>`;
+  chat.appendChild(w);chat.scrollTop=chat.scrollHeight;
+}
+function rmTyping(){const t=document.getElementById('typ');if(t)t.remove();}
+
+function parse(txt){
+  const map={'🎯':{lbl:'المهارة',icon:'ti-target',cls:''},'✅':{lbl:'القرار الفوري',icon:'ti-check',cls:'action'},'💬':{lbl:'الجملة',icon:'ti-message',cls:''},'⚡':{lbl:'تجنب',icon:'ti-alert-triangle',cls:'warn'}};
+  const blocks=[];let cur=null;
+  for(const line of txt.split('\n').filter(l=>l.trim())){
+    const e=[...line][0];
+    if(map[e]){if(cur)blocks.push(cur);cur={...map[e],text:line.replace(/^[🎯✅💬⚡]\s*[^:]*:\s*/,'').trim()};}
+    else if(cur){cur.text+=' '+line.trim();}
+  }
+  if(cur)blocks.push(cur);
+  if(!blocks.length)blocks.push({lbl:'',icon:'ti-message',cls:'',text:txt.trim()});
+  return blocks;
+}
+
+function addAI(txt){
+  const blocks=parse(txt);
+  const w=document.createElement('div');w.className='msg-ai';
+  const av=document.createElement('div');av.className='ai-avatar';av.innerHTML='<i class="ti ti-robot"></i>';
+  const bs=document.createElement('div');bs.className='bubbles';
+  for(const b of blocks){
+    const el=document.createElement('div');el.className='bubble '+b.cls;
+    el.innerHTML=`${b.lbl?`<div class="blbl"><i class="ti ${b.icon}"></i> ${b.lbl}</div>`:''}<p>${b.text}</p>`;
+    bs.appendChild(el);
+  }
+  w.appendChild(av);w.appendChild(bs);
+  chat.appendChild(w);chat.scrollTop=chat.scrollHeight;
+}
+
+async function send(){
+  const txt=inp.value.trim();if(!txt||sb.disabled)return;
+  addUser(txt);hist.push({role:'user',parts:[{text:txt}]});
+  inp.value='';inp.style.height='auto';sb.disabled=true;addTyping();
+  try{
+    const body={system_instruction:{parts:[{text:SYSTEM}]},contents:hist};
+    const r=await fetch(API_URL,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const d=await r.json();
+    const rep=d.candidates?.[0]?.content?.parts?.[0]?.text||'حدث خطأ، حاول مرة ثانية.';
+    hist.push({role:'model',parts:[{text:rep}]});
+    rmTyping();addAI(rep);
+  }catch(e){rmTyping();addAI('⚡ تعذّر الاتصال — تأكد من الاتصال بالإنترنت.');}
+  sb.disabled=false;
+}
+</script>
+</body>
+</html>
