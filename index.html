@@ -153,9 +153,9 @@ function addAI(txt){
 }
 
 async function callGroq(messages){
-  const r=await fetch('https://api.groq.com/openai/v1/chat/completions',{
+  const r=await fetch('/api/chat',{
     method:'POST',
-    headers:{'Content-Type':'application/json','Authorization':`Bearer ${GROQ_KEY}`},
+    
     body:JSON.stringify({model:'llama-3.3-70b-versatile',messages,max_tokens:500,temperature:0.7})
   });
   const d=await r.json();
