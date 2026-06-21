@@ -1,0 +1,13 @@
+{
+  "env": {
+    "GROQ_KEY": "@groq_key"
+  },
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {"key": "Access-Control-Allow-Origin", "value": "*"}
+      ]
+    }
+  ]
+}
