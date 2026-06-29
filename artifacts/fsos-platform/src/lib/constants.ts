@@ -1,12 +1,12 @@
 import {
   LayoutDashboard,
-  BarChart3,
-  FileText,
   Users,
+  CalendarCheck,
+  Bot,
+  UserPlus,
+  TrendingUp,
+  Route,
   Settings,
-  Bell,
-  Shield,
-  FolderOpen,
   type LucideIcon,
 } from "lucide-react";
 
@@ -26,25 +26,25 @@ export interface NavSection {
 
 export const NAV_SECTIONS: NavSection[] = [
   {
-    title: "Main",
+    title: "Sales",
     items: [
       { label: "Dashboard", href: "/", icon: LayoutDashboard },
-      { label: "Analytics", href: "/analytics", icon: BarChart3 },
-      { label: "Reports", href: "/reports", icon: FileText },
+      { label: "Customer 360", href: "/customers", icon: Users },
+      { label: "Daily Visit Plan", href: "/visits", icon: CalendarCheck },
+      { label: "AI Assistant", href: "/ai-assistant", icon: Bot },
     ],
   },
   {
-    title: "Management",
+    title: "Operations",
     items: [
-      { label: "Users", href: "/users", icon: Users },
-      { label: "Projects", href: "/projects", icon: FolderOpen },
-      { label: "Compliance", href: "/compliance", icon: Shield },
+      { label: "New Customer", href: "/new-customer", icon: UserPlus },
+      { label: "Executive Report", href: "/executive-report", icon: TrendingUp },
+      { label: "Route Analysis", href: "/route-analysis", icon: Route },
     ],
   },
   {
     title: "System",
     items: [
-      { label: "Notifications", href: "/notifications", icon: Bell },
       { label: "Settings", href: "/settings", icon: Settings },
     ],
   },
