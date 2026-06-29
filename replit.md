@@ -1,36 +1,42 @@
-# [Project name]
+# FSOS Platform
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A clean React + TypeScript + Vite frontend foundation with no backend, auth, or AI — ready for features to be added.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/fsos-platform run dev` — run the frontend dev server (port 23223)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Frontend: React 18 + Vite 7
+- Styling: Tailwind CSS v4 + shadcn/ui component library
+- Routing: Wouter
+- Build: Vite
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/fsos-platform/src/pages/` — route-level page components
+- `artifacts/fsos-platform/src/layouts/` — layout wrappers (MainLayout)
+- `artifacts/fsos-platform/src/components/ui/` — shadcn/ui primitives
+- `artifacts/fsos-platform/src/hooks/` — custom React hooks
+- `artifacts/fsos-platform/src/types/index.ts` — shared TypeScript types
+- `artifacts/fsos-platform/src/lib/constants.ts` — app-wide constants
+- `artifacts/fsos-platform/src/index.css` — global styles & design token theme
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Frontend-only: no API, no database, no auth — clean slate for future features.
+- Wouter for routing (lightweight, ~2kb, no react-router dependency).
+- Tailwind v4 with CSS custom properties for the color system (light + dark mode ready).
+- shadcn/ui gives a full component library without bundling unused components.
+- `@workspace/api-client-react` intentionally excluded — add back when a backend is needed.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+FSOS Platform frontend: header nav, home page, about page, 404 page, light/dark-mode-ready design system.
 
 ## User preferences
 
@@ -38,7 +44,9 @@ _Populate as you build — explicit user instructions worth remembering across s
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Restart workflow name is `artifacts/fsos-platform: web` (not just "web" or "FSOS Platform").
+- `BASE_PATH` and `PORT` are injected by the artifact workflow — do not hardcode them.
+- Theme colors are all CSS custom properties in `index.css`; edit there, not in Tailwind config.
 
 ## Pointers
 
