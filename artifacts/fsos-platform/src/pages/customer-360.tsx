@@ -1,4 +1,5 @@
-import { Search, Filter, Building2, MapPin, Calendar, TrendingUp, TrendingDown } from "lucide-react";
+import { Link } from "wouter";
+import { Search, Filter, Building2, MapPin, Calendar, TrendingUp, TrendingDown, ChevronRight, Star } from "lucide-react";
 import { PageHeader } from "@/components/page-header";
 import { BadgeStatus } from "@/components/badge-status";
 import { StatCard } from "@/components/stat-card";
@@ -7,8 +8,8 @@ import { CUSTOMERS } from "@/data/mock";
 const FILTERS = ["All", "Hypermarket", "Supermarket", "Co-op", "Premium Super"];
 
 export default function Customer360() {
-  const active = CUSTOMERS.filter((c) => c.status === "Active").length;
-  const atRisk = CUSTOMERS.filter((c) => c.status === "At Risk").length;
+  const active       = CUSTOMERS.filter((c) => c.status === "Active").length;
+  const atRisk       = CUSTOMERS.filter((c) => c.status === "At Risk").length;
   const totalRevenue = CUSTOMERS.reduce((s, c) => s + c.revenueMtd, 0);
 
   return (
@@ -17,9 +18,12 @@ export default function Customer360() {
         <button className="flex items-center gap-2 px-3 py-1.5 rounded-md border border-border bg-card text-sm text-foreground hover:bg-accent transition-colors">
           <Filter className="h-3.5 w-3.5" /> Filters
         </button>
-        <button className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors">
+        <Link
+          href="/new-customer"
+          className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 transition-colors"
+        >
           + Add Customer
-        </button>
+        </Link>
       </PageHeader>
 
       {/* Summary Stats */}
@@ -60,21 +64,29 @@ export default function Customer360() {
       {/* Customer Cards Grid */}
       <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
         {CUSTOMERS.map((c) => (
-          <div
+          <Link
             key={c.id}
-            className="rounded-xl border border-border bg-card p-4 hover:shadow-md transition-shadow cursor-pointer group"
+            href={`/customers/${c.id}`}
+            className="rounded-xl border border-border bg-card p-4 hover:shadow-md hover:border-primary/30 transition-all cursor-pointer group block"
           >
             {/* Header */}
             <div className="flex items-start justify-between gap-2 mb-3">
               <div className="flex items-center gap-2.5 min-w-0">
-                <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                <div className="h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
                   <Building2 className="h-4 w-4 text-primary" />
                 </div>
                 <div className="min-w-0">
                   <p className="text-sm font-semibold text-foreground truncate group-hover:text-primary transition-colors">
                     {c.name}
                   </p>
-                  <p className="text-xs text-muted-foreground">{c.type}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <p className="text-xs text-muted-foreground">{c.type}</p>
+                    {c.id <= 2 && (
+                      <span className="inline-flex items-center gap-0.5 rounded-full border px-1.5 py-0.5 text-[9px] font-bold bg-amber-500/20 text-amber-700 border-amber-500/30">
+                        <Star className="h-2.5 w-2.5" /> A
+                      </span>
+                    )}
+                  </div>
                 </div>
               </div>
               <BadgeStatus status={c.status} />
@@ -96,10 +108,16 @@ export default function Customer360() {
               </div>
             </div>
 
-            {/* Revenue */}
-            <div className="rounded-lg bg-muted/40 px-3 py-2 flex items-center justify-between">
-              <span className="text-xs text-muted-foreground">MTD Revenue</span>
-              <span className="text-sm font-bold text-foreground">AED {c.revenueMtd.toLocaleString()}</span>
+            {/* Revenue + CTA */}
+            <div className="rounded-lg bg-muted/40 px-3 py-2 flex items-center justify-between group-hover:bg-muted/60 transition-colors">
+              <div>
+                <p className="text-[10px] text-muted-foreground">MTD Revenue</p>
+                <p className="text-sm font-bold text-foreground">AED {c.revenueMtd.toLocaleString()}</p>
+              </div>
+              <div className="flex items-center gap-1 text-primary text-xs font-medium">
+                <span className="hidden sm:inline">View 360</span>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </div>
             </div>
 
             {/* Risk indicator */}
@@ -113,7 +131,7 @@ export default function Customer360() {
                 {c.risk === "High" ? "⚠ High risk – schedule visit urgently" : "⚡ Medium risk – schedule visit soon"}
               </div>
             )}
-          </div>
+          </Link>
         ))}
       </div>
     </div>

@@ -10,9 +10,29 @@ interface TopNavProps {
 
 function getBreadcrumb(path: string): { label: string; href: string }[] {
   const allItems = NAV_SECTIONS.flatMap((s) => s.items);
-  const match = allItems.find((i) => i.href === path);
-  if (!match) return [{ label: "Page", href: path }];
-  return [{ label: match.label, href: match.href }];
+
+  // Exact match first
+  const exact = allItems.find((i) => i.href === path);
+  if (exact) return [{ label: exact.label, href: exact.href }];
+
+  // Prefix match — find the deepest matching nav item
+  const prefix = allItems
+    .filter((i) => i.href !== "/" && path.startsWith(i.href))
+    .sort((a, b) => b.href.length - a.href.length)[0];
+
+  if (prefix) {
+    // Build sub-label from the trailing path segment
+    const sub = path.slice(prefix.href.length).replace(/^\//, "").replace(/-/g, " ");
+    if (sub) {
+      return [
+        { label: prefix.label, href: prefix.href },
+        { label: sub.charAt(0).toUpperCase() + sub.slice(1), href: path },
+      ];
+    }
+    return [{ label: prefix.label, href: prefix.href }];
+  }
+
+  return [{ label: "Page", href: path }];
 }
 
 export function TopNav({ onMobileMenuClick, onAiPanelToggle, aiPanelOpen }: TopNavProps) {
@@ -33,9 +53,15 @@ export function TopNav({ onMobileMenuClick, onAiPanelToggle, aiPanelOpen }: TopN
       {/* Breadcrumb */}
       <div className="flex items-center gap-1.5 min-w-0">
         <span className="text-muted-foreground text-sm hidden sm:block">FSOS /</span>
-        {crumbs.map((crumb) => (
-          <span key={crumb.href} className="text-sm font-medium text-foreground truncate">
-            {crumb.label}
+        {crumbs.map((crumb, i) => (
+          <span key={crumb.href} className="flex items-center gap-1.5">
+            {i > 0 && <span className="text-muted-foreground/40">/</span>}
+            <span className={[
+              "text-sm truncate",
+              i === crumbs.length - 1 ? "font-medium text-foreground" : "text-muted-foreground",
+            ].join(" ")}>
+              {crumb.label}
+            </span>
           </span>
         ))}
       </div>
@@ -79,7 +105,7 @@ export function TopNav({ onMobileMenuClick, onAiPanelToggle, aiPanelOpen }: TopN
 
         {/* Avatar */}
         <button className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center text-xs font-semibold text-primary hover:bg-primary/20 transition-colors">
-          U
+          J
         </button>
       </div>
     </header>
