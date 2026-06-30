@@ -4,6 +4,7 @@ import { DashboardLayout } from "@/layouts/dashboard-layout";
 import Dashboard from "@/pages/dashboard";
 import Customer360 from "@/pages/customer-360";
 import CustomerDetail from "@/pages/customer-detail";
+import DailyMission from "@/pages/daily-mission";
 import DailyVisitPlan from "@/pages/daily-visit-plan";
 import AiAssistant from "@/pages/ai-assistant";
 import NewCustomer from "@/pages/new-customer";
@@ -19,6 +20,7 @@ function Router() {
         <Route path="/" component={Dashboard} />
         <Route path="/customers" component={Customer360} />
         <Route path="/customers/:id" component={CustomerDetail} />
+        <Route path="/daily-mission" component={DailyMission} />
         <Route path="/visits" component={DailyVisitPlan} />
         <Route path="/ai-assistant" component={AiAssistant} />
         <Route path="/new-customer" component={NewCustomer} />

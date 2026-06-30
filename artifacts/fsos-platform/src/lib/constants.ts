@@ -2,6 +2,7 @@ import {
   LayoutDashboard,
   Users,
   CalendarCheck,
+  Crosshair,
   Bot,
   UserPlus,
   TrendingUp,
@@ -30,6 +31,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { label: "Dashboard", href: "/", icon: LayoutDashboard },
       { label: "Customer 360", href: "/customers", icon: Users },
+      { label: "Daily Mission", href: "/daily-mission", icon: Crosshair },
       { label: "Daily Visit Plan", href: "/visits", icon: CalendarCheck },
       { label: "AI Assistant", href: "/ai-assistant", icon: Bot },
     ],
