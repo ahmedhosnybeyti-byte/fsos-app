@@ -1,0 +1,147 @@
+Let's build the next major FSOS module.
+
+Module Name:
+Route 360
+
+Purpose:
+Route 360 provides a complete operational overview of a single sales route before, during, and after execution.
+
+Important:
+This is NOT just a map page.
+This is NOT a route optimization engine.
+
+Route 360 is the operational intelligence dashboard for one sales route.
+
+For this phase, build ONLY the UI and reusable components.
+Do NOT implement business logic, calculations, AI, or optimization algorithms.
+
+Use realistic placeholder data only.
+
+--------------------------------------------------
+
+The page should include:
+
+1. Route Summary
+- Route Name
+- Sales Representative
+- Territory
+- Planned Customers
+- Active Customers
+- Total Route Sales
+- Collection Status
+
+--------------------------------------------------
+
+2. Route KPIs
+
+Display KPI cards for:
+
+- Sales vs Target
+- Coverage
+- Strike Rate
+- Average Order Value
+- Collection Progress
+- Active Customer Rate
+
+--------------------------------------------------
+
+3. Customer Distribution
+
+Display visual cards showing:
+
+- Active Customers
+- Inactive Customers
+- High Value Customers
+- Collection Priority Customers
+- Lost Sales Customers
+
+--------------------------------------------------
+
+4. Product Performance
+
+Display:
+
+- Top Selling Products
+- Weak Products
+- Lost Sales Products
+- Cross Sell Opportunities
+
+--------------------------------------------------
+
+5. Route Alerts
+
+Examples:
+
+- High Collection Risk
+- Low Coverage
+- Low Strike Rate
+- Route Imbalance
+- High Lost Sales
+- Critical Customers
+
+--------------------------------------------------
+
+6. Route Timeline
+
+Display today's route as a simple timeline:
+
+- Planned
+- In Progress
+- Completed
+- Remaining
+
+--------------------------------------------------
+
+7. Intelligence Engine Placeholders
+
+Reserve modular cards for future engines:
+
+- Geo Intelligence Engine
+- Loading Intelligence Engine
+- Lost Sales Engine
+- Cross Sell Intelligence
+- Collection Intelligence
+- Behavioral Coaching
+- Company DNA
+
+Each card should display:
+
+- Engine Name
+- Short Description
+- Status: Awaiting Engine
+- Reserved Area for Future Integration
+
+--------------------------------------------------
+
+Design Requirements
+
+- Mobile-first design
+- Modern dashboard style
+- Reusable components
+- Responsive layout
+- Clean navigation
+- Consistent with all previous FSOS pages
+
+--------------------------------------------------
+
+Important Rules
+
+Do NOT implement:
+
+- AI
+- Route Optimization
+- GPS Logic
+- Business Rules
+- Calculations
+
+This page should only provide the operational structure and UI.
+
+--------------------------------------------------
+
+Architecture Note
+
+Route 360 will become the central operational dashboard for a complete sales route.
+
+It will aggregate information from multiple FSOS intelligence engines in future versions.
+
+Design the page with modular architecture so every future engine can connect without redesigning the page.

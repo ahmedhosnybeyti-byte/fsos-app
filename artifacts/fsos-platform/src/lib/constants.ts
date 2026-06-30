@@ -8,6 +8,7 @@ import {
   TrendingUp,
   Route,
   Truck,
+  MapPin,
   Settings,
   type LucideIcon,
 } from "lucide-react";
@@ -43,6 +44,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { label: "Loading Intelligence", href: "/loading-intelligence", icon: Truck },
       { label: "New Customer", href: "/new-customer", icon: UserPlus },
       { label: "Executive Report", href: "/executive-report", icon: TrendingUp },
+      { label: "Route 360", href: "/route-360", icon: MapPin },
       { label: "Route Analysis", href: "/route-analysis", icon: Route },
     ],
   },
