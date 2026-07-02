@@ -128,7 +128,7 @@ function VehicleStatusSection() {
   const isEmpty = v.currentItems.length === 0;
 
   return (
-    <SectionWrapper icon={Truck} iconColor="text-blue-500" title="Vehicle Status" sub={v.plate}>
+    <SectionWrapper icon={Truck} iconColor="text-blue-500" title="Vehicle Status" headerRight={<span className="text-xs text-muted-foreground">{v.plate}</span>}>
       <div className="grid sm:grid-cols-3 gap-4">
         {/* Vehicle info */}
         <div className="sm:col-span-1 space-y-3">

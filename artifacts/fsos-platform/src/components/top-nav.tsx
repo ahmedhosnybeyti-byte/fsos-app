@@ -52,7 +52,7 @@ export function TopNav({ onMobileMenuClick, onAiPanelToggle, aiPanelOpen }: TopN
 
       {/* Breadcrumb */}
       <div className="flex items-center gap-1.5 min-w-0">
-        <span className="text-muted-foreground text-sm hidden sm:block">FSOS /</span>
+        <span className="text-muted-foreground text-sm hidden sm:block">مرشدك /</span>
         {crumbs.map((crumb, i) => (
           <span key={crumb.href} className="flex items-center gap-1.5">
             {i > 0 && <span className="text-muted-foreground/40">/</span>}

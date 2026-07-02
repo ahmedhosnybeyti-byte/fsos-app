@@ -191,7 +191,7 @@ export default function Settings() {
           <Smartphone className="h-5 w-5 text-primary" />
         </div>
         <div className="flex-1">
-          <p className="text-sm font-semibold text-foreground">FSOS Mobile App</p>
+          <p className="text-sm font-semibold text-foreground">مرشدك Mobile App</p>
           <p className="text-xs text-muted-foreground">Last synced: Today at 08:45 AM · v2.4.1</p>
         </div>
         <button className="px-3 py-1.5 rounded-md border border-border text-sm text-foreground hover:bg-accent transition-colors shrink-0">

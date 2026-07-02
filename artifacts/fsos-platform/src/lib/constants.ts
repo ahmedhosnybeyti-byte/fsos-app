@@ -13,7 +13,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-export const APP_NAME = "FSOS Platform";
+export const APP_NAME = "مرشدك";
+export const APP_TAGLINE = "ذكاء المبيعات في جيبك";
 export const APP_VERSION = "0.1.0";
 
 export interface NavItem {

@@ -32,10 +32,10 @@ const FIRST_ORDER = [
 ];
 
 const STRATEGY = [
-  { id: 1, icon: Users,       color: "text-blue-500",    bg: "bg-blue-500/10",    label: "Introduction",        action: "Introduce yourself and present the FSOS partnership program",         note: "Reference 3 nearby Class-A partners: Carrefour Marina, Spinneys, Waitrose" },
+  { id: 1, icon: Users,       color: "text-blue-500",    bg: "bg-blue-500/10",    label: "Introduction",        action: "Introduce yourself and present the مرشدك partnership program",         note: "Reference 3 nearby Class-A partners: Carrefour Marina, Spinneys, Waitrose" },
   { id: 2, icon: ShoppingCart,color: "text-emerald-500", bg: "bg-emerald-500/10", label: "Lead SKU",            action: "Open with Ariel Liquid 2L — highest demand in this zone",            note: "Use 'All your neighbours carry it' proof point. Confidence: 94%" },
   { id: 3, icon: Package,     color: "text-violet-500",  bg: "bg-violet-500/10",  label: "Bundle Pitch",        action: "Present Nescafé Classic + Almarai bundle as a category starter pack",  note: "Combined order value: AED 2,580 · Basket affinity score: 0.89" },
-  { id: 4, icon: Clipboard,   color: "text-amber-500",   bg: "bg-amber-500/10",   label: "Competitor Audit",    action: "Capture competitor shelf data — Persil? Nescafé pricing? Facings?",    note: "Use FSOS shelf audit form. Record brand, facings, and retail price" },
+  { id: 4, icon: Clipboard,   color: "text-amber-500",   bg: "bg-amber-500/10",   label: "Competitor Audit",    action: "Capture competitor shelf data — Persil? Nescafé pricing? Facings?",    note: "Use مرشدك shelf audit form. Record brand, facings, and retail price" },
   { id: 5, icon: Camera,      color: "text-pink-500",    bg: "bg-pink-500/10",    label: "Store Photos",        action: "Capture 3 store photos: entrance, main shelf, competitor section",     note: "Required for new customer file. Flag any planogram opportunities." },
   { id: 6, icon: Target,      color: "text-primary",     bg: "bg-primary/10",     label: "Commitment",          action: "Agree on next visit date and collect buyer contact information",         note: "Target: follow-up within 3–5 business days. Aim for a second order." },
 ];
@@ -118,7 +118,7 @@ function TacticalMap({ step, showPins }: { step: number; showPins: boolean }) {
       <div className="absolute top-2.5 right-2.5 flex items-center gap-1 text-[9px] font-mono text-emerald-400/70">
         <Signal className="h-3 w-3" /> GPS LOCK
       </div>
-      <div className="absolute bottom-2.5 right-2.5 text-[9px] font-mono text-slate-500">FSOS GEO · Dubai North</div>
+      <div className="absolute bottom-2.5 right-2.5 text-[9px] font-mono text-slate-500">مرشدك GEO · Dubai North</div>
     </div>
   );
 }
@@ -262,7 +262,7 @@ function Step2({ onNext, onBack }: { onNext: () => void; onBack: () => void }) {
     <div className="space-y-5">
       <div>
         <h2 className="text-lg font-bold text-foreground">Nearby Customers Detected</h2>
-        <p className="text-sm text-muted-foreground mt-0.5">FSOS identified {NEARBY.length} active outlets within 2.5km of your location.</p>
+        <p className="text-sm text-muted-foreground mt-0.5">مرشدك identified {NEARBY.length} active outlets within 2.5km of your location.</p>
       </div>
 
       <TacticalMap step={2} showPins />
@@ -651,7 +651,7 @@ export default function NewCustomer() {
           <MapPin className="h-5 w-5 text-primary" />
           <h1 className="text-xl font-black text-foreground">New Customer — Geo Intelligence</h1>
         </div>
-        <p className="text-sm text-muted-foreground">FSOS uses location intelligence to build your visit strategy before you even enter the store.</p>
+        <p className="text-sm text-muted-foreground">مرشدك uses location intelligence to build your visit strategy before you even enter the store.</p>
       </div>
 
       {/* Step indicator */}
@@ -690,7 +690,7 @@ export default function NewCustomer() {
 
       {/* Footer note */}
       <p className="text-center text-[11px] text-muted-foreground">
-        FSOS Geo Intelligence · Location data is processed on-device and never shared externally.
+        مرشدك Geo Intelligence · Location data is processed on-device and never shared externally.
       </p>
     </div>
   );

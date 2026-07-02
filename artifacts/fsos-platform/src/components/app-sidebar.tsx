@@ -23,7 +23,7 @@ export function AppSidebar({ collapsed, onToggle, onNavClick }: AppSidebarProps)
       <div className="flex h-14 items-center border-b border-sidebar-border px-3 shrink-0">
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="h-7 w-7 rounded-md bg-sidebar-primary flex items-center justify-center shrink-0">
-            <span className="text-sidebar-primary-foreground text-xs font-bold">F</span>
+            <span className="text-sidebar-primary-foreground text-xs font-bold">م</span>
           </div>
           {!collapsed && (
             <span className="font-semibold text-sm text-sidebar-foreground truncate">

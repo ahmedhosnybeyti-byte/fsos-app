@@ -1,6 +1,8 @@
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { DashboardLayout } from "@/layouts/dashboard-layout";
+import { useAuth } from "@/hooks/use-auth";
+import Login from "@/pages/login";
 import Dashboard from "@/pages/dashboard";
 import Customer360 from "@/pages/customer-360";
 import CustomerDetail from "@/pages/customer-detail";
@@ -38,10 +40,12 @@ function Router() {
 }
 
 function App() {
+  const { isAuthenticated, login } = useAuth();
+
   return (
     <TooltipProvider>
       <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-        <Router />
+        {isAuthenticated ? <Router /> : <Login onLogin={login} />}
       </WouterRouter>
     </TooltipProvider>
   );
