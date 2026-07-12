@@ -4,6 +4,7 @@ import { ScheduleModule } from "@nestjs/schedule";
 import { APP_GUARD } from "@nestjs/core";
 import { AppConfigModule } from "./common/config";
 import { PrismaModule } from "./common/prisma";
+import { HealthModule } from "./modules/health/health.module";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
 import { SubscriptionActiveGuard } from "./common/guards/subscription-active.guard";
@@ -26,6 +27,7 @@ import { AnalysisStudioModule } from "./modules/analysis-studio/analysis-studio.
   imports: [
     AppConfigModule,
     PrismaModule,
+    HealthModule,
     ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([
       {

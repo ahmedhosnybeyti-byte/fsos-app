@@ -49,7 +49,9 @@ async function bootstrap() {
     next();
   });
 
-  app.setGlobalPrefix(`api/${API_VERSION_PREFIX}`);
+  // "health" is excluded so Railway's healthcheck / uptime monitoring can
+  // hit plain GET /health instead of GET /api/v1/health.
+  app.setGlobalPrefix(`api/${API_VERSION_PREFIX}`, { exclude: ["health"] });
   app.useGlobalFilters(new HttpExceptionFilter());
 
   // Full internal API reference — every module, cookie + bearer auth shown.
