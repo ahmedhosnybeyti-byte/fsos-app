@@ -21,7 +21,12 @@ export const FILE_UPLOAD_LIMITS = {
   // fixed role-based types. Still a bounded safety/cost guard, just sized
   // to not immediately block the catalog of datasets this was built for.
   maxActiveFilesPerCompany: 20,
-  maxFileSizeBytes: 10 * 1024 * 1024, // 10MB
+  // Raised from 10MB to 100MB — reps' workbooks sometimes carry formulas
+  // (rather than pasted plain values), which inflates file size well past a
+  // typical flat data export. 100MB still safely covers a single Excel
+  // workbook while keeping the check a real safety/cost guard, not just a
+  // formality.
+  maxFileSizeBytes: 100 * 1024 * 1024, // 100MB
   allowedMimeTypes: [
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", // .xlsx
     "application/vnd.ms-excel", // .xls
