@@ -10,7 +10,13 @@
 # repo root as build context (see docs/DEPLOYMENT.md).
 
 FROM node:20-slim AS base
-RUN corepack enable && corepack prepare pnpm@11.11.0 --activate
+# pnpm is installed as a plain global npm package here, NOT via
+# `corepack enable && corepack prepare` — corepack's shim script hits
+# ERR_UNKNOWN_BUILTIN_MODULE on Railway's build environment (Node v20.20.2),
+# breaking on every single pnpm invocation (turbo install, pnpm install,
+# etc). Installing via npm sidesteps corepack entirely and has been
+# confirmed to avoid the issue.
+RUN npm install -g pnpm@11.11.0 turbo@^2.3.3
 
 # ---------------------------------------------------------------------------
 # 1. Prune the monorepo down to only what @field-sales-os/api needs.
@@ -18,14 +24,6 @@ RUN corepack enable && corepack prepare pnpm@11.11.0 --activate
 FROM base AS pruner
 WORKDIR /app
 COPY . .
-# Installed via npm, not pnpm, specifically here: pnpm's corepack shim hits
-# ERR_UNKNOWN_BUILTIN_MODULE on some Node/corepack combinations when used
-# for a global install at this stage (before any project-level pnpm install
-# has run). npm ships with the base image regardless of corepack state, so
-# it sidesteps the issue entirely — this is the only place turbo is
-# installed this way; everywhere else it runs as the project's own
-# devDependency via the pnpm/turbo scripts already in package.json.
-RUN npm install -g turbo@^2.3.3
 RUN turbo prune @field-sales-os/api --docker
 
 # ---------------------------------------------------------------------------
@@ -42,7 +40,7 @@ RUN pnpm install --frozen-lockfile
 # ---------------------------------------------------------------------------
 COPY --from=pruner /app/out/full/ .
 RUN pnpm --filter @field-sales-os/database generate
-RUN pnpm turbo run build --filter=@field-sales-os/api...
+RUN turbo run build --filter=@field-sales-os/api...
 
 # ---------------------------------------------------------------------------
 # 4. Runtime image.
