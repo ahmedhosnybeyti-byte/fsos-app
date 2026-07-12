@@ -19,28 +19,30 @@ simplest: **Cloudflare R2** (S3-compatible, generous free tier, no egress
 fees). AWS S3, Backblaze B2, or DigitalOcean Spaces all work too — the code
 just needs S3-compatible `STORAGE_ENDPOINT`/keys, nothing R2-specific.
 
-## 1. Create the Railway project (you do this part — it's your account/billing)
+## 1. Create the Railway project (dashboard, no CLI needed)
 
-1. Sign up at [railway.com](https://railway.com). Currently a one-time $5
-   trial credit for 30 days, then Hobby is $5/month. Whether a card is
-   required at signup has changed a few times — confirm on their pricing
-   page when you sign up.
-2. Install the CLI: `npm install -g @railway/cli`
-3. `railway login`
-4. From the repo root: `railway init` — creates a new Railway project linked
-   to this folder.
-5. In the Railway dashboard for that project: **New → Database → Postgres**.
-   This gives you a `DATABASE_URL` you can reference from the API service
-   without copying it by hand (see step 3 below).
+1. Sign up / log in at [railway.com](https://railway.com) with GitHub
+   (`ahmedhosnybeyti-byte`). Currently a one-time $5 trial credit for 30
+   days, then Hobby is $5/month.
+2. A project may already exist from earlier setup (e.g. `intuitive-miracle`)
+   — open it if so, instead of creating a new one (creating a *new* project
+   can hit the free trial's resource-creation cap; adding a service to an
+   existing empty project does not).
+3. Click **"+ Add"** → **"GitHub Repository"** → select `fsos-app`.
+   **Gotcha:** if you instead use Railway's "New Project → Deploy from
+   GitHub repo" AI-assisted flow, it may try to auto-detect *multiple*
+   services from the monorepo with guessed names that don't match this
+   repo's real structure (seen: `mockup-...`, `api-spec`, `api-client...`).
+   Don't apply that plan. Adding via "+ Add → GitHub Repository" on an
+   already-open project adds one plain service instead.
+4. On that one service: **Settings → Source → Root Directory** should be
+   blank/`/` (repo root, not `apps/api` — the Dockerfile needs the whole
+   monorepo as build context). **Settings → Build → Builder = Dockerfile**,
+   **Dockerfile Path = `Dockerfile.api`**. `railway.json` at the repo root
+   declares this already; just verify it took.
+5. Same project → **"+ Add"** → **Database → Add PostgreSQL**.
 
-## 2. Point Railway at the Dockerfile
-
-In the Railway dashboard, on the API service: **Settings → Build → Builder
-= Dockerfile**, **Dockerfile Path = `Dockerfile.api`**. (`railway.json`
-already declares this — Railway should pick it up automatically on first
-deploy; check it landed correctly.)
-
-## 3. Set environment variables
+## 2. Set environment variables
 
 Dashboard → your API service → **Variables**. Set:
 
@@ -54,45 +56,52 @@ COOKIE_DOMAIN=localhost              # same
 
 DATABASE_URL=${{Postgres.DATABASE_URL}}   # Railway variable reference — auto-fills from the Postgres service you added in step 1
 
-JWT_ACCESS_SECRET=<generate: openssl rand -hex 32>
-JWT_REFRESH_SECRET=<generate: openssl rand -hex 32>
+JWT_ACCESS_SECRET=<generate — see below>
+JWT_REFRESH_SECRET=<generate — see below>
 
-STORAGE_ENDPOINT=<your R2/S3 endpoint>
+STORAGE_ENDPOINT=<your R2 endpoint, from the Cloudflare R2 API token page>
 STORAGE_REGION=auto
-STORAGE_BUCKET=<your bucket name>
-STORAGE_ACCESS_KEY_ID=<your key>
-STORAGE_SECRET_ACCESS_KEY=<your secret>
+STORAGE_BUCKET=field-sales-os
+STORAGE_ACCESS_KEY_ID=<your R2 Access Key ID>
+STORAGE_SECRET_ACCESS_KEY=<your R2 Secret Access Key>
 STORAGE_FORCE_PATH_STYLE=true
 ```
 
-## 4. Deploy
+To generate each JWT secret (Node is already required for this project, so
+this works with no extra install — run it twice, once per secret):
 
 ```bash
-railway up
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-This builds `Dockerfile.api` and deploys it. First deploy takes a few
-minutes (pnpm install + prisma generate + turbo build).
+## 3. Deploy
 
-## 5. Get the public URL and finish wiring env vars
+Railway auto-deploys on every push to `master` once the service is
+connected to the GitHub repo — just wait for the build to finish in the
+**Deployments** tab. (CLI alternative, if you ever want it:
+`npm install -g @railway/cli && railway login && railway up`.)
+
+This builds `Dockerfile.api`. First deploy takes a few minutes (pnpm
+install + prisma generate + turbo build) — watch the build logs for errors.
+
+## 4. Get the public URL and finish wiring env vars
 
 Dashboard → API service → **Settings → Networking → Generate Domain**. Copy
-the `https://....up.railway.app` URL, then go back to step 3 and set
-`API_URL` to it, redeploy (`railway up` again, or it may auto-redeploy on
-variable change).
+the `https://....up.railway.app` URL, then go back to step 2 and set
+`API_URL` to it. Railway redeploys automatically when a variable changes.
 
-## 6. Seed the database once
+## 5. Seed the database once
 
-```bash
-railway run pnpm --filter @field-sales-os/database migrate:deploy
-railway run pnpm --filter @field-sales-os/database seed
-```
+Dashboard → API service → click into a running deployment → look for a
+**"Run Command"** / one-off shell option (or use the CLI:
+`railway run pnpm --filter @field-sales-os/database seed`).
 
-(`migrate:deploy` also runs automatically on every container start per
-`Dockerfile.api`'s `CMD` — this manual run is just for the first time, and
-`seed` only needs running once.)
+`migrate:deploy` already runs automatically on every container start per
+`Dockerfile.api`'s `CMD`, so it doesn't need a manual step — only `seed`
+does, and only once (running it twice just re-seeds the same demo data,
+which is harmless but pointless).
 
-## 7. Re-point the Custom GPT at the new URL
+## 6. Re-point the Custom GPT at the new URL
 
 Two places had the old ngrok URL hardcoded/configured:
 
