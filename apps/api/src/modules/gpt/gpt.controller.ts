@@ -138,7 +138,7 @@ export class GptController {
   @ApiOperation({
     summary: "Verify the user's one-time access code and start a session — call this first, always.",
     description:
-      "Call first, always, before any other Action. Use the code the user pastes after \"Launch GPT\". Returns a sessionToken (send on every later call) and the active datasets list — the only valid source for \"what data do you have\" questions. Each dataset's columns/detected fields are your only metadata source for Stage 3/4 of the reasoning pipeline — never call getDataset just to inspect a dataset's shape.",
+      "Call first, always, before any other Action. Use the code the user pastes after \"Launch GPT\". Returns a sessionToken (send on every later call) and the active datasets list — the only valid source for \"what data\" questions and dataset metadata; never call getDataset just to inspect shape.",
   })
   @ApiBody({
     description: "The one-time access code the user pastes.",
@@ -199,7 +199,7 @@ export class GptController {
   @ApiOperation({
     summary: "Fetch a filtered, sorted, paginated, optionally projected page of rows from one dataset — never fetch the whole file.",
     description:
-      "Always narrow with customerId, invoiceId, routeId, salesRep, search, or filters first. Use aggregate (sum/count/avg/min/max, optional groupBy) instead of rows when only a figure is needed — cheaper than computing it yourself from raw rows. Building filters? Check the dataset's columns[].distinctValues from verifyAccess/listDatasets first — it gives the exact real values (casing included) for low-cardinality columns instead of guessing. Use columns to fetch only the fields you need and sortBy/sortDir for ordered results (e.g. top N) — both execute server-side, before pagination.",
+      "Always narrow with customerId, invoiceId, routeId, salesRep, search, or filters first. Use aggregate (sum/count/avg/min/max, groupBy) for figures instead of raw rows. Check columns[].distinctValues from verifyAccess/listDatasets for exact filter values. Use columns/sortBy to shape results.",
   })
   @ApiQuery({ name: "sessionToken", required: true, type: String, description: "Session token returned by verifyAccess." })
   @ApiQuery({ name: "fileId", required: true, type: String, description: "Dataset id, from verifyAccess's or listDatasets' response." })
