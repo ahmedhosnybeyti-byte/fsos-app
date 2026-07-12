@@ -61,7 +61,7 @@ async function bootstrap() {
     .setVersion("1.0")
     .addBearerAuth({ type: "http", scheme: "bearer", bearerFormat: "GPT API Key" }, "gpt-api-key")
     .addCookieAuth("fso_access_token")
-    .addServer("https://obtain-boneless-osmosis.ngrok-free.dev") 
+    .addServer("https://workspaceapi-server-production-7ec2.up.railway.app")
     .build();
   const document = SwaggerModule.createDocument(app, swaggerConfig);
   SwaggerModule.setup("docs", app, document);
