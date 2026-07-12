@@ -115,3 +115,76 @@ agreed in this session:
    design (general DNA + per-company DNA + per-supervisor/sector DNA,
    role-aware propagation) discussed earlier in this session applies here,
    not to the institutional version.
+
+## Railway deployment — completed this session
+
+Went live end-to-end: `api-server` on Railway, PostgreSQL attached, domain
+generated (`workspaceapi-server-production-7ec2.up.railway.app`), demo data
+seeded, GPT Action re-pointed at the new domain and retested successfully.
+
+Bugs hit and fixed along the way (all fixed in `master`, in order):
+
+1. `ERR_UNKNOWN_BUILTIN_MODULE` on every pnpm invocation — root cause was
+   `pnpm@11.11.0` requiring Node >=22.13 while `Dockerfile.api` used
+   `node:20-slim`. Fixed by bumping the base image to `node:22-slim`
+   (corepack was also swapped for a plain `npm install -g pnpm` as a
+   secondary, independent fix — corepack's shim hit the same error on
+   Railway's build environment regardless of Node version).
+2. Runtime CMD's `pnpm --filter @field-sales-os/database migrate:deploy`
+   failed with "No projects matched the filters in /app" *only* at
+   container start, despite the identical command succeeding at build time
+   in the same image. Root cause never fully isolated; fixed by not
+   depending on pnpm workspace resolution at runtime at all — the CMD now
+   calls `packages/database/node_modules/.bin/prisma` directly.
+3. Railway dashboard had stale manual Build/Start Command overrides
+   (referencing a nonexistent `@workspace/api-server` filter) left over
+   from Railway's initial auto-detect flow — cleared them so the
+   Dockerfile's own CMD is used, per `railway.json`.
+4. `GET /`, `/api`, `/health` all 404'd after a clean boot — expected for
+   `/` and `/api` (everything real lives under `/api/v1/*`), but `/health`
+   genuinely didn't exist. Added `HealthModule`/`HealthController`,
+   excluded it from the global prefix, wired `railway.json`'s
+   `healthcheckPath`.
+5. Web login silently failed (no error, just bounced back to `/login`) —
+   `COOKIE_DOMAIN=localhost` is invalid once the API is on a different host
+   than the web app; the browser drops the Set-Cookie entirely. Fixed
+   `auth.cookies.ts` to omit `domain` (host-only cookie) and use
+   `sameSite: "none"` in production instead of forcing `"localhost"`.
+6. Web app's own `middleware.ts` read the session cookie server-side to
+   gate `/dashboard` — structurally impossible once web (localhost) and API
+   (Railway) are different origins, since the browser never attaches an
+   API-origin cookie to a request aimed at the Next.js server. Disabled
+   that redirect (real auth boundary is the API's guards + client-side
+   `GET /auth/me`, per the existing code comment).
+7. GPT Builder's Action import initially failed validation: two
+   `@ApiOperation` `description` strings in `gpt.controller.ts`
+   (`verifyAccess`, `getDataset`) exceeded OpenAI's 300-char limit —
+   shortened both.
+8. Root cause of "GPT can't reach the API at all" (zero requests ever
+   arriving at Railway, confirmed via HTTP Logs): the GPT Builder's
+   Authentication → API Key field was never actually filled in. Setting it
+   to the seeded demo key (`fso_demo_acme.REPLACE_ME_GPT_API_SECRET`) fixed
+   it immediately.
+
+## Retest result: the Layer-4 accuracy risk (multi-dataset planning)
+
+Retested on stable Railway hosting, per the condition set out above under
+"Accuracy". Result: **partially confirmed, still present.**
+
+- verifyAccess -> real dataset list -> getDataset -> a genuinely correct,
+  data-grounded Customer 360 answer (real invoice count, real date range,
+  real product categories) worked cleanly for the first 1-2 questions in a
+  conversation.
+- The model correctly *refused* to fabricate a Lost Sales figure it didn't
+  have the logic to compute honestly — good discipline, not a bug.
+- By the 3rd question in the same conversation, it reported having "lost"
+  the sessionToken and asked for the Launch Code again, despite the guard
+  chain's session still being valid (`gptSessionHours: 4`).
+
+So: stable hosting alone did **not** fully resolve Layer 4 — the model
+still loses track of session/tool-call state within a single conversation
+after a few turns, independent of any backend issue. Per the plan already
+on file: if this keeps recurring, the next lever isn't more prompt-tuning
+but reducing how much cross-turn state the model has to carry itself
+(e.g. a session token that survives being "forgotten," or collapsing
+multi-step joins into fewer required tool calls).
