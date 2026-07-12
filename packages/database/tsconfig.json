@@ -1,0 +1,10 @@
+{
+  "extends": "@field-sales-os/config/tsconfig.base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "./dist",
+    "noEmit": true
+  },
+  "include": ["src", "prisma"]
+}

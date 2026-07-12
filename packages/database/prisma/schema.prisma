@@ -1,0 +1,433 @@
+// Field Sales OS — core data model.
+// Design intent: Company is the tenant root. Subscriptions, payments, and the
+// Custom GPT config belong to the Company, not the individual User. Tables that
+// look "over-designed" for the MVP (Role/Permission, multi-provider Payment,
+// generic AuditLog, GptUsageEvent, AiReport) exist so future growth (multiple
+// companies, multiple GPTs, multiple plans, new payment providers, analytics,
+// persisted AI output) never requires a redesign — only new rows/adapters.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum CompanyStatus {
+  ACTIVE
+  SUSPENDED
+  DISABLED
+}
+
+enum UserStatus {
+  ACTIVE
+  INVITED
+  DISABLED
+}
+
+enum SubscriptionStatus {
+  TRIAL
+  ACTIVE
+  EXPIRED
+  SUSPENDED
+}
+
+enum SubscriptionPaymentStatus {
+  PAID
+  UNPAID
+}
+
+enum BillingInterval {
+  MONTHLY
+  YEARLY
+  ONE_TIME
+}
+
+enum PaymentProviderType {
+  MANUAL
+  STRIPE
+  PAYMOB
+  OTHER
+}
+
+enum PaymentRecordStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum FileStatus {
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum GptUsageEventType {
+  LAUNCH_TOKEN_ISSUED
+  VERIFY_ACCESS
+  DATASET_FETCH
+  ANALYSIS_RUN
+}
+
+// ---------------------------------------------------------------------------
+// Tenant root
+// ---------------------------------------------------------------------------
+
+model Company {
+  id        String        @id @default(cuid())
+  name      String
+  slug      String        @unique
+  status    CompanyStatus @default(ACTIVE)
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  users         User[]
+  subscriptions Subscription[]
+  payments      Payment[]
+  gpt           Gpt?
+  files         File[]
+  launchTokens  GptLaunchToken[]
+  auditLogs     AuditLog[]
+  usageEvents   GptUsageEvent[]
+  aiReports     AiReport[]
+
+  @@map("companies")
+}
+
+// ---------------------------------------------------------------------------
+// RBAC — normalized instead of a hardcoded enum so custom roles/permissions
+// can be added later (e.g. a company-specific role) without a schema change.
+// ---------------------------------------------------------------------------
+
+model Role {
+  id          String   @id @default(cuid())
+  code        String   @unique // SUPER_ADMIN | COMPANY_ADMIN | MANAGER | SUPERVISOR | SALES_REP
+  name        String
+  description String?
+  isSystem    Boolean  @default(true)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  users           User[]
+  rolePermissions RolePermission[]
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String  @id @default(cuid())
+  code        String  @unique // e.g. "users.manage", "files.upload.company"
+  description String?
+
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String @map("role_id")
+  permissionId String @map("permission_id")
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id           String     @id @default(cuid())
+  companyId    String?    @map("company_id") // null only for platform SUPER_ADMIN users
+  roleId       String     @map("role_id")
+  email        String     @unique
+  passwordHash String     @map("password_hash")
+  fullName     String     @map("full_name")
+  status       UserStatus @default(ACTIVE)
+  lastLoginAt  DateTime?  @map("last_login_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+
+  company       Company?         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  role          Role             @relation(fields: [roleId], references: [id])
+  refreshTokens RefreshToken[]
+  uploadedFiles File[]           @relation("FileUploadedBy")
+  launchTokens  GptLaunchToken[]
+  auditLogs     AuditLog[]
+  usageEvents   GptUsageEvent[]
+  aiReports     AiReport[]
+
+  @@index([companyId])
+  @@map("users")
+}
+
+// DB-tracked refresh tokens (not purely stateless) so a company going
+// expired/suspended can be locked out immediately by revoking rows,
+// rather than waiting for short-lived JWTs to naturally expire.
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  tokenHash String    @unique @map("token_hash")
+  userAgent String?   @map("user_agent")
+  ip        String?
+  expiresAt DateTime  @map("expires_at")
+  revokedAt DateTime? @map("revoked_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Plans & Subscriptions & Payments
+// ---------------------------------------------------------------------------
+
+model Plan {
+  id              String          @id @default(cuid())
+  code            String          @unique // trial | basic | professional | enterprise
+  name            String
+  priceCents      Int             @default(0) @map("price_cents")
+  currency        String          @default("USD")
+  billingInterval BillingInterval @default(MONTHLY) @map("billing_interval")
+  maxUsers        Int?            @map("max_users")
+  features        Json            @default("{}")
+  isActive        Boolean         @default(true) @map("is_active")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id                 String                    @id @default(cuid())
+  companyId          String                    @map("company_id")
+  planId             String                    @map("plan_id")
+  status             SubscriptionStatus        @default(TRIAL)
+  paymentStatus      SubscriptionPaymentStatus @default(UNPAID) @map("payment_status")
+  trialEndsAt        DateTime?                 @map("trial_ends_at")
+  currentPeriodStart DateTime?                 @map("current_period_start")
+  currentPeriodEnd   DateTime?                 @map("current_period_end")
+  canceledAt         DateTime?                 @map("canceled_at")
+  createdAt          DateTime                  @default(now()) @map("created_at")
+  updatedAt          DateTime                  @updatedAt @map("updated_at")
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  plan     Plan      @relation(fields: [planId], references: [id])
+  payments Payment[]
+
+  @@index([companyId])
+  @@index([status])
+  @@map("subscriptions")
+}
+
+// provider is extensible (MANUAL now, STRIPE/PAYMOB later) without altering
+// this table — rawPayload preserves whatever the provider sends us.
+model Payment {
+  id                String              @id @default(cuid())
+  companyId         String              @map("company_id")
+  subscriptionId    String?             @map("subscription_id")
+  provider          PaymentProviderType @default(MANUAL)
+  providerPaymentId String?             @map("provider_payment_id")
+  amountCents       Int                 @map("amount_cents")
+  currency          String              @default("USD")
+  status            PaymentRecordStatus @default(PENDING)
+  rawPayload        Json?               @map("raw_payload")
+  paidAt            DateTime?           @map("paid_at")
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([companyId])
+  @@map("payments")
+}
+
+// ---------------------------------------------------------------------------
+// Custom GPT
+// ---------------------------------------------------------------------------
+
+// companyId is @unique to enforce the MVP rule "one company may have one
+// Custom GPT" at the DB level, while the model itself is otherwise shaped to
+// support many-per-company later (just drop the @unique in a future migration).
+model Gpt {
+  id         String   @id @default(cuid())
+  companyId  String   @unique @map("company_id")
+  name       String
+  // API key is split public-id / secret-hash (like Stripe/GitHub tokens):
+  // apiKeyId is indexed so the Action's Bearer token can be looked up in
+  // O(1) before argon2-verifying the secret against apiKeySecretHash —
+  // argon2 hashes aren't otherwise queryable.
+  apiKeyId         String   @unique @map("api_key_id")
+  apiKeySecretHash String   @map("api_key_secret_hash")
+  dnaConfig  Json     @default("{}") @map("dna_config")
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  company      Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  launchTokens GptLaunchToken[]
+  usageEvents  GptUsageEvent[]
+
+  @@map("gpts")
+}
+
+// ---------------------------------------------------------------------------
+// Files (Excel uploads)
+// ---------------------------------------------------------------------------
+
+// Files represent business datasets (Invoices, Customers, Payments, Returns,
+// Products, Routes, Visits, Inventory, Pricing, Collections, and whatever
+// comes next) — datasetType is deliberately a free string, not a closed
+// enum, so a new dataset category never requires a migration. Multiple
+// active files may share the same datasetType (e.g. one Route file per
+// sales rep); the GPT receives the full list of active datasets and decides
+// which are relevant to a given question — the platform no longer maps a
+// fixed file type to a fixed analysis scope.
+model File {
+  id               String     @id @default(cuid())
+  companyId        String     @map("company_id")
+  uploadedByUserId String     @map("uploaded_by_user_id")
+  datasetType      String     @map("dataset_type")
+  // Best-guess or confirmed — see DatasetClassifierService. Existing rows
+  // (uploaded before auto-classification existed) default to confirmed:
+  // a human explicitly typed the type, so there's nothing to confirm.
+  datasetTypeConfidence Float?   @map("dataset_type_confidence")
+  datasetTypeConfirmed  Boolean  @default(true) @map("dataset_type_confirmed")
+  // Which sheet of the workbook this row's data/classification came from —
+  // needed once a workbook can contain more than one candidate dataset
+  // (see "mixed workbook" detection) so re-parsing later reads the same
+  // sheet that was classified/confirmed, not always the first one.
+  sheetIndex       Int        @default(0) @map("sheet_index")
+  fileName         String     @map("file_name")
+  storageKey       String     @map("storage_key")
+  sizeBytes        Int        @map("size_bytes")
+  status           FileStatus @default(PROCESSING)
+  parsedMetadata   Json?      @map("parsed_metadata")
+  isActive         Boolean    @default(true) @map("is_active")
+  createdAt        DateTime   @default(now()) @map("created_at")
+  updatedAt        DateTime   @updatedAt @map("updated_at")
+
+  company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  uploadedBy User       @relation("FileUploadedBy", fields: [uploadedByUserId], references: [id])
+  aiReports  AiReport[]
+
+  @@index([companyId, isActive])
+  @@index([companyId, datasetType])
+  @@map("files")
+}
+
+// Singleton row (always the fixed id below) — platform-wide configuration
+// editable by SUPER_ADMIN through the Admin UI, never a code constant.
+// Changing trial policy is a settings change, not a deploy.
+model PlatformSettings {
+  id                           String   @id @default("platform_settings")
+  trialEnabled                 Boolean  @default(true) @map("trial_enabled")
+  trialDurationDays            Int      @default(14) @map("trial_duration_days")
+  defaultPlanCode              String   @default("trial") @map("default_plan_code")
+  autoStartTrialOnRegistration Boolean  @default(true) @map("auto_start_trial_on_registration")
+  // There is one Custom GPT for the whole platform (every company's users
+  // authenticate into it with their own company API key, entered on first
+  // use) — so the launch link is platform config, not a per-company field.
+  gptBaseUrl                   String   @default("https://chatgpt.com/g/g-6a5188788cc0819196ca83b39f686d74-field-sales-os") @map("gpt_base_url")
+  updatedAt                    DateTime @updatedAt @map("updated_at")
+
+  @@map("platform_settings")
+}
+
+// Short-lived token minted when a user clicks "Launch GPT". The GPT's first
+// Action call (verify-access) must present this alongside the company's
+// static API key — see GptModule for the verification flow.
+model GptLaunchToken {
+  id        String    @id @default(cuid())
+  userId    String    @map("user_id")
+  companyId String    @map("company_id")
+  gptId     String?   @map("gpt_id")
+  tokenHash String    @unique @map("token_hash")
+  expiresAt DateTime  @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  gpt     Gpt?    @relation(fields: [gptId], references: [id])
+
+  @@index([companyId])
+  @@map("gpt_launch_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Cross-cutting: audit, usage analytics, AI reports
+// ---------------------------------------------------------------------------
+
+// Deliberately generic (string action/entityType) so any future module can
+// write audit entries without a migration.
+model AuditLog {
+  id         String   @id @default(cuid())
+  companyId  String?  @map("company_id")
+  userId     String?  @map("user_id")
+  action     String
+  entityType String?  @map("entity_type")
+  entityId   String?  @map("entity_id")
+  metadata   Json?
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+model GptUsageEvent {
+  id        String            @id @default(cuid())
+  companyId String            @map("company_id")
+  userId    String?           @map("user_id")
+  gptId     String?           @map("gpt_id")
+  eventType GptUsageEventType @map("event_type")
+  metadata  Json?
+  createdAt DateTime          @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  gpt     Gpt?    @relation(fields: [gptId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+  @@map("gpt_usage_events")
+}
+
+// Stub table: not deeply used in the MVP, but present so persisting
+// GPT-generated analysis output later needs zero migration.
+model AiReport {
+  id         String   @id @default(cuid())
+  companyId  String   @map("company_id")
+  userId     String?  @map("user_id")
+  fileId     String?  @map("file_id")
+  reportType String   @map("report_type")
+  content    Json
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  file    File?   @relation(fields: [fileId], references: [id], onDelete: SetNull)
+
+  @@index([companyId])
+  @@map("ai_reports")
+}

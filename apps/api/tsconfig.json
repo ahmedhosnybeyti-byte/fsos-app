@@ -1,0 +1,10 @@
+{
+  "extends": "@field-sales-os/config/tsconfig.nestjs.json",
+  "compilerOptions": {
+    "baseUrl": "./",
+    "paths": {
+      "@/*": ["src/*"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

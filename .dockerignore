@@ -1,0 +1,15 @@
+node_modules
+.pnpm-store
+dist
+build
+.next
+out
+.turbo
+.docker-data
+.git
+.claude
+*.log
+coverage
+.env
+.env.local
+.env.*.local

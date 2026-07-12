@@ -1,0 +1,53 @@
+# Deploys apps/api (the NestJS API) as a standalone container, using the
+# standard turborepo "prune" recipe so only what apps/api actually depends
+# on (packages/database, packages/schemas, packages/config) gets built and
+# shipped — not apps/web or its dependencies.
+#
+# Build from the repo root:
+#   docker build -f Dockerfile.api -t field-sales-os-api .
+#
+# Railway: point the service's Dockerfile path at "Dockerfile.api" with the
+# repo root as build context (see docs/DEPLOYMENT.md).
+
+FROM node:20-slim AS base
+RUN corepack enable && corepack prepare pnpm@11.11.0 --activate
+
+# ---------------------------------------------------------------------------
+# 1. Prune the monorepo down to only what @field-sales-os/api needs.
+# ---------------------------------------------------------------------------
+FROM base AS pruner
+WORKDIR /app
+COPY . .
+RUN pnpm add -g turbo@^2.3.3
+RUN turbo prune @field-sales-os/api --docker
+
+# ---------------------------------------------------------------------------
+# 2. Install dependencies using the pruned lockfile (better layer caching:
+#    this layer only invalidates when dependencies actually change).
+# ---------------------------------------------------------------------------
+FROM base AS installer
+WORKDIR /app
+COPY --from=pruner /app/out/json/ .
+RUN pnpm install --frozen-lockfile
+
+# ---------------------------------------------------------------------------
+# 3. Bring in the real source, generate the Prisma client, build.
+# ---------------------------------------------------------------------------
+COPY --from=pruner /app/out/full/ .
+RUN pnpm --filter @field-sales-os/database generate
+RUN pnpm turbo run build --filter=@field-sales-os/api...
+
+# ---------------------------------------------------------------------------
+# 4. Runtime image.
+# ---------------------------------------------------------------------------
+FROM base AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=installer /app .
+
+EXPOSE 4000
+
+# Applies any pending Prisma migrations, then starts the API. Fine for a
+# single-instance MVP; if this ever runs as more than one instance, move the
+# migrate step to a separate one-off Railway deploy/release command instead.
+CMD ["sh", "-c", "pnpm --filter @field-sales-os/database migrate:deploy && node apps/api/dist/main.js"]
