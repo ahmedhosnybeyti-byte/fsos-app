@@ -58,4 +58,12 @@ EXPOSE 4000
 # Applies any pending Prisma migrations, then starts the API. Fine for a
 # single-instance MVP; if this ever runs as more than one instance, move the
 # migrate step to a separate one-off Railway deploy/release command instead.
-CMD ["sh", "-c", "pnpm --filter @field-sales-os/database migrate:deploy && node apps/api/dist/main.js"]
+#
+# Deliberately NOT using `pnpm --filter @field-sales-os/database migrate:deploy`
+# here — on Railway's runtime container that failed with "No projects matched
+# the filters in /app" even though the identical `pnpm --filter` command
+# succeeded during the build (installer stage). Calling the prisma binary
+# directly from inside packages/database sidesteps pnpm's workspace-filter
+# resolution at container start entirely, so it can't be affected by whatever
+# runtime-vs-build-time difference caused that.
+CMD ["sh", "-c", "cd packages/database && ./node_modules/.bin/prisma migrate deploy && cd /app && node apps/api/dist/main.js"]
