@@ -18,7 +18,14 @@ RUN corepack enable && corepack prepare pnpm@11.11.0 --activate
 FROM base AS pruner
 WORKDIR /app
 COPY . .
-RUN pnpm add -g turbo@^2.3.3
+# Installed via npm, not pnpm, specifically here: pnpm's corepack shim hits
+# ERR_UNKNOWN_BUILTIN_MODULE on some Node/corepack combinations when used
+# for a global install at this stage (before any project-level pnpm install
+# has run). npm ships with the base image regardless of corepack state, so
+# it sidesteps the issue entirely — this is the only place turbo is
+# installed this way; everywhere else it runs as the project's own
+# devDependency via the pnpm/turbo scripts already in package.json.
+RUN npm install -g turbo@^2.3.3
 RUN turbo prune @field-sales-os/api --docker
 
 # ---------------------------------------------------------------------------
