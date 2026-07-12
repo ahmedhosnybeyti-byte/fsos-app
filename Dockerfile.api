@@ -9,13 +9,16 @@
 # Railway: point the service's Dockerfile path at "Dockerfile.api" with the
 # repo root as build context (see docs/DEPLOYMENT.md).
 
-FROM node:20-slim AS base
+FROM node:22-slim AS base
+# Base image is Node 22, not 20: pnpm 11.x requires Node >=22.13 and throws
+# ERR_UNKNOWN_BUILTIN_MODULE on Node 20 (confirmed via pnpm/turbo tooling
+# issues — the error is a Node-version mismatch, not a corepack problem).
+#
 # pnpm is installed as a plain global npm package here, NOT via
-# `corepack enable && corepack prepare` — corepack's shim script hits
-# ERR_UNKNOWN_BUILTIN_MODULE on Railway's build environment (Node v20.20.2),
-# breaking on every single pnpm invocation (turbo install, pnpm install,
-# etc). Installing via npm sidesteps corepack entirely and has been
-# confirmed to avoid the issue.
+# `corepack enable && corepack prepare` — corepack's shim script also hits
+# ERR_UNKNOWN_BUILTIN_MODULE on Railway's build environment independent of
+# the Node-version issue above. Installing via npm sidesteps corepack
+# entirely and has been confirmed to avoid that failure mode too.
 RUN npm install -g pnpm@11.11.0 turbo@^2.3.3
 
 # ---------------------------------------------------------------------------
