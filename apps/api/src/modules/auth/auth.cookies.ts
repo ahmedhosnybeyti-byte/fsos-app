@@ -17,15 +17,18 @@ function baseCookieOptions(config: AppConfigService) {
   // `domain` makes it a host-only cookie tied to the API's real origin,
   // which works correctly across origins as long as sameSite is "none".
   const domain = cookieDomain && cookieDomain !== "localhost" ? cookieDomain : undefined;
+  // Cross-origin (web app and API on different hosts, e.g. localhost:3000
+  // talking to a *.railway.app API) requires SameSite=None, which in turn
+  // requires Secure — fine in prod (Railway is HTTPS). Local dev, where
+  // both sides are on localhost, keeps "lax" since SameSite=None without
+  // Secure is rejected by browsers over plain http. (`as const` can't be
+  // applied directly to a ternary — TS1355 — so the union is annotated on
+  // this intermediate variable instead.)
+  const sameSite: "none" | "lax" = isProd ? "none" : "lax";
   return {
     httpOnly: true,
     secure: isProd,
-    // Cross-origin (web app and API on different hosts, e.g. localhost:3000
-    // talking to a *.railway.app API) requires SameSite=None, which in turn
-    // requires Secure — fine in prod (Railway is HTTPS). Local dev, where
-    // both sides are on localhost, keeps "lax" since SameSite=None without
-    // Secure is rejected by browsers over plain http.
-    sameSite: (isProd ? "none" : "lax") as const,
+    sameSite,
     domain,
     path: "/",
   };
