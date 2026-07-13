@@ -188,3 +188,189 @@ on file: if this keeps recurring, the next lever isn't more prompt-tuning
 but reducing how much cross-turn state the model has to carry itself
 (e.g. a session token that survives being "forgotten," or collapsing
 multi-step joins into fewer required tool calls).
+
+## Backlog / future ideas (not started)
+
+- **Auto-convert uploaded Excel to CSV**: let the platform convert .xlsx/.xls
+  uploads to CSV internally (or offer CSV as an export option). Raised by
+  the user during the route-splitting discussion below; not scoped or
+  started yet — just a reminder note.
+
+## Route-splitting / territory design (new thread, in progress)
+
+Real, well-known operations research problem: **Territory Design /
+Territory Alignment**, common in FMCG field-sales route-to-market
+planning. User's actual pain point, from direct field experience: a
+supervisor's route ("خط سير") — a set of customers already assigned to one
+rep by whatever rule that supervisor/company uses (out of scope, varies
+too much to standardize) — needs to be split into sub-groups (labeled
+either by area name or by day of the week, functionally the same thing)
+that are:
+
+1. Geographically coherent/compact (primary constraint).
+2. Close in total sales value to each other (secondary constraint, not
+   required to be exactly equal).
+
+Explicitly descoped for now: visit-frequency/periodic scheduling (e.g.
+"Cash Van" customers needing 2 visits/week) — real requirement, real
+complexity (turns this into a periodic vehicle routing problem), but the
+user asked to set it aside until the single-visit balanced-split case
+works.
+
+Default day count: 6-day work week (used when the supervisor doesn't
+specify a number of groups).
+
+Data confirmed available directly in the uploaded `Invoices.xlsx`
+(2,150 rows): `CustomerCode`, `Rep`, `Area`, `Class`, `Latitude`,
+`Longitude`, `Total` — everything needed (per-customer location, current
+rep/route assignment, and a sales figure to aggregate) already lives in
+one file, no separate customer master or geocoding step needed for the
+prototype.
+
+Plan: build an offline prototype (aggregate sales per customer, then a
+two-step algorithm — geographic clustering first, boundary-swap
+refinement for sales balance second) against one real rep's customers,
+visualize as a colored map, and only then decide the delivery surface
+(GPT Action command vs. dashboard feature vs. both) — same principle as
+the heatmap work: heavy computation and full-dataset visualization belong
+server-side, not inside the GPT's own context/response.
+
+**Prototype validated against real data, algorithm hardened.** Tested
+against a 100-customer sample (Customers.xlsx + Invoices.xlsx) and then a
+much larger, realistic 2,165-customer FSOS demo dataset
+(FSOS_Demo_Dataset.xlsx — full multi-sheet schema: Customers, Routes,
+Daily Visit Plan, Visit Execution, Sales Invoices, Customer/Route/Salesman
+KPIs, etc.). Key findings:
+
+- **Straight-line distance, not drive time.** User explicitly rejected
+  drive-time (traffic makes it non-reproducible) in favor of a fixed
+  geographic radius ("دايرة") around each group's center — computable
+  from lat/lon alone (Haversine formula), no routing API/cost needed.
+- **Found and fixed a real bug**: the original greedy swap heuristic
+  (move a customer if it locally looks better) could cycle forever,
+  bouncing one customer between two clusters indefinitely. Fixed by
+  switching to proper hill-climbing on a global objective (sum of
+  absolute deviation from target across all groups) — a move is only
+  accepted if it strictly reduces that objective, which mathematically
+  cannot cycle.
+- **Added the "circle" constraint**: a hard max-radius-from-centroid cap:
+  a customer cannot join a group if they're farther than the cap, no
+  matter how much it would help balance sales. This is a hard constraint,
+  not a preference — implements the user's "mercury droplet" analogy
+  (each group stays a compact blob, never a stretched-out shape).
+- **Radius is data-dependent, not a fixed constant.** Too tight a radius
+  blocks almost all balancing moves (deviation stays near the
+  unbalanced baseline); too loose defeats the point of a "route." Right
+  answer found by sweeping a range and picking the smallest radius that
+  still reaches near-0% deviation. Worked examples: Mohamed's toy route
+  (100-cust sample) balanced at 20km; a real rep (SM-018, 160 real
+  customers) balanced at just 6km; a real territory (TR-004, 322 real
+  customers, 5 routes) balanced at 15km reaching 0.0% deviation (vs. a
+  6x spread — 140K to 834K SAR — from pure geographic clustering alone).
+- **Important negative result**: territory TR-002 (759 customers) could
+  NOT be balanced into 8 compact routes at any reasonable radius (still
+  ~97% deviation even at 80km). Root cause found by inspecting the data:
+  the territory isn't geographically uniform — 86% of customers/88% of
+  sales sit in a dense ~20km-wide urban core, with the rest scattered
+  across a ~180km sparse corridor. No algorithm can make a sparse,
+  far-flung minority "equal" to a dense urban majority within a sane
+  travel radius — this is a genuine data/business-structure limit, not a
+  tuning problem. Correct fix: split dense-core vs. sparse-periphery
+  customers into separate sub-problems rather than forcing one N across
+  a non-uniform territory (not yet implemented).
+- **Real data also has fragmented current assignments** (e.g. TR-004's
+  322 customers are currently split across 18 different reps in
+  wildly uneven slivers) — real-world messiness the algorithm has to be
+  robust to, not an artifact of the demo.
+
+Current deliverables (all rebuilt against the real 2,165-customer
+dataset, not the earlier 100-customer toy sample):
+`sales_heatmap.html` (full customer base, territory/channel filters —
+user's stated top priority, "هي اللي هاتبيع المنتج"),
+`sector_split_prototype.html` (TR-004, 322 customers -> 5 balanced
+routes), `route_split_prototype_mohamed.html` (real rep SM-018, 160
+customers -> 6 balanced days).
+
+Not yet done: dense/sparse territory splitting (TR-002 case), coverage %
+/ strike rate % saturation signal (deferred by user — most companies
+can't compute it yet, though the FSOS demo dataset's Visit Execution /
+Route KPIs / Salesman KPIs sheets do have real StrikeRate%/
+VisitComplianceRate% columns that could validate this later).
+
+## Balancing algorithm changed to region-growing (adjacency-only), then shipped as a real dashboard feature
+
+User reviewed the swap-based "after" result on a real map and asked for a
+different growth rule, illustrated with a "mercury droplet" analogy
+confirmed earlier: start from the "before" pure-geographic k-means groups
+and grow each under-target group only by absorbing its nearest **directly
+adjacent** neighbor from an over-target donor group — never a jump to a
+non-adjacent customer, even if that customer would balance sales better.
+Implemented as: sort groups by how under-target they are; for the most
+under-target group, scan every customer currently in an over-target donor
+group, take whichever one has the shortest distance to any point already
+in the target group, move it, repeat until within tolerance or stuck.
+Precomputes the full pairwise Haversine distance matrix once so each
+iteration's "nearest neighbor" lookup is a fast array read, not a
+recomputation.
+
+Result quality (tolerance=1%): TR-004 (322 real customers, 5 groups)
+140K-834K spread -> 401K-406K (max ~1% deviation); SM-018 (160 real
+customers, 6 groups) 29K-228K spread -> 136K-149K (~5% deviation) — looser
+than the earlier free-swap version's 0.0%, expected since growth-only is a
+strictly more constrained search, but every group is now guaranteed a
+single contiguous blob on the map (no orphaned customers), which was the
+actual ask.
+
+**Shipped as a real dashboard feature** (user's choice: dashboard button,
+not a GPT Action command — "أول ما يفتح يستخدمها لو هو عايز"). New
+`route-planning` module:
+
+- `packages/schemas/src/route-planning.schemas.ts` — Zod schemas for the
+  two endpoints (`routePlanningDistinctValuesSchema`,
+  `routePlanningSplitSchema`); `ROUTE_PLANNING_LIMITS` added to
+  `constants.ts` (maxGroupCount 20, maxCustomersPerRequest 5000 — a
+  computation-time guard for the O(n^2) distance matrix, NOT a
+  GPT-Actions-style response-size guard, since this endpoint is called
+  directly by the dashboard).
+- `apps/api/src/modules/route-planning/route-balancer.util.ts` — pure
+  TypeScript port of the validated Python algorithm (Haversine, a
+  hand-rolled k-means++ with multiple restarts since no ML dependency was
+  needed at this data scale, then the region-growing balance pass).
+  Verified via a standalone `tsx` run against the real TR-004 data before
+  wiring it into the API — reproduced the same ~0.8% deviation the Python
+  version got.
+- `route-planning.service.ts` / `.controller.ts` / `.module.ts` — reads an
+  uploaded Customers-type file via the existing `FilesService`
+  (buffer -> XLSX -> rows, same pattern `GptService.getDataset` already
+  uses), filters by a user-chosen scope column/value (e.g. one
+  SalesmanID or TerritoryID), sources the sales value either from a column
+  already on that file or aggregated on the fly from a second file (e.g.
+  Invoices) keyed by customer id, excludes rows with insane/zero
+  coordinates (same 3-bad-row pattern found in the real demo data),
+  and returns before/after cluster assignments + totals for the map.
+  Registered in `app.module.ts`.
+- Frontend: `apps/web/src/app/(dashboard)/dashboard/route-planning/page.tsx`
+  — file/column pickers (populated from `parsedMetadata.headers`, no
+  hand-typed column names), a scope-value dropdown backed by a new
+  `GET /route-planning/distinct-values` endpoint, group-count input, a
+  sales-source toggle (column vs. aggregate-from-second-file), and a
+  before/after map. `components/route-planning/route-split-map.tsx` draws
+  the map with vanilla Leaflet (dynamically imported inside `useEffect`
+  only — Leaflet's module top-level code touches `window`, so a static
+  import would break server-side rendering of the client component's
+  first pass; the CSS import is static since stylesheets don't have that
+  problem). Added `leaflet` + `@types/leaflet` to `apps/web/package.json`,
+  and a "Route Planning" nav item to the dashboard shell.
+
+Not yet type-checked against a real `tsc` run — the sandbox's
+`node_modules/typescript` symlink is unreadable in this environment (same
+class of mount-permission quirk as the earlier `git index.lock` issue),
+so this needs verifying via the user's own local build or the Railway
+build log, same fallback used earlier this session for the TS1355 cookie
+bug.
+
+Still not implemented: the four flexible split modes discussed earlier
+(auto-suggest group count / fixed count / rebalance existing groups / add
+one new group to existing ones) — current version only supports "split
+into a fixed group count from scratch." Also not implemented: the
+dense/sparse territory pre-split (TR-002 case) as an automatic step.

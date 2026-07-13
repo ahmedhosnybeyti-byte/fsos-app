@@ -10,3 +10,4 @@ export * from "./file.schemas";
 export * from "./gpt.schemas";
 export * from "./platform-settings.schemas";
 export * from "./analysis-studio.schemas";
+export * from "./route-planning.schemas";

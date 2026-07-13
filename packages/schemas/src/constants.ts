@@ -62,7 +62,33 @@ export const API_VERSION_PREFIX = "v1";
 // never again be the whole file (root cause of the ChatGPT
 // ResponseTooLargeError this replaced). Sized to stay well under Actions'
 // response size ceiling even for wide rows (~20 columns).
+//
+// maxLimitNarrowProjection/narrowProjectionMaxColumns: a deliberate
+// exception for map/heatmap-style requests (e.g. lat/lon/category/total per
+// row) that genuinely need every matching row, not a page of them — see the
+// July 2026 GPT retest, where the model correctly refused to loop ~20
+// sequential getDataset calls itself to build one artifact (a real ChatGPT
+// Actions constraint, not a prompt problem). Raising the cap is only safe
+// because it's gated on a narrow column projection: filtering already scans
+// every matching row in memory regardless of `limit` (see gpt.service.ts's
+// filterRows), so a bigger slice costs nothing extra server-side — the
+// response-size risk this cap exists for only reappears if the row is wide.
 export const GPT_DATASET_QUERY_LIMITS = {
   defaultLimit: 50,
   maxLimit: 100,
+  maxLimitNarrowProjection: 5000,
+  narrowProjectionMaxColumns: 5,
+} as const;
+
+// Route Planning (territory/route balanced-split feature, dashboard-only —
+// see PROJECT_LOG.md's "Route-splitting / territory design" section for the
+// full design history). maxCustomersPerRequest is a computation-time guard
+// (the region-growing algorithm needs an O(n^2) one-time distance matrix),
+// not a response-size guard like GPT_DATASET_QUERY_LIMITS — this endpoint is
+// called directly by the dashboard, not through a GPT Action.
+export const ROUTE_PLANNING_LIMITS = {
+  maxGroupCount: 20,
+  maxCustomersPerRequest: 5000,
+  defaultTolerance: 0.01,
+  maxDistinctValues: 300,
 } as const;

@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, FileSpreadsheet, Sparkles, Users, Settings } from "lucide-react";
+import { LayoutDashboard, FileSpreadsheet, Sparkles, Users, Settings, Map } from "lucide-react";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { AppShell, type NavItem } from "@/components/shell/app-shell";
 import { Spinner } from "@/components/ui/spinner";
@@ -20,6 +20,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
     { href: "/dashboard/analysis-studio", label: "Analysis Studio", icon: Sparkles },
     { href: "/dashboard/files", label: "Files", icon: FileSpreadsheet },
+    { href: "/dashboard/route-planning", label: "Route Planning", icon: Map },
     ...(user.role.code === "COMPANY_ADMIN" ? [{ href: "/dashboard/team", label: "Team", icon: Users }] : []),
     ...(user.role.code === "COMPANY_ADMIN" ? [{ href: "/dashboard/settings", label: "Settings", icon: Settings }] : []),
   ];

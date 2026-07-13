@@ -11,3 +11,4 @@ export * from "./usage";
 export * from "./audit";
 export * from "./platform-settings";
 export * from "./analysis-studio";
+export * from "./route-planning";

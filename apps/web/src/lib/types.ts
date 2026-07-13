@@ -131,6 +131,51 @@ export interface FileRecord {
   } | null;
 }
 
+// Route Planning — balanced territory/route split feature. See
+// docs/PROJECT_LOG.md's "Route-splitting / territory design" section for
+// the algorithm's design history (why region-growth, why Haversine not
+// drive time, etc.).
+export interface RoutePlanningSplitRequest {
+  customerFileId: string;
+  latitudeColumn: string;
+  longitudeColumn: string;
+  idColumn: string;
+  labelColumn?: string;
+  scopeColumn: string;
+  scopeValue: string;
+  groupCount: number;
+  tolerance?: number;
+  salesColumn?: string;
+  salesFileId?: string;
+  salesFileCustomerIdColumn?: string;
+  salesFileAmountColumn?: string;
+}
+
+export interface RoutePlanningRecord {
+  id: string;
+  label: string;
+  lat: number;
+  lon: number;
+  sales: number;
+  before: number;
+  after: number;
+}
+
+export interface RoutePlanningSplitResult {
+  scopeColumn: string;
+  scopeValue: string;
+  groupCount: number;
+  target: number;
+  excludedBadCoordinates: number;
+  totalScopedRows: number;
+  usedRows: number;
+  beforeTotals: number[];
+  afterTotals: number[];
+  beforeCounts: number[];
+  afterCounts: number[];
+  records: RoutePlanningRecord[];
+}
+
 export interface PlatformSettings {
   id: string;
   trialEnabled: boolean;

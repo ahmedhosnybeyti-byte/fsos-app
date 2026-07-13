@@ -22,6 +22,7 @@ import { UsageAnalyticsModule } from "./modules/usage-analytics/usage-analytics.
 import { ScheduledTasksModule } from "./modules/scheduled-tasks/scheduled-tasks.module";
 import { PlatformSettingsModule } from "./modules/platform-settings/platform-settings.module";
 import { AnalysisStudioModule } from "./modules/analysis-studio/analysis-studio.module";
+import { RoutePlanningModule } from "./modules/route-planning/route-planning.module";
 
 @Module({
   imports: [
@@ -49,6 +50,7 @@ import { AnalysisStudioModule } from "./modules/analysis-studio/analysis-studio.
     ScheduledTasksModule,
     PlatformSettingsModule,
     AnalysisStudioModule,
+    RoutePlanningModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
