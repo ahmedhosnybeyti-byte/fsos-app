@@ -41,7 +41,7 @@ export class RoutePlanningService {
 
     const buffer = await this.filesService.downloadFileBuffer(file.id, companyId);
     const rows = readSheetRows(buffer, file.sheetIndex);
-    if (rows.length > 0 && !(column in rows[0])) {
+    if (rows.length > 0 && !(column in rows[0]!)) {
       throw new BadRequestException(`Column "${column}" was not found in this dataset`);
     }
 
@@ -65,7 +65,7 @@ export class RoutePlanningService {
     const requiredColumns = [input.latitudeColumn, input.longitudeColumn, input.idColumn, input.scopeColumn];
     if (allRows.length > 0) {
       for (const col of requiredColumns) {
-        if (!(col in allRows[0])) throw new BadRequestException(`Column "${col}" was not found in the customer dataset`);
+        if (!(col in allRows[0]!)) throw new BadRequestException(`Column "${col}" was not found in the customer dataset`);
       }
     }
 
@@ -134,10 +134,10 @@ export class RoutePlanningService {
       tolerance: input.tolerance,
     });
 
-    const beforeCounts = new Array(input.groupCount).fill(0);
-    const afterCounts = new Array(input.groupCount).fill(0);
-    for (const g of result.before) beforeCounts[g]++;
-    for (const g of result.after) afterCounts[g]++;
+    const beforeCounts: number[] = new Array(input.groupCount).fill(0);
+    const afterCounts: number[] = new Array(input.groupCount).fill(0);
+    for (const g of result.before) beforeCounts[g] = (beforeCounts[g] ?? 0) + 1;
+    for (const g of result.after) afterCounts[g] = (afterCounts[g] ?? 0) + 1;
 
     return {
       scopeColumn: input.scopeColumn,

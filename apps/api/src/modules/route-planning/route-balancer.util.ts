@@ -65,31 +65,31 @@ function kMeans(points: LatLon[], k: number, restarts = 8, maxIterations = 100, 
     // k-means++ style seeding: first center random, subsequent centers
     // weighted by squared distance to the nearest existing center.
     const centers: LatLon[] = [];
-    centers.push(points[Math.floor(rand() * n)]);
+    centers.push(points[Math.floor(rand() * n)]!);
     while (centers.length < k) {
       const distSq = points.map((p) => Math.min(...centers.map((c) => haversineKm(p, c) ** 2)));
       const total = distSq.reduce((a, b) => a + b, 0);
       if (total === 0) {
-        centers.push(points[Math.floor(rand() * n)]);
+        centers.push(points[Math.floor(rand() * n)]!);
         continue;
       }
       let r = rand() * total;
       let idx = 0;
       for (; idx < n; idx++) {
-        r -= distSq[idx];
+        r -= distSq[idx]!;
         if (r <= 0) break;
       }
-      centers.push(points[Math.min(idx, n - 1)]);
+      centers.push(points[Math.min(idx, n - 1)]!);
     }
 
-    let labels = new Array(n).fill(0);
+    let labels: number[] = new Array(n).fill(0);
     for (let iter = 0; iter < maxIterations; iter++) {
       let changed = false;
-      const newLabels = points.map((p) => {
+      const newLabels: number[] = points.map((p) => {
         let best = 0;
         let bestDist = Infinity;
         for (let c = 0; c < k; c++) {
-          const d = haversineKm(p, centers[c]);
+          const d = haversineKm(p, centers[c]!);
           if (d < bestDist) {
             bestDist = d;
             best = c;
@@ -112,7 +112,7 @@ function kMeans(points: LatLon[], k: number, restarts = 8, maxIterations = 100, 
       if (!changed) break;
     }
 
-    const inertia = points.reduce((sum, p, i) => sum + haversineKm(p, centers[labels[i]]) ** 2, 0);
+    const inertia = points.reduce((sum, p, i) => sum + haversineKm(p, centers[labels[i]!]!) ** 2, 0);
     return { labels, inertia };
   }
 
@@ -156,13 +156,16 @@ export function balancedRegionGrow(input: RegionGrowInput): RegionGrowResult {
   for (let i = 0; i < n; i++) {
     D[i] = new Array(n);
     for (let j = 0; j < n; j++) {
-      D[i][j] = i === j ? 0 : haversineKm(points[i], points[j]);
+      D[i]![j] = i === j ? 0 : haversineKm(points[i]!, points[j]!);
     }
   }
 
   function totalsOf(labels: number[]): number[] {
-    const t = new Array(groupCount).fill(0);
-    for (let i = 0; i < n; i++) t[labels[i]] += values[i];
+    const t: number[] = new Array(groupCount).fill(0);
+    for (let i = 0; i < n; i++) {
+      const idx = labels[i]!;
+      t[idx] = (t[idx] ?? 0) + values[i]!;
+    }
     return t;
   }
 
@@ -176,11 +179,11 @@ export function balancedRegionGrow(input: RegionGrowInput): RegionGrowResult {
 
     let moved = false;
     for (const U of order) {
-      if (dev[U] >= -tolerance * target) continue; // U is already at/above target
+      if (dev[U]! >= -tolerance * target) continue; // U is already at/above target
 
       const donors = new Set<number>();
       for (let c = 0; c < groupCount; c++) {
-        if (c !== U && totals[c] > target * (1 + tolerance)) donors.add(c);
+        if (c !== U && totals[c]! > target * (1 + tolerance)) donors.add(c);
       }
       const donorSet = donors.size > 0 ? donors : new Set(Array.from({ length: groupCount }, (_, c) => c).filter((c) => c !== U));
 
@@ -191,10 +194,10 @@ export function balancedRegionGrow(input: RegionGrowInput): RegionGrowResult {
       let bestCandidate = -1;
       let bestDist = Infinity;
       for (let i = 0; i < n; i++) {
-        if (after[i] === U || !donorSet.has(after[i])) continue;
+        if (after[i] === U || !donorSet.has(after[i]!)) continue;
         let minDist = Infinity;
         for (const m of uMembers) {
-          const d = D[i][m];
+          const d = D[i]![m]!;
           if (d < minDist) minDist = d;
         }
         if (minDist < bestDist) {
