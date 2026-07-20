@@ -39,16 +39,26 @@ export class PaymentsService {
     return { items, total, page, pageSize };
   }
 
-  async listAll(pagination: { page: number; pageSize: number }) {
+  async listAll(
+    pagination: { page: number; pageSize: number },
+    filters?: { companyId?: string; from?: Date; to?: Date },
+  ) {
     const { page, pageSize } = pagination;
+    const where = {
+      ...(filters?.companyId ? { companyId: filters.companyId } : {}),
+      ...(filters?.from || filters?.to
+        ? { createdAt: { ...(filters.from ? { gte: filters.from } : {}), ...(filters.to ? { lte: filters.to } : {}) } }
+        : {}),
+    };
     const [items, total] = await Promise.all([
       this.prisma.payment.findMany({
+        where,
         include: { company: true },
         skip: (page - 1) * pageSize,
         take: pageSize,
         orderBy: { createdAt: "desc" },
       }),
-      this.prisma.payment.count(),
+      this.prisma.payment.count({ where }),
     ]);
     return { items, total, page, pageSize };
   }

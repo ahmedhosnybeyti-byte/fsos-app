@@ -2,15 +2,8 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import { randomBytes, createHash } from "node:crypto";
 import * as argon2 from "argon2";
 import * as XLSX from "xlsx";
-import type { File, Gpt } from "@field-sales-os/database";
-import {
-  TOKEN_TTL,
-  type AggregateSpec,
-  type ConfigureGptInput,
-  type FilterOperatorSpec,
-  type GetGptDatasetInput,
-  type RenderAnalysisEventInput,
-} from "@field-sales-os/schemas";
+import type { Gpt } from "@field-sales-os/database";
+import { TOKEN_TTL, type ConfigureGptInput, type GetGptDatasetInput, type RenderAnalysisEventInput } from "@field-sales-os/schemas";
 import { PrismaService, isUniqueConstraintError } from "../../common/prisma";
 import { SubscriptionsService } from "../subscriptions/subscriptions.service";
 import { FilesService } from "../files/files.service";
@@ -18,6 +11,21 @@ import { UsageAnalyticsService } from "../usage-analytics/usage-analytics.servic
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { AnalysisEventService } from "../analysis-studio/analysis-event.service";
 import { PlatformSettingsService } from "../platform-settings/platform-settings.service";
+import { CanonicalHierarchyResolverService } from "../rie/canonical-hierarchy-resolver.service";
+import {
+  type DatasetRow,
+  type DatasetSummary,
+  applyHierarchyFilter,
+  computeAggregate,
+  filterRows,
+  projectRow,
+  resolveColumns,
+  resolveExactColumn,
+  resolveGroupSortField,
+  sortGroups,
+  sortRows,
+  toDatasetSummary,
+} from "../files/dataset-query.util";
 
 function hashLaunchCode(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
@@ -34,324 +42,10 @@ function parseApiKey(raw: string): ApiKeyParts | null {
   return { keyId: raw.slice(0, idx), secret: raw.slice(idx + 1) };
 }
 
-// Mirrors ColumnMetadata/DetectedMetadata in
-// modules/files/classification/types.ts — kept as a separate, looser type
-// here (rather than importing those) because parsedMetadata is untyped JSON
-// on the File row by the time it reaches this service, same as
-// DatasetSummary's other fields.
-interface ColumnSummary {
-  name: string;
-  type: "numeric" | "date" | "boolean" | "text" | "empty";
-  nullable: boolean;
-  min?: number | string;
-  max?: number | string;
-  distinctValues?: string[];
-}
-
-interface DetectedSummary {
-  period?: { from: string; to: string };
-  region?: string[];
-  branch?: string[];
-  salesRep?: string[];
-  route?: string[];
-}
-
-interface DatasetSummary {
-  id: string;
-  datasetType: string;
-  fileName: string;
-  rowCount: number | null;
-  headers: string[] | null;
-  // Metadata Layer (Sprint 2.2) — additive: absent on files uploaded before
-  // this existed (their parsedMetadata predates these fields), present on
-  // everything parsed since. Lets Stage 3/4 of the reasoning pipeline
-  // (metadata inspection, column resolution) work from real column
-  // types/values instead of header names alone, with zero extra calls.
-  columns: ColumnSummary[] | null;
-  detected: DetectedSummary | null;
-}
-
-// Lightweight metadata the model uses to decide which dataset(s) are
-// relevant to a question — never the full row data (that's a separate
-// getDataset call per fileId, since row data can be large).
-function toDatasetSummary(file: Pick<File, "id" | "datasetType" | "fileName" | "parsedMetadata">): DatasetSummary {
-  const metadata = file.parsedMetadata as { rowCount?: number; headers?: string[]; columns?: ColumnSummary[]; detected?: DetectedSummary } | null;
-  return {
-    id: file.id,
-    datasetType: file.datasetType,
-    fileName: file.fileName,
-    rowCount: metadata?.rowCount ?? null,
-    headers: metadata?.headers ?? null,
-    columns: metadata?.columns ?? null,
-    detected: metadata?.detected ?? null,
-  };
-}
-
-// ---- getDataset filtering ---------------------------------------------
-// Uploaded workbooks have no fixed column schema (a company's "customer
-// id" column might be CustomerCode, Customer ID, custcode, ...), so the
-// named shortcuts below are resolved against each dataset's real headers
-// at request time rather than assumed to exist.
-type DatasetRow = Record<string, unknown>;
-
-function normalizeHeader(header: string): string {
-  return header.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
-const COLUMN_ALIASES: Record<"customerId" | "invoiceId" | "routeId" | "salesRep", string[]> = {
-  customerId: ["customercode", "customerid", "custcode", "custid", "clientcode", "clientid"],
-  invoiceId: ["invoiceno", "invoiceid", "invoicenumber", "invno"],
-  routeId: ["routeid", "routecode", "routeno", "route"],
-  salesRep: ["salesrep", "rep", "repname", "salesrepname", "repcode"],
-};
-
-// Finds the real header name (original casing) matching one of the given
-// filter's known aliases, or null if this dataset has no such column.
-function resolveColumnAlias(headers: string[], filterName: keyof typeof COLUMN_ALIASES): string | null {
-  const aliasSet = new Set(COLUMN_ALIASES[filterName]);
-  return headers.find((h) => aliasSet.has(normalizeHeader(h))) ?? null;
-}
-
-function valuesMatch(cellValue: unknown, expected: string): boolean {
-  if (cellValue === null || cellValue === undefined) return false;
-  return String(cellValue).trim().toLowerCase() === expected.trim().toLowerCase();
-}
-
-// Sprint 2.3 — Rich Filter Operators. Cell values come from XLSX parsed
-// with cellDates:true, so a date cell is already a JS Date; a string spec
-// bound (dateFrom/dateTo, already validated as parseable by the schema)
-// still needs parsing here.
-function toDate(value: unknown): Date | null {
-  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
-  if (typeof value === "string" || typeof value === "number") {
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? null : d;
-  }
-  return null;
-}
-
-// One column's operator spec against one cell — every key present on the
-// spec must pass (AND), same as filters already ANDs across columns. A cell
-// that can't be read as the operator's type (not a date, not a number, not
-// present) fails the condition rather than being silently skipped, so an
-// operator filter never accidentally widens into "match everything".
-function matchesFilterOperatorSpec(cellValue: unknown, spec: FilterOperatorSpec): boolean {
-  if (spec.dateFrom !== undefined || spec.dateTo !== undefined) {
-    const cellDate = toDate(cellValue);
-    if (!cellDate) return false;
-    if (spec.dateFrom !== undefined && cellDate < toDate(spec.dateFrom)!) return false;
-    if (spec.dateTo !== undefined && cellDate > toDate(spec.dateTo)!) return false;
-  }
-
-  const hasNumericOp =
-    spec.greaterThan !== undefined ||
-    spec.greaterThanOrEqual !== undefined ||
-    spec.lessThan !== undefined ||
-    spec.lessThanOrEqual !== undefined ||
-    spec.between !== undefined;
-  if (hasNumericOp) {
-    const n = toNumeric(cellValue);
-    if (n === null) return false;
-    if (spec.greaterThan !== undefined && !(n > spec.greaterThan)) return false;
-    if (spec.greaterThanOrEqual !== undefined && !(n >= spec.greaterThanOrEqual)) return false;
-    if (spec.lessThan !== undefined && !(n < spec.lessThan)) return false;
-    if (spec.lessThanOrEqual !== undefined && !(n <= spec.lessThanOrEqual)) return false;
-    if (spec.between !== undefined && !(n >= spec.between[0] && n <= spec.between[1])) return false;
-  }
-
-  if (spec.contains !== undefined || spec.startsWith !== undefined || spec.endsWith !== undefined) {
-    if (cellValue === null || cellValue === undefined) return false;
-    const str = String(cellValue).trim().toLowerCase();
-    if (spec.contains !== undefined && !str.includes(spec.contains.trim().toLowerCase())) return false;
-    if (spec.startsWith !== undefined && !str.startsWith(spec.startsWith.trim().toLowerCase())) return false;
-    if (spec.endsWith !== undefined && !str.endsWith(spec.endsWith.trim().toLowerCase())) return false;
-  }
-
-  if (spec.in !== undefined && !spec.in.some((v) => valuesMatch(cellValue, v))) return false;
-
-  return true;
-}
-
-interface DatasetQueryFilters {
-  customerId?: string;
-  invoiceId?: string;
-  routeId?: string;
-  salesRep?: string;
-  search?: string;
-  filters?: Record<string, string | FilterOperatorSpec>;
-}
-
-// Applies every provided filter with AND semantics, returning only the
-// matching rows — this (plus the caller's limit/offset) is what keeps a
-// response from ever again being the entire dataset. Executes in-memory in
-// Node before pagination/aggregation (same architecture as Sprint 2.1's
-// aggregate) — there is no row-level Postgres store to push this into.
-function filterRows(rows: DatasetRow[], headers: string[], query: DatasetQueryFilters): DatasetRow[] {
-  const namedColumns: Array<{ column: string; value: string }> = [];
-  for (const key of ["customerId", "invoiceId", "routeId", "salesRep"] as const) {
-    const value = query[key];
-    if (!value) continue;
-    const column = resolveColumnAlias(headers, key);
-    if (!column) {
-      throw new BadRequestException(
-        `No column matching "${key}" was found in this dataset. Available columns: ${headers.join(", ")}. Use "filters" with the exact column name instead.`,
-      );
-    }
-    namedColumns.push({ column, value });
-  }
-
-  const genericFilters = Object.entries(query.filters ?? {}).map(([key, value]) => {
-    const column = headers.find((h) => h.toLowerCase() === key.toLowerCase());
-    if (!column) {
-      throw new BadRequestException(`filters column "${key}" was not found in this dataset. Available columns: ${headers.join(", ")}.`);
-    }
-    return { column, value };
-  });
-
-  const search = query.search?.trim().toLowerCase();
-
-  return rows.filter((row) => {
-    for (const { column, value } of [...namedColumns, ...genericFilters]) {
-      const matches = typeof value === "string" ? valuesMatch(row[column], value) : matchesFilterOperatorSpec(row[column], value);
-      if (!matches) return false;
-    }
-    if (search) {
-      const rowMatchesSearch = Object.values(row).some((v) => v !== null && v !== undefined && String(v).toLowerCase().includes(search));
-      if (!rowMatchesSearch) return false;
-    }
-    return true;
-  });
-}
-
-// ---- getDataset aggregation ---------------------------------------------
-// Purely mechanical: the caller (the model) supplies op + column explicitly,
-// same as SUM()/COUNT() in a spreadsheet — the backend never infers what a
-// number means or decides to aggregate on its own.
-
-function resolveExactColumn(headers: string[], name: string): string {
-  const column = headers.find((h) => h.toLowerCase() === name.toLowerCase());
-  if (!column) {
-    throw new BadRequestException(`Column "${name}" was not found in this dataset. Available columns: ${headers.join(", ")}.`);
-  }
-  return column;
-}
-
-function toNumeric(value: unknown): number | null {
-  if (value === null || value === undefined || value === "") return null;
-  const n = Number(value);
-  return Number.isFinite(n) ? n : null;
-}
-
-interface AggregateResult {
-  value: number;
-  rowsAggregated: number;
-  skippedNonNumericRows: number;
-}
-
-// Non-numeric/blank cells are skipped rather than treated as errors or
-// zeros — same behavior a spreadsheet's SUM/AVERAGE gives on mixed columns
-// — but the count is reported so the model can be honest about it rather
-// than silently presenting a figure that quietly ignored bad data.
-function computeAggregate(op: AggregateSpec["op"], rows: DatasetRow[], column: string | undefined): AggregateResult {
-  if (op === "count") {
-    return { value: rows.length, rowsAggregated: rows.length, skippedNonNumericRows: 0 };
-  }
-  const numbers: number[] = [];
-  let skipped = 0;
-  for (const row of rows) {
-    const n = toNumeric(row[column!]);
-    if (n === null) skipped++;
-    else numbers.push(n);
-  }
-  let value = 0;
-  if (numbers.length > 0) {
-    if (op === "sum") value = numbers.reduce((a, b) => a + b, 0);
-    else if (op === "avg") value = numbers.reduce((a, b) => a + b, 0) / numbers.length;
-    else if (op === "min") value = Math.min(...numbers);
-    else value = Math.max(...numbers); // "max"
-  }
-  return { value, rowsAggregated: numbers.length, skippedNonNumericRows: skipped };
-}
-
-// ---- getDataset sorting & projection (Sprint 2.4) ------------------------
-// Both execute server-side, after filtering and before pagination — same
-// place aggregate already ran (Sprint 2.1) — and are purely presentational:
-// neither changes which rows match, only how the result set is ordered or
-// which fields of it come back.
-
-type SortDir = "asc" | "desc";
-
-// Numeric or date compare when both sides parse as that type (reusing the
-// same coercion filters/aggregate already use, so a column sorts the same
-// way it filters), otherwise a case-insensitive natural string compare —
-// this is what makes sorting work uniformly across text/numeric/date
-// columns without the caller declaring the column's type up front.
-function compareValues(a: unknown, b: unknown): number {
-  const an = toNumeric(a);
-  const bn = toNumeric(b);
-  if (an !== null && bn !== null) return an - bn;
-
-  const ad = toDate(a);
-  const bd = toDate(b);
-  if (ad !== null && bd !== null) return ad.getTime() - bd.getTime();
-
-  return String(a).localeCompare(String(b), undefined, { sensitivity: "base", numeric: true });
-}
-
-// Blank cells always sort last, in either direction — a common convention
-// (and avoids "ascending" surfacing every blank row first). Ties preserve
-// original relative order (stable).
-function sortRows(rows: DatasetRow[], column: string, dir: SortDir): DatasetRow[] {
-  return rows
-    .map((row, index) => ({ row, index }))
-    .sort((a, b) => {
-      const av = a.row[column];
-      const bv = b.row[column];
-      const aBlank = av === null || av === undefined || av === "";
-      const bBlank = bv === null || bv === undefined || bv === "";
-      if (aBlank && bBlank) return a.index - b.index;
-      if (aBlank) return 1;
-      if (bBlank) return -1;
-      const cmp = compareValues(av, bv);
-      return (dir === "desc" ? -cmp : cmp) || a.index - b.index;
-    })
-    .map((entry) => entry.row);
-}
-
-// Resolves every requested projection name against this dataset's real
-// headers up front (case-insensitive, same as resolveExactColumn) so a
-// typo'd column name always fails clearly, in rows or aggregate mode alike
-// — even though projection itself only applies to a rows-mode response.
-function resolveColumns(headers: string[], names: string[]): string[] {
-  return names.map((name) => resolveExactColumn(headers, name));
-}
-
-function projectRow(row: DatasetRow, columns: string[]): DatasetRow {
-  const projected: DatasetRow = {};
-  for (const column of columns) projected[column] = row[column];
-  return projected;
-}
-
-// The only "columns" that exist on a grouped-aggregate result — distinct
-// from the dataset's own headers, so sortBy is validated against this fixed
-// set instead of resolveExactColumn when groupBy is active.
-const GROUP_SORT_FIELDS = ["groupValue", "value", "rowCount"] as const;
-type GroupSortField = (typeof GROUP_SORT_FIELDS)[number];
-
-function resolveGroupSortField(sortBy: string): GroupSortField {
-  const match = GROUP_SORT_FIELDS.find((f) => f.toLowerCase() === sortBy.toLowerCase());
-  if (!match) {
-    throw new BadRequestException(`sortBy "${sortBy}" is not valid when grouping — use one of: ${GROUP_SORT_FIELDS.join(", ")}.`);
-  }
-  return match;
-}
-
-function sortGroups<T extends { groupValue: string; rowCount: number; value: number }>(groups: T[], field: GroupSortField, dir: SortDir): T[] {
-  return [...groups].sort((a, b) => {
-    const cmp = field === "groupValue" ? String(a[field]).localeCompare(String(b[field]), undefined, { sensitivity: "base", numeric: true }) : a[field] - b[field];
-    return dir === "desc" ? -cmp : cmp;
-  });
-}
+// Filtering, aggregation, sorting, projection, and dataset-summary helpers
+// all now live in ../files/dataset-query.util.ts — shared with the native
+// Assistant module's query_dataset tool. Behavior here is unchanged, this
+// file just imports them instead of defining them locally.
 
 // This service is the entire "the ChatGPT link must never be freely usable"
 // requirement made concrete. Two independent secrets gate every Action call:
@@ -373,6 +67,7 @@ export class GptService {
     private readonly auditLogService: AuditLogService,
     private readonly analysisEventService: AnalysisEventService,
     private readonly platformSettingsService: PlatformSettingsService,
+    private readonly hierarchyResolver: CanonicalHierarchyResolverService,
   ) {}
 
   // ---- Company-admin session-auth management -----------------------------
@@ -603,7 +298,11 @@ export class GptService {
     }
 
     const buffer = await this.filesService.downloadFileBuffer(file.id, gpt.companyId);
-    const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
+    // 2026-07-20: restrict XLSX.read to the one needed sheet — see the same
+    // fix (and its full explanation) in ExcelDatasetEntityProvider.parseDatasetFromFiles.
+    // Otherwise every call pays for parsing the entire (potentially
+    // multi-sheet batch, tens of MB) workbook just to read one sheet.
+    const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, sheets: Array.from(new Set([file.sheetIndex, 0])) });
     const sheetName = workbook.SheetNames[file.sheetIndex] ?? workbook.SheetNames[0];
     const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
     const allRows = (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as DatasetRow[];
@@ -613,7 +312,27 @@ export class GptService {
     // applies to the rows-mode return below.
     const resolvedColumns = query.columns ? resolveColumns(headers, query.columns) : null;
 
-    let matchingRows = filterRows(allRows, headers, {
+    // Row-level access control (strategic point 3). This Action route
+    // authenticates via API key + launch-code session, not a platform JWT,
+    // so the requesting user's role/email aren't already on hand the way
+    // they are in AssistantService — fetched once here instead. Same
+    // enforcement as the native Assistant screen, so the old ChatGPT screen
+    // can never see more than it does.
+    const requestingUser = await this.prisma.user.findUnique({ where: { id: session.userId }, include: { role: true } });
+    // No requestingUser should be unreachable (the session was just
+    // validated), but fails closed rather than open if it ever happens.
+    let visibleRows: DatasetRow[] = [];
+    if (requestingUser) {
+      const hierarchyUser = { roleCode: requestingUser.role.code, email: requestingUser.email };
+      // ADR-001 migration: resolved the same way RIE-sourced screens do it —
+      // via the company's Canonical Routes/Employees Datasets — instead of
+      // this file's old manual repColumn/supervisorColumn/managerColumn +
+      // Route Hierarchy Config (both removed; see FilesService).
+      const routeAllowed = await this.hierarchyResolver.resolveAllowedRouteIds(gpt.companyId, hierarchyUser);
+      visibleRows = applyHierarchyFilter(allRows, headers, routeAllowed);
+    }
+
+    let matchingRows = filterRows(visibleRows, headers, {
       customerId: query.customerId,
       invoiceId: query.invoiceId,
       routeId: query.routeId,

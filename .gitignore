@@ -11,8 +11,9 @@ out/
 # Turbo
 .turbo/
 
-# dev-guard single-instance lock (apps/web/scripts/dev-guard.mjs)
+# dev-guard single-instance locks (apps/web + apps/api scripts/dev-guard.mjs)
 .next-dev.lock
+.api-dev.lock
 
 # Env
 .env
@@ -43,3 +44,10 @@ Thumbs.db
 # Misc
 *.tsbuildinfo
 coverage/
+
+# Claude Code local session config (machine-specific, not shared)
+.claude/
+
+# Sandbox/FUSE-mount test artifacts (symlink probing, temp scratch files)
+__symtest.bak
+_tmp_*

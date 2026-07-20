@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 import { AppConfigService } from "../../../common/config";
 import type { StorageProvider, UploadObjectParams } from "./storage-provider.interface";
 
@@ -20,6 +21,14 @@ export class S3StorageProvider implements StorageProvider {
         accessKeyId: storage.accessKeyId,
         secretAccessKey: storage.secretAccessKey,
       },
+      // 2026-07-20 incident: the AWS SDK v3's default HTTP handler has NO
+      // request/connection timeout at all — when the storage endpoint
+      // (local MinIO in dev) is unreachable or half-up, every call that
+      // touches file bytes (download/upload/presign) hung forever with no
+      // error, which looked identical to a frontend bug from the outside
+      // (a Daily Brief request stuck at "Pending" indefinitely). Explicit
+      // timeouts make that failure mode fail fast with a real error instead.
+      requestHandler: new NodeHttpHandler({ connectionTimeout: 5_000, requestTimeout: 15_000 }),
     });
   }
 

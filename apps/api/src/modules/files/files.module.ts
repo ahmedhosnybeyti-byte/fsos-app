@@ -5,9 +5,10 @@ import { FilesController } from "./files.controller";
 import { STORAGE_PROVIDER } from "./storage/storage-provider.interface";
 import { S3StorageProvider } from "./storage/s3-storage.provider";
 import { DatasetClassifierService } from "./classification/dataset-classifier.service";
+import { ImportValidationModule } from "../import-validation/import-validation.module";
 
 @Module({
-  imports: [AuditLogModule],
+  imports: [AuditLogModule, ImportValidationModule],
   providers: [
     FilesService,
     DatasetClassifierService,

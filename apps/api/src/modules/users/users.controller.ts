@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query } from "@nestjs/common";
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import {
   createUserSchema,
@@ -29,9 +29,13 @@ export class UsersController {
 
   @Post()
   @Auth("COMPANY_ADMIN")
-  create(@CurrentUser() user: AuthenticatedUser, @Body(new ZodValidationPipe(createUserSchema)) body: CreateUserInput) {
-    if (!user.companyId) throw new ForbiddenException();
-    return this.usersService.createUser(user.companyId, body);
+  create(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query("companyId") companyId: string | undefined,
+    @Body(new ZodValidationPipe(createUserSchema)) body: CreateUserInput,
+  ) {
+    const scopedCompanyId = this.resolveCompanyScope(user, companyId);
+    return this.usersService.createUser(scopedCompanyId, body);
   }
 
   @Get()
@@ -47,22 +51,37 @@ export class UsersController {
 
   @Patch(":id")
   @Auth("COMPANY_ADMIN")
-  update(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Body(new ZodValidationPipe(updateUserSchema)) body: UpdateUserInput) {
-    if (!user.companyId) throw new ForbiddenException();
-    return this.usersService.updateUser(id, user.companyId, body);
+  update(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Query("companyId") companyId: string | undefined,
+    @Body(new ZodValidationPipe(updateUserSchema)) body: UpdateUserInput,
+  ) {
+    const scopedCompanyId = this.resolveCompanyScope(user, companyId);
+    return this.usersService.updateUser(id, scopedCompanyId, body, user.userId);
   }
 
   @Post(":id/disable")
   @Auth("COMPANY_ADMIN")
-  disable(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
-    if (!user.companyId) throw new ForbiddenException();
-    return this.usersService.setStatus(id, user.companyId, "DISABLED");
+  disable(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Query("companyId") companyId: string | undefined) {
+    const scopedCompanyId = this.resolveCompanyScope(user, companyId);
+    return this.usersService.setStatus(id, scopedCompanyId, "DISABLED");
   }
 
   @Post(":id/enable")
   @Auth("COMPANY_ADMIN")
-  enable(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
-    if (!user.companyId) throw new ForbiddenException();
-    return this.usersService.setStatus(id, user.companyId, "ACTIVE");
+  enable(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Query("companyId") companyId: string | undefined) {
+    const scopedCompanyId = this.resolveCompanyScope(user, companyId);
+    return this.usersService.setStatus(id, scopedCompanyId, "ACTIVE");
+  }
+
+  // "حذف مستخدم" — soft delete: ARCHIVED + sessions revoked + hidden from
+  // the Team list. See UsersService.archiveUser for the guard rails (no
+  // self-delete, no deleting admins).
+  @Delete(":id")
+  @Auth("COMPANY_ADMIN")
+  remove(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Query("companyId") companyId: string | undefined) {
+    const scopedCompanyId = this.resolveCompanyScope(user, companyId);
+    return this.usersService.archiveUser(id, scopedCompanyId, user.userId);
   }
 }

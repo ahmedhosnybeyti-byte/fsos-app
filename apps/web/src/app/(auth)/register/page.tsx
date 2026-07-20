@@ -38,12 +38,13 @@ export default function RegisterPage() {
   });
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className="glass-hero rise-in rise-d1 relative border-0">
+      <div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" />
+      <CardHeader className="relative">
         <CardTitle>Start your free trial</CardTitle>
         <CardDescription>Creates your company workspace and a 14-day trial — no card required.</CardDescription>
       </CardHeader>
-      <form onSubmit={handleSubmit((values) => mutation.mutate(values))}>
+      <form className="relative" onSubmit={handleSubmit((values) => mutation.mutate(values))}>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="companyName">Company name</Label>

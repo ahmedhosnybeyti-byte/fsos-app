@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "scripts": {
     "build": "nest build",
-    "dev": "nest start --watch",
+    "dev": "node scripts/dev-guard.mjs",
     "start": "node dist/main.js",
     "lint": "eslint \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit -p tsconfig.json"
@@ -22,6 +22,7 @@
     "@nestjs/throttler": "^6.3.0",
     "@aws-sdk/client-s3": "^3.712.0",
     "@aws-sdk/s3-request-presigner": "^3.712.0",
+    "@smithy/node-http-handler": "^4.9.4",
     "argon2": "^0.41.1",
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.7",

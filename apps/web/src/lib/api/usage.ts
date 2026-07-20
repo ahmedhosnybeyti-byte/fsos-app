@@ -11,6 +11,7 @@ export interface PlatformUsageStats {
   usersCount: number;
   subscriptionsByStatus: Record<string, number>;
   totalEvents: number;
+  eventCounts: Record<string, number>;
 }
 
 export const usageApi = {

@@ -98,7 +98,123 @@ const PLANS = [
   },
 ];
 
+// Phase 3: Organizational Type Registry defaults. These are the same four
+// levels the constitution names (Region -> Branch -> Distribution Center ->
+// Route) — seeded once as system rows so the registry is never empty, while
+// staying a pure data table: adding a fifth type later (Sales Office,
+// Warehouse, Business Unit, ...) is just another upsert here or via the
+// SUPER_ADMIN API, never a code change. "ROOT" is the reserved sentinel for
+// "directly under the Company".
+const ORG_UNIT_TYPES = [
+  {
+    typeCode: "REGION",
+    name: "Region",
+    description: "Top-level geographic/administrative grouping of branches",
+    allowedParentCodes: ["ROOT"],
+    allowedChildCodes: ["BRANCH", "DISTRIBUTION_CENTER"],
+  },
+  {
+    typeCode: "BRANCH",
+    name: "Branch",
+    description: "Company's official MVP operational level",
+    // Phase 10 Company Policy: "no Branch without Region" — applied
+    // prospectively only (per explicit approval). Existing companies whose
+    // Branch already sits directly under the Company (parentId=null, valid
+    // under the old registry row) are grandfathered and untouched; this
+    // change only affects newly *created* org units from now on. See
+    // OrgUnitsService.ensureDefaultRegion for how new/updated companies stay
+    // compliant automatically.
+    allowedParentCodes: ["REGION"],
+    allowedChildCodes: ["ROUTE"],
+  },
+  {
+    typeCode: "DISTRIBUTION_CENTER",
+    name: "Distribution Center",
+    description: "Logistics/warehousing unit, reserved for future phases",
+    allowedParentCodes: ["ROOT", "REGION"],
+    allowedChildCodes: [],
+  },
+  {
+    typeCode: "ROUTE",
+    name: "Route",
+    description: "Field sales route, reserved for future phases",
+    allowedParentCodes: ["BRANCH"],
+    allowedChildCodes: [],
+  },
+] as const;
+
+// Phase 6: Data Source Type Registry defaults — the types the constitution
+// names explicitly. Adding an 10th type later is just another upsert here
+// or via the SUPER_ADMIN API, never a code change.
+const DATA_SOURCE_TYPES = [
+  { typeCode: "EXCEL_FILE", name: "Excel File", description: "Uploaded .xlsx workbook" },
+  { typeCode: "CSV_FILE", name: "CSV File", description: "Uploaded .csv file" },
+  { typeCode: "SQL_SERVER", name: "SQL Server", description: "Microsoft SQL Server database connection" },
+  { typeCode: "POSTGRESQL", name: "PostgreSQL", description: "PostgreSQL database connection" },
+  { typeCode: "MYSQL", name: "MySQL", description: "MySQL / MariaDB database connection" },
+  { typeCode: "ORACLE", name: "Oracle", description: "Oracle database connection" },
+  { typeCode: "REST_API", name: "REST API", description: "Generic REST API endpoint" },
+  { typeCode: "ERP_CONNECTOR", name: "ERP Connector", description: "ERP system connector (SAP, Oracle EBS, ...)" },
+  { typeCode: "CLOUD_STORAGE", name: "Cloud Storage", description: "Cloud object storage bucket (S3-compatible, ...)" },
+] as const;
+
+// Phase 7: Basic Schema Registry defaults — reuses the exact category
+// vocabulary the file classifier (apps/api/.../classification/dataset-
+// classification-rules.ts) already produces, normalized the same way
+// ImportEngine's File Mapping does (upper snake case). `expectedColumns`
+// intentionally left empty for every row: this is the "Basic" registry the
+// constitution asks for — strict per-column enforcement is a future
+// enhancement, not required for Phase 7/8 to ship.
+const SCHEMA_DEFINITIONS = [
+  { entityName: "INVOICES", description: "Invoices" },
+  { entityName: "INVOICE_ITEMS", description: "Invoice Items" },
+  { entityName: "CUSTOMERS", description: "Customers" },
+  { entityName: "PAYMENTS", description: "Payments" },
+  { entityName: "RETURNS", description: "Returns" },
+  { entityName: "PRODUCTS", description: "Products" },
+  { entityName: "INVENTORY", description: "Inventory" },
+  { entityName: "PRICING", description: "Pricing" },
+  { entityName: "ROUTES", description: "Routes" },
+  { entityName: "EMPLOYEES", description: "Employees" },
+  { entityName: "VISITS", description: "Visits" },
+  { entityName: "COLLECTIONS", description: "Collections" },
+  { entityName: "TARGETS", description: "Targets" },
+  { entityName: "COMPETITORS", description: "Competitors" },
+] as const;
+
 async function main() {
+  console.log("Seeding basic schema registry...");
+  for (const def of SCHEMA_DEFINITIONS) {
+    await prisma.schemaDefinition.upsert({
+      where: { entityName: def.entityName },
+      update: { description: def.description },
+      create: { ...def, isSystem: true },
+    });
+  }
+
+  console.log("Seeding data source type registry...");
+  for (const type of DATA_SOURCE_TYPES) {
+    await prisma.dataSourceType.upsert({
+      where: { typeCode: type.typeCode },
+      update: { name: type.name, description: type.description },
+      create: { ...type, isSystem: true },
+    });
+  }
+
+  console.log("Seeding organizational unit type registry...");
+  for (const type of ORG_UNIT_TYPES) {
+    await prisma.orgUnitTypeDefinition.upsert({
+      where: { typeCode: type.typeCode },
+      update: {
+        name: type.name,
+        description: type.description,
+        allowedParentCodes: [...type.allowedParentCodes],
+        allowedChildCodes: [...type.allowedChildCodes],
+      },
+      create: { ...type, allowedParentCodes: [...type.allowedParentCodes], allowedChildCodes: [...type.allowedChildCodes], isSystem: true },
+    });
+  }
+
   console.log("Seeding permissions...");
   for (const permission of PERMISSIONS) {
     await prisma.permission.upsert({

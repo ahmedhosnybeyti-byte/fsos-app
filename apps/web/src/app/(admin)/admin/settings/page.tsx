@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Settings as SettingsIcon } from "lucide-react";
 import { toast } from "sonner";
 import { platformSettingsApi, plansApi } from "@/lib/api";
 import { ApiError } from "@/lib/api-client";
@@ -61,15 +62,23 @@ export default function PlatformSettingsPage() {
   const effectiveAutoStart = trialEnabled && autoStart;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Platform Settings</h1>
-        <p className="text-muted-foreground">
-          Trial policy for every new company that registers. Changing this takes effect immediately — no deploy needed.
-        </p>
+    <div className="relative space-y-6">
+      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
+      <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
+
+      <div className="rise-in flex items-center gap-4">
+        <span className="crystal-badge hidden h-14 w-14 shrink-0 bg-primary/15 text-primary drop-shadow-[0_0_24px_hsl(var(--primary)/0.4)] sm:flex">
+          <SettingsIcon className="h-6 w-6" />
+        </span>
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Platform Settings</h1>
+          <p className="text-muted-foreground">
+            Trial policy for every new company that registers. Changing this takes effect immediately — no deploy needed.
+          </p>
+        </div>
       </div>
 
-      <Card>
+      <Card className="glass-card rise-in rise-d1">
         <CardHeader>
           <CardTitle>Custom GPT</CardTitle>
           <CardDescription>
@@ -99,7 +108,7 @@ export default function PlatformSettingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="glass-card rise-in rise-d2">
         <CardHeader>
           <CardTitle>Trial configuration</CardTitle>
           <CardDescription>Applies the moment a company completes registration.</CardDescription>

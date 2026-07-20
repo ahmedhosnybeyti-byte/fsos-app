@@ -170,9 +170,28 @@ export const getGptDatasetSchema = z
     // behavior exactly (file order for rows; value-descending for groups).
     sortBy: z.string().min(1).max(200).optional(),
     sortDir: z.enum(["asc", "desc"]).default("asc"),
-    limit: z.coerce.number().int().min(1).max(GPT_DATASET_QUERY_LIMITS.maxLimit).default(GPT_DATASET_QUERY_LIMITS.defaultLimit),
+    // Capped at maxLimitNarrowProjection (not maxLimit) here so a narrow
+    // projection can request it; the superRefine below enforces that a
+    // limit above maxLimit is only actually allowed when columns is set to
+    // <= narrowProjectionMaxColumns fields and aggregate isn't set — see
+    // GPT_DATASET_QUERY_LIMITS's comment for why that's safe.
+    limit: z.coerce
+      .number()
+      .int()
+      .min(1)
+      .max(GPT_DATASET_QUERY_LIMITS.maxLimitNarrowProjection)
+      .default(GPT_DATASET_QUERY_LIMITS.defaultLimit),
     offset: z.coerce.number().int().min(0).default(0),
   })
   .refine((v) => !v.groupBy || v.aggregate, { message: "groupBy requires aggregate to also be set", path: ["groupBy"] })
-  .refine((v) => v.sortBy || v.sortDir === "asc", { message: "sortDir requires sortBy to also be set", path: ["sortDir"] });
+  .refine((v) => v.sortBy || v.sortDir === "asc", { message: "sortDir requires sortBy to also be set", path: ["sortDir"] })
+  .refine(
+    (v) =>
+      v.limit <= GPT_DATASET_QUERY_LIMITS.maxLimit ||
+      (!v.aggregate && !!v.columns && v.columns.length <= GPT_DATASET_QUERY_LIMITS.narrowProjectionMaxColumns),
+    {
+      message: `limit above ${GPT_DATASET_QUERY_LIMITS.maxLimit} requires columns set to at most ${GPT_DATASET_QUERY_LIMITS.narrowProjectionMaxColumns} fields and no aggregate (e.g. for a full-dataset map/export) — narrow the column projection or lower limit`,
+      path: ["limit"],
+    },
+  );
 export type GetGptDatasetInput = z.infer<typeof getGptDatasetSchema>;

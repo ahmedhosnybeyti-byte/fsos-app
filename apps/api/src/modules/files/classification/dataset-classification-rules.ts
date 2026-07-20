@@ -38,6 +38,28 @@ export const CLASSIFICATION_RULES: ClassificationRule[] = [
     expectsDateColumn: true,
   },
   {
+    // Header/Items split (Task #139, part of the FSOS Sales Database
+    // schema work — see docs/TECHNICAL_HANDOVER_FSOS_SALES_DB.md). Without
+    // this rule, an Invoice Items sheet (SKU + qty + unit price + line
+    // total, one row per line, all pointing back to an invoice number) was
+    // scoring highest against "Products" — same sku/unit-price signals, no
+    // rule that recognized the invoice-number foreign key. The "invoice
+    // number" group here is the single strongest distinguishing signal: a
+    // real Products catalog never has one, but every Invoice Items row
+    // does.
+    datasetType: "Invoice Items",
+    headerGroups: [
+      { keywords: ["invoice number", "invoice no", "invoice id", "inv no", "inv number"], weight: 2 },
+      { keywords: ["sku", "product code", "item code", "barcode"], weight: 1 },
+      { keywords: ["quantity", "qty", "qty ordered", "quantity ordered"], weight: 1 },
+      { keywords: ["unit price", "item price", "price per unit"], weight: 1 },
+      { keywords: ["line total", "line amount", "item total", "extended price", "net line amount"], weight: 1 },
+      { keywords: ["discount", "line discount"], weight: 1 },
+    ],
+    sheetNameKeywords: ["invoice items", "invoice item", "invoice details", "invoice lines", "line items", "order items", "order lines"],
+    expectsNumericColumn: true,
+  },
+  {
     datasetType: "Customers",
     headerGroups: [
       { keywords: ["customer id", "customer code", "client id", "account number"], weight: 2 },
@@ -123,6 +145,25 @@ export const CLASSIFICATION_RULES: ClassificationRule[] = [
       { keywords: ["territory", "area", "zone"], weight: 1 },
     ],
     sheetNameKeywords: ["route", "routes", "route plan", "journey plan"],
+  },
+  {
+    // Employees (added alongside Task #142's Route->Employee code
+    // resolution — that feature needs an Employees file to exist and be
+    // selectable, so it needs to classify correctly rather than falling
+    // back to "Unclassified"). "Direct manager / reports to" is the
+    // strongest distinguishing signal: a Customers or Routes sheet never
+    // has a self-referencing manager column, but an org-chart Employees
+    // sheet always does.
+    datasetType: "Employees",
+    headerGroups: [
+      { keywords: ["employee id", "employee code", "staff id", "emp id", "emp code"], weight: 2 },
+      { keywords: ["direct manager", "manager id", "reports to", "supervisor id"], weight: 2 },
+      { keywords: ["employee name", "staff name", "full name"], weight: 1 },
+      { keywords: ["role", "job title", "position", "designation"], weight: 1 },
+      { keywords: ["hire date", "joining date", "start date", "date of joining"], weight: 1 },
+    ],
+    sheetNameKeywords: ["employee", "employees", "staff", "hr", "sales team", "org chart"],
+    expectsDateColumn: true,
   },
   {
     datasetType: "Visits",

@@ -50,6 +50,11 @@ const config: Config = {
           DEFAULT: "hsl(var(--warning))",
           foreground: "hsl(var(--warning-foreground))",
         },
+        // FSOS Design Constitution §3.5/§4.1 Intelligent Glow colors not
+        // previously tokenized — see globals.css for the HSL values and
+        // the .glow-ai/.glow-premium utilities that consume them.
+        ai: "hsl(var(--ai))",
+        premium: "hsl(var(--premium))",
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",

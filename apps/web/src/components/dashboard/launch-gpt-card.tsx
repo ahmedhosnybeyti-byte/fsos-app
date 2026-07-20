@@ -18,14 +18,14 @@ export function LaunchGptCard() {
     mutationFn: gptApi.launch,
     onSuccess: (data) => setLaunch(data),
     onError: (error) => {
-      toast.error(error instanceof ApiError ? error.message : "Could not launch your GPT right now.");
+      toast.error(error instanceof ApiError ? error.message : "تعذر تشغيل الـ GPT دلوقتي.");
     },
   });
 
   function copyCode() {
     if (!launch) return;
     navigator.clipboard.writeText(launch.launchCode);
-    toast.success("Access code copied");
+    toast.success("تم نسخ كود الدخول");
   }
 
   return (
@@ -34,16 +34,14 @@ export function LaunchGptCard() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Rocket className="h-4 w-4 text-primary" />
-            Launch your Custom GPT
+            تشغيل الـ Custom GPT بتاعك
           </CardTitle>
-          <CardDescription>
-            Generates a one-time access code. Your GPT will ask for it before running any analysis.
-          </CardDescription>
+          <CardDescription>بيولّد كود دخول لمرة واحدة. الـ GPT بتاعك هيطلبه قبل ما يبدأ أي تحليل.</CardDescription>
         </CardHeader>
         <CardContent>
           <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
             {mutation.isPending && <Spinner />}
-            Launch GPT
+            تشغيل GPT
           </Button>
         </CardContent>
       </Card>
@@ -51,10 +49,10 @@ export function LaunchGptCard() {
       <Dialog open={!!launch} onOpenChange={(open) => !open && setLaunch(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Your access code is ready</DialogTitle>
+            <DialogTitle>كود الدخول جاهز</DialogTitle>
             <DialogDescription>
-              Open your Custom GPT, then paste this code when it asks you to verify access. It expires in{" "}
-              {launch?.expiresInMinutes} minutes.
+              افتح الـ Custom GPT بتاعك، والصق الكود ده لما يطلب منك التحقق من الدخول. الكود صالح لمدة{" "}
+              {launch?.expiresInMinutes} دقيقة.
             </DialogDescription>
           </DialogHeader>
 
@@ -67,7 +65,7 @@ export function LaunchGptCard() {
 
           <Button asChild className="w-full">
             <a href={launch?.gptUrl} target="_blank" rel="noopener noreferrer">
-              Open Custom GPT <ExternalLink className="h-4 w-4" />
+              فتح الـ Custom GPT <ExternalLink className="h-4 w-4" />
             </a>
           </Button>
         </DialogContent>

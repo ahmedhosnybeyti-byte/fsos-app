@@ -10,9 +10,15 @@ export class ZodValidationPipe implements PipeTransform {
   transform(value: unknown) {
     const result = this.schema.safeParse(value);
     if (!result.success) {
+      const flattened = result.error.flatten();
+      // Surface the actual field(s) and reason in the top-level message —
+      // "Validation failed" alone forced every caller to dig into dev tools
+      // to find out what was actually wrong (see PROJECT_LOG.md).
+      const fieldMessages = Object.entries(flattened.fieldErrors).map(([field, msgs]) => `${field}: ${(msgs ?? []).join("; ")}`);
+      const summary = fieldMessages.length > 0 ? fieldMessages.join(" | ") : flattened.formErrors.join("; ") || "Validation failed";
       throw new BadRequestException({
-        message: "Validation failed",
-        errors: result.error.flatten(),
+        message: summary,
+        errors: flattened,
       });
     }
     return result.data;

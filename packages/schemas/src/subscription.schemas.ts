@@ -11,6 +11,11 @@ export const updateSubscriptionSchema = z.object({
   status: subscriptionStatusSchema.optional(),
   paymentStatus: subscriptionPaymentStatusSchema.optional(),
   currentPeriodEnd: z.coerce.date().optional(),
+  // Per-company trial extension/adjustment — the global default
+  // (PlatformSettings.trialDurationDays) only stamps this once at signup;
+  // this lets a SUPER_ADMIN adjust an individual company's trial afterward
+  // (e.g. extend a stalled onboarding) without touching the global default.
+  trialEndsAt: z.coerce.date().optional(),
 });
 export type UpdateSubscriptionInput = z.infer<typeof updateSubscriptionSchema>;
 

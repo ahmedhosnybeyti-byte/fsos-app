@@ -19,16 +19,109 @@ datasource db {
 // Enums
 // ---------------------------------------------------------------------------
 
+// Phase 2 — Company Lifecycle Management. DRAFT/CONFIGURING/ARCHIVED are
+// additive (Task #147): existing ACTIVE/SUSPENDED/DISABLED rows and every
+// place that already reads them (login gate, admin companies screen,
+// subscription expiry flow) are completely untouched. DISABLED is kept
+// as-is rather than renamed to ARCHIVED — no data migration, no behavior
+// change for anything that already exists.
 enum CompanyStatus {
+  DRAFT
+  CONFIGURING
   ACTIVE
   SUSPENDED
+  ARCHIVED
   DISABLED
 }
 
+// The lifecycle events that move a Company between CompanyStatus states
+// (Phase 2's "Lifecycle Events" diagram). Recorded via the existing
+// AuditLog table (action: "company.lifecycle.<event>") rather than a new
+// table — see CompaniesService.transitionStatus.
+enum CompanyLifecycleEvent {
+  CREATE
+  ACTIVATE
+  SUSPEND
+  REACTIVATE
+  ARCHIVE
+}
+
+// Organizational Unit lifecycle (Phase 3's constitution): Draft/Active/
+// Suspended/Archived. DRAFT/SUSPENDED are additive on top of Phase 2's
+// original ACTIVE/ARCHIVED — no behavior change for existing Branch rows,
+// which are still created directly as ACTIVE.
+enum OrgUnitStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+// Phase 4 — User & Identity Management. PENDING/SUSPENDED/LOCKED/ARCHIVED are
+// additive on top of Phase 1/2's original ACTIVE/INVITED/DISABLED — no
+// behavior change for existing rows or the login gate (still just
+// `status !== "ACTIVE"`, which already matches the constitution's "only
+// Active may log in" rule). INVITED/DISABLED are kept as-is rather than
+// renamed to PENDING/ARCHIVED, same reasoning as CompanyStatus in Phase 2.
+// Phase 5 — Employee Management. Distinct from UserStatus: an Employee is a
+// business record, never a login account, so its lifecycle has no
+// PENDING/INVITED/LOCKED (those are identity/authentication concepts) but
+// does have ON_LEAVE, which has no User equivalent.
+enum EmploymentStatus {
+  DRAFT
+  ACTIVE
+  ON_LEAVE
+  SUSPENDED
+  INACTIVE
+  ARCHIVED
+}
+
 enum UserStatus {
+  PENDING
   ACTIVE
   INVITED
+  SUSPENDED
+  LOCKED
   DISABLED
+  ARCHIVED
+}
+
+// Phase 6 — Data Sources Management. This governs a DataSource *definition*
+// only (metadata/connection config) — it has nothing to do with FileStatus
+// below, which tracks an actual uploaded spreadsheet's processing state.
+enum DataSourceStatus {
+  DRAFT
+  CONFIGURING
+  CONNECTED
+  ACTIVE
+  SUSPENDED
+  ARCHIVED
+}
+
+// Phase 7 — Data Source Platform. Health is distinct from Status: Status is
+// an administrative lifecycle state set by a human (Phase 6); Health is a
+// system-computed signal of whether the source is currently usable, derived
+// from the latest Data Source Validation / Refresh outcome. OFFLINE is
+// reserved for source types where connectivity itself can fail (a future
+// live-connection provider) — the MVP Excel Folder provider never reports it.
+enum DataSourceHealthStatus {
+  HEALTHY
+  WARNING
+  ERROR
+  OFFLINE
+}
+
+// Phase 8 — Refresh Platform.
+enum RefreshType {
+  FULL
+  INCREMENTAL
+}
+
+enum RefreshRunStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
 }
 
 enum SubscriptionStatus {
@@ -69,6 +162,11 @@ enum FileStatus {
   FAILED
 }
 
+enum TargetSource {
+  UPLOAD // parsed from a company's uploaded "Targets"-type File, one row per rep/territory/month
+  MANUAL // entered directly in the platform's simple target-list UI
+}
+
 enum GptUsageEventType {
   LAUNCH_TOKEN_ISSUED
   VERIFY_ACCESS
@@ -97,8 +195,131 @@ model Company {
   auditLogs     AuditLog[]
   usageEvents   GptUsageEvent[]
   aiReports     AiReport[]
+  targets       Target[]
+  orgUnits      OrgUnit[]
+  profile       CompanyProfile?
+  employees     Employee[]
+  dataSources   DataSource[]
+  refreshRuns   RefreshRun[]
+  policies      CompanyPolicy[]
+  salesCalendarDays SalesCalendar[]
+  prospects     Prospect[]
 
   @@map("companies")
+}
+
+// Phase 2 — Company Profile: the *editable operational data* (Logo, Country,
+// City, Time Zone, Currency, Default Language, Fiscal Year Start, Contact
+// Info) as distinct from Company Identity (id/slug/name/status above, which
+// stays on Company itself and is immutable-ish). Split into its own 1:1
+// table — same shape as the existing Gpt model's "one row per company" —
+// instead of adding eight more nullable columns onto Company, so Company's
+// own row (read on every request for auth/tenant scoping) stays small.
+model CompanyProfile {
+  id              String   @id @default(cuid())
+  companyId       String   @unique @map("company_id")
+  logoUrl         String?  @map("logo_url")
+  country         String?
+  city            String?
+  timeZone        String?  @map("time_zone")
+  currency        String?
+  defaultLanguage String?  @map("default_language")
+  // "MM-DD", e.g. "01-01" — free text rather than a Date, since a fiscal
+  // year start is a recurring month/day, not a specific calendar date.
+  fiscalYearStart String?  @map("fiscal_year_start")
+  contactEmail    String?  @map("contact_email")
+  contactPhone    String?  @map("contact_phone")
+  // Customer Discovery provider (provider-agnostic architecture, approved
+  // 2026-07-19): the DB stores only three provider-related facts — the
+  // chosen provider id (free text, e.g. "OSM", "GOOGLE", or any future
+  // provider), and its credentials. "OSM" (OpenStreetMap/Overpass — free,
+  // no key) is the default. Any provider requiring credentials (e.g. a
+  // company's own Google Places API key + billing) has them stored here as
+  // ONE encrypted JSON blob keyed by provider id, e.g. {"GOOGLE":{"apiKey":
+  // "..."}} — never as a provider-named column. All provider-specific
+  // logic, auth types, and settings live exclusively in the code's
+  // ProspectDiscoveryProvider layer, never in this schema, so adding or
+  // removing a provider never requires a migration.
+  discoveryProvider              String  @default("OSM") @map("discovery_provider")
+  discoveryCredentialsEncrypted  String? @map("discovery_credentials_encrypted")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("company_profiles")
+}
+
+// Phase 3: Organizational Type Registry — the official, data-driven record
+// of every organizational unit type FSOS knows about (Unit Type,
+// Description, Parent Types, Allowed Children). Replaces the old fixed
+// OrgUnitType enum: adding a brand-new unit type (Sales Office, Warehouse,
+// Business Unit, ...) is now a data insert, never a schema/code change.
+// Pure metadata — this registry defines *what unit types exist and how they
+// may nest*, nothing else. It carries no business logic, permissions,
+// reporting rules, or employee/customer/RIE linkage; those remain
+// exclusively the Relationship Intelligence Engine's domain.
+model OrgUnitTypeDefinition {
+  id          String  @id @default(cuid())
+  typeCode    String  @unique @map("type_code")
+  name        String
+  description String?
+  // "ROOT" is a reserved sentinel meaning "may sit directly under the
+  // Company" (parentId = null) — it is not itself a registry row.
+  allowedParentCodes String[] @map("allowed_parent_codes")
+  allowedChildCodes  String[] @map("allowed_child_codes")
+  // System-seeded types (BRANCH, REGION, DISTRIBUTION_CENTER, ROUTE) are
+  // protected from deletion; future company-defined types are not.
+  isSystem  Boolean  @default(false) @map("is_system")
+  // Phase 9 — Versioning Strategy: bumped on every update so consumers can
+  // detect a definition changed. No history table — the existing AuditLog
+  // (once Phase 9's Platform Events are wired in) is the change trail.
+  version   Int      @default(1)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  orgUnits OrgUnit[]
+
+  @@map("org_unit_type_definitions")
+}
+
+// Phase 3's general Organizational Unit — Branch (Phase 1/2's approved MVP
+// level) is just the one type actually exposed in the product today; the
+// engine underneath already supports the full Region -> Branch ->
+// Distribution Center -> Route hierarchy the constitution asks for, with
+// zero schema changes needed to switch any of those on later.
+model OrgUnit {
+  id        String        @id @default(cuid())
+  companyId String        @map("company_id")
+  parentId  String?       @map("parent_id")
+  type      String        @default("BRANCH")
+  code      String
+  name      String
+  // Materialized Organizational Path (slash-joined unit codes from the
+  // structure root down to this unit) — the official reference used for
+  // permissions/filtering/reporting per the Phase 3 constitution. Recomputed
+  // on create and on every move (cascades to descendants).
+  path      String
+  status    OrgUnitStatus @default(ACTIVE)
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  company  Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parent   OrgUnit?              @relation("OrgUnitHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children OrgUnit[]             @relation("OrgUnitHierarchy")
+  typeDef  OrgUnitTypeDefinition @relation(fields: [type], references: [typeCode])
+  // Phase 4: users referencing this unit as their Organizational Unit —
+  // reference-only, no permission/business logic lives on this edge.
+  users    User[]
+  // Phase 5: employees referencing this unit — same reference-only rule.
+  employees Employee[]
+
+  // Pre-Migration Integrity Check: dropped the separate @@index([companyId,
+  // type]) — redundant, already covered by this unique index's leftmost
+  // (companyId, type) prefix.
+  @@unique([companyId, type, code])
+  @@index([companyId, parentId])
+  @@map("org_units")
 }
 
 // ---------------------------------------------------------------------------
@@ -154,20 +375,39 @@ model User {
   passwordHash String     @map("password_hash")
   fullName     String     @map("full_name")
   status       UserStatus @default(ACTIVE)
-  lastLoginAt  DateTime?  @map("last_login_at")
-  createdAt    DateTime   @default(now()) @map("created_at")
-  updatedAt    DateTime   @updatedAt @map("updated_at")
+  // Phase 4: "Organizational Unit" on the User Profile — a reference-only
+  // link into Phase 3's structure (e.g. which Branch this user belongs to).
+  // Deliberately nullable: not every user needs one assigned immediately,
+  // and it carries no permission/business logic by itself.
+  orgUnitId String? @map("org_unit_id")
+  // Phase 4: Force Change Password — set on admin-issued temporary
+  // passwords, cleared once the user sets their own password.
+  mustChangePassword Boolean   @default(false) @map("must_change_password")
+  lastLoginAt        DateTime? @map("last_login_at")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
 
-  company       Company?         @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  role          Role             @relation(fields: [roleId], references: [id])
-  refreshTokens RefreshToken[]
-  uploadedFiles File[]           @relation("FileUploadedBy")
-  launchTokens  GptLaunchToken[]
-  auditLogs     AuditLog[]
-  usageEvents   GptUsageEvent[]
-  aiReports     AiReport[]
+  company        Company?         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  role           Role             @relation(fields: [roleId], references: [id])
+  orgUnit        OrgUnit?         @relation(fields: [orgUnitId], references: [id], onDelete: SetNull)
+  refreshTokens  RefreshToken[]
+  uploadedFiles  File[]           @relation("FileUploadedBy")
+  launchTokens   GptLaunchToken[]
+  auditLogs      AuditLog[]
+  usageEvents    GptUsageEvent[]
+  aiReports      AiReport[]
+  createdTargets Target[]
+  // Phase 5: Employee Identity Mapping — set only if this User has been
+  // explicitly linked to an Employee business record. Reference-only.
+  employee       Employee?
+  // Phase 6: data sources this user is recorded as the Owner of.
+  ownedDataSources DataSource[]
+  // Phase 8: refresh runs this user triggered (Migration Readiness Review fix).
+  triggeredRefreshRuns RefreshRun[]
+  discoveredProspects  Prospect[]
 
   @@index([companyId])
+  @@index([orgUnitId])
   @@map("users")
 }
 
@@ -188,6 +428,241 @@ model RefreshToken {
 
   @@index([userId])
   @@map("refresh_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Employee Management (Phase 5)
+// ---------------------------------------------------------------------------
+
+// Employee is a Business Entity, deliberately independent from User
+// (Identity Entity) — the constitution forbids merging them. An Employee
+// may exist with no linked User at all; a User only becomes "employee-
+// mapped" once explicitly linked via `userId` (Employee Identity Mapping) —
+// this FK never implies login/password/permission behavior, which stays
+// exclusively User's concern. Employment/Assignment History (job title,
+// manager, org-unit, and status changes) is recorded via the existing
+// generic AuditLog table (action: "employee.history.<field>_changed"),
+// reusing the same pattern as Phase 2/4's lifecycle/identity audit trails
+// instead of a bespoke history table.
+model Employee {
+  id          String           @id @default(cuid())
+  companyId   String           @map("company_id")
+  employeeCode String          @map("employee_code")
+  fullName    String           @map("full_name")
+  jobTitle    String?          @map("job_title")
+  // Reference-only links into Phase 3's org structure and this same table's
+  // self-referencing manager hierarchy — no business logic lives on either
+  // edge. Route/Target/Customer assignment is explicitly out of scope here
+  // (Relationship Intelligence Engine's future domain, per the constitution).
+  orgUnitId   String?          @map("org_unit_id")
+  managerId   String?          @map("manager_id")
+  status      EmploymentStatus @default(DRAFT)
+  hireDate    DateTime?        @map("hire_date")
+  contactEmail String?         @map("contact_email")
+  contactPhone String?         @map("contact_phone")
+  // Employee Identity Mapping — optional, one-to-one. Never merges Employee
+  // fields into User or vice versa.
+  userId      String?          @unique @map("user_id")
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  company Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  orgUnit OrgUnit?  @relation(fields: [orgUnitId], references: [id], onDelete: SetNull)
+  manager Employee? @relation("EmployeeHierarchy", fields: [managerId], references: [id], onDelete: SetNull)
+  reports Employee[] @relation("EmployeeHierarchy")
+  user    User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  // Pre-Migration Integrity Check: dropped @@index([companyId]) — redundant,
+  // already covered by this unique index's (companyId) prefix.
+  @@unique([companyId, employeeCode])
+  @@index([companyId, orgUnitId])
+  @@index([companyId, managerId])
+  @@map("employees")
+}
+
+// ---------------------------------------------------------------------------
+// Data Sources Management (Phase 6)
+// ---------------------------------------------------------------------------
+
+// Platform-global registry of data source types (Excel, CSV, SQL Server,
+// PostgreSQL, MySQL, Oracle, REST API, ERP Connector, Cloud Storage, ...) —
+// same reuse-before-rewrite pattern as Phase 3's OrgUnitTypeDefinition: a
+// brand-new source type is a data insert here, never a schema/code change.
+// No parent/child nesting needed (source types are flat, unlike org units).
+model DataSourceType {
+  id          String   @id @default(cuid())
+  typeCode    String   @unique @map("type_code")
+  name        String
+  description String?
+  isSystem    Boolean  @default(false) @map("is_system")
+  // Phase 9 — Versioning Strategy (same reasoning as OrgUnitTypeDefinition.version above).
+  version     Int      @default(1)
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  dataSources DataSource[]
+
+  @@map("data_source_types")
+}
+
+// A DataSource is a *definition* only — name/type/connection metadata/
+// status. It never holds the actual data, never runs analysis, and never
+// auto-imports anything (Phase 6's explicit boundary). Uploading, replacing,
+// or syncing the underlying data is Phase 7 — Refresh Center's job, not
+// this model's. `connectionConfig` holds non-secret settings (host, port,
+// database, base URL, ...); any real secret (password/API key/token) is
+// AES-256-GCM encrypted into `credentialsCipher` and is never decrypted for
+// an API response — callers only ever see `hasCredentials: boolean`.
+model DataSource {
+  id          String           @id @default(cuid())
+  companyId   String           @map("company_id")
+  name        String
+  type        String
+  description String?
+  // Only meaningful when `type` is a file-based source (Excel/CSV) — reuses
+  // the same open, non-enum-enforced dataset-category vocabulary already
+  // established for file uploads (Customers/Products/Invoices/Payments/
+  // Returns/Employees/Routes/Inventory/Pricing, extensible without a schema
+  // change), not a duplicate/competing classification system.
+  dataCategory String?          @map("data_category")
+  status       DataSourceStatus @default(DRAFT)
+  connectionConfig Json?        @map("connection_config")
+  authMethod       String?      @map("auth_method")
+  credentialsCipher String?     @map("credentials_cipher")
+  ownerUserId       String?     @map("owner_user_id")
+  lastTestedAt      DateTime?   @map("last_tested_at")
+  lastTestResult    String?     @map("last_test_result")
+  // --- Phase 7 additions (additive only — nothing above this line changed) ---
+  // `provider` is the Data Source Provider code that knows how to read this
+  // source (MVP: "EXCEL_FOLDER" only, wraps the existing FilesService — see
+  // data-source-platform module). `healthStatus`/`schemaVersion`/
+  // `lastRefreshAt`/`lastValidatedAt` are populated by the new Data Source
+  // Platform / Refresh Platform layers, never by Phase 6 code paths.
+  provider          String?
+  healthStatus      DataSourceHealthStatus  @default(OFFLINE) @map("health_status")
+  schemaVersion     Int                     @default(1) @map("schema_version")
+  lastRefreshAt     DateTime?               @map("last_refresh_at")
+  lastValidatedAt   DateTime?               @map("last_validated_at")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  company Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  typeDef DataSourceType @relation(fields: [type], references: [typeCode])
+  owner   User?          @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
+  refreshRuns RefreshRun[]
+
+  // Pre-Migration Integrity Check: dropped @@index([companyId]) — redundant,
+  // already covered by this unique index's (companyId) prefix.
+  @@unique([companyId, name])
+  @@index([companyId, type])
+  @@index([companyId, status])
+  @@map("data_sources")
+}
+
+// ---------------------------------------------------------------------------
+// Data Source Platform (Phase 7) — additive infrastructure only. Does NOT
+// replace or redirect FilesService / dataset-query.util.ts; the existing 9
+// engines that read files directly are untouched and keep working exactly
+// as before. This layer wraps the current Excel-based implementation behind
+// a Data Source Provider abstraction so future source types and a future,
+// explicitly-approved migration of legacy engines can be added without a
+// platform redesign.
+// ---------------------------------------------------------------------------
+
+// Basic Schema Registry: the official reference for FSOS's approved
+// operational entity structure. `entityName` reuses the exact same
+// `datasetType` vocabulary the existing file classifier already produces
+// ("Customers", "Invoices", ...) rather than inventing a parallel taxonomy.
+// `expectedColumns` is intentionally optional/loose for the MVP ("Basic"
+// Schema Registry per the constitution) — strict column-level enforcement
+// is a future enhancement, not required to ship Phase 7.
+model SchemaDefinition {
+  id              String   @id @default(cuid())
+  entityName      String   @unique @map("entity_name")
+  description     String?
+  expectedColumns Json?    @map("expected_columns")
+  version         Int      @default(1)
+  isSystem        Boolean  @default(true) @map("is_system")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("schema_definitions")
+}
+
+// ---------------------------------------------------------------------------
+// Refresh Platform (Phase 8) — additive infrastructure only. MVP: Full
+// Refresh only, synchronous orchestration (no background worker/queue
+// infrastructure introduced yet — see RefreshOrchestratorService for the
+// documented interpretation). A RefreshRun is one execution of the
+// Refresh Orchestrator's workflow and doubles as the Data Quality Report
+// (embedded in `resultSummary`) since the two are 1:1 per the constitution's
+// own workflow diagram. No existing engine consumes this table.
+model RefreshRun {
+  id               String            @id @default(cuid())
+  companyId        String            @map("company_id")
+  dataSourceId     String            @map("data_source_id")
+  triggeredByUserId String?          @map("triggered_by_user_id")
+  // Migration Readiness Review finding: this FK column existed but had no
+  // declared Prisma relation (no DB-level referential integrity, no back-
+  // relation on User) — fixed below, consistent with every other "who did
+  // this" edge in the schema (Target.createdByUser, DataSource.owner, ...).
+  refreshType      RefreshType       @default(FULL) @map("refresh_type")
+  status           RefreshRunStatus  @default(QUEUED)
+  startedAt        DateTime?         @map("started_at")
+  completedAt      DateTime?         @map("completed_at")
+  durationMs       Int?              @map("duration_ms")
+  importedRecords  Int               @default(0) @map("imported_records")
+  errorCount       Int               @default(0) @map("error_count")
+  dataQualityScore Float?            @map("data_quality_score")
+  // Data Quality Report fields (missingFiles, invalidSchema, validationScore,
+  // ...) plus any structural-validation failure reason, all in one JSON blob
+  // — avoids a separate 1:1 table for what is always read/written alongside
+  // the run itself.
+  resultSummary    Json?             @map("result_summary")
+  createdAt        DateTime          @default(now()) @map("created_at")
+
+  company     Company     @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  dataSource  DataSource  @relation(fields: [dataSourceId], references: [id], onDelete: Cascade)
+  triggeredBy User?       @relation(fields: [triggeredByUserId], references: [id], onDelete: SetNull)
+
+  // Pre-Migration Integrity Check: dropped the plain @@index([companyId]) and
+  // @@index([dataSourceId]) added in the prior review pass — both became
+  // redundant once @@index([companyId, status]) and
+  // @@index([dataSourceId, createdAt]) (below) were added, since either
+  // composite's leftmost column alone already covers those lookups.
+  @@index([companyId, status])
+  @@index([dataSourceId, createdAt])
+  @@map("refresh_runs")
+}
+
+// ---------------------------------------------------------------------------
+// Governance (Phase 9) — Company Policy Engine. `policyType` reuses the
+// constitution's own fixed vocabulary (Organizational/Password/Refresh/
+// EmployeeAssignment/Permission/Archiving) as a plain string rather than a
+// dynamic type-registry table: unlike OrgUnitType/DataSourceType, the
+// constitution does not ask for this list to be extensible without a code
+// change, so a registry table here would be over-engineering. `value` holds
+// the policy's actual settings (shape is intentionally open/JSON — a
+// PasswordPolicy and a RefreshPolicy don't share a schema). Updating a
+// policy bumps `version`; the change itself is recorded via the existing
+// AuditLog (Platform Events), not a separate snapshot table.
+// ---------------------------------------------------------------------------
+model CompanyPolicy {
+  id         String   @id @default(cuid())
+  companyId  String   @map("company_id")
+  policyType String   @map("policy_type")
+  value      Json
+  version    Int      @default(1)
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  // Pre-Migration Integrity Check: dropped @@index([companyId]) — redundant,
+  // already covered by this unique index's (companyId) prefix.
+  @@unique([companyId, policyType])
+  @@map("company_policies")
 }
 
 // ---------------------------------------------------------------------------
@@ -313,22 +788,178 @@ model File {
   // (see "mixed workbook" detection) so re-parsing later reads the same
   // sheet that was classified/confirmed, not always the first one.
   sheetIndex       Int        @default(0) @map("sheet_index")
+  // Groups every File row that came from the SAME physical upload — e.g.
+  // one 19-sheet "FSOS_Canonical_Database" workbook produces up to 19 File
+  // rows (one per official entity sheet found in it), all sharing one
+  // batchId and one storageKey (the bytes are uploaded once, not per
+  // entity). A plain single-sheet upload is a batch of one. Lets the Files
+  // screen group rows back into "one card per upload" and lets the
+  // active-file-count gate count uploads, not individual entities — see
+  // FilesService.processWorkbook / countActiveBatches.
+  batchId          String     @default(cuid()) @map("batch_id")
+  // SHA-256 of the uploaded bytes — the duplicate-upload guard: an upload
+  // whose hash matches an ACTIVE file of the same company is rejected
+  // outright (re-uploading after deleting the old one is fine). Nullable:
+  // files uploaded before 2026-07-19 have no hash and are simply never
+  // matched by the guard.
+  contentHash      String?    @map("content_hash")
   fileName         String     @map("file_name")
   storageKey       String     @map("storage_key")
   sizeBytes        Int        @map("size_bytes")
   status           FileStatus @default(PROCESSING)
   parsedMetadata   Json?      @map("parsed_metadata")
   isActive         Boolean    @default(true) @map("is_active")
+  // Row-level access control (point 3 of the strategic list): the exact
+  // header name — set by a COMPANY_ADMIN, per file — whose values are
+  // literal platform user emails. When set, a SALES_REP/SUPERVISOR only
+  // sees rows where their email matches the corresponding column; a
+  // COMPANY_ADMIN/MANAGER/SUPER_ADMIN always sees every row. Left null,
+  // the file is unfiltered (e.g. a shared Products/reference file) —
+  // this is the default and existing files are unaffected. See
+  // dataset-query.util.ts's applyHierarchyFilter for the enforcement.
+  repColumn        String?    @map("rep_column")
+  supervisorColumn String?    @map("supervisor_column")
+  managerColumn    String?    @map("manager_column")
   createdAt        DateTime   @default(now()) @map("created_at")
   updatedAt        DateTime   @updatedAt @map("updated_at")
 
   company    Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   uploadedBy User       @relation("FileUploadedBy", fields: [uploadedByUserId], references: [id])
   aiReports  AiReport[]
+  targets    Target[]
+  salesCalendarDays SalesCalendar[]
+  prospects  Prospect[]
 
   @@index([companyId, isActive])
   @@index([companyId, datasetType])
+  @@index([companyId, batchId])
+  @@index([companyId, contentHash])
   @@map("files")
+}
+
+enum ProspectStatus {
+  NEW
+  VISITED
+  IGNORED
+  CONVERTED // became a real customer
+}
+
+// Customer Discovery (AI Visit Copilot Phase 2) — potential customers, from
+// BOTH sources per the approved decision: uploaded Prospects sheets and
+// live discovery via whichever ProspectDiscoveryProvider the company has
+// selected (Leaflet stays the app's map engine regardless of provider).
+// Materialized in Postgres (like SalesCalendar) because statuses
+// (visited/ignored/converted) are live operational state written from the
+// field, not re-parsed report data.
+// `source` is free text, not an enum: "UPLOAD" for sheet-imported rows, or
+// the id of whichever discovery provider found it ("OSM", "GOOGLE", or any
+// future provider) — provider-agnostic per the approved DB design, so a new
+// provider never needs a schema change.
+model Prospect {
+  id                 String         @id @default(cuid())
+  companyId          String         @map("company_id")
+  source             String
+  // ProspectCode (UPLOAD) or the discovery provider's own place id (OSM/GOOGLE/...).
+  externalKey        String         @map("external_key")
+  name               String
+  channel            String?
+  lat                Float?
+  lon                Float?
+  city               String?
+  address            String?
+  phone              String?
+  notes              String?
+  status             ProspectStatus @default(NEW)
+  discoveredByUserId String?        @map("discovered_by_user_id")
+  sourceFileId       String?        @map("source_file_id")
+  createdAt          DateTime       @default(now()) @map("created_at")
+  updatedAt          DateTime       @updatedAt @map("updated_at")
+
+  company      Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  discoveredBy User?   @relation(fields: [discoveredByUserId], references: [id], onDelete: SetNull)
+  sourceFile   File?   @relation(fields: [sourceFileId], references: [id], onDelete: SetNull)
+
+  // Re-upload / re-discovery upserts the same prospect instead of duplicating.
+  @@unique([companyId, source, externalKey])
+  @@index([companyId, status])
+  @@map("prospects")
+}
+
+// Sales Calendar — the one Canonical Entity (of the 18, as of 2026-07-19)
+// that is materialized into its own real Postgres table instead of being
+// re-parsed from Excel bytes on every RIE query. Every other Excel-backed
+// entity (Customers, Invoices, ...) stays that way; Sales Calendar is
+// different because it's a dense, frequently-queried reference dimension
+// (working days / holidays / Ramadan / promotion seasons) that other
+// engines (SGI, Analysis Studio) look up constantly — re-parsing an Excel
+// sheet for every "is this a working day" check doesn't scale the way it's
+// fine to for a one-shot report query. Ingested row-by-row (upsert by
+// companyId+calendarDate) once its sheet passes Import Validation — see
+// FilesService.ingestSalesCalendar.
+model SalesCalendar {
+  id              String   @id @default(cuid())
+  companyId       String   @map("company_id")
+  calendarDate    DateTime @map("calendar_date") @db.Date
+  day             String?
+  week            Int?
+  month           Int?
+  quarter         Int?
+  year            Int?
+  workingDay      Boolean? @map("working_day")
+  holiday         String?
+  season          String?
+  ramadan         Boolean?
+  promotionSeason String?  @map("promotion_season")
+  sourceFileId    String?  @map("source_file_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  company    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  sourceFile File?   @relation(fields: [sourceFileId], references: [id], onDelete: SetNull)
+
+  // One row per date per company — a re-upload of a refreshed calendar
+  // upserts existing dates instead of accumulating duplicates.
+  @@unique([companyId, calendarDate])
+  @@index([companyId, year, month])
+  @@map("sales_calendars")
+}
+
+// ---------------------------------------------------------------------------
+// Sales Growth Intelligence (SGI) — Phase 1
+// ---------------------------------------------------------------------------
+
+// Goal Planning's single source of truth: one target per rep/territory per
+// month, regardless of whether it came from an uploaded "Targets" file
+// (source=UPLOAD, sourceFileId set — parsed and upserted row-by-row on
+// upload) or was entered directly through the platform's own target-list
+// UI (source=MANUAL, createdByUserId set). See docs/SGI_ROADMAP.md §3
+// point 1 for why this exists as its own table instead of forcing manual
+// entries through the File/Excel-buffer pipeline.
+model Target {
+  id                String       @id @default(cuid())
+  companyId         String       @map("company_id")
+  // A platform user email (same convention as File.repColumn/
+  // supervisorColumn's row-level access control values) or a
+  // territory/route identifier — free text, not a foreign key, since
+  // "territory" has no dedicated table in this schema today.
+  repOrTerritoryKey String       @map("rep_or_territory_key")
+  periodMonth       String       @map("period_month") // "YYYY-MM"
+  value             Decimal      @db.Decimal(14, 2)
+  source            TargetSource @default(MANUAL)
+  createdByUserId   String?      @map("created_by_user_id")
+  sourceFileId      String?      @map("source_file_id")
+  createdAt         DateTime     @default(now()) @map("created_at")
+  updatedAt         DateTime     @updatedAt @map("updated_at")
+
+  company       Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdByUser User?   @relation(fields: [createdByUserId], references: [id], onDelete: SetNull)
+  sourceFile    File?   @relation(fields: [sourceFileId], references: [id], onDelete: SetNull)
+
+  // One target per rep/territory per month — an upload re-processing the
+  // same month upserts this row instead of accumulating duplicates.
+  @@unique([companyId, repOrTerritoryKey, periodMonth])
+  @@index([companyId, periodMonth])
+  @@map("targets")
 }
 
 // Singleton row (always the fixed id below) — platform-wide configuration

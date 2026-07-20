@@ -22,6 +22,16 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((v) => v === "true"),
+
+  // Optional — only required for the heat map's free-text filter box
+  // (translates a natural-language request into a structured filter via
+  // the Claude API). If unset, that one endpoint returns a clear error;
+  // everything else in the app works without it.
+  ANTHROPIC_API_KEY: z.string().optional(),
+
+  // GOOGLE_PLACES_API_KEY (removed): Customer Discovery's Google key is now
+  // a per-company setting stored encrypted on CompanyProfile — see the
+  // provider-based discovery refactor in modules/visit-copilot/discovery.
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

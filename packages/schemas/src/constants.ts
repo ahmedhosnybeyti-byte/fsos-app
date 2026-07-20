@@ -92,3 +92,36 @@ export const ROUTE_PLANNING_LIMITS = {
   defaultTolerance: 0.01,
   maxDistinctValues: 300,
 } as const;
+
+// Heat map (dashboard feature — see PROJECT_LOG.md). Reuses
+// ROUTE_PLANNING_LIMITS.maxCustomersPerRequest/maxDistinctValues for the
+// same reasons (dashboard-called, not a GPT Action). maxScopeValuesInPrompt
+// caps how many distinct scope values get sent to Claude when interpreting
+// a free-text filter request, to keep that call small and cheap.
+export const HEATMAP_LIMITS = {
+  maxScopeValuesInPrompt: 200,
+  maxPromptLength: 500,
+  // AI Decision Map — how many of the map's hottest points get sent to
+  // Claude for the decision-summary call. Keeps that call small/cheap, same
+  // reasoning as maxScopeValuesInPrompt.
+  maxTopPointsInDecisionPrompt: 20,
+} as const;
+
+// New Customer — Geo Intelligence (dashboard feature). Scope is deliberately
+// narrow: a rep captures a new customer's location, the system resolves a
+// reference customer set (nearest-N and/or manually picked) from an existing
+// dataset (e.g. Invoices, which already carries lat/lon + product lines),
+// and surfaces the best-performing product assortment for that set — then
+// stops. No invoice/order/customer-creation steps follow this (that's
+// out of scope for Field Sales OS — see PROJECT_LOG.md).
+export const GEO_INTELLIGENCE_LIMITS = {
+  maxRowsPerRequest: 20000,
+  maxNearestCount: 20,
+  defaultNearestCount: 5,
+  maxManualCustomerIds: 100,
+  maxTopProducts: 30,
+  defaultTopProducts: 10,
+  // Sent to Claude for the talking-points generation call — keep small/cheap
+  // like the heat map's interpret() call.
+  maxTopProductsInPrompt: 15,
+} as const;

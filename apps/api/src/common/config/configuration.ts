@@ -22,6 +22,9 @@ export function buildConfiguration(env: EnvConfig) {
       secretAccessKey: env.STORAGE_SECRET_ACCESS_KEY,
       forcePathStyle: env.STORAGE_FORCE_PATH_STYLE,
     },
+    anthropic: {
+      apiKey: env.ANTHROPIC_API_KEY,
+    },
   } as const;
 }
 

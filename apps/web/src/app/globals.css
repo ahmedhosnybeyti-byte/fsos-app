@@ -4,31 +4,85 @@
 
 @layer base {
   :root {
-    /* Field Sales OS — dark theme with an orange accent (fixed brand theme,
-       no light-mode toggle per the product spec). Values are HSL triplets
-       (no hsl() wrapper) so Tailwind can compose them with opacity modifiers. */
-    --background: 20 14% 6%;
-    --foreground: 30 20% 96%;
+    /* Field Sales OS / Murshidak — light theme (glassmorphism, blue accent).
+       Values are HSL triplets (no hsl() wrapper) so Tailwind can compose
+       them with opacity modifiers. Adopted July 2026 per the shared visual-
+       identity reference: light glass cards + a blue primary accent + a
+       distinct color per module badge (see lib/module-colors.ts). Dark mode
+       is now a real toggle (see components/theme-provider.tsx) instead of
+       the previous fixed-dark-only theme — see PROJECT_LOG.md. */
+    --background: 210 40% 98%;
+    --foreground: 222 47% 11%;
 
-    --card: 20 12% 9%;
-    --card-foreground: 30 20% 96%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
 
-    --popover: 20 12% 9%;
-    --popover-foreground: 30 20% 96%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
 
-    --primary: 20 90% 55%;
-    --primary-foreground: 20 15% 8%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 210 40% 98%;
 
-    --secondary: 20 10% 14%;
-    --secondary-foreground: 30 20% 96%;
+    --secondary: 210 40% 94%;
+    --secondary-foreground: 222 47% 11%;
 
-    --muted: 20 10% 14%;
-    --muted-foreground: 30 8% 62%;
+    --muted: 210 40% 94%;
+    --muted-foreground: 215 16% 47%;
 
-    --accent: 20 90% 55%;
-    --accent-foreground: 20 15% 8%;
+    --accent: 217 91% 60%;
+    --accent-foreground: 210 40% 98%;
 
     --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+
+    --success: 142 71% 40%;
+    --success-foreground: 0 0% 98%;
+
+    --warning: 38 92% 45%;
+    --warning-foreground: 20 15% 8%;
+
+    --border: 214 32% 88%;
+    --input: 214 32% 88%;
+    --ring: 217 91% 60%;
+
+    --radius: 0.875rem;
+
+    /* FSOS Design Constitution §3.5/§4.1 — Intelligent Glow semantic colors
+       not previously tokenized: AI (purple, used for Murshidak surfaces)
+       and Premium (gold — official-dark-mode-only per §3.4/§3.5, so the
+       light value here is a muted placeholder; .glow-premium is only
+       applied in dark mode by callers). Reuses the existing --success/
+       --warning/--destructive tokens for the other four glow states
+       instead of duplicating them. */
+    --ai: 262 83% 58%;
+    --premium: 38 30% 45%;
+  }
+
+  .dark {
+    /* Dark variant — navy glass, same blue accent as light so the brand
+       identity carries across both modes; only the base surfaces flip. */
+    --background: 222 47% 7%;
+    --foreground: 210 20% 96%;
+
+    --card: 222 40% 10%;
+    --card-foreground: 210 20% 96%;
+
+    --popover: 222 40% 10%;
+    --popover-foreground: 210 20% 96%;
+
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 47% 8%;
+
+    --secondary: 222 30% 15%;
+    --secondary-foreground: 210 20% 96%;
+
+    --muted: 222 30% 15%;
+    --muted-foreground: 215 15% 65%;
+
+    --accent: 217 91% 60%;
+    --accent-foreground: 222 47% 8%;
+
+    --destructive: 0 63% 42%;
     --destructive-foreground: 0 0% 98%;
 
     --success: 142 71% 45%;
@@ -37,13 +91,12 @@
     --warning: 38 92% 50%;
     --warning-foreground: 20 15% 8%;
 
-    --border: 20 10% 18%;
-    --input: 20 10% 18%;
-    --ring: 20 90% 55%;
+    --border: 222 25% 20%;
+    --input: 222 25% 20%;
+    --ring: 217 91% 60%;
 
-    --radius: 0.625rem;
-
-    --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+    --ai: 262 83% 66%;
+    --premium: 43 74% 49%;
   }
 }
 
@@ -53,5 +106,265 @@
   }
   body {
     @apply bg-background text-foreground antialiased;
+  }
+}
+
+@layer utilities {
+  /* Glassmorphism primitives used across the redesigned dashboard shell and
+     cards — frosted translucent panels over a soft gradient backdrop, per
+     the July 2026 visual-identity reference (light glass + per-module
+     accent badges + full RTL). See PROJECT_LOG.md for the design writeup. */
+  .glass-panel {
+    @apply bg-white/70 backdrop-blur-xl dark:bg-white/[0.04];
+  }
+  /* Constitution §3.2 "Thin Bright Edges" + §4.1 Glass Depth — a hairline
+     inset highlight along the top edge (visible mainly in dark mode, where
+     it reads as light catching a glass surface) layered under the drop
+     shadow. Depth comes from stacking both, not from either alone. */
+  .glass-card {
+    @apply relative rounded-2xl border border-border/60 bg-card/80 shadow-[inset_0_1px_0_0_rgb(255,255,255,0.4),0_2px_6px_rgb(0,0,0,0.03),0_12px_32px_rgb(0,0,0,0.05)] backdrop-blur-lg transition-colors dark:border-white/[0.08] dark:bg-white/[0.045] dark:shadow-[inset_0_1px_0_0_rgb(255,255,255,0.07),0_2px_8px_rgb(0,0,0,0.25),0_16px_40px_rgb(0,0,0,0.35)];
+  }
+  .bg-app-gradient {
+    @apply bg-gradient-to-br from-sky-50 via-white to-blue-50 dark:from-[#0b1220] dark:via-[#0d1526] dark:to-[#0a1120];
+  }
+
+  /* Constitution §14.6 Glass Levels — Hero Glass is reserved for the single
+     primary element on a screen (here: the Dashboard hero). Higher blur +
+     a built-in gradient wash + a stronger bright edge than glass-card,
+     since "زيادة الـ Blur تعني زيادة أهمية العنصر" (§4.1). overflow-hidden
+     so .hero-aurora (below) stays clipped to the card's own rounded
+     corners instead of bleeding into the page. */
+  .glass-hero {
+    @apply relative overflow-hidden rounded-3xl border border-border/60 bg-gradient-to-br from-card/95 via-card/90 to-card/75 backdrop-blur-2xl transition-colors dark:border-white/[0.12] dark:from-white/[0.09] dark:via-white/[0.045] dark:to-white/[0.01];
+    /* Depth via three stacked layers in one declaration (so nothing here
+       conflicts with a second box-shadow-setting class): the bright inset
+       edge (§3.2 Thin Bright Edges), the card's own drop shadow, and a
+       wide, soft "halo" that separates the Hero from the page behind it —
+       the extra depth requested in the visual-elevation follow-up. Only
+       the Hero gets the halo layer (§14.6 "Hero Glass reserved for the
+       primary element"); glass-card intentionally stops at two layers. */
+    box-shadow:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.5),
+      0 24px 70px -10px rgb(0 0 0 / 0.12),
+      0 40px 100px -20px hsl(var(--primary) / 0.2);
+  }
+  .dark .glass-hero {
+    box-shadow:
+      inset 0 1px 0 0 rgb(255 255 255 / 0.1),
+      0 24px 70px -10px rgb(0 0 0 / 0.6),
+      0 40px 100px -20px hsl(var(--primary) / 0.35);
+  }
+  /* A soft diagonal light streak, like light catching an angled glass pane
+     — the "glass reflection" the identity calls for, distinct from the
+     Aurora glow behind it. One static diagonal band, low opacity, applied
+     via ::after so it layers above .hero-aurora but below the content
+     (which the caller keeps at z-10). */
+  .glass-hero::after {
+    content: "";
+    @apply pointer-events-none absolute inset-0;
+    background: linear-gradient(115deg, transparent 30%, rgb(255 255 255 / 0.22) 46%, rgb(255 255 255 / 0.05) 54%, transparent 70%);
+  }
+  .dark .glass-hero::after {
+    background: linear-gradient(115deg, transparent 30%, rgb(255 255 255 / 0.09) 46%, rgb(255 255 255 / 0.02) 54%, transparent 70%);
+  }
+  /* Constitution §4.1 Aurora Lighting + Cinematic Background — a quiet,
+     fully static (no keyframes: Performance Before Beauty §2.2 and the
+     Continuous Improvement note on Aurora Lighting's device-performance
+     cost) layered radial-gradient wash. Two applications, both decorative
+     (aria-hidden, pointer-events-none, absolutely positioned by the
+     caller): .hero-aurora inside the Hero (clipped by glass-hero's own
+     overflow-hidden) and .dashboard-cinematic-bg behind the whole page.
+     Colors reuse existing semantic tokens — no new palette. */
+  /* Follow-up (visual-elevation v2): "Aurora أقوى خلف العنوان" — the first
+     blob is now centered directly behind where the greeting text sits
+     (start-aligned, vertically centered) instead of a generic top-left
+     placement, and every stop is noticeably more saturated than v1. */
+  .hero-aurora {
+    background:
+      radial-gradient(620px circle at 22% 45%, hsl(var(--primary) / 0.22), transparent 62%),
+      radial-gradient(520px circle at 90% 10%, hsl(var(--ai) / 0.2), transparent 60%),
+      radial-gradient(680px circle at 55% 135%, hsl(var(--success) / 0.1), transparent 60%);
+  }
+  .dark .hero-aurora {
+    background:
+      radial-gradient(620px circle at 22% 45%, hsl(var(--primary) / 0.36), transparent 62%),
+      radial-gradient(520px circle at 90% 10%, hsl(var(--ai) / 0.32), transparent 60%),
+      radial-gradient(680px circle at 55% 135%, hsl(var(--premium) / 0.14), transparent 60%);
+  }
+  /* Follow-up: "الخلفية لسه ساكنة" — this is now a real, page-covering
+     cinematic backdrop (fixed to the viewport, not just a 420px band
+     behind the Hero) with clearly higher-contrast stops, while staying
+     static (no keyframes) and staying behind every card's own opaque
+     glass fill so it never fights readability (§6 "لا تنافس المحتوى"). */
+  .dashboard-cinematic-bg {
+    background:
+      radial-gradient(1100px circle at 15% -5%, hsl(var(--primary) / 0.14), transparent 50%),
+      radial-gradient(900px circle at 100% 10%, hsl(var(--ai) / 0.12), transparent 50%),
+      radial-gradient(1000px circle at 30% 100%, hsl(var(--success) / 0.06), transparent 50%),
+      radial-gradient(800px circle at 85% 70%, hsl(var(--premium) / 0.05), transparent 45%);
+  }
+  .dark .dashboard-cinematic-bg {
+    background:
+      radial-gradient(1200px circle at 15% -5%, hsl(var(--primary) / 0.38), transparent 52%),
+      radial-gradient(1000px circle at 100% 8%, hsl(var(--ai) / 0.32), transparent 52%),
+      radial-gradient(1100px circle at 30% 105%, hsl(var(--premium) / 0.18), transparent 52%),
+      radial-gradient(850px circle at 85% 65%, hsl(var(--ai) / 0.16), transparent 48%);
+  }
+  /* Follow-up (visual DNA reference): a real static star-field, the one
+     ingredient a pure color-gradient wash can't fake on its own — a small
+     repeating tile of soft white dots at varying sizes/opacity, dark-mode
+     only (rendered via dark:block in the page so it's simply absent in
+     Crystal Light, matching §3.5's "الوضع الفاتح = النقاء والهدوء", not a
+     starfield). Fully static — a repeating background-image, no JS/canvas,
+     effectively free at runtime. */
+  .dashboard-starfield {
+    background-image:
+      radial-gradient(1px 1px at 10% 15%, rgb(255 255 255 / 0.9), transparent),
+      radial-gradient(1px 1px at 25% 45%, rgb(255 255 255 / 0.7), transparent),
+      radial-gradient(1.5px 1.5px at 40% 10%, rgb(255 255 255 / 0.85), transparent),
+      radial-gradient(1px 1px at 55% 65%, rgb(255 255 255 / 0.6), transparent),
+      radial-gradient(1.5px 1.5px at 70% 30%, rgb(255 255 255 / 0.9), transparent),
+      radial-gradient(1px 1px at 85% 55%, rgb(255 255 255 / 0.7), transparent),
+      radial-gradient(1px 1px at 95% 20%, rgb(255 255 255 / 0.6), transparent),
+      radial-gradient(1.5px 1.5px at 15% 80%, rgb(255 255 255 / 0.85), transparent),
+      radial-gradient(1px 1px at 65% 90%, rgb(255 255 255 / 0.6), transparent),
+      radial-gradient(1px 1px at 33% 75%, rgb(255 255 255 / 0.7), transparent);
+    background-repeat: repeat;
+    background-size: 340px 340px;
+  }
+
+  /* Constitution §4.1 "Intelligent Glow" — a quiet, static ring + soft
+     background tint + a soft emissive drop-shadow (the actual "glow") per
+     semantic state. No motion/pulse (Performance Before Beauty, §2.2) and
+     never combined on the same element (§4.1 rule: "يمنع استخدام أكثر من
+     وهج واحد على العنصر"). Plain box-shadow (not @apply-arbitrary) so the
+     hsl(var(...)/alpha) syntax isn't at the mercy of Tailwind's bracket
+     parser. */
+  .glow-ai {
+    @apply ring-1 ring-inset ring-ai/30 bg-ai/[0.07];
+    box-shadow: 0 0 28px -8px hsl(var(--ai) / 0.4);
+  }
+  /* Follow-up: "مرشدك يستحق يكون بطل الشاشة" — a louder variant reserved
+     for the one AI surface that should visually win the row it's in
+     (AssistantEntryCard), not the AI-tagged KPI tile (which stays on the
+     regular .glow-ai so the KPI row doesn't compete with it). Wider,
+     brighter ring + a much bigger, more saturated outer bloom. */
+  .glow-ai-strong {
+    @apply ring-2 ring-inset ring-ai/50 bg-ai/[0.1];
+    box-shadow: 0 0 60px -12px hsl(var(--ai) / 0.55), 0 0 0 1px hsl(var(--ai) / 0.15);
+  }
+  .dark .glow-ai-strong {
+    box-shadow: 0 0 70px -10px hsl(var(--ai) / 0.65), 0 0 0 1px hsl(var(--ai) / 0.2);
+  }
+  .glow-success {
+    @apply ring-1 ring-inset ring-success/30 bg-success/[0.07];
+    box-shadow: 0 0 24px -8px hsl(var(--success) / 0.35);
+  }
+  .glow-warning {
+    @apply ring-1 ring-inset ring-warning/30 bg-warning/[0.07];
+    box-shadow: 0 0 24px -8px hsl(var(--warning) / 0.35);
+  }
+  .glow-critical {
+    @apply ring-1 ring-inset ring-destructive/30 bg-destructive/[0.07];
+    box-shadow: 0 0 24px -8px hsl(var(--destructive) / 0.35);
+  }
+  /* Dark-mode only per §3.4/§3.5 — callers only apply this class inside a
+     dark-mode-relevant context; no light-mode override is defined on
+     purpose (the --premium light value is a muted placeholder, not a UI
+     color, per the token comment above). */
+  .glow-premium {
+    @apply ring-1 ring-inset ring-premium/35 bg-premium/[0.09];
+    box-shadow: 0 0 24px -8px hsl(var(--premium) / 0.4);
+  }
+
+  /* Constitution §3.2 Crystal Design ("مجسمات بلورية... مصنوعة من مادة
+     واحدة") — the shared icon-badge treatment for every card header icon
+     on the Dashboard (Murshidak, Subscription, Files Empty State): a
+     gradient fill in the badge's own tint, a matching ring, and a soft
+     inner highlight, so all three read as the same "material" instead of
+     three different flat icon chips. Color is set by the caller (e.g.
+     text-ai / bg-ai already applied); this only adds the shared depth
+     treatment on top. */
+  .crystal-badge {
+    @apply relative flex items-center justify-center overflow-hidden rounded-xl;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 35%, transparent);
+  }
+  .crystal-badge::before {
+    content: "";
+    @apply absolute inset-0 rounded-xl;
+    background: linear-gradient(160deg, rgb(255 255 255 / 0.35), transparent 55%);
+  }
+  .dark .crystal-badge::before {
+    background: linear-gradient(160deg, rgb(255 255 255 / 0.12), transparent 55%);
+  }
+
+  /* ---- Motion (premium polish pass) ----------------------------------
+     Micro-interactions only, per §2.2 Performance Before Beauty and the
+     polish brief: every animation here is a one-shot entrance or a
+     hover/press response — nothing loops, nothing pulses, nothing runs
+     while the user is idle. All of it collapses to zero under
+     prefers-reduced-motion. */
+
+  /* One-shot entrance: fade + small rise. Applied to Dashboard sections
+     with staggered delays (rise-d1..d4) so the page assembles top-down in
+     under half a second, and to newly-appended assistant messages (each
+     row animates once on mount). */
+  @keyframes fsos-rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .rise-in {
+    animation: fsos-rise-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  }
+  .rise-d1 {
+    animation-delay: 60ms;
+  }
+  .rise-d2 {
+    animation-delay: 120ms;
+  }
+  .rise-d3 {
+    animation-delay: 180ms;
+  }
+  .rise-d4 {
+    animation-delay: 240ms;
+  }
+
+  /* Hover lift for interactive cards/tiles: 2px rise on hover, settles
+     back on press. Transform-only (cheap, GPU-composited) so it never
+     fights the glass classes' own box-shadow declarations. */
+  .card-lift {
+    transition: transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .card-lift:hover {
+    transform: translateY(-2px);
+  }
+  .card-lift:active {
+    transform: translateY(0) scale(0.995);
+  }
+  /* Interactive glass brightens its edge slightly on hover — the "light
+     catches the pane" cue, kept to a border-color shift only. */
+  .card-lift.glass-card:hover {
+    border-color: hsl(var(--border));
+  }
+  .dark .card-lift.glass-card:hover {
+    border-color: rgb(255 255 255 / 0.16);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .rise-in {
+      animation: none;
+    }
+    .card-lift,
+    .card-lift:hover,
+    .card-lift:active {
+      transition: none;
+      transform: none;
+    }
   }
 }

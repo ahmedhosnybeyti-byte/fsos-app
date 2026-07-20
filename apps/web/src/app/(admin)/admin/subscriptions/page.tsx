@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { CreditCard } from "lucide-react";
 import { toast } from "sonner";
 import { paymentsApi, plansApi, subscriptionsApi } from "@/lib/api";
 import { ApiError } from "@/lib/api-client";
@@ -26,15 +27,28 @@ export default function AdminSubscriptionsPage() {
   const { data, isLoading } = useQuery({ queryKey: ["admin", "subscriptions", page], queryFn: () => subscriptionsApi.list(page) });
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Subscriptions</h1>
-        <p className="text-muted-foreground">Plan, status, and payment status for every company.</p>
+    <div className="relative space-y-6">
+      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
+      <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
+
+      <div className="rise-in flex items-center gap-4">
+        <span className="crystal-badge hidden h-14 w-14 shrink-0 bg-primary/15 text-primary drop-shadow-[0_0_24px_hsl(var(--primary)/0.4)] sm:flex">
+          <CreditCard className="h-6 w-6" />
+        </span>
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Subscriptions</h1>
+          <p className="text-muted-foreground">Plan, status, and payment status for every company.</p>
+        </div>
       </div>
 
-      <Card>
+      <Card className="glass-card rise-in rise-d1">
         <CardHeader>
-          <CardTitle>All subscriptions</CardTitle>
+          <CardTitle className="flex items-center gap-2.5">
+            <span className="crystal-badge h-9 w-9 bg-primary/15 text-primary">
+              <CreditCard className="h-4 w-4" />
+            </span>
+            All subscriptions
+          </CardTitle>
         </CardHeader>
         <CardContent>
           {isLoading ? (
@@ -57,12 +71,26 @@ export default function AdminSubscriptionsPage() {
                       <TableCell className="font-medium">{sub.company?.name}</TableCell>
                       <TableCell>{sub.plan.name}</TableCell>
                       <TableCell>
-                        <Badge variant={sub.status === "ACTIVE" || sub.status === "TRIAL" ? "success" : "destructive"}>
+                        <Badge
+                          variant="outline"
+                          className={
+                            sub.status === "ACTIVE"
+                              ? "glow-success border-transparent"
+                              : sub.status === "TRIAL"
+                                ? "glow-warning border-transparent"
+                                : "glow-critical border-transparent"
+                          }
+                        >
                           {sub.status}
                         </Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={sub.paymentStatus === "PAID" ? "success" : "secondary"}>{sub.paymentStatus}</Badge>
+                        <Badge
+                          variant="outline"
+                          className={sub.paymentStatus === "PAID" ? "glow-success border-transparent" : "border-transparent bg-secondary/60 text-muted-foreground"}
+                        >
+                          {sub.paymentStatus}
+                        </Badge>
                       </TableCell>
                       <TableCell className="flex gap-2">
                         <Button variant="outline" size="sm" onClick={() => setEditing(sub)}>
@@ -93,9 +121,17 @@ function EditSubscriptionDialog({ subscription, onClose }: { subscription: Subsc
   const { data: plans } = useQuery({ queryKey: ["admin", "plans"], queryFn: plansApi.listAll, enabled: !!subscription });
   const [status, setStatus] = useState<SubscriptionStatus | undefined>(subscription?.status);
   const [planCode, setPlanCode] = useState<string | undefined>(subscription?.plan.code);
+  const [trialEndsAt, setTrialEndsAt] = useState<string>(
+    subscription?.trialEndsAt ? subscription.trialEndsAt.slice(0, 10) : "",
+  );
 
   const mutation = useMutation({
-    mutationFn: () => subscriptionsApi.update(subscription!.companyId, { status, planCode }),
+    mutationFn: () =>
+      subscriptionsApi.update(subscription!.companyId, {
+        status,
+        planCode,
+        trialEndsAt: trialEndsAt ? new Date(trialEndsAt) : undefined,
+      }),
     onSuccess: async () => {
       toast.success("Subscription updated");
       await queryClient.invalidateQueries({ queryKey: ["admin", "subscriptions"] });
@@ -143,6 +179,14 @@ function EditSubscriptionDialog({ subscription, onClose }: { subscription: Subsc
               </SelectContent>
             </Select>
           </div>
+          <div className="space-y-2">
+            <Label htmlFor="trialEndsAt">Trial ends</Label>
+            <Input id="trialEndsAt" type="date" value={trialEndsAt} onChange={(e) => setTrialEndsAt(e.target.value)} />
+            <p className="text-xs text-muted-foreground">
+              Only applies while status is TRIAL. Extend or shorten this company&apos;s trial without changing the
+              platform-wide default.
+            </p>
+          </div>
         </div>
         <DialogFooter>
           <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
@@ -157,6 +201,8 @@ function EditSubscriptionDialog({ subscription, onClose }: { subscription: Subsc
 function RecordPaymentDialog({ subscription, onClose }: { subscription: Subscription | null; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [amount, setAmount] = useState("");
+  const [paidAt, setPaidAt] = useState("");
+  const [note, setNote] = useState("");
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -165,12 +211,16 @@ function RecordPaymentDialog({ subscription, onClose }: { subscription: Subscrip
         amountCents: Math.round(Number(amount) * 100),
         currency: subscription!.plan.currency,
         status: "SUCCEEDED",
+        paidAt: paidAt ? new Date(paidAt) : undefined,
+        note: note || undefined,
       }),
     onSuccess: async () => {
       toast.success("Payment recorded");
       await queryClient.invalidateQueries({ queryKey: ["admin", "subscriptions"] });
       await queryClient.invalidateQueries({ queryKey: ["admin", "payments"] });
       setAmount("");
+      setPaidAt("");
+      setNote("");
       onClose();
     },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : "Could not record payment"),
@@ -190,6 +240,14 @@ function RecordPaymentDialog({ subscription, onClose }: { subscription: Subscrip
           <p className="text-xs text-muted-foreground">
             Plan price: {formatMoneyCents(subscription.plan.priceCents, subscription.plan.currency)}
           </p>
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="paidAt">Paid on (optional)</Label>
+          <Input id="paidAt" type="date" value={paidAt} onChange={(e) => setPaidAt(e.target.value)} />
+        </div>
+        <div className="space-y-2">
+          <Label htmlFor="note">Note (optional)</Label>
+          <Input id="note" value={note} maxLength={500} onChange={(e) => setNote(e.target.value)} />
         </div>
         <DialogFooter>
           <Button onClick={() => mutation.mutate()} disabled={mutation.isPending || !amount}>

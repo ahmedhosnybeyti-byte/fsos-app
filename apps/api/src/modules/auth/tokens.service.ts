@@ -75,6 +75,17 @@ export class TokensService {
       throw new UnauthorizedException("Refresh token expired");
     }
 
+    // Account-status gate (2026-07-19 security fix): a suspended/disabled/
+    // archived user must not be able to keep a session alive by refreshing —
+    // login already blocks non-ACTIVE users, but without this check an
+    // existing session could rotate its refresh token indefinitely and
+    // never actually get locked out.
+    const owner = await this.prisma.user.findUnique({ where: { id: record.userId }, select: { status: true } });
+    if (!owner || owner.status !== "ACTIVE") {
+      await this.revokeAllForUser(record.userId);
+      throw new UnauthorizedException("Account is not active");
+    }
+
     await this.prisma.refreshToken.update({ where: { id: record.id }, data: { revokedAt: new Date() } });
     const refreshToken = await this.issueRefreshToken(record.userId, meta);
 

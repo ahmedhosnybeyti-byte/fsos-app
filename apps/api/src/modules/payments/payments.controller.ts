@@ -37,7 +37,16 @@ export class PaymentsController {
   @Get()
   @Auth("SUPER_ADMIN")
   @SkipSubscriptionCheck()
-  list(@Query(new ZodValidationPipe(paginationQuerySchema)) pagination: { page: number; pageSize: number }) {
-    return this.paymentsService.listAll(pagination);
+  list(
+    @Query(new ZodValidationPipe(paginationQuerySchema)) pagination: { page: number; pageSize: number },
+    @Query("companyId") companyId?: string,
+    @Query("from") from?: string,
+    @Query("to") to?: string,
+  ) {
+    return this.paymentsService.listAll(pagination, {
+      companyId: companyId || undefined,
+      from: from ? new Date(from) : undefined,
+      to: to ? new Date(to) : undefined,
+    });
   }
 }

@@ -46,11 +46,15 @@ export class UsageAnalyticsService {
   }
 
   async getPlatformStats() {
-    const [companiesCount, usersCount, subscriptionsByStatus, totalEvents] = await Promise.all([
+    const [companiesCount, usersCount, subscriptionsByStatus, totalEvents, eventCounts] = await Promise.all([
       this.prisma.company.count(),
       this.prisma.user.count(),
       this.prisma.subscription.groupBy({ by: ["status"], _count: { _all: true } }),
       this.prisma.gptUsageEvent.count(),
+      // Same groupBy already used per-company in getCompanyStats above,
+      // just without the companyId filter — lets the admin console's event-
+      // type glossary show real platform-wide counts instead of just labels.
+      this.prisma.gptUsageEvent.groupBy({ by: ["eventType"], _count: { _all: true } }),
     ]);
 
     return {
@@ -58,6 +62,9 @@ export class UsageAnalyticsService {
       usersCount,
       subscriptionsByStatus: Object.fromEntries(subscriptionsByStatus.map((s) => [s.status, s._count._all])),
       totalEvents,
+      eventCounts: Object.fromEntries(
+        eventCounts.map((e: { eventType: string; _count: { _all: number } }) => [e.eventType, e._count._all]),
+      ),
     };
   }
 }

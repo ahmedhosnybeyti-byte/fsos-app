@@ -1,7 +1,16 @@
-import { Body, Controller, Get, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Param, Post, Req, Res, UnauthorizedException } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import { Throttle } from "@nestjs/throttler";
 import type { Request, Response } from "express";
-import { AUTH_COOKIE_NAMES, loginSchema, registerSchema, type LoginInput, type RegisterInput } from "@field-sales-os/schemas";
+import {
+  AUTH_COOKIE_NAMES,
+  changePasswordSchema,
+  loginSchema,
+  registerSchema,
+  type ChangePasswordInput,
+  type LoginInput,
+  type RegisterInput,
+} from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Public } from "../../common/decorators/public.decorator";
@@ -39,6 +48,7 @@ export class AuthController {
 
   @Post("login")
   @Public()
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
   async login(
     @Body(new ZodValidationPipe(loginSchema)) body: LoginInput,
     @Req() req: Request,
@@ -82,5 +92,36 @@ export class AuthController {
   async me(@CurrentUser() user: AuthenticatedUser) {
     const profile = await this.usersService.findById(user.userId);
     return { ...profile, permissions: user.permissions };
+  }
+
+  // Phase 4: self-service Password Management.
+  @Post("change-password")
+  @Auth()
+  async changePassword(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body(new ZodValidationPipe(changePasswordSchema)) body: ChangePasswordInput,
+  ) {
+    await this.authService.changePassword(user.userId, body.currentPassword, body.newPassword);
+    return { success: true };
+  }
+
+  // Phase 4: admin-issued Reset Password — Platform Administrator or
+  // Company Administrator only, per the Identity Platform's Password
+  // Management rules. No request body: the server generates the temporary
+  // password, never the caller.
+  @Post("users/:id/reset-password")
+  @Auth("COMPANY_ADMIN", "SUPER_ADMIN")
+  resetPassword(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    if (user.roleCode !== "SUPER_ADMIN" && !user.companyId) throw new ForbiddenException();
+    return this.authService.resetPassword(id, user);
+  }
+
+  // Phase 4: standalone Session Revocation (Identity Audit event).
+  @Post("users/:id/revoke-sessions")
+  @Auth("COMPANY_ADMIN", "SUPER_ADMIN")
+  async revokeSessions(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    if (user.roleCode !== "SUPER_ADMIN" && !user.companyId) throw new ForbiddenException();
+    await this.authService.revokeSessions(id, user);
+    return { success: true };
   }
 }

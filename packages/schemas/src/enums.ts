@@ -15,13 +15,96 @@ export const ROLE_CODES = [
 export const roleCodeSchema = z.enum(ROLE_CODES);
 export type RoleCode = z.infer<typeof roleCodeSchema>;
 
-export const COMPANY_STATUSES = ["ACTIVE", "SUSPENDED", "DISABLED"] as const;
+export const COMPANY_STATUSES = ["DRAFT", "CONFIGURING", "ACTIVE", "SUSPENDED", "ARCHIVED", "DISABLED"] as const;
 export const companyStatusSchema = z.enum(COMPANY_STATUSES);
 export type CompanyStatus = z.infer<typeof companyStatusSchema>;
 
-export const USER_STATUSES = ["ACTIVE", "INVITED", "DISABLED"] as const;
+// Company Lifecycle Management (Phase 2) — audit-logged transitions, no
+// dedicated table; recorded via the existing generic AuditLog service with
+// action = `company.lifecycle.<event>`.
+export const COMPANY_LIFECYCLE_EVENTS = ["CREATE", "ACTIVATE", "SUSPEND", "REACTIVATE", "ARCHIVE"] as const;
+export const companyLifecycleEventSchema = z.enum(COMPANY_LIFECYCLE_EVENTS);
+export type CompanyLifecycleEvent = z.infer<typeof companyLifecycleEventSchema>;
+
+// Phase 3: organizational unit types are no longer a fixed enum — they're
+// rows in the OrgUnitTypeDefinition registry (see company.schemas.ts), so a
+// new type can be added without touching this file. `type` on an OrgUnit is
+// just a free string that must match an existing registry `typeCode`
+// (validated server-side, not by Zod, since the valid set is data not code).
+
+export const ORG_UNIT_STATUSES = ["DRAFT", "ACTIVE", "SUSPENDED", "ARCHIVED"] as const;
+export const orgUnitStatusSchema = z.enum(ORG_UNIT_STATUSES);
+export type OrgUnitStatus = z.infer<typeof orgUnitStatusSchema>;
+
+// Phase 4 — User & Identity Management lifecycle. PENDING/SUSPENDED/LOCKED/
+// ARCHIVED are additive on top of the original ACTIVE/INVITED/DISABLED — no
+// behavior change for existing rows; the login gate already only allows
+// ACTIVE, which already matches Phase 4's "only Active may log in" rule.
+export const USER_STATUSES = ["PENDING", "ACTIVE", "INVITED", "SUSPENDED", "LOCKED", "DISABLED", "ARCHIVED"] as const;
 export const userStatusSchema = z.enum(USER_STATUSES);
 export type UserStatus = z.infer<typeof userStatusSchema>;
+
+// Phase 5 — Employee Management lifecycle. Distinct from UserStatus: an
+// Employee is a business record, never a login account.
+export const EMPLOYMENT_STATUSES = ["DRAFT", "ACTIVE", "ON_LEAVE", "SUSPENDED", "INACTIVE", "ARCHIVED"] as const;
+export const employmentStatusSchema = z.enum(EMPLOYMENT_STATUSES);
+export type EmploymentStatus = z.infer<typeof employmentStatusSchema>;
+
+// Phase 6 — Data Sources Management lifecycle. A DataSource *definition*'s
+// status — unrelated to FileStatus (which tracks an uploaded file's
+// processing state).
+export const DATA_SOURCE_STATUSES = ["DRAFT", "CONFIGURING", "CONNECTED", "ACTIVE", "SUSPENDED", "ARCHIVED"] as const;
+export const dataSourceStatusSchema = z.enum(DATA_SOURCE_STATUSES);
+export type DataSourceStatus = z.infer<typeof dataSourceStatusSchema>;
+
+// Phase 7 — Data Source Platform. System-computed usability signal, distinct
+// from the human-set DataSourceStatus above.
+export const DATA_SOURCE_HEALTH_STATUSES = ["HEALTHY", "WARNING", "ERROR", "OFFLINE"] as const;
+export const dataSourceHealthStatusSchema = z.enum(DATA_SOURCE_HEALTH_STATUSES);
+export type DataSourceHealthStatus = z.infer<typeof dataSourceHealthStatusSchema>;
+
+// Phase 8 — Refresh Platform.
+export const REFRESH_TYPES = ["FULL", "INCREMENTAL"] as const;
+export const refreshTypeSchema = z.enum(REFRESH_TYPES);
+export type RefreshType = z.infer<typeof refreshTypeSchema>;
+
+export const REFRESH_RUN_STATUSES = ["QUEUED", "RUNNING", "COMPLETED", "FAILED"] as const;
+export const refreshRunStatusSchema = z.enum(REFRESH_RUN_STATUSES);
+export type RefreshRunStatus = z.infer<typeof refreshRunStatusSchema>;
+
+// Phase 9 — Company Policy Engine. Fixed vocabulary straight from the
+// constitution's own examples — deliberately not a dynamic registry table
+// (see CompanyPolicy's schema comment for why).
+export const COMPANY_POLICY_TYPES = [
+  "ORGANIZATIONAL_POLICY",
+  "PASSWORD_POLICY",
+  "REFRESH_POLICY",
+  "EMPLOYEE_ASSIGNMENT_POLICY",
+  "PERMISSION_POLICY",
+  "ARCHIVING_POLICY",
+] as const;
+export const companyPolicyTypeSchema = z.enum(COMPANY_POLICY_TYPES);
+export type CompanyPolicyType = z.infer<typeof companyPolicyTypeSchema>;
+
+// Phase 9 — Platform Events. The exact event names the constitution lists;
+// emitted in-process by PlatformEventsService and mirrored into AuditLog.
+export const PLATFORM_EVENT_NAMES = [
+  "CompanyCreated",
+  "CompanyUpdated",
+  "CompanyActivated",
+  "CompanyArchived",
+  "OrganizationalUnitCreated",
+  "OrganizationalUnitMoved",
+  "EmployeeCreated",
+  "EmployeeImported",
+  "EmployeeUpdated",
+  "DataSourceRegistered",
+  "RefreshStarted",
+  "RefreshCompleted",
+  "RefreshFailed",
+] as const;
+export const platformEventNameSchema = z.enum(PLATFORM_EVENT_NAMES);
+export type PlatformEventName = z.infer<typeof platformEventNameSchema>;
 
 export const SUBSCRIPTION_STATUSES = ["TRIAL", "ACTIVE", "EXPIRED", "SUSPENDED"] as const;
 export const subscriptionStatusSchema = z.enum(SUBSCRIPTION_STATUSES);
@@ -68,6 +151,7 @@ export type GptUsageEventType = z.infer<typeof gptUsageEventTypeSchema>;
 // category never requires a code change.
 export const SUGGESTED_DATASET_TYPES = [
   "Invoices",
+  "Invoice Items",
   "Customers",
   "Payments",
   "Returns",
@@ -75,6 +159,7 @@ export const SUGGESTED_DATASET_TYPES = [
   "Inventory",
   "Pricing",
   "Routes",
+  "Employees",
   "Visits",
   "Collections",
   "Targets",

@@ -86,6 +86,7 @@ export class SubscriptionsService {
         status: dto.status,
         paymentStatus: dto.paymentStatus,
         currentPeriodEnd: dto.currentPeriodEnd,
+        trialEndsAt: dto.trialEndsAt,
         canceledAt: dto.status === "SUSPENDED" || dto.status === "EXPIRED" ? new Date() : undefined,
       },
       include: subscriptionInclude,

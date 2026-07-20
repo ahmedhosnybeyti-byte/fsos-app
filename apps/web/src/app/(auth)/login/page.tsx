@@ -37,12 +37,13 @@ export default function LoginPage() {
   });
 
   return (
-    <Card>
-      <CardHeader>
+    <Card className="glass-hero rise-in rise-d1 relative border-0">
+      <div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" />
+      <CardHeader className="relative">
         <CardTitle>Welcome back</CardTitle>
         <CardDescription>Log in to your company workspace.</CardDescription>
       </CardHeader>
-      <form onSubmit={handleSubmit((values) => mutation.mutate(values))}>
+      <form className="relative" onSubmit={handleSubmit((values) => mutation.mutate(values))}>
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="email">Email</Label>

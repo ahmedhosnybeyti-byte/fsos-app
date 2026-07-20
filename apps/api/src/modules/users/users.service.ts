@@ -1,8 +1,10 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import * as argon2 from "argon2";
-import type { CreateUserInput, UpdateUserInput } from "@field-sales-os/schemas";
+import type { CreateUserInput, UpdateUserInput, UserStatus } from "@field-sales-os/schemas";
 import { PrismaService, type PrismaTx, isUniqueConstraintError } from "../../common/prisma";
 import { RolesService } from "../roles/roles.service";
+import { OrgUnitsService } from "../companies/org-units.service";
+import { AuditLogService } from "../audit-log/audit-log.service";
 
 // Explicit field selection (never `include`) for anything that can flow back
 // into an HTTP response — passwordHash must never leave this service.
@@ -13,6 +15,8 @@ const publicUserSelect = {
   email: true,
   fullName: true,
   status: true,
+  orgUnitId: true,
+  mustChangePassword: true,
   lastLoginAt: true,
   createdAt: true,
   updatedAt: true,
@@ -24,12 +28,18 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly rolesService: RolesService,
+    private readonly orgUnitsService: OrgUnitsService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
-  // Internal use only (login password verification) — includes passwordHash.
-  // Never return this object directly from a controller.
+  // Internal use only (login/change-password verification) — includes
+  // passwordHash. Never return this object directly from a controller.
   findByEmailWithPassword(email: string, tx: PrismaTx = this.prisma) {
     return tx.user.findUnique({ where: { email }, include: { role: true } });
+  }
+
+  findByIdWithPassword(id: string, tx: PrismaTx = this.prisma) {
+    return tx.user.findUnique({ where: { id }, include: { role: true } });
   }
 
   findByEmail(email: string, tx: PrismaTx = this.prisma) {
@@ -109,43 +119,129 @@ export class UsersService {
 
   async listByCompany(companyId: string, pagination: { page: number; pageSize: number }) {
     const { page, pageSize } = pagination;
+    // ARCHIVED = soft-deleted (see archiveUser) — hidden from the Team list
+    // entirely, unlike DISABLED which stays visible with a re-enable action.
+    const where = { companyId, status: { not: "ARCHIVED" as const } };
     const [items, total] = await Promise.all([
       this.prisma.user.findMany({
-        where: { companyId },
+        where,
         select: publicUserSelect,
         skip: (page - 1) * pageSize,
         take: pageSize,
         orderBy: { createdAt: "desc" },
       }),
-      this.prisma.user.count({ where: { companyId } }),
+      this.prisma.user.count({ where }),
     ]);
     return { items, total, page, pageSize };
   }
 
-  async updateUser(id: string, companyId: string, dto: UpdateUserInput) {
-    const existing = await this.prisma.user.findUnique({ where: { id } });
+  async updateUser(id: string, companyId: string, dto: UpdateUserInput, actorUserId?: string) {
+    const existing = await this.prisma.user.findUnique({ where: { id }, include: { role: true } });
     if (!existing || existing.companyId !== companyId) {
       throw new NotFoundException("User not found");
     }
 
-    const roleId = dto.roleCode ? (await this.rolesService.findByCode(dto.roleCode)).id : undefined;
+    const newRole = dto.roleCode ? await this.rolesService.findByCode(dto.roleCode) : undefined;
 
-    return this.prisma.user.update({
+    // Phase 4: "Organizational Unit" on the User Profile is reference-only —
+    // just validated against Phase 3's structure (same company, unit
+    // exists), never interpreted for permissions here.
+    if (dto.orgUnitId !== undefined && dto.orgUnitId !== null) {
+      await this.orgUnitsService.getOne(companyId, dto.orgUnitId);
+    }
+
+    const updated = await this.prisma.user.update({
       where: { id },
       data: {
         fullName: dto.fullName,
         status: dto.status,
-        roleId,
+        roleId: newRole?.id,
+        ...(dto.orgUnitId !== undefined ? { orgUnitId: dto.orgUnitId } : {}),
       },
       select: publicUserSelect,
     });
+
+    if (newRole && newRole.code !== existing.role.code) {
+      // Single-role-per-user model: a "role change" is simultaneously the
+      // Identity Audit's Role Assignment (new role) and Role Removal (old
+      // role) — recorded as one event with both codes in the metadata
+      // rather than two separate log rows for the same atomic change.
+      await this.auditLogService.record({
+        companyId,
+        userId: actorUserId ?? null,
+        action: "identity.role_assigned",
+        entityType: "User",
+        entityId: id,
+        metadata: { previousRoleCode: existing.role.code, newRoleCode: newRole.code },
+      });
+    }
+
+    return updated;
   }
 
-  async setStatus(id: string, companyId: string, status: "ACTIVE" | "DISABLED") {
+  async setStatus(id: string, companyId: string, status: UserStatus) {
     const existing = await this.prisma.user.findUnique({ where: { id } });
     if (!existing || existing.companyId !== companyId) {
       throw new NotFoundException("User not found");
     }
+    // Deactivating an account ends its sessions immediately (2026-07-19) —
+    // paired with the refresh-rotation status gate in tokens.service.ts, a
+    // disabled user is locked out within the access token's own 15-minute
+    // lifetime, not whenever their refresh token happens to expire.
+    if (status !== "ACTIVE") {
+      await this.revokeAllSessions(id);
+    }
     return this.prisma.user.update({ where: { id }, data: { status }, select: publicUserSelect });
+  }
+
+  // "حذف مستخدم" — soft delete (2026-07-19): status ARCHIVED + all sessions
+  // revoked + hidden from the Team list. Never a hard row delete: the user
+  // id is referenced by uploaded files, audit logs, targets, and reports —
+  // history must keep pointing at a real record. Guard rails: you can't
+  // delete yourself, and admin accounts can't be deleted from here (demote
+  // them first) — a compromised admin session shouldn't be able to wipe out
+  // the other admins.
+  async archiveUser(id: string, companyId: string, actorUserId: string) {
+    const existing = await this.prisma.user.findUnique({ where: { id }, include: { role: true } });
+    if (!existing || existing.companyId !== companyId) {
+      throw new NotFoundException("User not found");
+    }
+    if (id === actorUserId) {
+      throw new ForbiddenException("You cannot delete your own account.");
+    }
+    if (existing.role.code === "COMPANY_ADMIN" || existing.role.code === "SUPER_ADMIN") {
+      throw new ForbiddenException("Admin accounts cannot be deleted from here — change their role first.");
+    }
+
+    await this.revokeAllSessions(id);
+    const archived = await this.prisma.user.update({ where: { id }, data: { status: "ARCHIVED" }, select: publicUserSelect });
+
+    await this.auditLogService.record({
+      companyId,
+      userId: actorUserId,
+      action: "identity.user_archived",
+      entityType: "User",
+      entityId: id,
+      metadata: { email: existing.email, roleCode: existing.role.code },
+    });
+
+    return archived;
+  }
+
+  // Direct-Prisma revocation (not TokensService) on purpose — TokensService
+  // lives in AuthModule, which already imports UsersModule; injecting it
+  // here would create a module cycle for what is one updateMany.
+  private revokeAllSessions(userId: string) {
+    return this.prisma.refreshToken.updateMany({
+      where: { userId, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  // Phase 4: Password Management. Hashing/verification stays in AuthService
+  // (the Identity Platform surface) — this is only the write path, keeping
+  // passwordHash writes centralized here alongside createUserInternal.
+  setPasswordHash(id: string, passwordHash: string, mustChangePassword: boolean) {
+    return this.prisma.user.update({ where: { id }, data: { passwordHash, mustChangePassword } });
   }
 }

@@ -18,6 +18,14 @@ const TableBody = React.forwardRef<HTMLTableSectionElement, React.HTMLAttributes
 );
 TableBody.displayName = "TableBody";
 
+// For a subtotal/totals row under a table's body — visually distinct
+// (border above, slightly filled background, bold) so it doesn't read as
+// just another data row.
+const TableFooter = React.forwardRef<HTMLTableSectionElement, React.HTMLAttributes<HTMLTableSectionElement>>(
+  ({ className, ...props }, ref) => <tfoot ref={ref} className={cn("border-t-2 border-border bg-secondary/40 font-semibold", className)} {...props} />,
+);
+TableFooter.displayName = "TableFooter";
+
 const TableRow = React.forwardRef<HTMLTableRowElement, React.HTMLAttributes<HTMLTableRowElement>>(
   ({ className, ...props }, ref) => (
     <tr ref={ref} className={cn("transition-colors hover:bg-secondary/30", className)} {...props} />
@@ -29,7 +37,15 @@ const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<
   ({ className, ...props }, ref) => (
     <th
       ref={ref}
-      className={cn("h-10 px-4 text-left align-middle text-xs font-medium uppercase tracking-wide text-muted-foreground", className)}
+      // text-start (not text-left): a logical property so this follows the
+      // document's direction, same as TableCell (which has no explicit
+      // text-align and inherits the browser's per-direction default). With
+      // a hardcoded text-left, headers stayed pinned left under dir="rtl"
+      // while the data cells beneath them followed the RTL default
+      // (right/"start") — headers and their columns visually didn't line
+      // up in Arabic. This affected every table in the app, not just the
+      // two screens it was reported on.
+      className={cn("h-10 px-4 text-start align-middle text-xs font-medium uppercase tracking-wide text-muted-foreground", className)}
       {...props}
     />
   ),
@@ -41,4 +57,4 @@ const TableCell = React.forwardRef<HTMLTableCellElement, React.TdHTMLAttributes<
 );
 TableCell.displayName = "TableCell";
 
-export { Table, TableHeader, TableBody, TableRow, TableHead, TableCell };
+export { Table, TableHeader, TableBody, TableFooter, TableRow, TableHead, TableCell };

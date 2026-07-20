@@ -93,7 +93,9 @@ THE REASONING PIPELINE — every data question, this exact order, every time. Ne
    - sortBy/sortDir (default asc) for ordered results, e.g. "top 5 customers by revenue" -> sortBy=Total&sortDir=desc&limit=5, executed before pagination. With aggregate+groupBy, sortBy is one of groupValue/value/rowCount instead of a dataset column — omit both to keep groups in the existing value-descending default.
    - Decide now if this needs every matching row or a computed figure (Efficiency Rule 4). Rich filters compose with aggregate/groupBy/sortBy — filtering and sorting always run before pagination and before aggregation, so e.g. "top 5 regions by sales over $500 this quarter" is one call: filters for the amount+date bounds, aggregate sum, groupBy region, sortBy=value&sortDir=desc, limit=5.
 
-6. TOOL INVOCATION — the only stage calling getDataset. One call per needed dataset. Page with offset only if hasMore is true and you still need more. A single call's row limit (max 100) is NEVER a reason to say a task is impossible: if the question needs every row (a full-dataset map/heatmap, a complete export, an exact total across many rows), keep calling getDataset with increasing offset until hasMore is false, merging every page's rows into one set before Stage 7/8. 2,150 matching rows means ~22 sequential calls, not a blocker — loop, don't refuse.
+6. TOOL INVOCATION — the only stage calling getDataset. One call per needed dataset. Page with offset only if hasMore is true and you still need more. A single call's row limit (max 100) is NEVER a reason to say a task is impossible:
+   - If every matching row is genuinely needed AND only a few fields (e.g. a map needs lat/lon/category/total) -> set columns to those <=5 fields, no aggregate, and set limit up to 5000 directly — this returns everything in ONE call, no pagination loop needed. Always prefer this for map/heatmap/export requests before considering a loop.
+   - Otherwise, if a full row set with many columns is truly required, keep calling getDataset with increasing offset until hasMore is false, merging every page's rows into one set before Stage 7/8. Looping ~20 calls is not a blocker — loop, don't refuse.
 
 7. RESULT FUSION — only if more than one call was made. Combine rows (e.g. by a shared CustomerCode column across datasets). Skip for single-call answers.
 
@@ -134,7 +136,7 @@ Format: phrase -> dataset -> column -> plan -> visual
 
 9. "Map of customer locations" -> Customers -> Latitude/Longitude -> getDataset -> only real coordinate rows -> HtmlArtifact map.
 
-9b. "Heat map of all 2,150 invoices this year" -> row count exceeds one call's 100-row max -> this is NOT a reason to refuse -> loop getDataset with offset=0,100,200... until hasMore is false, merging every page's rows -> build one HtmlArtifact heat map from the complete merged set -> renderAnalysis.
+9b. "Heat map of all 2,150 invoices this year" -> needs every row but only Latitude/Longitude/Category/Total (<=5 fields, no aggregate) -> ONE getDataset call with columns=Latitude,Longitude,Category,Total&limit=5000 returns everything at once -> build one HtmlArtifact heat map from that complete set -> renderAnalysis. (Only fall back to looping offset=0,100,200... if more than 5 fields are genuinely needed.)
 
 10. "قارن مبيعات الشمال بالجنوب" / "Compare North vs South sales" -> sales/invoices -> Area-like column -> two calls, filters={"Area":"North"} and "South" -> compare real totals -> Table or KPICards.
 

@@ -230,7 +230,13 @@ export class GptController {
   })
   @ApiQuery({ name: "sortBy", required: false, type: String, description: "Real column name to sort by, executed before pagination. With aggregate+groupBy, one of groupValue/value/rowCount instead. Omit to keep default order." })
   @ApiQuery({ name: "sortDir", required: false, enum: ["asc", "desc"], description: "Sort direction, requires sortBy. Default asc." })
-  @ApiQuery({ name: "limit", required: false, type: Number, description: "Max rows (or groups, if aggregate+groupBy) to return (default 50, max 100)." })
+  @ApiQuery({
+    name: "limit",
+    required: false,
+    type: Number,
+    description:
+      "Max rows (or groups, if aggregate+groupBy) to return (default 50, max 100). Exception: if you genuinely need every matching row (e.g. building a map/heatmap from all of them, not a page) and columns is set to at most 5 fields with no aggregate, limit may go up to 5000 in one call instead of looping pagination.",
+  })
   @ApiQuery({ name: "offset", required: false, type: Number, description: "Rows/groups to skip, for paging past the first page (default 0)." })
   @ApiOkResponse({
     description: "Either a filtered/paginated page of rows, or (if aggregate was set) a computed figure — never both.",

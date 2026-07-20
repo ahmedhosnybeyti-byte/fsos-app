@@ -1,13 +1,22 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import * as XLSX from "xlsx";
-import { ROUTE_PLANNING_LIMITS, type RoutePlanningSplitInput } from "@field-sales-os/schemas";
+import { ROUTE_PLANNING_LIMITS, type RoutePlanningRieSplitInput, type RoutePlanningScopeField, type RoutePlanningValuesResult } from "@field-sales-os/schemas";
+import type { AuthenticatedUser } from "../../common/types/authenticated-user";
+import { applyHierarchyFilter } from "../files/dataset-query.util";
 import { FilesService } from "../files/files.service";
+import { RieFacade } from "../rie/rie-facade.service";
+import { CanonicalHierarchyResolverService } from "../rie/canonical-hierarchy-resolver.service";
+import type { EntityQueryResult } from "../rie/entity-provider.interface";
 import { balancedRegionGrow, type LatLon } from "./route-balancer.util";
 
 type SheetRow = Record<string, unknown>;
 
 function readSheetRows(buffer: Buffer, sheetIndex: number): SheetRow[] {
-  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true });
+  // 2026-07-20: restrict XLSX.read to the one needed sheet — see the same
+  // fix (and its full explanation) in ExcelDatasetEntityProvider.parseDatasetFromFiles.
+  // Otherwise every call pays for parsing the entire (potentially
+  // multi-sheet batch, tens of MB) workbook just to read one sheet.
+  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, sheets: Array.from(new Set([sheetIndex, 0])) });
   const sheetName = workbook.SheetNames[sheetIndex] ?? workbook.SheetNames[0];
   const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
   return (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as SheetRow[];
@@ -31,19 +40,57 @@ function isSaneCoordinate(lat: number, lon: number): boolean {
   return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180 && !(lat === 0 && lon === 0);
 }
 
+// Migration #4 (ADR-001 / RIE Migration Plan, 2026-07-17) — split() now
+// reads via RieFacade (Customers/Invoices/Invoice Items), no file/column
+// mapping. listDistinctValues()/visibleRows() below are UNCHANGED and kept:
+// New Customer / Geo Intelligence (not yet migrated) still depends on GET
+// /route-planning/distinct-values for its own arbitrary uploaded-file
+// column dropdowns, so FilesService stays a dependency of this module.
 @Injectable()
 export class RoutePlanningService {
-  constructor(private readonly filesService: FilesService) {}
+  constructor(
+    private readonly filesService: FilesService,
+    private readonly rieFacade: RieFacade,
+    private readonly hierarchyResolver: CanonicalHierarchyResolverService,
+  ) {}
 
-  async listDistinctValues(companyId: string, fileId: string, column: string) {
+  private rieContext(user: AuthenticatedUser) {
+    return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
+  }
+
+  private assertAvailable(result: EntityQueryResult, arabicLabel: string): void {
+    if (!result.available) {
+      throw new NotFoundException(`بيانات "${arabicLabel}" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.`);
+    }
+  }
+
+  // Route-based hierarchy resolution (Task #138), rewired post-ADR-001 —
+  // resolved via the Canonical Routes/Employees Datasets (same as every
+  // other reader) rather than this file's old manual config. See
+  // heatmap.service.ts's identical helper. Still backs the legacy
+  // listDistinctValues() below.
+  private async visibleRows(rows: SheetRow[], headers: string[], companyId: string, user: AuthenticatedUser) {
+    const hierarchyUser = { roleCode: user.roleCode, email: user.email };
+    const routeAllowed = await this.hierarchyResolver.resolveAllowedRouteIds(companyId, hierarchyUser);
+    return applyHierarchyFilter(rows, headers, routeAllowed);
+  }
+
+  // UNCHANGED — legacy file+column dropdown, still used by New Customer /
+  // Geo Intelligence (not yet migrated). Do not touch.
+  async listDistinctValues(user: AuthenticatedUser, fileId: string, column: string) {
+    const companyId = user.companyId!;
     const file = await this.filesService.findActiveById(companyId, fileId);
     if (!file) throw new NotFoundException("Dataset not found");
 
     const buffer = await this.filesService.downloadFileBuffer(file.id, companyId);
-    const rows = readSheetRows(buffer, file.sheetIndex);
-    if (rows.length > 0 && !(column in rows[0]!)) {
+    const allRows = readSheetRows(buffer, file.sheetIndex);
+    if (allRows.length > 0 && !(column in allRows[0]!)) {
       throw new BadRequestException(`Column "${column}" was not found in this dataset`);
     }
+    // Row-level access control (strategic point 3) — a restricted role must
+    // not be able to discover scope values (e.g. other reps' territory
+    // codes) beyond their own rows via this dropdown-population endpoint.
+    const rows = await this.visibleRows(allRows, allRows.length > 0 ? Object.keys(allRows[0]!) : [], companyId, user);
 
     const seen = new Set<string>();
     for (const row of rows) {
@@ -55,23 +102,60 @@ export class RoutePlanningService {
     return { values: Array.from(seen).sort((a, b) => a.localeCompare(b)) };
   }
 
-  async split(companyId: string, input: RoutePlanningSplitInput) {
-    const customerFile = await this.filesService.findActiveById(companyId, input.customerFileId);
-    if (!customerFile) throw new NotFoundException("Customer dataset not found");
+  // RIE-backed dedicated dropdown endpoint for this screen's own scope
+  // field — same pattern as Migrations #2/#3's scope-values endpoints.
+  async scopeValues(user: AuthenticatedUser, scopeField: RoutePlanningScopeField): Promise<RoutePlanningValuesResult> {
+    const customersResult = await this.rieFacade.getEntityRecords("Customers", this.rieContext(user));
+    this.assertAvailable(customersResult, "العملاء");
+    const values = new Set<string>();
+    for (const row of customersResult.records) {
+      const v = String(row[scopeField] ?? "").trim();
+      if (v) values.add(v);
+    }
+    return { values: Array.from(values).sort((a, b) => a.localeCompare(b)) };
+  }
 
-    const customerBuffer = await this.filesService.downloadFileBuffer(customerFile.id, companyId);
-    const allRows = readSheetRows(customerBuffer, customerFile.sheetIndex);
+  // Sales value per customer — Invoice Items joined to Invoices by
+  // CustomerCode, summed by LineTotal. Same join shape as Migrations #1-#3
+  // (REL-CU-002/REL-IN-003 in the Relationship Registry). No date/category
+  // narrowing here — Route Planning never had that in the legacy flow
+  // either (least-change principle).
+  private async computeSalesByCustomer(ctx: ReturnType<RoutePlanningService["rieContext"]>): Promise<Map<string, number>> {
+    const [invoicesResult, itemsResult] = await Promise.all([
+      this.rieFacade.getEntityRecords("Invoices", ctx),
+      this.rieFacade.getEntityRecords("Invoice Items", ctx),
+    ]);
+    this.assertAvailable(invoicesResult, "الفواتير");
+    this.assertAvailable(itemsResult, "أصناف الفاتورة");
 
-    const requiredColumns = [input.latitudeColumn, input.longitudeColumn, input.idColumn, input.scopeColumn];
-    if (allRows.length > 0) {
-      for (const col of requiredColumns) {
-        if (!(col in allRows[0]!)) throw new BadRequestException(`Column "${col}" was not found in the customer dataset`);
-      }
+    const invoiceCustomer = new Map<string, string>();
+    for (const inv of invoicesResult.records) {
+      const no = String(inv.InvoiceNo ?? "").trim();
+      const cust = String(inv.CustomerCode ?? "").trim();
+      if (no && cust) invoiceCustomer.set(no, cust);
     }
 
-    const scoped = allRows.filter((row) => String(row[input.scopeColumn] ?? "") === input.scopeValue);
+    const salesById = new Map<string, number>();
+    for (const item of itemsResult.records) {
+      const invoiceNo = String(item.InvoiceNo ?? "").trim();
+      const customerCode = invoiceCustomer.get(invoiceNo);
+      if (!customerCode) continue; // item's invoice not found — dropped, same as Migration #1's join
+      const amount = toFiniteNumber(item.LineTotal) ?? 0;
+      salesById.set(customerCode, (salesById.get(customerCode) ?? 0) + amount);
+    }
+    return salesById;
+  }
+
+  async split(user: AuthenticatedUser, input: RoutePlanningRieSplitInput) {
+    const ctx = this.rieContext(user);
+    const customersResult = await this.rieFacade.getEntityRecords("Customers", ctx);
+    this.assertAvailable(customersResult, "العملاء");
+
+    const { scopeField, scopeValues } = input;
+    const scopeValueSet = new Set(scopeValues);
+    const scoped = customersResult.records.filter((row) => scopeValueSet.has(String(row[scopeField] ?? "")));
     if (scoped.length === 0) {
-      throw new BadRequestException(`No rows match ${input.scopeColumn} = "${input.scopeValue}"`);
+      throw new BadRequestException(`No rows match ${scopeField} in [${scopeValues.join(", ")}]`);
     }
     if (scoped.length > ROUTE_PLANNING_LIMITS.maxCustomersPerRequest) {
       throw new BadRequestException(
@@ -79,22 +163,7 @@ export class RoutePlanningService {
       );
     }
 
-    // Sales value lookup: either read directly off the customer row, or
-    // aggregate from a second file (e.g. Invoices) keyed by customer id.
-    let salesById: Map<string, number> | null = null;
-    if (input.salesFileId && input.salesFileCustomerIdColumn && input.salesFileAmountColumn) {
-      const salesFile = await this.filesService.findActiveById(companyId, input.salesFileId);
-      if (!salesFile) throw new NotFoundException("Sales dataset not found");
-      const salesBuffer = await this.filesService.downloadFileBuffer(salesFile.id, companyId);
-      const salesRows = readSheetRows(salesBuffer, salesFile.sheetIndex);
-      salesById = new Map();
-      for (const row of salesRows) {
-        const id = String(row[input.salesFileCustomerIdColumn] ?? "");
-        if (!id) continue;
-        const amount = toFiniteNumber(row[input.salesFileAmountColumn]) ?? 0;
-        salesById.set(id, (salesById.get(id) ?? 0) + amount);
-      }
-    }
+    const salesById = await this.computeSalesByCustomer(ctx);
 
     const records: {
       id: string;
@@ -106,15 +175,15 @@ export class RoutePlanningService {
     let excludedBadCoordinates = 0;
 
     for (const row of scoped) {
-      const lat = toFiniteNumber(row[input.latitudeColumn]);
-      const lon = toFiniteNumber(row[input.longitudeColumn]);
+      const lat = toFiniteNumber(row.Latitude);
+      const lon = toFiniteNumber(row.Longitude);
       if (lat === null || lon === null || !isSaneCoordinate(lat, lon)) {
         excludedBadCoordinates++;
         continue;
       }
-      const id = String(row[input.idColumn] ?? "");
-      const label = input.labelColumn ? String(row[input.labelColumn] ?? id) : id;
-      const sales = salesById ? (salesById.get(id) ?? 0) : (toFiniteNumber(row[input.salesColumn ?? ""]) ?? 0);
+      const id = String(row.CustomerCode ?? "").trim();
+      const label = String(row.CustomerName ?? id);
+      const sales = salesById.get(id) ?? 0;
       records.push({ id, label, lat, lon, sales });
     }
 
@@ -140,8 +209,12 @@ export class RoutePlanningService {
     for (const g of result.after) afterCounts[g] = (afterCounts[g] ?? 0) + 1;
 
     return {
-      scopeColumn: input.scopeColumn,
-      scopeValue: input.scopeValue,
+      // Kept as "scopeColumn" in the output shape (not renamed to
+      // scopeField) — RouteSplitMap/Customer Similarity's adapter and the
+      // Excel export both consume this result shape unchanged; only the
+      // request contract changed.
+      scopeColumn: input.scopeField,
+      scopeValues: input.scopeValues,
       groupCount: input.groupCount,
       target: result.target,
       excludedBadCoordinates,

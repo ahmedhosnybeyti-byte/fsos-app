@@ -33,7 +33,11 @@ export function PricingSection() {
         </p>
       )}
 
-      {plans && (
+      {plans && plans.length === 0 && (
+        <p className="mt-12 text-center text-sm text-muted-foreground">No plans are available right now. Check back soon.</p>
+      )}
+
+      {plans && plans.length > 0 && (
         <div className="mt-12 grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
           {plans.map((plan) => (
             <Card key={plan.id} className={plan.code === "professional" ? "border-primary shadow-lg shadow-primary/10" : undefined}>
