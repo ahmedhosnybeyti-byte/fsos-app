@@ -241,7 +241,22 @@ export class AssistantService {
       throw new BadRequestException("تعذر الاتصال بالمساعد، حاول تاني.");
     }
     if (!response.ok) {
-      throw new BadRequestException(`فشل طلب المساعد (${response.status}).`);
+      // 2026-07-20: surface Anthropic's actual error body instead of just
+      // the HTTP status — "فشل طلب المساعد (400)" alone gives no way to
+      // tell an invalid/expired API key apart from a malformed request
+      // body apart from a rate limit, all of which return 400/401/429 with
+      // a JSON body shaped { error: { type, message } }. Read as text first
+      // (not .json()) so a non-JSON error page (e.g. a proxy 502) doesn't
+      // throw its own unrelated parse error and mask the real one.
+      const rawBody = await response.text().catch(() => "");
+      let detail = rawBody;
+      try {
+        const parsed = JSON.parse(rawBody) as { error?: { type?: string; message?: string } };
+        if (parsed.error?.message) detail = `${parsed.error.type ?? ""} ${parsed.error.message}`.trim();
+      } catch {
+        // not JSON — keep rawBody as-is
+      }
+      throw new BadRequestException(`فشل طلب المساعد (${response.status})${detail ? `: ${detail}` : "."}`);
     }
     return (await response.json()) as ClaudeResponse;
   }

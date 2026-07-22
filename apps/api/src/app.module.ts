@@ -39,6 +39,9 @@ import { RefreshPlatformModule } from "./modules/refresh-platform/refresh-platfo
 import { GovernanceModule } from "./modules/governance/governance.module";
 import { RieModule } from "./modules/rie/rie.module";
 import { VisitCopilotModule } from "./modules/visit-copilot/visit-copilot.module";
+import { TerritoryIntelligenceModule } from "./modules/territory-intelligence/territory-intelligence.module";
+import { DecisionAnalyticsStudioModule } from "./modules/decision-analytics-studio/decision-analytics-studio.module";
+import { GeoEngineModule } from "./modules/geo-engine/geo-engine.module";
 
 @Module({
   imports: [
@@ -83,6 +86,9 @@ import { VisitCopilotModule } from "./modules/visit-copilot/visit-copilot.module
     GovernanceModule,
     RieModule,
     VisitCopilotModule,
+    TerritoryIntelligenceModule,
+    DecisionAnalyticsStudioModule,
+    GeoEngineModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

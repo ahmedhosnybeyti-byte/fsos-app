@@ -64,6 +64,23 @@ interface CustomerAcc {
   lastPurchaseMs: number | null;
   collectionCurrent: number;
   repVotes: Map<string, number>;
+  // Product codes this customer bought in the CURRENT window only — powers
+  // GROWTH_OPPORTUNITY (see sgi.schemas.ts): what a customer already has vs.
+  // what their rep's other customers have.
+  products: Set<string>;
+  // Per-product value in each window — powers PRODUCT_DECLINE: which
+  // specific product did THIS customer cut back on, comparing their own
+  // current vs. prior spend on that product (not a peer comparison, unlike
+  // GROWTH_OPPORTUNITY's `products` above).
+  productValuesCurrent: Map<string, number>;
+  productValuesPrior: Map<string, number>;
+}
+
+interface ProductAgg {
+  name: string;
+  category: string | null;
+  totalValue: number;
+  customers: Set<string>;
 }
 
 interface RepAcc {
@@ -79,7 +96,17 @@ interface ResolvedRep {
 function getOrCreateCustomer(map: Map<string, CustomerAcc>, key: string, label: string): CustomerAcc {
   let acc = map.get(key);
   if (!acc) {
-    acc = { label, current: 0, prior: 0, lastPurchaseMs: null, collectionCurrent: 0, repVotes: new Map() };
+    acc = {
+      label,
+      current: 0,
+      prior: 0,
+      lastPurchaseMs: null,
+      collectionCurrent: 0,
+      repVotes: new Map(),
+      products: new Set(),
+      productValuesCurrent: new Map(),
+      productValuesPrior: new Map(),
+    };
     map.set(key, acc);
   } else if (acc.label === key && label !== key) {
     // Upgrade a fallback label (customer code used as its own label because
@@ -263,14 +290,21 @@ export class SgiService {
     const warnings: string[] = [];
     const ctx = this.rieContext(companyId, hierarchyUser);
 
-    const [routesResult, employeesResult, invoicesResult, invoiceItemsResult, customersResult, collectionsResult] = await Promise.all([
-      this.rieFacade.getEntityRecords("Routes", ctx),
-      this.rieFacade.getEntityRecords("Employees", ctx),
-      this.rieFacade.getEntityRecords("Invoices", ctx),
-      this.rieFacade.getEntityRecords("Invoice Items", ctx),
-      this.rieFacade.getEntityRecords("Customers", ctx),
-      this.rieFacade.getEntityRecords("Collections", ctx),
-    ]);
+    const [routesResult, employeesResult, invoicesResult, invoiceItemsResult, customersResult, collectionsResult, targetsResult, productsResult] =
+      await Promise.all([
+        this.rieFacade.getEntityRecords("Routes", ctx),
+        this.rieFacade.getEntityRecords("Employees", ctx),
+        this.rieFacade.getEntityRecords("Invoices", ctx),
+        this.rieFacade.getEntityRecords("Invoice Items", ctx),
+        this.rieFacade.getEntityRecords("Customers", ctx),
+        this.rieFacade.getEntityRecords("Collections", ctx),
+        this.rieFacade.getEntityRecords("Targets", ctx),
+        // GROWTH_OPPORTUNITY only — ProductName/Category for the gap
+        // product's label. Optional/degrading like Geo Intelligence's same
+        // join: ProductCode itself is used as the label if unavailable,
+        // never blocks the other five situation types.
+        this.rieFacade.getEntityRecords("Products", ctx),
+      ]);
     this.assertEntityAvailable(routesResult, "المسارات");
     this.assertEntityAvailable(invoicesResult, "الفواتير");
     this.assertEntityAvailable(invoiceItemsResult, "أصناف الفاتورة");
@@ -300,10 +334,31 @@ export class SgiService {
     const priorFromTime = Date.parse(input.priorDateFrom);
     const priorToTime = Date.parse(input.priorDateTo);
 
+    // GROWTH_OPPORTUNITY's product metadata — same optional/degrading join
+    // as Geo Intelligence's buildJoinedSalesRows (ProductCode itself is the
+    // label if Products is unavailable or a code isn't found in it).
+    const productMeta = new Map<string, { name: string; category: string | null }>();
+    if (productsResult.available) {
+      for (const p of productsResult.records) {
+        const code = String(p.ProductCode ?? "").trim();
+        if (!code) continue;
+        productMeta.set(code, { name: String(p.ProductName ?? code).trim() || code, category: p.Category ? String(p.Category).trim() || null : null });
+      }
+    }
+
     const customers = new Map<string, CustomerAcc>();
     const reps = new Map<string, RepAcc>();
     const repSupervisorMap: Record<string, string> = {};
     let totalActualCurrent = 0;
+
+    // Rep's book of business this period, at the product level — a rep's
+    // OTHER customers already buying a product is the peer signal
+    // GROWTH_OPPORTUNITY compares each customer against (see the schema
+    // comment on GROWTH_OPPORTUNITY for why this is rep-book-based rather
+    // than geo-based). Built in the same pass as everything else, no extra
+    // read.
+    const repProductAgg = new Map<string, Map<string, ProductAgg>>();
+    const repActiveCustomers = new Map<string, Set<string>>();
 
     for (const item of invoiceItemsResult.records) {
       const invoiceNo = String(item.InvoiceNo ?? "").trim();
@@ -323,6 +378,12 @@ export class SgiService {
       const cAcc = getOrCreateCustomer(customers, customerKey, label);
       if (cAcc.lastPurchaseMs === null || t > cAcc.lastPurchaseMs) cAcc.lastPurchaseMs = t;
 
+      // Hoisted above both window branches — PRODUCT_DECLINE needs the
+      // prior-window branch below to know which product each line item was
+      // for too, not just the current-window branch GROWTH_OPPORTUNITY
+      // already used it for.
+      const productCode = String(item.ProductCode ?? "").trim();
+
       if (t >= fromTime && t <= toTime) {
         cAcc.current += amount;
         totalActualCurrent += amount;
@@ -332,9 +393,30 @@ export class SgiService {
           rAcc.current += amount;
           reps.set(repEmail, rAcc);
         }
+
+        if (productCode) {
+          cAcc.products.add(productCode);
+          cAcc.productValuesCurrent.set(productCode, (cAcc.productValuesCurrent.get(productCode) ?? 0) + amount);
+          if (repEmail) {
+            const activeSet = repActiveCustomers.get(repEmail) ?? new Set<string>();
+            activeSet.add(customerKey);
+            repActiveCustomers.set(repEmail, activeSet);
+
+            const productAgg = repProductAgg.get(repEmail) ?? new Map<string, ProductAgg>();
+            const meta2 = productMeta.get(productCode);
+            const pAcc = productAgg.get(productCode) ?? { name: meta2?.name ?? productCode, category: meta2?.category ?? null, totalValue: 0, customers: new Set() };
+            pAcc.totalValue += amount;
+            pAcc.customers.add(customerKey);
+            productAgg.set(productCode, pAcc);
+            repProductAgg.set(repEmail, productAgg);
+          }
+        }
       }
       if (t >= priorFromTime && t <= priorToTime) {
         cAcc.prior += amount;
+        if (productCode) {
+          cAcc.productValuesPrior.set(productCode, (cAcc.productValuesPrior.get(productCode) ?? 0) + amount);
+        }
       }
     }
 
@@ -357,17 +439,48 @@ export class SgiService {
 
     const situations: SgiSituation[] = [];
 
-    // ---- TARGET_BEHIND (rep/territory level) — out of Migration #8's
-    // scope by explicit product decision: still reads Prisma `Target`
-    // unchanged. Only `reps` (the "actual" side, keyed by RIE-resolved
-    // rep email) is now RIE-sourced instead of a manually-mapped column.
-    const targets = await this.prisma.target.findMany({ where: { companyId, periodMonth: input.periodMonth } });
-    if (targets.length === 0) {
-      warnings.push(`لا يوجد أهداف مسجلة لشهر ${input.periodMonth} — تم تخطي موقف "متأخر عن الهدف". أضف الأهداف من شاشة الأهداف أولاً.`);
+    // ---- TARGET_BEHIND (rep/territory level).
+    //
+    // 2026-07-20 fix: this used to read the standalone Prisma `Target`
+    // model (repOrTerritoryKey + periodMonth + value), left untouched by
+    // Migration #8 as an explicit scoping decision. In practice that model
+    // has no UI anywhere to populate it, so it was permanently empty and
+    // this situation NEVER fired for any real company, no matter what was
+    // actually uploaded — confirmed live: a company with real per-route
+    // SalesTarget figures in its uploaded Targets sheet still got "لا يوجد
+    // أهداف مسجلة" for every rep on every route.
+    //
+    // Now reads the real, already-populated RIE Canonical "Targets" entity
+    // (official Import Template: Month/Year/RouteID/SalesTarget/...,
+    // dependsOn Routes) the same way every other situation in this method
+    // already reads Invoices/Collections — RouteID -> resolveRep() -> rep
+    // email, same two-hop join, so a route with multiple target rows across
+    // months is scoped by Month/Year and a rep covering multiple routes has
+    // their SalesTarget summed. Only SalesTarget powers this situation;
+    // CollectionTarget/WeightTarget/ActiveCustomersTarget/ProductiveCallsTarget/
+    // SKUDistributionTarget are already imported and available for future
+    // situation types, not used here.
+    const [targetPeriodYear, targetPeriodMonthNum] = input.periodMonth.split("-").map(Number) as [number, number];
+    const repTargetTotals = new Map<string, number>();
+    if (targetsResult.available) {
+      for (const row of targetsResult.records) {
+        if (toFiniteNumber(row.Month) !== targetPeriodMonthNum || toFiniteNumber(row.Year) !== targetPeriodYear) continue;
+        const routeId = String(row.RouteID ?? "").trim();
+        if (!routeId) continue;
+        const resolved = resolveRep(routeId);
+        if (!resolved) continue;
+        const salesTarget = toFiniteNumber(row.SalesTarget) ?? 0;
+        repTargetTotals.set(resolved.repEmail, (repTargetTotals.get(resolved.repEmail) ?? 0) + salesTarget);
+      }
+    }
+
+    if (repTargetTotals.size === 0) {
+      warnings.push(
+        `لا يوجد أهداف مبيعات (SalesTarget) مسجلة لأي مسار في شهر ${input.periodMonth} داخل ملف Targets — تم تخطي موقف "متأخر عن الهدف". ارفع أو حدّث ملف Targets لهذا الشهر.`,
+      );
     } else {
-      const [y, m] = input.periodMonth.split("-").map(Number) as [number, number];
-      const monthStart = Date.UTC(y, m - 1, 1);
-      const monthEnd = Date.UTC(y, m, 1);
+      const monthStart = Date.UTC(targetPeriodYear, targetPeriodMonthNum - 1, 1);
+      const monthEnd = Date.UTC(targetPeriodYear, targetPeriodMonthNum, 1);
       const daysInMonth = (monthEnd - monthStart) / 86_400_000;
       const elapsedDays = Math.min(daysInMonth, Math.max(0, (toTime - monthStart) / 86_400_000 + 1));
       const elapsedFraction = daysInMonth > 0 ? elapsedDays / daysInMonth : 1;
@@ -376,10 +489,8 @@ export class SgiService {
       const nameByEmail = new Map(users.map((u) => [u.email.trim().toLowerCase(), u.fullName]));
 
       const behindCandidates: Array<{ key: string; targetValue: number; actual: number; expected: number; gap: number }> = [];
-      for (const target of targets) {
-        const key = target.repOrTerritoryKey.trim().toLowerCase();
+      for (const [key, targetValue] of repTargetTotals) {
         const actual = reps.get(key)?.current ?? 0;
-        const targetValue = decimalToNumber(target.value);
         const expected = targetValue * elapsedFraction;
         if (expected <= 0) continue;
         const gap = expected - actual;
@@ -511,8 +622,199 @@ export class SgiService {
       });
     }
 
-    const targetTotalAgg = await this.prisma.target.aggregate({ where: { companyId, periodMonth: input.periodMonth }, _sum: { value: true } });
-    const targetTotalNum = targetTotalAgg._sum.value ? decimalToNumber(targetTotalAgg._sum.value) : null;
+    // ---- GROWTH_OPPORTUNITY. See the schema comment on this type: for
+    // each rep's book of currently-active customers, a product is a
+    // "meaningful peer signal" once at least a third of that rep's active
+    // customers already buy it (MIN_ADOPTION_SHARE) — below a MIN_PEER_BOOK
+    // size the signal is too thin to trust (one or two customers buying
+    // something proves nothing about the other). Each active customer gets
+    // at most ONE opportunity — their single best (highest-adoption, then
+    // highest-value) gap product — so the screen surfaces one concrete next
+    // action per customer rather than a product-by-product flood.
+    const MIN_PEER_BOOK = 3;
+    const MIN_ADOPTION_SHARE = 0.34;
+    const growthCandidates: Array<{ key: string; acc: CustomerAcc; repEmail: string; product: ProductAgg & { code: string }; adoptionShare: number; potentialValue: number }> = [];
+    // Diagnostics for the "found nothing" warning below — without these, a
+    // rep seeing zero GROWTH_OPPORTUNITY situations has no way to tell
+    // "your data genuinely has no repeat-product pattern yet" apart from
+    // "something's broken," the same ambiguity TARGET_BEHIND's warning
+    // solves for an empty Targets sheet.
+    let repsConsidered = 0;
+    let repsWithPeerBook = 0;
+    let maxAdoptionShareSeen = 0;
+    for (const [repEmail, activeSet] of repActiveCustomers) {
+      repsConsidered += 1;
+      if (activeSet.size < MIN_PEER_BOOK) continue;
+      repsWithPeerBook += 1;
+      const productAgg = repProductAgg.get(repEmail);
+      if (!productAgg) continue;
+
+      const adoptedProducts = Array.from(productAgg.entries())
+        .map(([code, p]) => ({ code, ...p, adoptionShare: p.customers.size / activeSet.size }))
+        .sort((a, b) => b.adoptionShare - a.adoptionShare || b.totalValue - a.totalValue);
+      if (adoptedProducts.length > 0) maxAdoptionShareSeen = Math.max(maxAdoptionShareSeen, adoptedProducts[0]!.adoptionShare);
+      const qualifying = adoptedProducts.filter((p) => p.adoptionShare >= MIN_ADOPTION_SHARE);
+      if (qualifying.length === 0) continue;
+
+      for (const customerKey of activeSet) {
+        const cAcc = customers.get(customerKey);
+        if (!cAcc) continue;
+        const gap = qualifying.find((p) => !cAcc.products.has(p.code));
+        if (!gap) continue;
+        growthCandidates.push({
+          key: customerKey,
+          acc: cAcc,
+          repEmail,
+          product: gap,
+          adoptionShare: gap.adoptionShare,
+          potentialValue: gap.totalValue / gap.customers.size,
+        });
+      }
+    }
+
+    if (growthCandidates.length === 0 && repsConsidered > 0) {
+      const detail =
+        repsWithPeerBook === 0
+          ? `كل المناديب عندهم أقل من ${MIN_PEER_BOOK} عملاء نشطين الشهر ده — العينة صغيرة عشان نستنتج نمط شراء مشترك.`
+          : `أعلى نسبة عملاء اشتركوا في نفس الصنف عند أي مندوب كانت ${Math.round(maxAdoptionShareSeen * 100)}%، وده أقل من الحد الأدنى (${Math.round(MIN_ADOPTION_SHARE * 100)}%) اللي بنعتبره نمط شراء موثوق.`;
+      warnings.push(`لسه مفيش فرص نمو واضحة الشهر ده — ${detail}`);
+    }
+
+    const growthSeverity = assignSeverityByRank(growthCandidates, (c) => c.potentialValue);
+    for (const c of growthCandidates) {
+      const adoptionPct = Math.round(c.adoptionShare * 100);
+      situations.push({
+        id: `GROWTH_OPPORTUNITY:${c.key}:${input.periodMonth}`,
+        type: "GROWTH_OPPORTUNITY",
+        severity: growthSeverity.get(c)!,
+        entityType: "customer",
+        entityKey: c.key,
+        entityLabel: c.acc.label,
+        title: `فرصة بيع عند ${c.acc.label}: ${c.product.name}`,
+        detail: `${adoptionPct}% من عملاء نفس المندوب بيشتروا ${c.product.name}${c.product.category ? ` (${c.product.category})` : ""}، و${c.acc.label} لسه ما جربهوش. متوسط قيمة الصنف ده للعميل الواحد حوالي ${fmt(c.potentialValue)}.`,
+        recommendation: `اعرض ${c.product.name} على ${c.acc.label} في زيارتك الجاية — صنف بيبيع كويس عند عملاء تانيين بنفس المسار وهو لسه مالوش عنده.`,
+        metricValue: c.potentialValue,
+        metricValuePrior: null,
+        periodMonth: input.periodMonth,
+        ownerRepEmail: c.repEmail,
+      });
+    }
+
+    // ---- PRODUCT_DECLINE. See the schema comment on this type: the
+    // inverse question to GROWTH_OPPORTUNITY, but per-customer (own
+    // history) rather than per-peer-book. Only considers customers still
+    // active this period (acc.current > 0) — a fully-stopped customer is
+    // LOST_SALES's job, not this one's. For each such customer, find the
+    // single product with the biggest absolute drop from prior to current
+    // (dropping below PRODUCT_DECLINE_DROP_RATIO of its prior value,
+    // including all the way to zero) — same "one concrete signal per
+    // customer" shape as every other candidate list in this method.
+    const PRODUCT_DECLINE_DROP_RATIO = 0.7;
+    const declineCandidates: Array<{
+      key: string;
+      acc: CustomerAcc;
+      productCode: string;
+      productName: string;
+      productCategory: string | null;
+      priorValue: number;
+      currentValue: number;
+    }> = [];
+    for (const [key, acc] of customers) {
+      if (acc.current <= 0) continue;
+      let worst: { code: string; priorValue: number; currentValue: number; drop: number } | null = null;
+      for (const [code, priorValue] of acc.productValuesPrior) {
+        if (priorValue <= 0) continue;
+        const currentValue = acc.productValuesCurrent.get(code) ?? 0;
+        if (currentValue >= priorValue * PRODUCT_DECLINE_DROP_RATIO) continue;
+        const drop = priorValue - currentValue;
+        if (!worst || drop > worst.drop) worst = { code, priorValue, currentValue, drop };
+      }
+      if (!worst) continue;
+      const meta = productMeta.get(worst.code);
+      declineCandidates.push({
+        key,
+        acc,
+        productCode: worst.code,
+        productName: meta?.name ?? worst.code,
+        productCategory: meta?.category ?? null,
+        priorValue: worst.priorValue,
+        currentValue: worst.currentValue,
+      });
+    }
+
+    const declineSeverity = assignSeverityByRank(declineCandidates, (c) => c.priorValue - c.currentValue);
+    for (const c of declineCandidates) {
+      const pctDrop = c.priorValue > 0 ? Math.round(((c.priorValue - c.currentValue) / c.priorValue) * 100) : 0;
+      situations.push({
+        id: `PRODUCT_DECLINE:${c.key}:${c.productCode}:${input.periodMonth}`,
+        type: "PRODUCT_DECLINE",
+        severity: declineSeverity.get(c)!,
+        entityType: "customer",
+        entityKey: c.key,
+        entityLabel: c.acc.label,
+        title: `${c.acc.label} قلّل شراء ${c.productName}`,
+        detail: `كان بيشتري ${c.productName}${c.productCategory ? ` (${c.productCategory})` : ""} بـ ${fmt(c.priorValue)} الفترة اللي فاتت، ونزل لـ ${fmt(c.currentValue)} الفترة دي (تراجع ${pctDrop}%) — رغم إنه لسه عميل نشط بشكل عام.`,
+        recommendation: `اسأل ${c.acc.label} عن سبب تقليل ${c.productName} في زيارتك الجاية — ممكن يكون مشكلة توفر، سعر، أو منافس بدأ ياخد نصيب من الصنف ده.`,
+        metricValue: c.currentValue,
+        metricValuePrior: c.priorValue,
+        periodMonth: input.periodMonth,
+        ownerRepEmail: dominantVote(c.acc.repVotes),
+      });
+    }
+
+    // 2026-07-20: same fix as TARGET_BEHIND above — sum of the real,
+    // RIE-sourced per-rep SalesTarget totals (repTargetTotals, already
+    // hierarchy-scoped since it's built from a hierarchy-filtered RIE read)
+    // instead of the permanently-empty Prisma `Target` table.
+    const targetTotalNum = repTargetTotals.size > 0 ? Array.from(repTargetTotals.values()).reduce((sum, v) => sum + v, 0) : null;
+
+    // Per-rep breakdown backing getLatest()'s scoped monthlyGoal (see the
+    // schema comment on repMonthlyGoals). Every rep who has either a
+    // SalesTarget or actual sales this period gets an entry; a rep with
+    // sales but no assigned target still gets actualTotal so their card
+    // can show "no target set" rather than silently falling back to 0.
+    const repMonthlyGoals: SgiRecalculateResult["repMonthlyGoals"] = {};
+    for (const email of new Set([...repTargetTotals.keys(), ...reps.keys()])) {
+      repMonthlyGoals[email] = {
+        targetTotal: repTargetTotals.has(email) ? repTargetTotals.get(email)! : null,
+        actualTotal: reps.get(email)?.current ?? 0,
+      };
+    }
+
+    // Per-rep collection rollup — Collections rows don't carry a
+    // route/rep directly (see the Collections ingestion block above), so
+    // attribution reuses the same dominant-rep-vote convention every other
+    // customer-level situation in this method already relies on
+    // (dominantVote(cAcc.repVotes), built from this period's Invoice Items).
+    const repCollectionTotals = new Map<string, number>();
+    for (const acc of customers.values()) {
+      if (acc.collectionCurrent <= 0) continue;
+      const repEmail = dominantVote(acc.repVotes);
+      if (!repEmail) continue;
+      repCollectionTotals.set(repEmail, (repCollectionTotals.get(repEmail) ?? 0) + acc.collectionCurrent);
+    }
+
+    // Reports feature (Task #259) — per-rep KPI snapshot for the "360
+    // درجة" section (see sgiRepStatsSchema). Reuses reps/repTargetTotals/
+    // repActiveCustomers/repProductAgg/repCollectionTotals, all already
+    // computed above — no extra pass over the source data.
+    const repStats: SgiRecalculateResult["repStats"] = {};
+    for (const email of new Set([...repTargetTotals.keys(), ...reps.keys()])) {
+      const productAgg = repProductAgg.get(email);
+      const topProducts = productAgg
+        ? Array.from(productAgg.values())
+            .sort((a, b) => b.totalValue - a.totalValue)
+            .slice(0, 3)
+            .map((p) => ({ name: p.name, value: p.totalValue }))
+        : [];
+      repStats[email] = {
+        salesActual: reps.get(email)?.current ?? 0,
+        salesTarget: repTargetTotals.has(email) ? repTargetTotals.get(email)! : null,
+        collectionActual: repCollectionTotals.get(email) ?? 0,
+        activeCustomers: repActiveCustomers.get(email)?.size ?? 0,
+        topProducts,
+      };
+    }
 
     const summary: SgiRecalculateResult["summary"] = {
       totalSituations: situations.length,
@@ -529,6 +831,8 @@ export class SgiService {
       periodMonth: input.periodMonth,
       situations,
       repSupervisorMap,
+      repMonthlyGoals,
+      repStats,
       warnings,
       summary,
       // Unfiltered (company-wide) briefing — this is what a COMPANY_ADMIN/
@@ -572,10 +876,24 @@ export class SgiService {
     const content = row.content as unknown as SgiRecalculateResult;
     const scopedToOwnTeam = user.roleCode === "SUPERVISOR" || user.roleCode === "SALES_REP";
 
+    // 2026-07-20: monthlyGoal used to be returned straight from
+    // content.summary — a single company-wide figure baked in at
+    // recalculation time — for every role. A SALES_REP's "الهدف الشهري"
+    // card ended up showing the exact same numbers as the Company Admin's.
+    // Scoped here the same way situations already were: a rep gets their
+    // own target/actual (from repMonthlyGoals), a supervisor gets their
+    // team's sum, everyone else keeps the company-wide total.
     let situations = content.situations;
+    let monthlyGoal = content.summary.monthlyGoal;
     if (user.roleCode === "SALES_REP") {
       const email = user.email.trim().toLowerCase();
       situations = situations.filter((s) => s.ownerRepEmail === email);
+      const mine = content.repMonthlyGoals?.[email];
+      monthlyGoal = {
+        targetTotal: mine?.targetTotal ?? null,
+        actualTotal: mine?.actualTotal ?? 0,
+        progressPct: mine?.targetTotal && mine.targetTotal > 0 ? Math.round((mine.actualTotal / mine.targetTotal) * 100) : null,
+      };
     } else if (user.roleCode === "SUPERVISOR") {
       const email = user.email.trim().toLowerCase();
       const myReps = new Set(
@@ -584,7 +902,27 @@ export class SgiService {
           .map(([rep]) => rep),
       );
       situations = situations.filter((s) => s.ownerRepEmail !== null && myReps.has(s.ownerRepEmail));
+
+      let teamTarget: number | null = null;
+      let teamActual = 0;
+      for (const repEmail of myReps) {
+        const entry = content.repMonthlyGoals?.[repEmail];
+        if (!entry) continue;
+        if (entry.targetTotal !== null) teamTarget = (teamTarget ?? 0) + entry.targetTotal;
+        teamActual += entry.actualTotal;
+      }
+      monthlyGoal = {
+        targetTotal: teamTarget,
+        actualTotal: teamActual,
+        progressPct: teamTarget && teamTarget > 0 ? Math.round((teamActual / teamTarget) * 100) : null,
+      };
     }
+
+    const summary: SgiRecalculateResult["summary"] = {
+      totalSituations: situations.length,
+      highSeverityCount: situations.filter((s) => s.severity === "high").length,
+      monthlyGoal,
+    };
 
     const repEmails = Array.from(new Set(situations.map((s) => s.ownerRepEmail).filter((e): e is string => e !== null)));
     let repDirectory: SgiRepDirectoryEntry[] = [];
@@ -602,14 +940,25 @@ export class SgiService {
       });
     }
 
+    // Reports feature (Task #259) — same visibility boundary as
+    // repDirectory above (built from the same repEmails set): a rep who
+    // has no situations this period also has no repStats entry here, same
+    // pre-existing repDirectory limitation, not a new one.
+    const repStats: Record<string, SgiRecalculateResult["repStats"][string]> = {};
+    for (const email of repEmails) {
+      const entry = content.repStats?.[email];
+      if (entry) repStats[email] = entry;
+    }
+
     return {
       generatedAt: content.generatedAt,
       periodMonth: content.periodMonth,
       situations,
       warnings: content.warnings ?? [],
-      summary: content.summary,
-      briefing: buildBriefing(content.summary, situations),
+      summary,
+      briefing: buildBriefing(summary, situations),
       repDirectory,
+      repStats,
       scopedToOwnTeam,
     };
   }

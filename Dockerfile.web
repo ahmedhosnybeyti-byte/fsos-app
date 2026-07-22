@@ -1,0 +1,59 @@
+# Deploys apps/web (the Next.js frontend) as a standalone container, using
+# the same turborepo "prune" recipe as Dockerfile.api, plus Next.js's
+# ".next/standalone" output so the runtime image doesn't need a full
+# `pnpm install` (standalone already bundles only the node_modules this app
+# actually needs).
+#
+# Build from the repo root:
+#   docker build -f Dockerfile.web \
+#     --build-arg NEXT_PUBLIC_API_URL=https://your-api.up.railway.app/api/v1 \
+#     -t field-sales-os-web .
+#
+# Railway: point the service's Dockerfile path at "Dockerfile.web" with the
+# repo root as build context, and set NEXT_PUBLIC_API_URL as a **Build
+# Argument** (Settings -> Build -> Build Args), NOT a runtime Variable —
+# Next.js bakes every NEXT_PUBLIC_* value into the client bundle at `next
+# build` time, so setting it as a normal env var (which only exists at
+# container start) would have no effect. See docs/DEPLOYMENT.md.
+
+FROM node:22-slim AS base
+# Same Node 22 + plain-npm-install-of-pnpm choice as Dockerfile.api, for the
+# same reason (pnpm 11.x/corepack both hit ERR_UNKNOWN_BUILTIN_MODULE on
+# Railway's build environment otherwise).
+RUN npm install -g pnpm@11.11.0 turbo@^2.3.3
+
+# ---------------------------------------------------------------------------
+# 1. Prune the monorepo down to only what @field-sales-os/web needs.
+# ---------------------------------------------------------------------------
+FROM base AS pruner
+WORKDIR /app
+COPY . .
+RUN turbo prune @field-sales-os/web --docker
+
+# ---------------------------------------------------------------------------
+# 2. Install dependencies, bring in real source, build.
+# ---------------------------------------------------------------------------
+FROM base AS installer
+WORKDIR /app
+COPY --from=pruner /app/out/json/ .
+RUN pnpm install --frozen-lockfile
+
+COPY --from=pruner /app/out/full/ .
+# Baked into the client bundle at build time — see the header comment above.
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+RUN turbo run build --filter=@field-sales-os/web...
+
+# ---------------------------------------------------------------------------
+# 3. Runtime image — just the standalone server output, not full node_modules.
+# ---------------------------------------------------------------------------
+FROM node:22-slim AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=installer /app/apps/web/.next/standalone ./
+COPY --from=installer /app/apps/web/.next/static ./apps/web/.next/static
+COPY --from=installer /app/apps/web/public ./apps/web/public
+
+EXPOSE 3000
+ENV PORT=3000
+CMD ["node", "apps/web/server.js"]

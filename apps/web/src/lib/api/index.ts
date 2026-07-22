@@ -25,3 +25,6 @@ export * from "./visit-efficiency";
 export * from "./sgi";
 export * from "./customer-locations";
 export * from "./visit-copilot";
+export * from "./territory-intelligence";
+export * from "./decision-analytics-studio";
+export * from "./geo-engine";

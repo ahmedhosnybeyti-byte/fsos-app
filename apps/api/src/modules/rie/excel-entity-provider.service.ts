@@ -97,7 +97,10 @@ function boolToYesNo(value: boolean | null): string | null {
 // entity's RouteID visibility somehow changed between two uploads of it,
 // which isn't a real scenario in this system (a given customer/invoice/
 // route's visibility doesn't change from one upload to the next).
-const PARSED_DATASET_CACHE_TTL_MS = 5 * 60_000; // 5 minutes of inactivity
+// 2026-07-20: bumped from 5 minutes to 5 hours — see FILE_BUFFER_CACHE_TTL_MS
+// in files.service.ts for the full reasoning (correctness is signature-based,
+// not time-based; this TTL only bounds idle memory).
+const PARSED_DATASET_CACHE_TTL_MS = 5 * 60 * 60_000; // 5 hours of inactivity
 const PARSED_DATASET_CACHE_MAX_ENTRIES = 300; // bound on (companyId, entityName) pairs held at once
 
 interface ParsedDatasetSnapshot {

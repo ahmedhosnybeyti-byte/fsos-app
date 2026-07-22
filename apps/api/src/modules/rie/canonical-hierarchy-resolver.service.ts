@@ -1,8 +1,33 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import * as XLSX from "xlsx";
 import { FilesService } from "../files/files.service";
 import { normalizeHeader, type DatasetRow, type HierarchyFilterUser } from "../files/dataset-query.util";
 import { ENTITY_DATASET_TYPE_MAP } from "./excel-entity-provider.mapping";
+
+// 2026-07-20: same root cause and fix as ExcelDatasetEntityProvider's
+// parsed-dataset cache, applied here too. resolveAllowedRouteIds is called
+// once per Canonical Entity read (Visit Copilot's daily-brief alone touches
+// 8+ entities), and — unlike ExcelDatasetEntityProvider — had NO caching at
+// all: every single call re-downloaded and re-parsed Routes and Employees
+// from scratch. Measured live: with the sheet-restriction fix already in
+// place, hierarchyResolve was STILL taking 30-90+ seconds PER CALL (up to
+// 8 times in one request) because of this — the dominant remaining cost in
+// a ~140s total request even after Invoice Items/Visits/etc. parses dropped
+// to a few seconds each. Routes/Employees content doesn't depend on which
+// user is asking, so it's safe to cache by (companyId, entityName) exactly
+// like the sibling cache, invalidated the same way (signature of active
+// file ids).
+// 2026-07-20: bumped from 5 minutes to 5 hours — see FILE_BUFFER_CACHE_TTL_MS
+// in files.service.ts for the full reasoning (correctness is signature-based,
+// not time-based; this TTL only bounds idle memory).
+const HIERARCHY_RAW_CACHE_TTL_MS = 5 * 60 * 60_000;
+const HIERARCHY_RAW_CACHE_MAX_ENTRIES = 300;
+
+interface HierarchyRawCacheEntry {
+  signature: string;
+  snapshot: Promise<{ rows: DatasetRow[]; headers: string[] } | null>;
+  createdAt: number;
+}
 
 // Roles this route-based restriction ever narrows. SUPER_ADMIN/COMPANY_ADMIN
 // are unrestricted (matches applyHierarchyFilter's own null-means-unfiltered
@@ -45,6 +70,9 @@ const ROUTE_ASSIGNMENT_COLUMNS = ["SalesRepID", "SupervisorID", "ManagerID"] as 
  */
 @Injectable()
 export class CanonicalHierarchyResolverService {
+  private readonly logger = new Logger(CanonicalHierarchyResolverService.name);
+  private readonly rawCache = new Map<string, HierarchyRawCacheEntry>();
+
   constructor(private readonly filesService: FilesService) {}
 
   // Returns the set of Route IDs (lowercased/trimmed) this user may see, or
@@ -131,11 +159,15 @@ export class CanonicalHierarchyResolverService {
     return allowed;
   }
 
-  // Raw (unfiltered) rows+headers for one Canonical Dataset — same
-  // list/download/parse steps ExcelDatasetEntityProvider.getRecords uses,
-  // without any hierarchy-filter step, since resolveAllowedRouteIds is what
-  // computes hierarchy visibility in the first place (filtering Routes/
-  // Employees themselves by it would be circular).
+  // Raw (unfiltered) rows+headers for one Canonical Dataset, cached by
+  // (companyId, entityName) and invalidated by a signature of the active
+  // file ids currently backing it — same shape/reasoning as
+  // ExcelDatasetEntityProvider's parsedDatasetCache (see the class-level
+  // comment above). Concurrent callers for the same key share the same
+  // in-flight Promise, so a burst of near-simultaneous entity reads (e.g.
+  // Visit Copilot's daily-brief touching 8+ entities, each independently
+  // calling resolveAllowedRouteIds) triggers exactly one Routes parse and
+  // one Employees parse for the whole request, not one pair per entity.
   private async fetchRawEntityRows(entityName: string, companyId: string): Promise<{ rows: DatasetRow[]; headers: string[] } | null> {
     const mapping = ENTITY_DATASET_TYPE_MAP[entityName];
     if (!mapping) return null;
@@ -150,20 +182,67 @@ export class CanonicalHierarchyResolverService {
     const matchingFiles = allFiles.filter((f: { datasetType: string }) => f.datasetType === mapping.datasetType);
     if (matchingFiles.length === 0) return null;
 
+    const cacheKey = `${companyId}::${entityName}`;
+    const signature = matchingFiles
+      .map((f: { id: string }) => f.id)
+      .sort()
+      .join(",");
+
+    const cached = this.rawCache.get(cacheKey);
+    if (cached && cached.signature === signature) {
+      this.rawCache.delete(cacheKey);
+      this.rawCache.set(cacheKey, cached);
+      return cached.snapshot;
+    }
+
+    const snapshot = this.parseRawEntityRows(entityName, companyId, matchingFiles);
+    this.rawCache.set(cacheKey, { signature, snapshot, createdAt: Date.now() });
+    this.evictRawCache();
+
+    try {
+      return await snapshot;
+    } catch (err) {
+      const current = this.rawCache.get(cacheKey);
+      if (current?.snapshot === snapshot) this.rawCache.delete(cacheKey);
+      throw err;
+    }
+  }
+
+  private evictRawCache(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.rawCache) {
+      if (now - entry.createdAt > HIERARCHY_RAW_CACHE_TTL_MS) this.rawCache.delete(key);
+    }
+    while (this.rawCache.size > HIERARCHY_RAW_CACHE_MAX_ENTRIES) {
+      const oldestKey = this.rawCache.keys().next().value;
+      if (oldestKey === undefined) break;
+      this.rawCache.delete(oldestKey);
+    }
+  }
+
+  // The actual download + XLSX parse, factored out so fetchRawEntityRows
+  // can cache it as a unit — identical shape to
+  // ExcelDatasetEntityProvider.parseDatasetFromFiles.
+  private async parseRawEntityRows(
+    entityName: string,
+    companyId: string,
+    matchingFiles: { id: string; sheetIndex: number; fileName: string }[],
+  ): Promise<{ rows: DatasetRow[]; headers: string[] }> {
     let mergedRows: DatasetRow[] = [];
     let headers: string[] = [];
     for (const file of matchingFiles) {
       try {
+        const tStart = Date.now();
         const buffer = await this.filesService.downloadFileBuffer(file.id, companyId);
-        // 2026-07-20: same fix as ExcelDatasetEntityProvider.parseDatasetFromFiles
-        // — this path is UNCACHED and runs on every single getRecords() call
-        // for SALES_REP/SUPERVISOR/MANAGER users (resolveAllowedRouteIds is
-        // called fresh each time, unlike the parsed-dataset cache). Without
-        // `sheets`, every call to resolve Routes+Employees would re-parse
-        // the entire multi-sheet batch workbook (measured ~150s for a real
-        // 40MB/530k-row seed file) on every request from a scoped role —
-        // restricting to the needed sheet(s) is what makes this path viable
-        // at all, not just faster.
+        const tDownloadEnd = Date.now();
+        // `sheets` restricts XLSX.read to the one needed sheet instead of
+        // parsing the entire (possibly multi-sheet batch, tens of MB)
+        // workbook — see ExcelDatasetEntityProvider.parseDatasetFromFiles
+        // for the full explanation. Combined with the cache in
+        // fetchRawEntityRows above (this call only happens once per
+        // signature, not once per getRecords() call), Routes/Employees
+        // resolution went from "150s+, repeated per entity read" to a
+        // handful of seconds, once, per request.
         const workbook = XLSX.read(buffer, {
           type: "buffer",
           cellDates: true,
@@ -172,6 +251,11 @@ export class CanonicalHierarchyResolverService {
         const sheetName = workbook.SheetNames[file.sheetIndex] ?? workbook.SheetNames[0];
         const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
         const rows = (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as DatasetRow[];
+        const tEnd = Date.now();
+        this.logger.log(
+          `[HierarchyRawParseTiming] entity=${entityName} file=${file.fileName} bytes=${buffer.length} rows=${rows.length} ` +
+            `download=${tDownloadEnd - tStart}ms parse=${tEnd - tDownloadEnd}ms`,
+        );
         const fileHeaders = rows.length > 0 ? Object.keys(rows[0] as object) : [];
         for (const h of fileHeaders) if (!headers.includes(h)) headers.push(h);
         mergedRows = mergedRows.concat(rows);

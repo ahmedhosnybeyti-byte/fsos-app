@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Brain, Flame, Sparkles } from "lucide-react";
+import { Brain, FileSpreadsheet, Flame, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { heatmapApi } from "@/lib/api";
 import { ApiError } from "@/lib/api-client";
@@ -13,9 +13,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { HeatmapMap } from "@/components/heatmap/heatmap-map";
+import { HeatmapMap, LAYER_PALETTE, type HeatmapLayerData } from "@/components/heatmap/heatmap-map";
 import { useTranslation } from "@/components/translation-provider";
-import type { HeatmapDecisionResult, HeatmapQueryResult, HeatmapScopeField } from "@/lib/types";
+import type { TranslationKey } from "@/lib/i18n/dictionaries";
+import type { HeatmapDecisionResult, HeatmapPoint, HeatmapQueryResult, HeatmapScopeField } from "@/lib/types";
+
+type Translate = (key: TranslationKey, params?: Record<string, string | number>) => string;
 
 const ALL_VALUES = "__all__";
 
@@ -106,14 +109,77 @@ export default function HeatmapPage() {
     mutationFn: heatmapApi.query,
     onSuccess: (data) => {
       setResult(data);
+      setLayerResults(null);
       toast.success(t("heatmap.pointsToastSuccess", { count: data.usedRows }));
     },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : t("heatmap.queryErrorFallback")),
   });
 
-  const canQuery = !needsTwoWindows(metric) || (!!priorDateFrom && !!priorDateTo && !!dateFrom && !!dateTo);
+  // Multi-layer mode (Task #251, explicit product request): several values
+  // of one dimension (a handful of product categories, or a handful of
+  // sales channels/routes/cities/customer classes) shown as SEPARATE
+  // toggleable heat layers on the same map, instead of the single-value
+  // filter above which only ever narrows the map to one thing at a time.
+  // "category" isn't a real HeatmapScopeField (it's its own endpoint,
+  // heatmapApi.categoryValues(), same asymmetry the single-value filter
+  // above already has), so the dimension type is a small union rather than
+  // reusing HeatmapScopeField directly. Reuses the existing single-value
+  // query endpoint once per selected value (Promise.all) — no backend
+  // change needed, this is purely a frontend layering of already-supported
+  // queries.
+  type LayerDimension = "category" | HeatmapScopeField;
+  const [multiLayerMode, setMultiLayerMode] = useState(false);
+  const [layerDimension, setLayerDimension] = useState<LayerDimension>("category");
+  const [selectedLayerValues, setSelectedLayerValues] = useState<Set<string>>(new Set());
+
+  const layerValuesQuery = useQuery({
+    queryKey: ["heatmap", "layer-values", layerDimension],
+    queryFn: () => (layerDimension === "category" ? heatmapApi.categoryValues() : heatmapApi.scopeValues({ scopeField: layerDimension })),
+    enabled: multiLayerMode,
+  });
+
+  const [layerResults, setLayerResults] = useState<HeatmapLayerData[] | null>(null);
+  const multiLayerMutation = useMutation({
+    mutationFn: async () => {
+      const values = Array.from(selectedLayerValues);
+      const responses = await Promise.all(
+        values.map((v) =>
+          heatmapApi.query({
+            metric,
+            dateFrom: dateFrom || undefined,
+            dateTo: dateTo || undefined,
+            priorDateFrom: needsTwoWindows(metric) ? priorDateFrom || undefined : undefined,
+            priorDateTo: needsTwoWindows(metric) ? priorDateTo || undefined : undefined,
+            ...(layerDimension === "category" ? { categoryValue: v } : { scopeField: layerDimension, scopeValues: [v] }),
+          }),
+        ),
+      );
+      const layers: HeatmapLayerData[] = values.map((v, i) => ({
+        id: v,
+        label: v,
+        color: LAYER_PALETTE[i % LAYER_PALETTE.length]!,
+        points: responses[i]!.points,
+        maxValue: responses[i]!.maxValue,
+      }));
+      return layers;
+    },
+    onSuccess: (layers) => {
+      setLayerResults(layers);
+      setResult(null);
+      const totalPoints = layers.reduce((sum, l) => sum + l.points.length, 0);
+      toast.success(t("heatmap.pointsToastSuccess", { count: totalPoints }));
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t("heatmap.queryErrorFallback")),
+  });
+
+  const canQuery =
+    (!needsTwoWindows(metric) || (!!priorDateFrom && !!priorDateTo && !!dateFrom && !!dateTo)) && (!multiLayerMode || selectedLayerValues.size > 0);
 
   function handleQuery() {
+    if (multiLayerMode) {
+      multiLayerMutation.mutate();
+      return;
+    }
     queryMutation.mutate({
       metric,
       scopeField: scopeField || undefined,
@@ -254,6 +320,69 @@ export default function HeatmapPage() {
             </div>
           )}
 
+          <div className="space-y-3 rounded-md border border-dashed border-border p-2.5">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs text-muted-foreground"
+              onClick={() => setMultiLayerMode((v) => !v)}
+            >
+              {multiLayerMode ? t("heatmap.layersDisable") : t("heatmap.layersEnable")}
+            </Button>
+            {multiLayerMode && (
+              <div className="space-y-3">
+                <div className="grid gap-2 sm:max-w-xs">
+                  <Label>{t("heatmap.layerDimensionLabel")}</Label>
+                  <Select
+                    value={layerDimension}
+                    onValueChange={(v) => {
+                      setLayerDimension(v as "category" | HeatmapScopeField);
+                      setSelectedLayerValues(new Set());
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {supportsCategoryFilter(metric) && <SelectItem value="category">{t("heatmap.categoryLabel")}</SelectItem>}
+                      {SCOPE_FIELDS.map((f) => (
+                        <SelectItem key={f.value} value={f.value}>
+                          {f.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {layerValuesQuery.isLoading ? (
+                  <p className="text-xs text-muted-foreground">{t("heatmap.loading")}</p>
+                ) : (
+                  <div className="flex flex-wrap gap-x-4 gap-y-2">
+                    {(layerValuesQuery.data?.values ?? []).map((v) => (
+                      <label key={v} className="flex cursor-pointer items-center gap-1.5 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={selectedLayerValues.has(v)}
+                          onChange={(e) =>
+                            setSelectedLayerValues((prev) => {
+                              const next = new Set(prev);
+                              if (e.target.checked) next.add(v);
+                              else next.delete(v);
+                              return next;
+                            })
+                          }
+                          className="h-3.5 w-3.5"
+                        />
+                        {v}
+                      </label>
+                    ))}
+                  </div>
+                )}
+                <p className="text-xs text-muted-foreground">{t("heatmap.layersHint")}</p>
+              </div>
+            )}
+          </div>
+
           {!needsTwoWindows(metric) && (
             <div className="grid gap-4 sm:grid-cols-2 sm:max-w-md">
               <div className="grid gap-2">
@@ -289,9 +418,9 @@ export default function HeatmapPage() {
             </div>
           )}
 
-          <Button disabled={!canQuery || queryMutation.isPending} onClick={handleQuery}>
-            {queryMutation.isPending ? <Spinner /> : <Flame className="h-4 w-4" />}
-            {queryMutation.isPending ? t("heatmap.updatingButton") : t("heatmap.updateMapButton")}
+          <Button disabled={!canQuery || queryMutation.isPending || multiLayerMutation.isPending} onClick={handleQuery}>
+            {queryMutation.isPending || multiLayerMutation.isPending ? <Spinner /> : <Flame className="h-4 w-4" />}
+            {queryMutation.isPending || multiLayerMutation.isPending ? t("heatmap.updatingButton") : t("heatmap.updateMapButton")}
           </Button>
         </div>
       </div>
@@ -323,9 +452,55 @@ export default function HeatmapPage() {
         </CardContent>
       </Card>
 
-      {result && <ResultView result={result} metricLabels={METRIC_LABELS} />}
+      {(result || layerResults) && (
+        <ResultView
+          result={result}
+          layers={layerResults}
+          metric={metric}
+          metricLabels={METRIC_LABELS}
+          layersTitle={layerResults ? (layerDimension === "category" ? t("heatmap.categoryLabel") : SCOPE_FIELDS.find((f) => f.value === layerDimension)?.label) : undefined}
+        />
+      )}
     </div>
   );
+}
+
+// Same dynamic-import + json_to_sheet pattern already used by Team
+// Performance / Visit Efficiency / Route Planning's Excel export buttons.
+// Multi-layer results get an extra "الطبقة" column so a rep can filter/pivot
+// per category or channel in Excel after the fact; single-query results
+// skip that column since there's only ever one layer.
+async function exportHeatmapToExcel({
+  layers,
+  points,
+  metricLabel,
+  t,
+}: {
+  layers: HeatmapLayerData[] | null;
+  points: HeatmapPoint[];
+  metricLabel: string;
+  t: Translate;
+}) {
+  const XLSX = await import("xlsx");
+
+  const rows = layers
+    ? layers.flatMap((l) => l.points.map((p) => ({ [t("heatmap.colLayer")]: l.label, ...pointRow(p, metricLabel, t) })))
+    : points.map((p) => pointRow(p, metricLabel, t));
+
+  const sheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, t("heatmap.sheetName"));
+  XLSX.writeFile(workbook, t("heatmap.fileName"));
+}
+
+function pointRow(p: HeatmapPoint, metricLabel: string, t: Translate) {
+  return {
+    [t("heatmap.colLabel")]: p.label,
+    [t("heatmap.colMetric")]: metricLabel,
+    [t("heatmap.colValue")]: Math.round(p.value),
+    [t("heatmap.colLat")]: p.lat,
+    [t("heatmap.colLon")]: p.lon,
+  };
 }
 
 function supportsCategoryFilter(metric: HeatmapMetric): boolean {
@@ -336,7 +511,25 @@ function needsTwoWindows(metric: HeatmapMetric): boolean {
   return metric === "lostSales" || metric === "opportunity";
 }
 
-function ResultView({ result, metricLabels }: { result: HeatmapQueryResult; metricLabels: Record<HeatmapMetric, string> }) {
+// Renders either the classic single-query result (`result`) or a
+// multi-layer result (`layers`, Task #251) — never both at once (page.tsx's
+// queryMutation/multiLayerMutation each clear the other's state on
+// success). Stats (points/total/etc.) are derived generically across
+// whichever mode is active so the badges and "AI Decision" button below
+// don't need their own mode branching.
+function ResultView({
+  result,
+  layers,
+  metric,
+  metricLabels,
+  layersTitle,
+}: {
+  result: HeatmapQueryResult | null;
+  layers: HeatmapLayerData[] | null;
+  metric: HeatmapMetric;
+  metricLabels: Record<HeatmapMetric, string>;
+  layersTitle?: string;
+}) {
   const { t } = useTranslation();
   const [decision, setDecision] = useState<HeatmapDecisionResult | null>(null);
   const decisionMutation = useMutation({
@@ -345,15 +538,21 @@ function ResultView({ result, metricLabels }: { result: HeatmapQueryResult; metr
     onError: (error) => toast.error(error instanceof ApiError ? error.message : t("heatmap.decisionErrorFallback")),
   });
 
+  const allPoints: HeatmapPoint[] = layers ? layers.flatMap((l) => l.points) : (result?.points ?? []);
+  const usedRowsCount = layers ? allPoints.length : (result?.usedRows ?? 0);
+  const totalValue = layers ? layers.reduce((sum, l) => sum + l.points.reduce((s, p) => s + p.value, 0), 0) : (result?.totalValue ?? 0);
+  const excludedBadCoordinates = result?.excludedBadCoordinates ?? 0;
+  const displayMetric = result?.metric ?? metric;
+
   function handleGenerateDecisions() {
-    const topPoints = [...result.points]
+    const topPoints = [...allPoints]
       .sort((a, b) => b.value - a.value)
       .slice(0, 20)
       .map((p) => ({ label: p.label, value: p.value }));
     decisionMutation.mutate({
-      metric: result.metric,
-      totalValue: result.totalValue,
-      usedRows: result.usedRows,
+      metric: displayMetric,
+      totalValue,
+      usedRows: usedRowsCount,
       topPoints,
     });
   }
@@ -361,28 +560,40 @@ function ResultView({ result, metricLabels }: { result: HeatmapQueryResult; metr
   return (
     <Card className="glass-card rise-in">
       <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <span className="crystal-badge h-7 w-7 bg-warning/15 text-warning">
-            <Flame className="h-4 w-4" />
+        <CardTitle className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-2">
+            <span className="crystal-badge h-7 w-7 bg-warning/15 text-warning">
+              <Flame className="h-4 w-4" />
+            </span>
+            {t("heatmap.resultTitle")}
           </span>
-          {t("heatmap.resultTitle")}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            disabled={allPoints.length === 0}
+            onClick={() => exportHeatmapToExcel({ layers, points: result?.points ?? [], metricLabel: metricLabels[displayMetric], t })}
+          >
+            <FileSpreadsheet className="h-4 w-4" />
+            {t("heatmap.exportExcelButton")}
+          </Button>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap gap-2">
-          <Badge variant="secondary">{t("heatmap.pointsBadge", { count: result.usedRows })}</Badge>
-          <Badge variant="secondary">{t("heatmap.metricBadge", { metric: metricLabels[result.metric] })}</Badge>
-          {result.metric !== "customerCount" && (
-            <Badge variant="secondary">{t("heatmap.totalBadge", { total: Math.round(result.totalValue).toLocaleString("en-US") })}</Badge>
+          <Badge variant="secondary">{t("heatmap.pointsBadge", { count: usedRowsCount })}</Badge>
+          <Badge variant="secondary">{t("heatmap.metricBadge", { metric: metricLabels[displayMetric] })}</Badge>
+          {displayMetric !== "customerCount" && (
+            <Badge variant="secondary">{t("heatmap.totalBadge", { total: Math.round(totalValue).toLocaleString("en-US") })}</Badge>
           )}
-          {result.excludedBadCoordinates > 0 && (
-            <Badge variant="warning">{t("heatmap.excludedBadge", { count: result.excludedBadCoordinates })}</Badge>
-          )}
+          {excludedBadCoordinates > 0 && <Badge variant="warning">{t("heatmap.excludedBadge", { count: excludedBadCoordinates })}</Badge>}
+          {layers && <Badge variant="secondary">{t("heatmap.layersBadge", { count: layers.length })}</Badge>}
         </div>
-        <HeatmapMap points={result.points} maxValue={result.maxValue} />
+        <HeatmapMap layers={layers ?? undefined} points={layers ? undefined : result?.points} maxValue={layers ? undefined : result?.maxValue} layersTitle={layersTitle} />
 
         <div className="space-y-3 border-t border-border pt-4">
-          <Button variant="secondary" size="sm" disabled={result.points.length === 0 || decisionMutation.isPending} onClick={handleGenerateDecisions}>
+          <Button variant="secondary" size="sm" disabled={allPoints.length === 0 || decisionMutation.isPending} onClick={handleGenerateDecisions}>
             {decisionMutation.isPending ? <Spinner className="h-4 w-4" /> : <Brain className="h-4 w-4" />}
             {t("heatmap.generateDecisionsButton")}
           </Button>

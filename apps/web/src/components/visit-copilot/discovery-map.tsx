@@ -63,8 +63,12 @@ export function DiscoveryMap({
 
       if (!mapRef.current) {
         const map = L.map(containerRef.current).setView([21.6, 39.19], 10);
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attribution: "&copy; OpenStreetMap contributors",
+        // See heatmap-map.tsx for why this isn't the raw OSM tile server —
+        // same rate-limiting issue, same fix, applied consistently.
+        L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
+          attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
+          subdomains: "abcd",
+          maxZoom: 20,
         }).addTo(map);
         mapRef.current = map;
       }

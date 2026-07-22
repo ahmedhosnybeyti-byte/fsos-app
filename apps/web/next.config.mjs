@@ -1,6 +1,12 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Production Docker deploy (Railway) needs the minimal self-contained
+  // ".next/standalone" server output — otherwise the image would need the
+  // full node_modules tree (including devDependencies-adjacent build
+  // tooling) copied in at runtime. Doesn't affect `pnpm dev`/local `next
+  // start` at all. See Dockerfile.web / docs/DEPLOYMENT.md.
+  output: "standalone",
   // Internal workspace packages ship TS source directly (no build step) —
   // Next transpiles them itself rather than expecting compiled JS.
   transpilePackages: ["@field-sales-os/schemas"],

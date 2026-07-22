@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, FileSpreadsheet, Sparkles, Users, Settings, Map, Flame, UserPlus, GitCompare, Bot, TrendingUp, Users2, Footprints, Target, LocateFixed, IdCard, Compass } from "lucide-react";
+import { LayoutDashboard, FileSpreadsheet, FileText, Sparkles, Users, Settings, Map, Flame, UserPlus, GitCompare, Bot, TrendingUp, Users2, Footprints, Target, LocateFixed, IdCard, Compass, MapPinned, BarChart3, Globe2 } from "lucide-react";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { AppShell, type NavItem } from "@/components/shell/app-shell";
 import { useTranslation } from "@/components/translation-provider";
@@ -31,6 +31,27 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { href: "/dashboard/analysis-studio", label: t("nav.analysisStudio"), icon: Sparkles, colorKey: "analysisStudio", group: t("group.aiInsights") },
     { href: "/dashboard/heatmap", label: t("nav.heatmap"), icon: Flame, colorKey: "heatmap", group: t("group.aiInsights") },
     { href: "/dashboard/sales-growth", label: t("nav.sgi"), icon: Target, colorKey: "sgi", group: t("group.aiInsights") },
+    {
+      href: "/dashboard/territory-intelligence",
+      label: t("nav.territoryIntelligence"),
+      icon: MapPinned,
+      colorKey: "territoryIntelligence",
+      group: t("group.aiInsights"),
+    },
+    {
+      href: "/dashboard/decision-analytics-studio",
+      label: t("nav.decisionAnalyticsStudio"),
+      icon: BarChart3,
+      colorKey: "decisionAnalyticsStudio",
+      group: t("group.aiInsights"),
+    },
+    {
+      href: "/dashboard/geo-engine",
+      label: t("nav.geoEngine"),
+      icon: Globe2,
+      colorKey: "geoEngine",
+      group: t("group.aiInsights"),
+    },
     { href: "/dashboard/new-customer", label: t("nav.newCustomer"), icon: UserPlus, colorKey: "newCustomer", group: t("group.customersTerritory") },
     {
       href: "/dashboard/customer-comparison",
@@ -74,6 +95,17 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             label: t("nav.teamPerformance"),
             icon: TrendingUp,
             colorKey: "teamPerformance" as const,
+            group: t("group.team"),
+          },
+        ]
+      : []),
+    ...(["COMPANY_ADMIN", "MANAGER", "SUPERVISOR"].includes(user.role.code)
+      ? [
+          {
+            href: "/dashboard/reports",
+            label: t("nav.reports"),
+            icon: FileText,
+            colorKey: "reports" as const,
             group: t("group.team"),
           },
         ]

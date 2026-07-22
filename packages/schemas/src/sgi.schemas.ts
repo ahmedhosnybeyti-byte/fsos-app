@@ -31,8 +31,47 @@ import { z } from "zod";
 //     a one-off gap (distinct from LOST_SALES's "just stopped" signal).
 //   - COLLECTION_RISK: a customer bought a lot this period but paid back
 //     disproportionately little of it — an accumulating receivable.
-
-export const sgiSituationTypeSchema = z.enum(["TARGET_BEHIND", "LOST_SALES", "CUSTOMER_DECLINING", "CUSTOMER_INACTIVE", "COLLECTION_RISK"]);
+//
+// 2026-07-20: added a 6th type, GROWTH_OPPORTUNITY, per explicit product
+// feedback that every situation up to this point was risk/behavioral —
+// nothing pointed a rep toward upside. Deliberately NOT geo-based (unlike
+// Geo Intelligence's Customer Comparison, which anchors on lat/lon nearest-
+// neighbors) — SGI's recalculation pass is a single flat scan over Invoice
+// Items with no per-customer geo lookups, and not every customer has valid
+// coordinates. Instead it compares a customer's own current-period product
+// set against what OTHER customers on the same rep's book already buy — the
+// same "peer group" the rep already owns, cheap to compute in the same
+// pass, no new data requirement:
+//   - GROWTH_OPPORTUNITY: a product a meaningful share of a rep's other
+//     active customers buy this period, that this specific (also active)
+//     customer does not — a concrete cross-sell/upsell suggestion, not just
+//     "visit them."
+//
+// 2026-07-21: added a 7th type, PRODUCT_DECLINE, per explicit product
+// request while scoping the Reports/PowerPoint feature ("نمو الاصناف او
+// انخفاضها" — GROWTH_OPPORTUNITY already covers the "نمو" half, this is
+// the "انخفاض" half). The inverse question to GROWTH_OPPORTUNITY, but at
+// the product level within a single STILL-ACTIVE customer rather than
+// across a rep's peer book: among products this customer bought last
+// period, which one dropped sharply (or vanished) this period, while the
+// customer overall is still buying SOMETHING (acc.current > 0)?
+// Deliberately independent from the LOST_SALES/CUSTOMER_DECLINING/
+// CUSTOMER_INACTIVE else-if chain (see sgi.service.ts) — a customer can be
+// both "overall declining" and "stopped buying Product X specifically";
+// the second is a more concrete, actionable signal (ask about that one
+// product) than the first.
+//   - PRODUCT_DECLINE: a specific product a still-active customer used to
+//     buy meaningfully last period that they've now sharply cut back or
+//     dropped entirely this period.
+export const sgiSituationTypeSchema = z.enum([
+  "TARGET_BEHIND",
+  "LOST_SALES",
+  "CUSTOMER_DECLINING",
+  "CUSTOMER_INACTIVE",
+  "COLLECTION_RISK",
+  "GROWTH_OPPORTUNITY",
+  "PRODUCT_DECLINE",
+]);
 export type SgiSituationType = z.infer<typeof sgiSituationTypeSchema>;
 
 export const sgiSeveritySchema = z.enum(["high", "medium", "low"]);
@@ -76,6 +115,24 @@ export const sgiRecalculateInputSchema = z.object({
 });
 export type SgiRecalculateInput = z.infer<typeof sgiRecalculateInputSchema>;
 
+// Reports feature (Task #259, explicit product request — the "360 درجة"
+// section of the Reports/PowerPoint wizard): a per-rep KPI snapshot beyond
+// what situations[] alone conveys (sales vs target, collection, active
+// customer count, top products) — computed once at recalculation time from
+// data SgiService already has in hand (reps/repTargetTotals/
+// repActiveCustomers/repProductAgg, plus a new per-rep collection rollup),
+// no extra reads. Same fail-closed exposure convention as repDirectory:
+// GET /sgi/latest filters this down to only the emails the viewer is
+// already allowed to see.
+export const sgiRepStatsSchema = z.object({
+  salesActual: z.number(),
+  salesTarget: z.number().nullable(),
+  collectionActual: z.number(),
+  activeCustomers: z.number(),
+  topProducts: z.array(z.object({ name: z.string(), value: z.number() })),
+});
+export type SgiRepStats = z.infer<typeof sgiRepStatsSchema>;
+
 export const sgiRecalculateResultSchema = z.object({
   generatedAt: z.string(),
   periodMonth: z.string(),
@@ -86,6 +143,25 @@ export const sgiRecalculateResultSchema = z.object({
   // anymore) — persisted alongside the situations so GET /sgi/latest can
   // scope results to a SUPERVISOR's own team without re-reading source data.
   repSupervisorMap: z.record(z.string(), z.string()),
+  // Rep email -> that rep's OWN target/actual for the period, captured at
+  // recalculation time alongside repSupervisorMap. Internal only, never
+  // sent to the frontend directly — getLatest() uses it to build a
+  // per-viewer summary.monthlyGoal (a rep's own numbers, a supervisor's
+  // team total, everyone else the company-wide total) instead of always
+  // returning the single company-wide figure baked into `summary` below.
+  // 2026-07-20: added because summary.monthlyGoal was being returned
+  // verbatim (company-wide) to every role — a rep's "الهدف الشهري" card
+  // was showing the same numbers as the Company Admin's.
+  repMonthlyGoals: z.record(
+    z.string(),
+    z.object({
+      targetTotal: z.number().nullable(),
+      actualTotal: z.number(),
+    }),
+  ),
+  // See sgiRepStatsSchema above — persisted per-rep, filtered down to the
+  // viewer's own visible reps in getLatest() before being sent out.
+  repStats: z.record(z.string(), sgiRepStatsSchema),
   warnings: z.array(z.string()),
   summary: z.object({
     totalSituations: z.number(),
@@ -138,6 +214,9 @@ export const sgiLatestResultSchema = z.object({
   summary: sgiRecalculateResultSchema.shape.summary,
   briefing: z.string(),
   repDirectory: z.array(sgiRepDirectoryEntrySchema),
+  // Filtered to exactly the emails in repDirectory above — same visibility
+  // boundary, just KPI numbers instead of names.
+  repStats: z.record(z.string(), sgiRepStatsSchema),
   scopedToOwnTeam: z.boolean(),
 });
 export type SgiLatestResult = z.infer<typeof sgiLatestResultSchema>;

@@ -27,3 +27,6 @@ export * from "./sgi.schemas";
 export * from "./sgi-context.schemas";
 export * from "./customer-location.schemas";
 export * from "./visit-copilot.schemas";
+export * from "./territory-intelligence.schemas";
+export * from "./decision-analytics-studio.schemas";
+export * from "./geo-engine.schemas";

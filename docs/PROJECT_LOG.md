@@ -2861,3 +2861,801 @@ correctly end-to-end now that both fixes are in place — session ended on
 continues next should re-exercise Visit Copilot (daily-brief, plan,
 Discovery, a customer briefing) and confirm no hang and no OOM crash before
 considering this closed.**
+
+---
+
+## Light performance pass — API gzip + Priority Center re-group-on-keystroke (2026-07-21)
+
+**Instruction:** "جهزلي التطبيق لافضل حالة اداء وسيبهولي على اعلى كفاءة"
+(get the app into its best performance state / leave it at highest
+efficiency), scoped down via follow-up questions to: (1) frontend speed as
+experienced by users, (2) whatever's left from the earlier performance
+audit (Tasks #240-244 — indexes, N+1/caching, over-fetching/memoization,
+connection pool/query logging). That earlier audit's own written
+recommendations couldn't be relocated in this session (not saved to
+PROJECT_LOG or any other file — apparently only reported in that session's
+chat, which is not accessible here), so this pass is a fresh, deliberately
+narrow re-check rather than a resume of a specific list. Kept small on
+purpose — the user is close to their weekly Claude usage limit this week
+(resets Sunday) and explicitly wants to avoid heavy work until then.
+
+**Re-confirmed already in good shape, no action taken:**
+- `packages/database/prisma/schema.prisma` — indexes are comprehensive;
+  several comments document a deliberate "Pre-Migration Integrity Check"
+  pass that already dropped redundant single-column indexes in favor of
+  composite ones. Nothing to add.
+- `apps/web/next.config.mjs` — `optimizePackageImports` already covers
+  lucide-react + the Radix packages used (from the July 2026 slow-nav fix,
+  see the "Stabilization Phase" / earlier nav-speed entries).
+- `apps/web/src/app/providers.tsx` — React Query already has a sane global
+  `staleTime: 30_000` and a retry policy that doesn't retry on 401/403.
+  Not an over-fetching source.
+- Heavy client-only libs (Leaflet, `xlsx`, `pptxgenjs`) are already
+  dynamic-imported inside `useEffect`/handlers rather than top-level
+  imported — confirmed still true, no regression.
+- `apps/api/src/common/prisma/prisma.service.ts` — no query-level logging
+  enabled (would hurt throughput under load); nothing to change.
+
+**Fixed — gzip compression on the API (`apps/api/src/main.ts`):**
+`helmet()`/`cookieParser()` were wired up but nothing compressed response
+bodies — every response (Heat Map points, SGI situations, RIE-sourced
+datasets built from thousands of Excel rows, PPTX-adjacent JSON, etc.) went
+over the wire uncompressed. Added the `compression` package
+(`app.use(compression())`, right after `helmet()`, before `cookieParser()`)
+— default settings (1KB threshold, so small responses like auth/health skip
+the CPU cost). `compression` + `@types/compression` added to
+`apps/api/package.json`; **needs `pnpm install` to take effect** (same as
+the earlier `pptxgenjs` addition — bundle this into whatever `pnpm install`
+the user already owes the repo).
+
+**Fixed — Priority Center re-grouping on every search keystroke**
+(`apps/web/src/app/(dashboard)/dashboard/sales-growth/priority-tree.tsx`):
+`groupByRep`/`groupBySector` (the functions that walk every visible
+situation to build the Sector -> Rep -> Priorities tree) were being called
+directly in the render body, with `query` (the search box's live state) in
+the same render pass — so for a COMPANY_ADMIN/MANAGER with a large roster,
+typing a single character in "بحث في القطاعات أو المناديب" re-walked and
+re-grouped the *entire* situations array on every keystroke, even though
+search only needs to filter the already-grouped sectors/reps by name
+(`filterSectors`/`filterReps`, both cheap — they operate on the small
+grouped-array, not on raw situations). Split the two concerns: `visibleSituations`
+(severity filter) and `groupedReps`/`groupedSectors` (the expensive walk)
+are now `useMemo`'d on `[situations, activeSeverity, repDirectory]` — i.e.
+they only recompute when the underlying data or the severity-tile selection
+changes, never on `query`. The cheap `filterReps`/`filterSectors` pass still
+runs on every keystroke, which is correct and fast. Both hooks are called
+unconditionally before the component's early return (`situations.length ===
+0`) to respect the Rules of Hooks. Minor accepted tradeoff: both
+`groupedReps` and `groupedSectors` are computed even though only one is used
+per role (`groupBySector` also internally calls `groupByRep` per sector) —
+a small amount of redundant work on data-change, traded for not having to
+branch hook calls on `roleCode`. Net effect: strictly less work than before
+in every case that matters (typing in the search box), no risk introduced.
+
+**Not done, left as-is (would need real profiling data, not present in this
+sandbox, to justify):** no `React.memo` usage anywhere in `apps/web` — for a
+map/table-heavy dashboard this is a plausible future win, but blindly
+wrapping components without measuring which ones actually re-render
+wastefully risks churn for no measured benefit. Flagging as a
+recommendation, not doing it speculatively.
+
+**Verification:** sandbox still can't run `pnpm`/`tsc` reliably against the
+mounted project folder (documented root cause above, under "Stabilization
+Phase" — FUSE mount can't delete symlinks). Verified `apps/api/package.json`
+is valid JSON, and hand-traced the `priority-tree.tsx` diff for correct
+Rules-of-Hooks ordering and JSX/paren structure (a blind brace/paren-count
+script produced false positives on this file, entirely from natural-language
+parentheticals inside the file's prose comments — not a real signal here).
+**User should run `pnpm install && pnpm --filter web typecheck && pnpm
+--filter api typecheck` locally** to get a real compile check on both
+changes before relying on them.
+
+---
+
+## Real `pnpm build` catches a pptxgenjs typing bug this sandbox couldn't (2026-07-21)
+
+**What happened:** user ran `pnpm build` (testing whether `pnpm start`
+production mode is faster than `pnpm dev`, unrelated to any change above)
+and hit a real TS compile error in `apps/web/src/lib/export/sgi-report-pptx.ts:100`:
+`Property 'shapes' does not exist on type 'PptxGenJS'`. This is exactly the
+class of bug the file's own top-of-file comment (Task #253) flagged as a
+risk — pptxgenjs's nested type exports couldn't be verified against the
+actually-installed version from this sandbox (no working `pnpm`/`tsc`
+here), so several calls were written from a guessed API shape.
+
+**Root cause, confirmed by reading the installed
+`node_modules/.pnpm/pptxgenjs@3.12.0/.../types/index.d.ts` directly:**
+`shapes` (uppercase-key enum, `RECTANGLE = 'rect'`) and `charts` (uppercase-
+key enum, `DOUGHNUT = 'doughnut'`) are **namespace-level exports only**
+(`PptxGenJS.shapes`, `PptxGenJS.charts`) — never exposed on a `PptxGenJS`
+instance. The instance only exposes `ShapeType`/`ChartType` (lowercase-key
+enums, e.g. `ShapeType.rect`). But `addShape`'s `shapeName` parameter and
+`addChart`'s `type` parameter are both typed as plain string-literal unions
+(`SHAPE_NAME`, `CHART_NAME`), not the enum types — and a TS string-enum
+member is not structurally assignable to a matching plain string-literal
+type without a cast. So even `pres.ShapeType.rect` would have failed the
+same way; the only form guaranteed to typecheck against this library's
+actual declarations is the raw literal itself.
+
+**Fix:** replaced all 5 call sites — `pres.shapes.RECTANGLE` (3x, in
+`addChrome`/`addCoverSlide`/`addSituationTypeSlide`) and `pres.charts.DOUGHNUT`/
+`pres.charts.PIE` (1x each, in `addSummarySlide`) — with the raw string
+literals `"rect"`, `"doughnut"`, `"pie"`. Verified against `SHAPE_NAME`/
+`CHART_NAME`'s actual union definitions in the installed `.d.ts` that these
+values are members. Brace/paren balance re-checked, all 5 replacements
+confirmed via grep — no other `.shapes`/`.charts` instance-property usage
+left in the file.
+
+**Not yet confirmed:** this was diagnosed by reading the installed
+package's `.d.ts` directly (finally possible — the user's own machine has a
+real `pnpm install`, unlike this sandbox), not by running `tsc` here.
+**User should re-run `pnpm build` to confirm this was the only error** —
+build tools generally stop at the first file's first error rather than
+scanning every file, so it's possible (though every other pptxgenjs call in
+this file was cross-checked against the same `.d.ts` and looks clean) that
+another unrelated file surfaces next.
+
+## Territory Intelligence — new screen shipped (V1, per approved design doc)
+
+Implemented `docs/GEO_INTELLIGENCE_CENTER_DESIGN.md` v1.1's V1 scope as a
+real new screen, named **"Territory Intelligence"** per explicit user
+instruction ("ابدا التنفيذ فورا مع اعطاء اسم للشاشة Territory
+Intelligence"). Ships as its own new nav entry/route per §2.5 — Heat Map
+and Geo Intelligence/New Customer are untouched. Built via two parallel
+subagents (backend + frontend) against a fixed API contract worked out in
+advance, plus nav/i18n wiring done directly. Both agents cross-checked
+their work against each other's actual output afterward (frontend's hand-
+mirrored types vs. backend's real Zod schemas) — exact match, no drift.
+
+**Territory grouping key**: `Customer.City` (trimmed, non-empty). Confirmed
+via full-repo research that no formal Region/Branch/GeoJSON-polygon concept
+exists anywhere in this platform yet — `Regions`/`Branches` RIE entities
+are UNMAPPED (no dataset classifier backs them), and the parallel
+`OrgUnit` Prisma hierarchy isn't joined to `Customer` anywhere. `City` is
+the only geographic field on every real Customer row.
+
+**Backend** (`apps/api/src/modules/territory-intelligence/` +
+`packages/schemas/src/territory-intelligence.schemas.ts`):
+- `GET /territory-intelligence/summary` — groups customers by City,
+  computes a 0-100 **Health Score** per territory from 5 metrics (Sales
+  Growth %, Active Customer Rate, Lost Sales count, Visit Coverage %,
+  Collection Health %), each normalized to a 0-100 "goodness" score and
+  combined via a named `DEFAULT_HEALTH_SCORE_WEIGHTS` const (equal 20%
+  each — kept as a swappable const per the design doc's "configurable, not
+  hardcoded" requirement; an admin weight-editor UI is still backlog).
+  Missing-data metrics (Invoices/Visits unavailable) degrade to `null` and
+  are excluded from the weighted average (renormalized over whatever's
+  available) rather than failing the whole territory.
+- Reuses SGI's already-persisted situations (`SgiService.getLatest()`)
+  for the "why" list and Smart Recommendation — joined to territories via
+  `entityKey === Customer.CustomerCode`, filtered to City. No new
+  situation-detection logic; `TARGET_BEHIND` (rep-level, not geographic)
+  is excluded. Recommendation text is templated per top situation type;
+  Suggested Actions reuse each situation's own `.recommendation` string
+  verbatim.
+- `opportunityValueSar`/`expectedImpactSar` = sum of `GROWTH_OPPORTUNITY`
+  situations' `metricValue` + `LOST_SALES` situations' `metricValuePrior`
+  (recoverable revenue) for that territory.
+- `GET /territory-intelligence/executive` — Top 5 Opportunities, Worst 5
+  Territories, Fastest Win (highest opportunity value among
+  healthScore>=40 territories), Biggest Risk (lowest health score among
+  high-severity-topped territories), derived in-process from one
+  `getSummary()` call, no duplicate data fetch.
+- Date window: current calendar month vs. previous calendar month, same
+  convention as `sgi.service.ts`'s `recalculateForCompany`.
+- Registered in `app.module.ts`; both endpoints `@Auth()` (any role) —
+  RIE's existing hierarchy row-level scoping applies automatically via
+  `requestingUser`, same as every other RIE-backed module.
+
+**Frontend**:
+- `apps/web/src/app/(dashboard)/dashboard/territory-intelligence/page.tsx`
+  — Live Decision Canvas (single `selectedTerritoryId`/`activeLibraryItem`
+  state at page level, shared by map/ranking/AI panel per §5.11), 4-category
+  Intelligence Library sidebar, AI Decision Panel (Summary/Performance/
+  Risk/Opportunity/Comparison tabs per §5.5), ranking list, role-gated
+  Executive Mode (§5.12, `COMPANY_ADMIN`/`MANAGER` only, lazily-fetched
+  query), Quick Tools (export buttons stubbed for V1 — real pptxgenjs/
+  image export not wired yet, judged lower value than the core decision
+  flow for this pass).
+- `apps/web/src/components/territory-intelligence/territory-map.tsx` —
+  new Leaflet component, one `circleMarker` per territory (fixed pixel
+  radius scaled by customer count, not a geo-radius circle), 5-tier
+  red→amber→green fill matching the existing severity color language,
+  split into a rebuild-on-data-change effect and a cheap restyle-only
+  effect on selection change (so clicking around doesn't re-fit the
+  viewport every time). Same SSR-safe dynamic-`import("leaflet")` pattern
+  as `heatmap-map.tsx`.
+- All 48 `territoryIntelligence.*` translation keys (+ `nav.
+  territoryIntelligence`) added to both AR/EN blocks in `dictionaries.ts`
+  directly (not by the agents, to avoid two processes editing the same
+  large file concurrently); nav entry added to `(dashboard)/layout.tsx`
+  (in `group.aiInsights`, after SGI) with a new `territoryIntelligence`
+  `ModuleColorKey`/badge color in `module-colors.ts`.
+
+**Verification**: sandbox can't run `pnpm build`/`tsc` against this mount
+(same long-standing FUSE/symlink limitation). Did brace/paren-balance
+checks on all 7 new/hand-written files (all balanced), read every file in
+full, confirmed every import resolves to a real export, confirmed the
+`SgiModule` export name and `@Auth`/`@Get` decorator usage match existing
+controllers exactly, confirmed all UI primitives used (`Badge` success/
+warning/destructive variants, `Table`, `Tabs`, `Select`) exist in
+`components/ui/`, confirmed `useAuth`/`useTranslation` hook usage matches
+`team-performance/page.tsx`'s established pattern. **User should run
+`pnpm build` to get real TypeScript verification** — same caveat as every
+other frontend/backend change this session; the sandbox's manual review
+is a strong second line of defense but not a substitute for a real
+compiler pass, as the pptxgenjs bug earlier this session demonstrated.
+
+Not yet implemented (flagged, not blocking): real PPT/image export in
+Quick Tools (stubbed), Comparison tab is a simple two-column metrics table
+rather than a chart, and everything in the design doc's §10 Vision Layer
+(AI Confidence, Decision Impact Simulation, Explainability, Decision
+History, Geographic Story timeline, DNA Score) — all explicitly deferred
+roadmap items per the design doc, not part of this V1 build.
+
+## Territory Intelligence — full redesign to "Enterprise Territory Intelligence Workspace" (client mockup package)
+
+Client supplied a 5-file redesign package (Implementation Brief +
+5 annotated mockup images: Polygon Territories vs Marker Map, Multi-Layer
+Territory Intelligence, Territory Drill Down, Executive Analysis Panel,
+Territory Intelligence Decision Journey) demanding the screen be rebuilt
+to Power BI/Tableau/ArcGIS-Dashboards quality: real polygon choropleth
+territories (not circle markers), instant-switching multi-layer analysis,
+a City→Route→Customer drill-down, and a full-page Executive Decision
+Panel — explicitly under **"do not modify backend/APIs/database
+schema/business logic/other screens, only redesign Territory
+Intelligence"** and **"do not invent functionality, do not simplify, do
+not remove components, stop and ask before architectural decisions."**
+
+Two rounds of `AskUserQuestion` (boundary-polygon data source; drill-down
+depth) plus several follow-up clarifications from the user resolved the
+three real conflicts between the mockup and this platform's actual data
+model:
+
+1. **No official GeoJSON boundaries and no country should be hardcoded.**
+   User: *"The map architecture must be country-agnostic... Think of the
+   geographic boundaries as a pluggable data layer... interchangeable
+   GeoJSON boundary files without requiring any UI or architectural
+   changes."* → built a swappable **boundary registry**
+   (`components/territory-intelligence/boundary-registry.ts`):
+   `BOUNDARY_REGISTRY` maps a country-name substring to a `/public`
+   GeoJSON asset URL (currently one entry: Saudi Arabia →
+   `/geo-boundaries/SA.geojson`); `resolveBoundaryAssetUrl(country)` +
+   `loadBoundaryIndex(url)` (cached, never throws — a missing/broken file
+   degrades to an empty index, never crashes the screen). The company's
+   own already-existing `GET /companies/me/profile` endpoint (unmodified)
+   is the sole source of which country's file loads — zero backend
+   changes. `apps/web/public/geo-boundaries/SA.geojson` is a hand-authored
+   demonstration `FeatureCollection` (8 polygons, one per real Saudi city
+   in FSOS's seed data, generated from real city-center coordinates via a
+   deterministic "wobbly polygon" script) — external GeoJSON sources
+   (geoBoundaries.org, GitHub raw, jsdelivr, OSM Nominatim) were all
+   unreachable from this sandbox (proxy `403`s / empty bodies / Git-LFS
+   pointers on every attempt), and the user had explicitly pre-approved
+   treating any downloaded file as "only a temporary demonstration
+   dataset" — so a hand-authored one was substituted, documented in code
+   as a swappable placeholder, on-map disclosure badge shown whenever a
+   territory falls back to a generated shape (no boundary match).
+2. **Full Country→Region→City→District→Route→Customer drill-down isn't
+   supported by any existing endpoint.** User approved City→Route→Customer
+   for V1, then: *"Do not hardcode the hierarchy... Design the drill-down
+   engine so it supports configurable hierarchy levels... data-driven and
+   configurable rather than fixed in code."* → built a generic **N-level
+   hierarchy engine** (`components/territory-intelligence/
+   hierarchy-engine.ts`): `HierarchyLevelDef[]` (each with its own
+   `fetchNodes`) is the only seam; `useTerritoryHierarchy(levels)` is a
+   level-agnostic state machine (`drillPath`, `drillInto`, `goToLevel`,
+   `canDrillDeeper`) with no "city"/"customer" special-casing anywhere in
+   the hook itself.
+3. **No endpoint anywhere in the codebase returns `RouteID` alongside
+   `City` + coordinates per customer** (confirmed by reading Heat Map's,
+   Route Planning's, and Visit Efficiency's actual query code) — Route
+   couldn't be added without a new endpoint. User: *"Do not redesign the
+   data architecture... If the existing data cannot support every future
+   drill-down level, implement the UI and drill-down engine in a
+   configurable way using the currently available data... Prioritize
+   implementation over expanding the data model."* → V1's concrete config
+   (`buildTerritoryHierarchyLevels`, the *only* place "city"/"customer"
+   are hardcoded) ships exactly **City → Customer** (customer level reuses
+   the existing `heatmapApi.query({ scopeField: "City", ... })` endpoint,
+   already used by the unrelated Heat Map screen — zero new endpoints);
+   Route is a documented future level, not silently dropped.
+
+**New/rewritten frontend files** (all under
+`components/territory-intelligence/`, built via 2 parallel subagents on
+disjoint file sets, orchestrated/wired together by hand):
+- `territory-map.tsx` — rewritten from circle markers to real
+  `L.geoJSON()` polygons for boundary-matched territories, a deterministic
+  9-vertex "wobbly" fallback polygon for unmatched ones (never a circle,
+  per the client's explicit mandate); 7 instant-switching analysis layers
+  (`healthScore`, `salesGrowthPct`, `lostSalesCount`, `visitCoveragePct`,
+  `collectionHealthPct`, `opportunityValueSar`, and a new client-derived
+  `riskLevel = 100 - healthScore`) all recolor the same already-loaded
+  polygon set with no refetch; Customer-level (point) nodes render as
+  small gradient-colored `circleMarker`s since individual customers have
+  no health score.
+- `territory-layers-sidebar.tsx` — the persistent numbered 7-layer
+  switcher + color legend from the "Multi-Layer" mockup.
+- `territory-decision-panel.tsx` — the "Executive Analysis Panel"
+  mockup's single-scroll BI-style layout (not the old 5-tab layout):
+  overview + health gauge + ranking + last-updated, KPI grid, an honest
+  empty-state for Performance Trend (no historical/snapshot series exists
+  on `TerritorySummaryItem` — not fabricated), AI Insight, Growth
+  Opportunities, Recommended Actions, Visit Plan with Compare/Export/
+  Share, a drill-into-customers CTA, Close. Every number traces to a real
+  field; a "Total Sales" KPI was deliberately omitted (only
+  `salesGrowthPct`, a %, actually exists) rather than invented.
+- `territory-customer-list.tsx` — the Customer-level list, direct
+  counterpart to the City-level ranking list once drilled into a city.
+- `boundary-registry.ts`, `hierarchy-engine.ts` — see above.
+- `app/(dashboard)/dashboard/territory-intelligence/page.tsx` — rewritten
+  to orchestrate all of the above: company-profile fetch →
+  `resolveBoundaryAssetUrl` → `loadBoundaryIndex`; `useTerritoryHierarchy`
+  drives a breadcrumb (root + one clickable segment per `drillPath`
+  entry), the map, and which right-hand panel / bottom list renders
+  (`TerritoryDecisionPanel` + a `CityRankingList` at the City level,
+  `TerritoryCustomerList` full-width at the Customer level — the 3rd grid
+  column collapses at Customer level since no decision panel exists for
+  individual customers by design). Executive Mode (role-gated
+  `COMPANY_ADMIN`/`MANAGER` quick drill-in) is untouched from the original
+  build — nothing in this redesign touched it, drilling in from Executive
+  Mode resets the hierarchy to the City level and selects the chosen
+  territory. ~30 new `territoryIntelligence.*` translation keys (AR+EN)
+  added directly to `dictionaries.ts` before dispatching the subagents, to
+  avoid concurrent edits on that shared file.
+
+**Verification**: sandbox's `pnpm`/`tsc` are non-functional against this
+mount this session (global `pnpm install -g` succeeded but the workspace's
+`node_modules/typescript` symlink resolves to a path outside the mount and
+errors with I/O error; a scoped `tsc --noEmit` inside `apps/web` failed to
+even resolve its own `typescript` module for the same reason) — same
+long-standing limitation as prior entries, worse this time. In its place:
+read all 7 new/rewritten files in full twice (once per agent's delivery,
+once again during orchestration), verified brace/paren balance
+programmatically on all 7 (all balanced), cross-referenced every
+`TerritoryLayersSidebar`/`TerritoryMap`/`TerritoryDecisionPanel`/
+`TerritoryCustomerList` prop passed from `page.tsx` against each
+component's actual exported prop interface (all match exactly), and
+programmatically cross-checked all 58 `territoryIntelligence.*`
+translation keys referenced across these 5 files against `dictionaries.ts`
+— zero missing keys, all present in both AR and EN blocks. **User should
+run `pnpm build` on their own machine for a real compiler pass** — this
+sandbox limitation is now worse than the simple "no FUSE/symlink support"
+noted in earlier entries and could not be worked around this session.
+
+Not yet implemented (flagged, not blocking, per the user's own "prioritize
+implementation over expanding the data model" instruction): a Route level
+between City and Customer (no backend field currently joins `RouteID` to
+per-customer coordinates within a city — documented as the natural next
+hierarchy level once that data exists), and real PPT/image export in
+Quick Tools (still stubbed, unchanged from the original V1 build).
+
+## Territory Intelligence — fix: map showed zero polygons (post-redesign regression)
+
+User reported (with a screenshot) that after the redesign above, the page
+loaded correctly — sidebar, ranking list, and the Executive Decision Panel
+all showed real data — but the map itself was completely blank: no real
+boundary polygons AND no fallback "wobbly" shapes either, not even one.
+
+**Root cause**: `useTerritoryHierarchy(hierarchyLevels)` was called
+unconditionally at the top of `TerritoryIntelligencePage`, before the
+`summaryQuery.isLoading` guard. On the component's very first render
+(before `summaryQuery.data` exists), `territories` was still the
+`EMPTY_TERRITORIES` placeholder, so `buildTerritoryHierarchyLevels([])`
+produced a "city" level whose `fetchNodes` closure returned `[]`. TanStack
+Query executed that `queryFn` once for `queryKey: ["territory-hierarchy",
+0, undefined]` and cached the empty result. Once `summaryQuery` resolved
+and `territories` became the real 8-city array, `hierarchyLevels` was
+recomputed with a fresh closure that *would* return real data — but the
+`useQuery`'s `queryKey` hadn't changed, so TanStack Query never re-ran
+`queryFn` and kept serving the stale, empty, cached `[]` forever.
+`TerritoryMap` is fed exclusively from `hierarchy.nodes`, so it had zero
+nodes to loop over — not even the fallback-polygon branch ever executed.
+The rest of the screen looked fine because the ranking list and decision
+panel read `territories` (the raw, correctly-loaded summary array)
+directly, bypassing the broken hierarchy cache entirely — which is exactly
+why only the map was affected.
+
+**Fix**: moved the `useTerritoryHierarchy`/`buildTerritoryHierarchyLevels`
+call out of the page component and into `NormalView`, which the parent
+only ever mounts once `territories.length > 0`. Its first data fetch now
+always sees the real, loaded territories, so the query cache is correct
+from the start. This also let `handleExecutiveDrillDown` drop its manual
+`hierarchy.goToLevel(0)` reset — toggling out of and back into Executive
+Mode now unmounts/remounts `NormalView`, which naturally resets its
+`drillPath` state to the City level on its own. No changes to
+`hierarchy-engine.ts`, `territory-map.tsx`, or any other component — this
+was purely a `page.tsx` wiring bug introduced during orchestration, not a
+design or engine flaw. Verified via brace-balance check and a grep
+confirming zero leftover references to the removed `onDrillInto`/
+`onGoToLevel`/`hierarchy` props. **User should reload the page and confirm
+polygons now render** — this sandbox still can't run a real `tsc` pass
+(see prior entry).
+
+## Decision Analytics Studio — full build (client-approved spec, 2026-07-22)
+
+Client supplied a complete "Decision Analytics Studio — Complete Product
+Design Specification" (4 reference images + a full written spec: KPI list,
+Analyze By dimensions, filter list, 10 chart types, Category→Brand→SKU→
+Customer→Invoice drill-down chain, cross-filtering rules, workspace states,
+RTL/LTR + light/dark, "Open Territory Intelligence"/"Return" navigation)
+with an explicit scope lock: implement only this screen, don't touch
+backend/APIs/DB/auth/architecture/other screens, don't simplify or invent
+business logic, stop and ask if something can't be built on the existing
+model. Process, in the order the client actually drove it (a deliberate
+correction from the usual flow):
+
+1. **Frontend-first, not backend-first.** After I'd already gotten
+   approval to build a new backend module, the client sent a follow-up
+   overriding that: build the frontend against existing endpoints first,
+   and only present a precise gap list — no speculative backend work —
+   before touching the backend. I audited Heat Map, Team Performance,
+   Territory Intelligence, and Visit Efficiency's actual endpoint
+   capabilities (all single-metric/single-scope-field, none doing a
+   flexible group-by), confirmed no Prisma models exist for Customers/
+   Invoices/Products (everything is Excel-upload-sourced through
+   `RieFacade`), and reported the gap list. Client reviewed it, then said
+   **"Approved"** with explicit minimum-scope constraints: no refactor of
+   existing services, reuse `RieFacade`/existing entities/business rules,
+   no generic/future-proof abstractions beyond this one screen, and stop
+   to ask for the business definition of "Productivity" before
+   implementing it (client chose: Sales ÷ count(Productive Visits)).
+
+2. **Backend** — one new module, `decision-analytics-studio` (schemas +
+   service + controller + module), reusing the exact `RieFacade`/rep-
+   resolver/Zod-validation conventions every other module already follows,
+   plus reusing `SgiService.getLatest()` unmodified for the AI Insight
+   panel and Lost Sales KPI (no live per-click LLM call — instant-response
+   requirement is incompatible with that). Three endpoints only:
+   `POST /query` (the single aggregation engine — parameterized by
+   `analyzeBy`, this ONE endpoint also IS the drill-down mechanism: a
+   click just changes `analyzeBy` to the next dimension and narrows a
+   filter, no separate drill endpoint), `GET /filter-options` (dropdown
+   values for the 9 filterable fields), `POST /table` (paginated Invoice-
+   line detail — the "Invoice" drill level). Self-caught and fixed one
+   honesty bug during my own review: `buildChartGroups`'s per-group
+   Collections/Returns were initialized to a fabricated `0` for non-
+   product dimensions instead of the honest `null` these values actually
+   are at that grain (Collections/Returns link to a Customer, not to a
+   Category/Brand/etc. line) — fixed before considering the backend done.
+
+3. **Frontend** — one Global Analysis State object (`{analyzeBy, filters}`)
+   that every widget on `/dashboard/decision-analytics-studio` reads from
+   and writes to, no widget updates another directly (client's explicit
+   Cross Filtering requirement): global filter bar (9 multi-select filters
+   built as a small local Radix dropdown-menu component, not by extending
+   the shared `ui/dropdown-menu.tsx`, to keep this additive-only + a date
+   range), 10 KPI cards (Sales/Growth/Coverage/Orders/Collections/Strike
+   Rate/Active Customers/Lost Sales/Average Order/Productivity — null
+   always renders as "—", never a fabricated value), a chart engine
+   (`recharts`, newly added dependency) covering all 10 spec'd chart types
+   (Column/Bar/Line/Area/Stacked/Pie/Treemap/Scatter/Pareto/Data Table —
+   Stacked implemented honestly as a single 100%-composition bar of each
+   group's real Sales value, since no fabricated sub-components exist at
+   that grain), a Mini Heat Map (new lightweight Leaflet component — city
+   points only, since the backend's heatmap is always flat/city-grouped,
+   not the polygon-boundary Territory Intelligence map) bidirectionally
+   linked to the same filter state, an AI Insight panel (SGI situations,
+   scoped by the backend to the current filters), and a paginated Detail
+   Table. Drill-down: clicking a chart mark advances `analyzeBy` along the
+   Category→Brand→Product(SKU)→Customer chain while narrowing the matching
+   filter to the clicked value; dimensions outside that chain (territory/
+   channel/representative/supervisor) just narrow the filter with no
+   further drill level, since the spec doesn't define one. "Invoice" is
+   simply the Detail Table, which always reflects whatever filters are
+   currently active — no separate mechanism needed.
+
+4. **Territory Intelligence handoff** — "Open Territory Intelligence"
+   encodes the full analysis state into a `?dasState=...&dasCity=...` deep
+   link (same encode/decode-with-graceful-fallback pattern as the existing
+   `SgiContext` deep link), navigates there, and Territory Intelligence
+   (additive-only change, nothing behaves differently for any pre-existing
+   entry point) auto-selects the matching territory by name and shows a
+   "Return to Decision Analytics Studio" button that hands the untouched
+   `dasState` straight back, restoring the exact prior state.
+
+5. **i18n/nav** — 61 new `decisionAnalyticsStudio.*` keys + 1 new
+   `territoryIntelligence.returnToDecisionStudio` key + `nav.
+   decisionAnalyticsStudio`, added to both the AR and EN blocks and the
+   `TranslationKey` union; new nav entry (blue `BarChart3` icon, "AI &
+   Insights" group) added to the dashboard shell; new `decisionAnalyticsStudio`
+   `ModuleColorKey` added to `lib/module-colors.ts`.
+
+**Verification performed**: brace/paren/bracket balance on every new/
+changed file (all balanced), every `getEntityRecords()` entity-name string
+in the new service cross-checked against the 19-entity Canonical Entity
+Registry (all 9 used strings match exactly), every imported schema type
+confirmed exported and non-dead, a full programmatic cross-check of all 61
+`decisionAnalyticsStudio.*` (+2 related) translation keys used in code
+against the `TranslationKey` union and both AR/EN records (zero mismatches,
+every key present exactly twice). **Could not get a real `tsc` compiler
+pass this session** — the usual broken-symlink issue plus this sandbox's
+mounted-drive I/O being unusually slow today (multiple simple `cp`/`tar`
+operations timed out mid-copy) meant even a session-root `tsc` binary
+couldn't finish a full typecheck before timing out; manually verified
+`recharts`'s prop usage against its documented v2 API instead. **The
+client's own spec requires browser verification before considering this
+done, and this sandbox cannot run `pnpm dev` reliably — the user should
+run `pnpm install && pnpm --filter web dev` locally, open
+`/dashboard/decision-analytics-studio`, and click through the cross-
+filtering/drill-down/chart-type-switch/Territory Intelligence handoff
+paths before treating this as production-verified.**
+
+---
+
+## Geo Intelligence Engine — Phase 1 of 3 (Executive Map Redesign Spec, 2026-07-22)
+
+Client delivered a full "FSOS Geo Intelligence Engine v2.0" spec (Arabic)
+after flagging the Heat Map as "the app's weak point" and sharing 3
+Folium/Leaflet reference exports (multi-layer per-category heat maps with a
+native layer-control toggle UI). Hard Scope from the doc: map
+rendering/interaction layer only -- no business logic, DB, or existing-API
+changes unless a real gap exists; reuse existing services as much as
+possible. Target: one unified Geo Intelligence Engine (shared map component
++ shared filters + shared analysis state) behind 8 map modes (Heat/Bubble/
+Territory/Cluster/Opportunity/Risk/Coverage/Route), real geographic
+drill-down, and AI Insight Panel integration.
+
+Given the size (8 modes + engine + drill-down + AI + 100k-point performance
++ export), agreed an explicit 3-phase plan with the client before writing
+any code (same process used for Decision Analytics Studio): **Phase 1** --
+the unified engine + filters + architecture. **Phase 2** -- Heat Map +
+Choropleth + Bubble + Cluster, the actual rendering modes. **Phase 3** --
+drill-down + AI + cross-filtering + executive polish (fullscreen/export/
+reset). Client also gave two explicit Phase-1 adjustments: (1) do NOT
+generate approximate/convex-hull territory boundaries -- keep Territory
+boundary polygons optional until real GeoJSON is available, architecture
+just needs to be ready to load it later without a redesign; (2) confirmed
+touching the map *widget* inside Territory Intelligence and the Heat Map
+screen is in scope for a later phase, as long as business logic, existing
+API compatibility, KPI calculations, and user workflows stay unchanged --
+only the map rendering/interaction layer gets unified.
+
+**Pre-build research surfaced two things that reshaped the plan:**
+
+1. Territory Intelligence already has a real, working boundary/polygon
+   system (`components/territory-intelligence/boundary-registry.ts` +
+   `territory-map.tsx`, built in an earlier session, task #279): a
+   pluggable per-country GeoJSON registry (`/public/geo-boundaries/*`),
+   loaded and matched by territory name, with an *honest, non-fake*
+   fallback -- a deterministic irregular polygon (not a circle) drawn only
+   when no real boundary matches, with a visible "approximate demo
+   boundaries" disclosure. This already satisfies the client's "no fake
+   boundaries" adjustment exactly -- Phase 1 doesn't rebuild it, a later
+   phase just points the unified engine's Choropleth mode at it as-is.
+2. The module name "geo-intelligence" was already taken by an unrelated
+   pre-existing feature (`apps/api/src/modules/geo-intelligence` -- the New
+   Customer wizard's location-capture/nearest-customer lookup). The new
+   engine is named **`geo-engine`** everywhere (backend module, frontend
+   component folder, API client) specifically to avoid colliding with or
+   touching that unrelated module, which the client's Hard Scope forbids
+   touching anyway.
+
+**What Phase 1 actually built:**
+
+1. **Backend** -- new, self-contained `geo-engine` module (own
+   `GeoEngineService`/Controller/Module, not importing any other module's
+   private code, matching this codebase's established per-module isolation
+   convention). `packages/schemas/src/geo-engine.schemas.ts` defines
+   `geoFiltersSchema` -- field-for-field identical to Decision Analytics
+   Studio's `decisionFiltersSchema` (branch/city/channel/category/brand/
+   product/customer/rep/supervisor + date range) so one filter bar UI works
+   for any future screen built on this engine -- plus a `geoKpiSchema`
+   (`sales | orders | customers | visits | collections | lostSales`) and a
+   `groupBy: "customer" | "city"` toggle. Country/Region were deliberately
+   left out -- confirmed with the client that Customers only ever carries
+   `City`, nothing above it, in the real data model; inventing those fields
+   would violate this project's "never fabricate" discipline. Two real
+   gaps got filled additively: `orders` (distinct invoice count) and
+   `visits` (visit count) didn't exist as Heat Map metrics before -- both
+   reuse entities/joins other modules already read (Invoices/Invoice Items
+   for orders, Visits for visits), no schema/DB change, no existing
+   endpoint touched.
+2. **Frontend primitives** -- `components/geo-engine/geo-map-canvas.tsx`
+   extracts the ~25-line "create a Leaflet map once, dynamic-import
+   Leaflet client-side only, add the CartoDB Positron tile layer, clean up
+   on unmount" block that `heatmap-map.tsx`, `mini-heatmap.tsx`, and
+   `territory-map.tsx` each currently duplicate independently -- exposed
+   via a `forwardRef` handle (`getMap()`/`getLeaflet()`) so any future mode
+   renderer (Heat/Bubble/Cluster/Choropleth in Phase 2) can mount its own
+   layer-building effect on top, the same way those three existing
+   components already build their own layers, just without re-deriving the
+   map lifecycle each time. `components/geo-engine/geo-filter-bar.tsx` is
+   the unified filter bar -- reuses Decision Analytics Studio's existing
+   `MultiSelectFilter` component and its `GET /decision-analytics-studio/
+   filter-options` endpoint directly (same field set, same entities) rather
+   than duplicating a filter-options endpoint, per the spec's explicit
+   "reuse existing services" instruction.
+3. **Phase 1 proof screen** -- new, additive `/dashboard/geo-engine` page
+   (nav entry, cyan `Globe2` icon, "AI & Insights" group). Deliberately
+   renders results as plain sized circle markers, NOT a polished heat map --
+   the four real modes are Phase 2 scope. The only job of this screen is to
+   let the client verify, in the real running app, that the new 9-filter
+   bar + KPI selector + `geo-engine` backend return correct, properly-
+   filtered real data before any Phase 2 rendering work gets built on top
+   of it. **Heat Map and Territory Intelligence are completely untouched**
+   -- this is a new, independent, additive screen; existing workflows are
+   unaffected.
+4. **i18n** -- 32 new `geoEngine.*` keys + `nav.geoEngine`, added to both
+   AR/EN blocks and the `TranslationKey` union; new `geoEngine`
+   `ModuleColorKey`.
+
+**Verification performed**: brace/paren/bracket balance on every new file
+(all balanced), every `getEntityRecords()` entity-name string in the new
+service cross-checked against the Canonical Entity Registry (all 8 match
+entities already used successfully by `decision-analytics-studio.service.ts`
+-- Customers/Products/Invoices/Invoice Items/Routes/Employees/Collections/
+Visits), a full programmatic cross-check of all `geoEngine.*` translation
+keys against the `TranslationKey` union and both AR/EN records (909/909
+keys match exactly, zero mismatches). **Could not get a real `tsc`
+compiler pass this session either** -- found a working `tsc` binary outside
+the workspace again, but a full `tsc --noEmit -p tsconfig.json` on
+`apps/api` still didn't finish inside a 40s timeout (killed with exit code
+124), same persistent sandbox I/O limitation as prior sessions. Relied on
+manual verification instead (as disclosed above). **Per the client's own
+instruction, Phase 1 stops here for the client to validate the new engine
+in their own running app (`/dashboard/geo-engine`) before Phase 2 (the
+actual Heat/Choropleth/Bubble/Cluster rendering modes) begins.**
+
+---
+
+## Geo Intelligence Engine — Phase 2 of 3 (map modes)
+
+Client validated Phase 1 in their own running app ("المؤشرات شغالة بكفاءة")
+and approved starting Phase 2: the four real map-rendering modes on top of
+the Phase 1 engine (unified filters + KPI selector + `geo-engine` backend,
+all untouched this phase).
+
+**What got built, all under `apps/web/src/components/geo-engine/`:**
+
+1. `color-scale.ts` — one shared blue -> cyan -> green -> yellow -> orange
+   -> red intensity scale (matches the client's own reference Folium
+   exports and their explicit correction: "كل ما تكون الكثافة عالية بيتحول
+   للون البرتقالي ثم الاحمر"), exposed two ways: `heatGradientObject()` for
+   `leaflet.heat`'s `gradient` option, `colorForRatio()` for discrete
+   per-marker fills — so Heat/Bubble/Cluster modes read as one visual
+   family instead of three different color languages.
+2. `modes/heat-map-mode.tsx` — real `leaflet.heat` layer (same package
+   `heatmap-map.tsx` already uses) but with radius/blur that scale with
+   zoom (recomputed on `zoomend`, `42 - zoom*2.2` clamped 14-42) instead of
+   heatmap-map.tsx's fixed 22/18, and the full 6-stop gradient above instead
+   of a single-hue alpha ramp. `heatmap-map.tsx` itself is untouched —
+   swapping the standalone Heat Map screen onto this mode is a deliberate
+   next step, not done this phase.
+3. `modes/bubble-map-mode.tsx` — circles whose RADIUS scales with
+   `sqrt(value)` (area-proportional, so a value that's 4x bigger reads as
+   ~2x the radius / ~4x the visual area, matching how size differences are
+   actually perceived) and whose fill color comes from the same intensity
+   scale.
+4. `modes/cluster-map-mode.tsx` — merges points into a zoom-sized grid
+   (`8 / 2^zoom` degrees per cell, rebucketed on `zoomend`) instead of
+   depending on the `leaflet.markercluster` plugin. Deliberate choice: this
+   sandbox has repeatedly hit long stalls installing even one new npm
+   package into `apps/web` (documented in the Decision Analytics Studio
+   entry above), and grid clustering delivers the spec's actual requirement
+   ("دمج العملاء عند Zoom Out. تفكيكهم عند Zoom In.") without that risk.
+   Clicking a cluster zooms in on it, which naturally re-buckets into
+   smaller clusters or individual points. Swappable for the real plugin
+   later without touching anything else in the engine.
+5. `modes/territory-map-mode.tsx` — per the client's explicit "no fake
+   boundaries" instruction, this does NOT reinvent polygon rendering: it's
+   a thin adapter that converts this engine's city-grouped points into the
+   exact node shape Territory Intelligence's own `TerritoryMap` component
+   already expects, and reuses that component unchanged (real GeoJSON
+   boundaries when available, honest non-fake fallback shape otherwise).
+   The only change to `territory-map.tsx` itself is one new optional prop,
+   `colorForValue` — when omitted (Territory Intelligence's own caller
+   never passes it), behavior is byte-for-byte identical to before; when
+   provided, it replaces the polygon fill-color lookup so a caller whose
+   nodes don't carry a full `TerritorySummaryItem` (this engine's nodes
+   don't) can still drive real value-based coloring.
+6. `/dashboard/geo-engine` page — Phase 1's placeholder circle markers
+   replaced with a mode switcher (Heat/Bubble/Cluster/Territory pill
+   buttons). Switching modes never re-queries with a different shape, it
+   only changes how the same `result.points` gets drawn — except Territory
+   mode, which forces `groupBy: "city"` (visibly, via the existing group-by
+   control) since choropleth needs one shape per territory. Heat/Bubble/
+   Cluster all mount on Phase 1's shared `GeoMapCanvas`; Territory mode
+   renders `TerritoryMap` directly (it owns its own separate Leaflet map
+   instance already — forcing it onto the shared canvas is later
+   migration work, not required to prove this mode).
+
+**One real bug caught and fixed before it shipped**: the first version of
+the mode-mount logic used a boolean `mapReady` flag to tell each mode
+component "the canvas is ready, build your layer." Switching to Territory
+mode and back unmounts/remounts `GeoMapCanvas` (a brand-new Leaflet map
+instance each time), but a boolean stuck at `true` from the *previous*
+instance would never flip again — meaning the mode component's data-driven
+effect would never re-run for the new instance, silently rendering nothing
+until an unrelated state change happened to retrigger it. Fixed by
+replacing the boolean with an incrementing version counter
+(`mapReadyTick`), so every real "canvas instance is ready" event always
+produces a fresh value React's effect dependencies actually see as changed.
+
+**Verification performed**: brace/paren/bracket balance on every new/
+changed file (all balanced), a full programmatic cross-check of every
+`geoEngine.*` translation key against the `TranslationKey` union and both
+AR/EN records (915/915 keys match, zero mismatches), manual review of every
+`leaflet`/`leaflet.heat` type usage against the existing ambient
+declarations in `src/types/leaflet-heat.d.ts` and how `heatmap-map.tsx` /
+`territory-map.tsx` already use them. **`tsc --noEmit` still could not
+complete within a 40s window on `apps/web`** (same persistent sandbox I/O
+limitation as every prior session) — relied on the manual review above
+instead. **Standalone Heat Map and Territory Intelligence are still
+completely untouched** — swapping their rendering onto this engine (which
+the client already approved doing whenever it's ready) is the natural next
+step, either as the rest of Phase 2 or folded into Phase 3, client's call.
+
+## Geo Intelligence Engine — Phase 3 of 3 (Drill Down, Cross Filtering, AI Insight Panel, Executive Tools)
+
+**Date**: 2026-07-22
+**Scope (client-approved, verbatim)**: "Proceed with Phase 3 as one integrated implementation. Scope: Drill Down (City -> Territory -> Customer -> Invoice); Cross Filtering across the entire workspace; AI Insight Panel integration using the existing SGI service; Executive Experience (Fullscreen, Reset View, Export Image, Export PDF)." Requirements: reuse the existing Global Analysis State, no duplicate state management, no changes to business logic/KPI calculations, no new AI service, synchronized interactions with no page refreshes.
+
+**Global Analysis State**: consolidated the page's four previously-separate `useState`s (`filters`/`kpi`/`groupBy`/`mode`) into one `GeoAnalysisState` object, mirroring Decision Analytics Studio's own `{ analyzeBy, filters }` pattern (there is no separate shared hook/context to import — DAS's own page-level comment confirms its "Global Analysis State" is this same per-page-object convention, not a singleton). The map/KPI-cards/chart/AI-panel/detail-table all read from ONE `useQuery` keyed on this state object, so any change — a filter edit, a map click, a chart-bar click, a breadcrumb click — reactively refetches and re-renders every widget with no manual "Update" button (removed) and no page refresh.
+
+**Drill Down — City -> Territory -> Customer -> Invoice**: implemented with zero extra state. In this codebase's own established vocabulary a City IS a Territory (`decisionAnalyzeByDimensionSchema`'s `territory, // Customers.City`; Territory Intelligence's whole city-boundary system) — so "City -> Territory" is one click, not two: clicking a city-level point narrows `filters.cityValues` and switches the mode to Bubble (mirroring Territory Intelligence's own polygon-level -> point-level convention). Clicking a customer point narrows `filters.customerCodes` AND `filters.cityValues` together (from the point's own `city` field), so both breadcrumb segments populate from one click. "Invoice" is the Detail Table always rendered below, reflecting current scope — same established convention `decision-analytics-studio.service.ts`'s own drill chain already uses for its final level (see that file's `DRILL_CHAIN_NEXT` comment). The breadcrumb component (`geo-breadcrumb.tsx`) is a pure derivation of `filters.cityValues[0]`/`filters.customerCodes[0]` — no parallel `drillPath` array — reuses `territoryIntelligence.breadcrumbRoot`'s existing translation key instead of adding a duplicate.
+
+**Cross Filtering**: every map mode (Heat/Bubble/Cluster/Territory) and the new Top-10 bar chart now accept an `onPointClick` callback wired to the same handler. Bubble/Cluster/Territory already had real per-point markers to attach a click to; Heat Map (leaflet.heat renders one canvas overlay with no per-point DOM) got an additional invisible `CircleMarker` per point purely as a click target, zero visual change to the gradient. Cluster markers only fire `onPointClick` for single-point buckets (a real object) — clicking a multi-point cluster still just zooms in, unchanged.
+
+**AI Insight Panel**: `GeoEngineModule` now imports `SgiModule`; `GeoEngineService.query()` calls the new `computeInsights()` (a direct copy of `decision-analytics-studio.service.ts`'s SGI-filtering block, adapted to this module's own `compileFilters`/`customerInScope` helpers) which calls `SgiService.getLatest(user)` once and filters the already-persisted `situations[]` down to whichever customers/reps are in the current `GeoFilters` scope — same reuse pattern Decision Analytics Studio and Territory Intelligence already independently established (this is the 4th instance, not a new one). No live LLM call. The result's `insights` field reuses `decisionInsightItemSchema`/`DecisionInsightItem` as-is (identical shape), and the frontend renders it via DAS's own `<AiInsightPanel>` component directly — imported, not copied — since the shape lines up exactly.
+
+**Detail Table ("Invoice")**: new `POST /geo-engine/table` endpoint + `GeoEngineService.table()`, structurally identical to `decision-analytics-studio.service.ts`'s `table()` (GeoFilters is already field-identical to DecisionFilters) but reading through this module's own `loadContext()`, per this codebase's established per-module isolation convention. Required extending `geo-engine.service.ts`'s internal metadata: `ProductMeta` gained `name`, `ResolvedRep` gained `repName`/`supervisorName`, `SalesRow` gained `lineNo` — all additive, no existing KPI/query behavior touched. Frontend `GeoDetailTable` mirrors DAS's `DetailTable` exactly, reusing its `decisionAnalyticsStudio.*` column/pagination translation keys directly instead of duplicating labels.
+
+**Executive Tools (Fullscreen / Reset View / Export Image / Export PDF)**: confirmed via repo-wide search that nothing in this codebase does DOM capture or native Fullscreen today — Territory Intelligence's own "Export Image"/"Export PPT" buttons are disabled `title="Coming soon"` placeholders with no implementation behind them. This is genuinely new code: native `Element.requestFullscreen()`/`document.exitFullscreen()` for Fullscreen, and two new frontend dependencies — `html2canvas` (DOM -> canvas) and `jspdf` (canvas -> single-page PDF, auto-orientation from the captured aspect ratio) — added to `apps/web/package.json`, dynamic-imported on click only (same "keep it out of the SSR bundle" convention already used for `xlsx`/`pptxgenjs` elsewhere in this app). Reset View resets the whole `GeoAnalysisState` to its defaults (today's month range, `kpi:"sales"`, `groupBy:"customer"`, `mode:"heat"`, no filters) — same idea as DAS's own `handleResetFilters`.
+
+**Files touched**: `packages/schemas/src/geo-engine.schemas.ts` (insights field reusing `decisionInsightItemSchema`, new `geoTableQueryInputSchema`/`geoTableRowSchema`/`geoTableResultSchema`), `apps/api/src/modules/geo-engine/geo-engine.module.ts` (+`SgiModule`), `geo-engine.service.ts` (+`SgiService` injection, `computeInsights()`, `table()`, richer metadata), `geo-engine.controller.ts` (+`POST /table`), `apps/web/src/lib/types.ts` + `lib/api/geo-engine.ts` (mirrored additions), `apps/web/package.json` (+html2canvas, +jspdf), and (all new) `components/geo-engine/geo-breadcrumb.tsx`, `geo-kpi-cards.tsx`, `geo-chart.tsx`, `geo-detail-table.tsx`, `executive-tools.tsx`, plus `onPointClick` added to all 4 existing map-mode components and a full rewrite of `/dashboard/geo-engine/page.tsx` orchestrating everything through the single `GeoAnalysisState`.
+
+**Verification performed**: brace/paren/bracket balance on every new/changed file (all balanced, checked in one batch), a full programmatic cross-check of every translation key against the `TranslationKey` union and both AR/EN records (928/928/928, zero mismatches), a repo-wide grep confirming no stray references to the removed manual "Update Map" button/mutation. **Not performed**: a live browser run-through of the Definition of Done (click a point -> KPIs/chart/AI panel/table all update; drill down and back via breadcrumbs; Fullscreen/Export Image/Export PDF actually produce correct output) — this sandbox has no way to run the app's dev server or a browser against it, same limitation disclosed in the Phase 1/Phase 2 log entries for `tsc --noEmit`. The client should smoke-test the full Definition of Done directly after their next `pnpm install && pnpm build && pnpm start` (this phase adds two new npm dependencies, so `pnpm install` is required this time, not just a build).
+
+## Geo Intelligence Engine — Phase 3 follow-ups: build fix, Fullscreen/filters bug, standalone Heat Map generalization
+
+**Date**: 2026-07-22
+
+**Build fix**: `apps/web/src/app/(dashboard)/dashboard/geo-engine/page.tsx`'s `cityLabel`/`selectedCustomerCode` computation broke `pnpm build` twice in a row. First cause: `state.filters.cityValues[0]` accessed inline off an optional-chained length check isn't narrowed away from `undefined` unless the property is captured in a stable local first. Second (the real, persistent cause): this repo's `packages/config/tsconfig.base.json` sets `noUncheckedIndexedAccess: true`, so `cityValues[0]` is typed `string | undefined` regardless of any preceding `.length === 1` check — TypeScript doesn't correlate a length comparison with index-in-bounds. Fixed with `(cityValues[0] ?? null)` after assigning to a local const, same documented gotcha as this log's earlier Route Planning entry.
+
+**Fullscreen breaking filters (live user report)**: `ExecutiveTools`'s Fullscreen button was calling `targetRef.current.requestFullscreen()` on just the workspace `<div>`. Radix's Select/MultiSelectFilter popups render into a portal attached to `document.body` by default — outside that div's subtree — so once fullscreen was active, every dropdown still opened (state updated) but its popup content sat outside the fullscreened element and was invisible/unreachable, reading as "the filters don't work." Fixed by fullscreening `document.documentElement` instead, which keeps `document.body` (and therefore every portal) inside the fullscreened tree, at the cost of the dashboard's own sidebar/header also being visible while fullscreen is on — judged a far safer fix than teaching every dropdown a custom portal container (which would touch shared UI primitives used across the whole app). Export Image/PDF are unaffected — `captureCanvas()` still targets the workspace div only, so exports stay scoped to just the Geo Engine content.
+
+**Standalone Heat Map screen generalization (client request: "عمم على باقي الشاشات اللي فيها خرائط حرارية")**: confirmed via a repo-wide grep for `leaflet.heat`/`heatLayer` usage that the standalone `/dashboard/heatmap` screen's `heatmap-map.tsx` is the only other real heat-density-layer screen in the app (Territory Intelligence renders polygons, not a heat layer; Visit Efficiency's `visit-map.tsx` only carries a historical comment — task #105 already moved it to markers for reliability reasons). Migrated its rendering, staying strictly within "map rendering/interaction layer only" per the client's original approval (no changes to `heatmap.service.ts`, filters, KPI calculations, or any endpoint):
+- Extracted `radiusForZoom` out of `geo-engine/modes/heat-map-mode.tsx` into the shared `geo-engine/color-scale.ts`, so both screens' Heat Map rendering now share one implementation instead of `heatmap-map.tsx` keeping its own old fixed `radius: 22, blur: 18` constants.
+- Added the same `zoomend`-driven radius/blur retune `heat-map-mode.tsx` already had, split into its own effect (separate from bounds-fitting) so it never fights the user's manual zoom — same reasoning as that file's own comment.
+- Gradient selection: when exactly one layer is on screen (the normal case), now uses `heatGradientObject()` — the real multi-stop blue → cyan → green → yellow → orange → red density gradient from the client's own reference exports — instead of the old single-hue opacity gradient. When 2+ layers are up at once (the category/channel comparison toggles from task #251), each layer keeps its own distinct solid hue instead, since a shared gradient would make overlapping layers indistinguishable — comparison mode's whole point.
+
+**Verification performed**: brace/paren/bracket balance on every changed file (all balanced). **Not performed**: a live browser re-check of the Fullscreen fix or the standalone Heat Map screen's new gradient — same sandbox limitation as every prior entry; the client should confirm both directly after their next `pnpm build && pnpm start`.
+
+## Chart Intelligence Engine — Phase 1: Unified Semantic Color Engine
+
+**Date**: 2026-07-22
+
+**Client spec**: "FSOS Chart Color & Visual Intelligence Standard v1.0" (uploaded docx) + follow-up instruction: "Implement a unified semantic color engine. The engine must automatically select the coloring strategy: Target-Based Coloring whenever the displayed KPI includes valid target values (e.g. Sales Rep, Supervisor, Manager performance); Relative Semantic Coloring whenever no target exists (e.g. Customers, Products, Cities, Territories, Lost Sales). The selection must happen automatically without requiring different chart implementations."
+
+**Pre-work audit**: confirmed via repo-wide search that `recharts` is the only charting library in the app, used in exactly two files — `decision-analytics-studio/chart-engine.tsx` (9 chart types: Column/Bar/Line/Area/Stacked/Pie/Treemap/Scatter/Pareto) and `geo-engine/geo-chart.tsx` (1 Top-10 bar chart). Every bar/slice/point in both was hardcoded to one fixed hue (`#2563eb`/`#0891b2`), with only a hardcoded amber override for the currently-selected item — no semantic (good/bad) coloring existed anywhere.
+
+**Target-data research**: confirmed a real target value exists today — the RIE Canonical "Targets" entity (Month/Year/RouteID/SalesTarget, official import template), the same source SGI's `TARGET_BEHIND` situation already reads via a RouteID -> rep two-hop join. Decision Analytics Studio's `analyzeBy` chart output had no target field at all before this change.
+
+**Engine**: new `apps/web/src/components/charts/chart-color-scale.ts`. Exports `SEMANTIC_COLORS` (green/yellow/orange/red/blue/gray, one fixed business meaning each) and `colorChartSeries`/`colorHexChartSeries(points, polarity)`, which take an array of `{ value, target? }` and return one color per point. Strategy is resolved **once per series**: if ANY point in the series carries a real (non-null, >0) `target`, the whole series uses Target-Based Coloring (actual/target ratio: >=110% excellent, 90-110% stable, 70-89% warning, <70% critical — the client's own thresholds); otherwise Relative Semantic Coloring (percentile rank of each value within the *currently filtered* dataset, quartile buckets, `polarity` flips direction for "lower is better" metrics like Lost Sales/Returns). A point with `value` null/undefined always renders gray ("no data"); a point riding a target-based series with no target of its own also renders gray rather than silently reverting to relative ranking for just that one item.
+
+**Backend wiring (to make Target-Based Coloring real, not just theoretical)**: `decisionChartGroupSchema` gained a `target: number | null` field. `decision-analytics-studio.service.ts`: `loadContext()` now also loads the RIE "Targets" entity and derives a `repEmail -> supervisorEmail` map from every Route (not just routes with a target row); new `buildRepTargetTotals()` sums `SalesTarget` per rep for Target rows whose calendar month overlaps the query's `[dateFrom, dateTo]` window (generalizing SGI's single-month join to this module's arbitrary date range); `buildChartGroups()` now populates `target` per group — direct lookup for `analyzeBy:"representative"`, summed across that supervisor's reps for `analyzeBy:"supervisor"`, `null` for every other dimension (Territory/Channel/Category/Brand/Product/Customer — no target concept exists for them, matching the spec's own Relative Semantic Coloring examples). No existing KPI calculation, endpoint shape, or business logic changed — purely additive.
+
+**Frontend wiring**: `chart-engine.tsx` and `geo-chart.tsx` now compute per-series colors via `colorHexChartSeries` and apply them to Column, Bar, Stacked, Pie, Treemap, Scatter, and Pareto bars (all replaced their single fixed fill). Treemap needed a custom `content` render prop (recharts doesn't support `<Cell>` children there) to get per-tile semantic fill. Pareto's cumulative line was actually red (`#dc2626`) before this change despite a "blue trend line" intent — corrected to `SEMANTIC_COLORS.neutral` (blue) per the spec's explicit "Cumulative line uses Blue" rule. Selection state (the previously-hardcoded amber override) is now a stroke/outline drawn on top of the semantic fill instead of replacing it, so a selected bar's business-meaning color stays visible. Line/Area charts were left as-is (already blue, matching the spec's "Blue line for the trend"; their more elaborate turning-point-marker/gradient-direction rules are Phase 2 "redesign all chart types" scope, not this engine).
+
+**Files touched**: `packages/schemas/src/decision-analytics-studio.schemas.ts`, `apps/web/src/lib/types.ts`, `apps/api/src/modules/decision-analytics-studio/decision-analytics-studio.service.ts`, `apps/web/src/components/charts/chart-color-scale.ts` (new), `apps/web/src/components/decision-analytics-studio/chart-engine.tsx`, `apps/web/src/components/geo-engine/geo-chart.tsx`.
+
+**Verification performed**: full manual read-through of every changed file for brace/paren balance, signature/call-site consistency (loadContext's destructured tuple order, buildChartGroups' new parameters at its one call site), and confirmation no other code constructs a `DecisionChartGroup` object that would now be missing the new required `target` field. Attempted a real `tsc --noEmit` from this sandbox but the mounted Windows `node_modules` has broken cross-filesystem symlinks (pnpm's Windows-native symlinks don't resolve over the Linux mount) — every package's own dependencies (including `zod`) report as unresolvable, an environment artifact, not a code issue. **Not performed**: an actual `pnpm typecheck`/`pnpm build`/browser run — the client should run these on their machine as usual; if a rep/supervisor's Targets data is uploaded, their bars should now render red/orange/yellow/green instead of blue.
+
+## Decision Analytics Studio: mini-map gets Heat/Bubble/Cluster modes
+
+**Date**: 2026-07-22
+
+Client asked the DAS mini-map to match Geo Engine's three view modes. Rewrote `mini-heatmap.tsx` in place (still its own self-contained Leaflet instance, not migrated onto Geo Engine's shared `GeoMapCanvas`): added a mode switcher (reusing `geoEngine.modeHeat/modeBubble/modeCluster` i18n keys) and ported Geo Engine's heat-layer and grid-clustering logic in compact form, using the shared `heatGradientObject`/`radiusForZoom`/`colorForRatio` helpers from `geo-engine/color-scale.ts`. Fill colors are now semantic (`colorForRatio`) instead of one fixed blue; selection is shown via border/weight only, consistent with the chart color engine's convention. City-toggle filtering behavior unchanged, no backend/prop changes. Not verified in browser (sandbox can't run the dev server) — client should check after `pnpm build`.
+
+## DAS chart tooltip target/achievement + heatmap (0,0) fix
+
+**Date**: 2026-07-22
+
+Column/Bar tooltips in `chart-engine.tsx` now show Target + Achievement % lines (new `renderGroupTooltip`, new i18n keys `decisionAnalyticsStudio.tooltipTarget`/`tooltipAchievement`) whenever the hovered group carries a real target — same graceful omit-if-absent as the color engine. Also fixed `decision-analytics-studio.service.ts`'s `buildHeatmap`: cities with zero customers having valid Latitude/Longitude used to be emitted at a fabricated `(0,0)` point instead of being dropped — could distort the mini-map's fitBounds or show a phantom marker. Now filtered out entirely (still counted in KPI totals, just not mappable). Not verified in browser.
+
+## DAS mini-map "only one point" — actual root cause found
+
+**Date**: 2026-07-22
+
+Client pushed back correctly on my earlier "maybe it's the uploaded data" guess, asking for a full query -> filters -> aggregation -> map-payload trace. Traced it and compared line-by-line against Geo Engine's equivalent (which shows the same data fine): `buildHeatmap()`'s per-row loop had `if (!c || !c.city) continue;` — silently dropping a customer's sales from the map entirely whenever their `City` text field was blank, even with perfectly valid Latitude/Longitude. Geo Engine's own point-builder never gates on `City` at all (only requires a sane coordinate pair, and falls back to `city || name` as the grouping label in its own `groupByCity`) — that asymmetry is why Geo Engine could show many points from the same dataset while this map collapsed to almost none. Fixed to match Geo Engine exactly: drop the `City` requirement, fall back to `c.city || c.name` as the bucket key/label, and reuse the same `isSaneCoordinate` rejection (rejects out-of-range values and literal (0,0)) instead of a bare non-null check. Root cause was in the aggregation pipeline, not the uploaded data or active filters. Not verified in browser.

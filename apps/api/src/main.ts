@@ -5,6 +5,7 @@ import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import helmet from "helmet";
+import compression from "compression";
 import cookieParser from "cookie-parser";
 import { AppModule } from "./app.module";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
@@ -16,6 +17,14 @@ async function bootstrap() {
   const config = app.get(AppConfigService).values;
 
   app.use(helmet());
+  // Performance pass (2026-07-21): several endpoints return large JSON
+  // payloads (Heat Map points, SGI situations, RIE-sourced datasets built
+  // from thousands of Excel rows) with no compression — every response was
+  // sent over the wire uncompressed. gzip here cuts payload size (JSON
+  // compresses very well, typically 70-90%) for every route with zero
+  // per-endpoint code changes. Threshold left at compression's 1KB default
+  // so small responses (auth, health) skip the CPU cost of compressing.
+  app.use(compression());
   app.use(cookieParser());
   app.enableCors({
     origin: config.app.corsOrigins,

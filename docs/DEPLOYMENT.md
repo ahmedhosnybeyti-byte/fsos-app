@@ -113,3 +113,40 @@ Two places had the old ngrok URL hardcoded/configured:
 
 Then retest the multi-question conversation that hit `ERR_NGROK_3200`
 before, to see if a stable host resolves it on its own.
+
+## 7. Deploying `apps/web` too (so you have one public URL for the app)
+
+Everything above only deploys the API. The web app (`apps/web`) is a
+separate Railway service using `Dockerfile.web` (added 2026-07-22), same
+turborepo-prune pattern, producing a minimal Next.js "standalone" server.
+
+1. In the **same Railway project** as the API service: **"+ Add" -> "GitHub
+   Repository"** -> select `fsos-app` again (adds a second, independent
+   service from the same repo).
+2. That new service -> **Settings -> Source -> Root Directory** = blank/`/`
+   (same reason as the API: the Dockerfile needs the whole monorepo as
+   context). **Settings -> Build -> Builder = Dockerfile, Dockerfile Path =
+   `Dockerfile.web`**.
+3. **Settings -> Build -> Build Args** (not Variables — see the Dockerfile's
+   own header comment for why): add
+   `NEXT_PUBLIC_API_URL=https://<your-api-service>.up.railway.app/api/v1`
+   using the API service's actual Railway domain from section 4 above, with
+   `/api/v1` appended (matches `.env.example`'s local convention).
+4. **Settings -> Networking -> Generate Domain** on this web service once it
+   deploys — this is the public URL you give to users.
+5. Go back to the **API** service's Variables and update:
+   ```
+   WEB_URL=https://<your-web-service>.up.railway.app
+   CORS_ORIGINS=https://<your-web-service>.up.railway.app
+   COOKIE_DOMAIN=<leave unset for cross-subdomain Railway URLs, or set your real domain if you attach one>
+   ```
+   This redeploys the API automatically; without it the browser will get
+   CORS errors calling the API from the deployed web URL.
+6. First login: use whatever SUPER_ADMIN/company credentials `pnpm
+   --filter @field-sales-os/database seed` created (see section 5) — check
+   `packages/database/prisma/seed.ts` for the exact seeded email/password if
+   you don't remember them.
+
+Note: `NEXT_PUBLIC_API_URL` is baked in at build time. If you ever change
+the API's domain later, you must trigger a **new build** of the web service
+(not just a restart) for the change to take effect.

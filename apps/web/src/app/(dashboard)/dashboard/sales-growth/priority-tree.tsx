@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { AlertTriangle, CalendarDays, ChevronRight, Clock, HelpCircle, Lightbulb, MessageCircle, Search, TrendingDown, Wallet } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { AlertTriangle, CalendarDays, ChevronRight, Clock, HelpCircle, Lightbulb, MessageCircle, PackageMinus, Search, TrendingDown, TrendingUp, Wallet } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,8 @@ const TYPE_LABEL: Record<SgiSituationType, string> = {
   CUSTOMER_DECLINING: "تراجع",
   CUSTOMER_INACTIVE: "خامل",
   COLLECTION_RISK: "تحصيل",
+  GROWTH_OPPORTUNITY: "فرصة نمو",
+  PRODUCT_DECLINE: "تراجع صنف",
 };
 
 const TYPE_ICON: Record<SgiSituationType, LucideIcon> = {
@@ -56,6 +58,8 @@ const TYPE_ICON: Record<SgiSituationType, LucideIcon> = {
   CUSTOMER_DECLINING: TrendingDown,
   CUSTOMER_INACTIVE: Clock,
   COLLECTION_RISK: Wallet,
+  GROWTH_OPPORTUNITY: TrendingUp,
+  PRODUCT_DECLINE: PackageMinus,
 };
 
 const SEVERITY_ICON_STYLE: Record<SgiSeverity, string> = {
@@ -184,28 +188,97 @@ function CountChip({ color, value }: { color: string; value: number }) {
   );
 }
 
-function StatTile({ label, value, className }: { label: string; value: number; className: string }) {
+// Clickable — selecting a tile filters the tree/list below to that
+// severity and smoothly scrolls it into view (see SummaryStats/PriorityCenter).
+// Purely a display filter over situations SgiService already scored;
+// invents nothing new.
+function StatTile({
+  label,
+  value,
+  className,
+  active,
+  onClick,
+}: {
+  label: string;
+  value: number;
+  className: string;
+  active?: boolean;
+  onClick?: () => void;
+}) {
   return (
-    <div className={cn("rounded-lg p-3 text-center", className)}>
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-lg p-3 text-center transition-all",
+        className,
+        onClick && "cursor-pointer hover:brightness-110",
+        active && "ring-2 ring-primary ring-offset-1 ring-offset-background",
+      )}
+    >
       <p className="text-2xl font-semibold">{value}</p>
       <p className="text-xs">{label}</p>
-    </div>
+    </button>
   );
 }
 
-function SummaryStats({ counts }: { counts: SeverityCounts }) {
+function SummaryStats({
+  counts,
+  activeSeverity,
+  onSelect,
+}: {
+  counts: SeverityCounts;
+  activeSeverity?: SgiSeverity | null;
+  onSelect?: (severity: SgiSeverity | null) => void;
+}) {
   return (
     <div className="grid grid-cols-4 gap-2">
-      <StatTile label="إجمالي الأولويات" value={counts.total} className="bg-secondary/40 text-foreground" />
-      <StatTile label="عالية" value={counts.high} className="bg-destructive/10 text-destructive" />
-      <StatTile label="متوسطة" value={counts.medium} className="bg-warning/10 text-warning" />
-      <StatTile label="منخفضة" value={counts.low} className="bg-success/10 text-success" />
+      <StatTile
+        label="إجمالي الأولويات"
+        value={counts.total}
+        className="bg-secondary/40 text-foreground"
+        active={!activeSeverity}
+        onClick={onSelect ? () => onSelect(null) : undefined}
+      />
+      <StatTile
+        label="عالية"
+        value={counts.high}
+        className="bg-destructive/10 text-destructive"
+        active={activeSeverity === "high"}
+        onClick={onSelect ? () => onSelect("high") : undefined}
+      />
+      <StatTile
+        label="متوسطة"
+        value={counts.medium}
+        className="bg-warning/10 text-warning"
+        active={activeSeverity === "medium"}
+        onClick={onSelect ? () => onSelect("medium") : undefined}
+      />
+      <StatTile
+        label="منخفضة"
+        value={counts.low}
+        className="bg-success/10 text-success"
+        active={activeSeverity === "low"}
+        onClick={onSelect ? () => onSelect("low") : undefined}
+      />
     </div>
   );
 }
 
-function TreeNode({ label, subtitle, counts, children }: { label: string; subtitle?: string; counts: SeverityCounts; children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
+function TreeNode({
+  label,
+  subtitle,
+  counts,
+  children,
+  defaultOpen,
+}: {
+  label: string;
+  subtitle?: string;
+  counts: SeverityCounts;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen ?? false);
   return (
     <div className="rounded-md border border-border">
       <button
@@ -238,10 +311,14 @@ function TreeNode({ label, subtitle, counts, children }: { label: string; subtit
 function SituationCard({ situation, onDiscuss }: { situation: SgiSituation; onDiscuss: (situation: SgiSituation) => void }) {
   const [open, setOpen] = useState(false);
   const Icon = TYPE_ICON[situation.type];
+  // GROWTH_OPPORTUNITY is upside (something to sell), not risk — its
+  // severity still ranks which opportunity is biggest, but the icon tint
+  // shouldn't read as a "problem" the way the other five types do.
+  const iconStyle = situation.type === "GROWTH_OPPORTUNITY" ? "bg-primary/15 text-primary" : SEVERITY_ICON_STYLE[situation.severity];
   return (
     <div className="rounded-md border border-border">
       <button type="button" onClick={() => setOpen((v) => !v)} className="flex w-full items-center gap-3 p-3 text-start transition-colors hover:bg-secondary/30">
-        <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full", SEVERITY_ICON_STYLE[situation.severity])}>
+        <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full", iconStyle)}>
           <Icon className="h-4 w-4" />
         </span>
         <div className="min-w-0 flex-1">
@@ -303,6 +380,34 @@ export function PriorityCenter({
   onDiscuss: (situation: SgiSituation) => void;
 }) {
   const [query, setQuery] = useState("");
+  // Selecting a summary tile filters the tree/list to that severity and
+  // auto-expands whatever groups remain, so the click reads as "open the
+  // relevant part of the tree" rather than just recoloring a number.
+  const [activeSeverity, setActiveSeverity] = useState<SgiSeverity | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+
+  const selectSeverity = (severity: SgiSeverity | null) => {
+    setActiveSeverity(severity);
+    // Next tick, after the filtered/expanded tree has rendered, so the
+    // scroll target's height already reflects the new content.
+    requestAnimationFrame(() => listRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
+
+  const visibleSituations = useMemo(
+    () => (activeSeverity ? situations.filter((s) => s.severity === activeSeverity) : situations),
+    [situations, activeSeverity],
+  );
+
+  // Perf pass (2026-07-21): groupByRep/groupBySector walk every visible
+  // situation to build the tree — for a COMPANY_ADMIN/MANAGER with a large
+  // company this was being redone on every keystroke in the search box
+  // (query was a dependency of the render, not of the grouping itself),
+  // even though the search only needs to filter the already-grouped
+  // sectors/reps by name. Memoized separately from `query` so typing in
+  // the search box only re-runs the cheap filterReps/filterSectors pass
+  // below, not the full re-group.
+  const groupedReps = useMemo(() => groupByRep(visibleSituations, repDirectory), [visibleSituations, repDirectory]);
+  const groupedSectors = useMemo(() => groupBySector(visibleSituations, repDirectory), [visibleSituations, repDirectory]);
 
   if (situations.length === 0) {
     return <p className="py-6 text-center text-sm text-muted-foreground">مفيش أولويات ظاهرة دلوقتي.</p>;
@@ -313,28 +418,39 @@ export function PriorityCenter({
   if (roleCode !== "COMPANY_ADMIN" && roleCode !== "MANAGER" && roleCode !== "SUPERVISOR") {
     return (
       <DayHeader>
-        <div className="space-y-2">
-          {situations.map((s) => (
-            <SituationCard key={s.id} situation={s} onDiscuss={onDiscuss} />
-          ))}
+        <div className="space-y-3">
+          <SummaryStats counts={countSeverity(situations)} activeSeverity={activeSeverity} onSelect={selectSeverity} />
+          <div ref={listRef} className="space-y-2 scroll-mt-4">
+            {visibleSituations.length === 0 ? (
+              <p className="py-4 text-center text-sm text-muted-foreground">مفيش مواقف بالدرجة دي دلوقتي.</p>
+            ) : (
+              visibleSituations.map((s) => <SituationCard key={s.id} situation={s} onDiscuss={onDiscuss} />)
+            )}
+          </div>
         </div>
       </DayHeader>
     );
   }
 
   if (roleCode === "SUPERVISOR") {
-    const reps = filterReps(groupByRep(situations, repDirectory), query);
+    const reps = filterReps(groupedReps, query);
     return (
       <DayHeader>
         <div className="space-y-3">
-          <SummaryStats counts={countSeverity(situations)} />
+          <SummaryStats counts={countSeverity(situations)} activeSeverity={activeSeverity} onSelect={selectSeverity} />
           <SearchBox value={query} onChange={setQuery} placeholder="بحث في المناديب…" />
-          <div className="space-y-2">
+          <div ref={listRef} className="space-y-2 scroll-mt-4">
             {reps.length === 0 ? (
               <p className="py-4 text-center text-sm text-muted-foreground">مفيش نتيجة مطابقة.</p>
             ) : (
               reps.map((rep) => (
-                <TreeNode key={rep.key} label={rep.name} subtitle={typeBreakdownLabel(rep.situations)} counts={countSeverity(rep.situations)}>
+                <TreeNode
+                  key={`${rep.key}::${activeSeverity ?? "all"}`}
+                  label={rep.name}
+                  subtitle={typeBreakdownLabel(rep.situations)}
+                  counts={countSeverity(rep.situations)}
+                  defaultOpen={!!activeSeverity}
+                >
                   {rep.situations.map((s) => (
                     <SituationCard key={s.id} situation={s} onDiscuss={onDiscuss} />
                   ))}
@@ -348,20 +464,31 @@ export function PriorityCenter({
   }
 
   // COMPANY_ADMIN / MANAGER: full 3-level tree.
-  const sectors = filterSectors(groupBySector(situations, repDirectory), query);
+  const sectors = filterSectors(groupedSectors, query);
   return (
     <DayHeader>
       <div className="space-y-3">
-        <SummaryStats counts={countSeverity(situations)} />
+        <SummaryStats counts={countSeverity(situations)} activeSeverity={activeSeverity} onSelect={selectSeverity} />
         <SearchBox value={query} onChange={setQuery} placeholder="بحث في القطاعات أو المناديب…" />
-        <div className="space-y-2">
+        <div ref={listRef} className="space-y-2 scroll-mt-4">
           {sectors.length === 0 ? (
             <p className="py-4 text-center text-sm text-muted-foreground">مفيش نتيجة مطابقة.</p>
           ) : (
             sectors.map((sector) => (
-              <TreeNode key={sector.key} label={sector.name} counts={countSeverity(sector.situations)}>
+              <TreeNode
+                key={`${sector.key}::${activeSeverity ?? "all"}`}
+                label={sector.name}
+                counts={countSeverity(sector.situations)}
+                defaultOpen={!!activeSeverity}
+              >
                 {sector.reps.map((rep) => (
-                  <TreeNode key={rep.key} label={rep.name} subtitle={typeBreakdownLabel(rep.situations)} counts={countSeverity(rep.situations)}>
+                  <TreeNode
+                    key={`${rep.key}::${activeSeverity ?? "all"}`}
+                    label={rep.name}
+                    subtitle={typeBreakdownLabel(rep.situations)}
+                    counts={countSeverity(rep.situations)}
+                    defaultOpen={!!activeSeverity}
+                  >
                     {rep.situations.map((s) => (
                       <SituationCard key={s.id} situation={s} onDiscuss={onDiscuss} />
                     ))}

@@ -21,7 +21,11 @@ export type ModuleColorKey =
   | "sgi"
   | "team"
   | "employees"
-  | "settings";
+  | "settings"
+  | "reports"
+  | "territoryIntelligence"
+  | "decisionAnalyticsStudio"
+  | "geoEngine";
 
 export const MODULE_BADGE_CLASSES: Record<ModuleColorKey, string> = {
   overview: "bg-sky-500/15 text-sky-600 dark:bg-sky-400/15 dark:text-sky-300",
@@ -41,4 +45,8 @@ export const MODULE_BADGE_CLASSES: Record<ModuleColorKey, string> = {
   team: "bg-orange-500/15 text-orange-600 dark:bg-orange-400/15 dark:text-orange-300",
   employees: "bg-blue-500/15 text-blue-600 dark:bg-blue-400/15 dark:text-blue-300",
   settings: "bg-slate-500/15 text-slate-600 dark:bg-slate-400/15 dark:text-slate-300",
+  reports: "bg-red-500/15 text-red-600 dark:bg-red-400/15 dark:text-red-300",
+  territoryIntelligence: "bg-amber-600/15 text-amber-700 dark:bg-amber-500/15 dark:text-amber-400",
+  decisionAnalyticsStudio: "bg-blue-600/15 text-blue-700 dark:bg-blue-500/15 dark:text-blue-400",
+  geoEngine: "bg-cyan-600/15 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-400",
 };

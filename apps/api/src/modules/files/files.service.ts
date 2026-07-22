@@ -200,9 +200,43 @@ export interface ReplaceFileOutcome {
   otherAccepted: FileRow[];
 }
 
+// 2026-07-20: multi-sheet batch uploads (File.batchId) store every sheet's
+// File row against the SAME physical storageKey — one uploaded .xlsx is
+// literally one object in storage, shared by up to 18 File records (one per
+// entity/sheet). Every reader (ExcelDatasetEntityProvider,
+// CanonicalHierarchyResolverService, the GPT Action, Route Planning,
+// Targets) calls downloadFileBuffer independently per entity, so a single
+// Visit Copilot daily-brief touching 8+ entities was re-downloading the
+// exact same bytes (measured: a real 40MB seed file) 8+ times over — this
+// showed up as download times that kept growing request over request (as
+// concurrent large downloads queued behind each other) even after the
+// parse-side caches were added. Caching the raw buffer by storageKey here,
+// below every one of those call sites, means the whole request pays for
+// that download exactly once regardless of how many entities share the
+// file. Safe indefinitely by construction: storageKey embeds an upload
+// timestamp+batchId, so a new upload never reuses an old key — no
+// invalidation logic needed, only a TTL/size cap to bound memory.
+// 2026-07-20: bumped from 5 minutes to 5 hours (~one work shift) after
+// confirming correctness never depends on this TTL — cache entries are
+// invalidated immediately on a new/replaced upload via the storageKey
+// itself changing, not by expiring. The TTL only bounds how long we hold
+// memory for data nobody's actively asking for; at current company/dataset
+// scale, trading a few hundred MB of RAM for far fewer cold-cache stalls
+// during a normal workday (rep opens app, steps away, comes back) is a
+// clear win. Revisit downward only if per-company memory footprint becomes
+// a real constraint (many more companies, each with large active datasets).
+const FILE_BUFFER_CACHE_TTL_MS = 5 * 60 * 60_000;
+const FILE_BUFFER_CACHE_MAX_ENTRIES = 50;
+
+interface FileBufferCacheEntry {
+  buffer: Promise<Buffer>;
+  createdAt: number;
+}
+
 @Injectable()
 export class FilesService {
   private readonly logger = new Logger(FilesService.name);
+  private readonly bufferCache = new Map<string, FileBufferCacheEntry>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -864,10 +898,44 @@ export class FilesService {
 
   // Used by GptModule's dataset Action endpoint to read the actual workbook
   // bytes for parsing (as opposed to getDownloadUrl, which is for humans).
+  // Cached by storageKey — see the class-level FILE_BUFFER_CACHE comment:
+  // every File row from the same batch upload shares one physical object,
+  // so this avoids re-downloading identical bytes once per entity/sheet.
   async downloadFileBuffer(id: string, companyId: string): Promise<Buffer> {
     const file = await this.prisma.file.findUnique({ where: { id } });
     if (!file || file.companyId !== companyId) throw new NotFoundException("File not found");
-    return this.storage.download(file.storageKey);
+
+    const key = file.storageKey;
+    const cached = this.bufferCache.get(key);
+    if (cached) {
+      this.bufferCache.delete(key);
+      this.bufferCache.set(key, cached);
+      return cached.buffer;
+    }
+
+    const buffer = this.storage.download(key);
+    this.bufferCache.set(key, { buffer, createdAt: Date.now() });
+    this.evictBufferCache();
+
+    try {
+      return await buffer;
+    } catch (err) {
+      const current = this.bufferCache.get(key);
+      if (current?.buffer === buffer) this.bufferCache.delete(key);
+      throw err;
+    }
+  }
+
+  private evictBufferCache(): void {
+    const now = Date.now();
+    for (const [key, entry] of this.bufferCache) {
+      if (now - entry.createdAt > FILE_BUFFER_CACHE_TTL_MS) this.bufferCache.delete(key);
+    }
+    while (this.bufferCache.size > FILE_BUFFER_CACHE_MAX_ENTRIES) {
+      const oldestKey = this.bufferCache.keys().next().value;
+      if (oldestKey === undefined) break;
+      this.bufferCache.delete(oldestKey);
+    }
   }
 
   // Plain substring search across every cell in every row of this file's
@@ -879,7 +947,7 @@ export class FilesService {
     const file = await this.prisma.file.findUnique({ where: { id } });
     if (!file || file.companyId !== companyId) throw new NotFoundException("File not found");
 
-    const buffer = await this.storage.download(file.storageKey);
+    const buffer = await this.downloadFileBuffer(id, companyId);
     // 2026-07-20: same fix as ExcelDatasetEntityProvider/CanonicalHierarchyResolverService
     // — this file's storageKey may point at a large multi-sheet batch
     // workbook; restrict the parse to the one sheet this record actually

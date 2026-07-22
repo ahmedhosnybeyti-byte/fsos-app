@@ -795,7 +795,14 @@ export interface Paginated<T> {
 
 // Sales Growth Intelligence (SGI) Phase 1. See docs/SGI_ROADMAP.md and
 // apps/api/src/modules/sgi/sgi.service.ts for the full computation.
-export type SgiSituationType = "TARGET_BEHIND" | "LOST_SALES" | "CUSTOMER_DECLINING" | "CUSTOMER_INACTIVE" | "COLLECTION_RISK";
+export type SgiSituationType =
+  | "TARGET_BEHIND"
+  | "LOST_SALES"
+  | "CUSTOMER_DECLINING"
+  | "CUSTOMER_INACTIVE"
+  | "COLLECTION_RISK"
+  | "GROWTH_OPPORTUNITY"
+  | "PRODUCT_DECLINE";
 export type SgiSeverity = "high" | "medium" | "low";
 
 export interface SgiSituation {
@@ -858,6 +865,17 @@ export interface SgiRepDirectoryEntry {
   supervisorName: string | null;
 }
 
+// Reports feature (Task #259) — per-rep KPI snapshot backing the "360
+// درجة" section of the Reports wizard. Filtered server-side to exactly the
+// emails in repDirectory (same visibility boundary).
+export interface SgiRepStats {
+  salesActual: number;
+  salesTarget: number | null;
+  collectionActual: number;
+  activeCustomers: number;
+  topProducts: Array<{ name: string; value: number }>;
+}
+
 export interface SgiLatestResult {
   generatedAt: string;
   periodMonth: string;
@@ -866,6 +884,7 @@ export interface SgiLatestResult {
   summary: SgiSummary;
   briefing: string;
   repDirectory: SgiRepDirectoryEntry[];
+  repStats: Record<string, SgiRepStats>;
   scopedToOwnTeam: boolean;
 }
 
@@ -894,6 +913,277 @@ export interface SgiContext {
   metricValuePrior: number | null;
   periodMonth: string;
   timestamp: string;
+}
+
+// Territory Intelligence — per-territory (grouped by City) health scoring
+// and AI decision panel (see apps/web/src/app/(dashboard)/dashboard/
+// territory-intelligence/page.tsx). `why` reuses SgiSituationType/SgiSeverity
+// as-is rather than a narrower union — Territory Intelligence never emits
+// TARGET_BEHIND, but one always-absent union member is harmless and keeps
+// this from drifting out of sync with SGI's own type if it's extended later.
+export type TerritoryTier = "excellent" | "good" | "average" | "weak" | "veryWeak";
+
+export interface TerritoryWhyItem {
+  type: SgiSituationType;
+  severity: SgiSeverity;
+  label: string;
+  detail: string;
+}
+
+export interface TerritoryMetrics {
+  salesGrowthPct: number | null;
+  activeCustomerRatePct: number;
+  lostSalesCount: number;
+  visitCoveragePct: number | null;
+  collectionHealthPct: number | null;
+}
+
+export interface TerritorySummaryItem {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  customerCount: number;
+  healthScore: number;
+  tier: TerritoryTier;
+  metrics: TerritoryMetrics;
+  why: TerritoryWhyItem[];
+  recommendation: string;
+  suggestedActions: string[];
+  expectedImpactSar: number | null;
+  opportunityValueSar: number;
+}
+
+// Pre-sorted worst-first (ascending healthScore) by the API.
+export interface TerritoryIntelligenceSummaryResponse {
+  territories: TerritorySummaryItem[];
+  generatedAt: string;
+  groupedBy: "City";
+}
+
+export interface TerritoryExecutiveItem {
+  territoryId: string;
+  name: string;
+  value: number | null;
+  reason: string;
+}
+
+export interface TerritoryIntelligenceExecutiveResponse {
+  topOpportunities: TerritoryExecutiveItem[];
+  worstTerritories: TerritoryExecutiveItem[];
+  fastestWin: TerritoryExecutiveItem | null;
+  biggestRisk: TerritoryExecutiveItem | null;
+  generatedAt: string;
+}
+
+// Decision Analytics Studio — mirrors packages/schemas/src/decision-analytics-studio.schemas.ts
+// field-for-field (this app hand-maintains a parallel `lib/types.ts` for
+// every backend schema rather than importing the zod types directly into
+// client components — same convention as every other module above).
+export type DecisionAnalyzeByDimension = "territory" | "channel" | "category" | "brand" | "product" | "customer" | "representative" | "supervisor";
+
+export interface DecisionFilters {
+  dateFrom: string;
+  dateTo: string;
+  priorDateFrom?: string;
+  priorDateTo?: string;
+  branchIds?: string[];
+  cityValues?: string[];
+  channelValues?: string[];
+  categoryValues?: string[];
+  brandValues?: string[];
+  productCodes?: string[];
+  customerCodes?: string[];
+  repEmails?: string[];
+  supervisorEmails?: string[];
+}
+
+export interface DecisionQueryInput extends DecisionFilters {
+  analyzeBy: DecisionAnalyzeByDimension;
+}
+
+export interface DecisionKpiSummary {
+  sales: number;
+  salesGrowthPct: number | null;
+  collections: number | null;
+  returns: number | null;
+  lostSalesValue: number;
+  ordersCount: number;
+  averageOrderValue: number | null;
+  activeCustomersCount: number;
+  coveragePct: number | null;
+  strikeRatePct: number | null;
+  productivity: number | null;
+}
+
+export interface DecisionChartGroup {
+  key: string;
+  label: string;
+  sales: number;
+  salesPriorPct: number | null;
+  collections: number | null;
+  returns: number | null;
+  ordersCount: number;
+  activeCustomersCount: number;
+  // Chart Color & Visual Intelligence Standard v1.0 — only populated for
+  // analyzeBy = "representative"/"supervisor"; null everywhere else and for
+  // a rep/supervisor with no matching Targets row this period. See
+  // decision-analytics-studio.schemas.ts's decisionChartGroupSchema.
+  target: number | null;
+}
+
+export interface DecisionHeatmapTerritory {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  sales: number;
+}
+
+export type DecisionInsightType = "LOST_SALES" | "CUSTOMER_DECLINING" | "CUSTOMER_INACTIVE" | "COLLECTION_RISK" | "GROWTH_OPPORTUNITY" | "PRODUCT_DECLINE" | "TARGET_BEHIND";
+
+export interface DecisionInsightItem {
+  type: DecisionInsightType;
+  severity: "high" | "medium" | "low";
+  label: string;
+  detail: string;
+}
+
+export interface DecisionQueryResult {
+  kpis: DecisionKpiSummary;
+  chart: DecisionChartGroup[];
+  heatmap: DecisionHeatmapTerritory[];
+  insights: DecisionInsightItem[];
+  generatedAt: string;
+  datasetsAvailable: { invoices: boolean; collections: boolean; returns: boolean; visits: boolean };
+}
+
+export type DecisionFilterField = "branch" | "territory" | "channel" | "category" | "brand" | "product" | "customer" | "representative" | "supervisor";
+
+export interface DecisionFilterOption {
+  value: string;
+  label: string;
+}
+
+export interface DecisionFilterOptionsResult {
+  options: DecisionFilterOption[];
+}
+
+export interface DecisionTableQueryInput extends DecisionFilters {
+  page: number;
+  pageSize: number;
+}
+
+export interface DecisionTableRow {
+  invoiceNo: string;
+  lineNo: number;
+  date: string | null;
+  customerCode: string;
+  customerName: string;
+  city: string;
+  channel: string;
+  productCode: string;
+  productName: string;
+  category: string;
+  brand: string;
+  repName: string;
+  supervisorName: string;
+  amount: number;
+}
+
+export interface DecisionTableResult {
+  rows: DecisionTableRow[];
+  page: number;
+  pageSize: number;
+  totalRows: number;
+}
+
+// Geo Intelligence Engine (Executive Map Redesign Spec, Phase 1) — mirrors
+// geo-engine.schemas.ts. GeoFilters is deliberately field-for-field
+// identical to DecisionFilters (see that schema's comment) but kept as its
+// own type per this file's established one-interface-per-backend-schema
+// convention.
+export type GeoKpi = "sales" | "orders" | "customers" | "visits" | "collections" | "returns" | "lostSales";
+
+export interface GeoFilters {
+  dateFrom: string;
+  dateTo: string;
+  priorDateFrom?: string;
+  priorDateTo?: string;
+  branchIds?: string[];
+  cityValues?: string[];
+  channelValues?: string[];
+  categoryValues?: string[];
+  brandValues?: string[];
+  productCodes?: string[];
+  customerCodes?: string[];
+  repEmails?: string[];
+  supervisorEmails?: string[];
+}
+
+export type GeoGroupBy = "customer" | "city";
+
+export interface GeoQueryInput extends GeoFilters {
+  kpi: GeoKpi;
+  groupBy: GeoGroupBy;
+}
+
+export interface GeoPoint {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  city: string;
+  value: number;
+}
+
+export interface GeoQueryResult {
+  kpi: GeoKpi;
+  groupBy: GeoGroupBy;
+  points: GeoPoint[];
+  maxValue: number;
+  totalValue: number;
+  totalRows: number;
+  excludedBadCoordinates: number;
+  // Phase 3 — reuses DecisionInsightItem as-is (identical shape, SGI-backed,
+  // same reuse convention as decision-analytics-studio/territory-intelligence;
+  // see geo-engine.schemas.ts's geoQueryResultSchema comment).
+  insights: DecisionInsightItem[];
+  datasetsAvailable: { invoices: boolean; collections: boolean; returns: boolean; visits: boolean };
+  generatedAt: string;
+}
+
+// Phase 3 — Detail Table ("Invoice" step of the City -> Territory ->
+// Customer -> Invoice drill chain). Field-for-field identical to
+// DecisionTableQueryInput/DecisionTableRow/DecisionTableResult since
+// GeoFilters already mirrors DecisionFilters.
+export interface GeoTableQueryInput extends GeoFilters {
+  page: number;
+  pageSize: number;
+}
+
+export interface GeoTableRow {
+  invoiceNo: string;
+  lineNo: number;
+  date: string | null;
+  customerCode: string;
+  customerName: string;
+  city: string;
+  channel: string;
+  productCode: string;
+  productName: string;
+  category: string;
+  brand: string;
+  repName: string;
+  supervisorName: string;
+  amount: number;
+}
+
+export interface GeoTableResult {
+  rows: GeoTableRow[];
+  page: number;
+  pageSize: number;
+  totalRows: number;
 }
 
 export interface AuditLogEntry {

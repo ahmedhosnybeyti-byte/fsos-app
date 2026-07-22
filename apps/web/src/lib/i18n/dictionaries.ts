@@ -30,11 +30,207 @@ export type TranslationKey =
   | "nav.visitEfficiency"
   | "nav.customerLocations"
   | "nav.teamPerformance"
+  | "nav.reports"
   | "nav.sgi"
+  | "nav.territoryIntelligence"
+  | "nav.decisionAnalyticsStudio"
+  | "nav.geoEngine"
   | "nav.visitCopilot"
   | "nav.team"
   | "nav.employees"
   | "nav.settings"
+  | "territoryIntelligence.title"
+  | "territoryIntelligence.subtitle"
+  | "territoryIntelligence.libraryTitle"
+  | "territoryIntelligence.categoryPerformance"
+  | "territoryIntelligence.categoryRisk"
+  | "territoryIntelligence.categoryOpportunity"
+  | "territoryIntelligence.categoryTerritory"
+  | "territoryIntelligence.metricHealthScore"
+  | "territoryIntelligence.metricSalesGrowth"
+  | "territoryIntelligence.metricActiveCustomerRate"
+  | "territoryIntelligence.metricLostSales"
+  | "territoryIntelligence.metricVisitCoverage"
+  | "territoryIntelligence.metricCollectionHealth"
+  | "territoryIntelligence.metricOpportunityValue"
+  | "territoryIntelligence.tierExcellent"
+  | "territoryIntelligence.tierGood"
+  | "territoryIntelligence.tierAverage"
+  | "territoryIntelligence.tierWeak"
+  | "territoryIntelligence.tierVeryWeak"
+  | "territoryIntelligence.panelSummaryTab"
+  | "territoryIntelligence.panelPerformanceTab"
+  | "territoryIntelligence.panelRiskTab"
+  | "territoryIntelligence.panelOpportunityTab"
+  | "territoryIntelligence.panelComparisonTab"
+  | "territoryIntelligence.panelWhyTitle"
+  | "territoryIntelligence.panelRecommendationTitle"
+  | "territoryIntelligence.panelSuggestedActionsTitle"
+  | "territoryIntelligence.panelExpectedImpactTitle"
+  | "territoryIntelligence.panelCtaCreateVisitPlan"
+  | "territoryIntelligence.panelClose"
+  | "territoryIntelligence.rankingTitle"
+  | "territoryIntelligence.rankingCustomersBadge"
+  | "territoryIntelligence.emptyState"
+  | "territoryIntelligence.loading"
+  | "territoryIntelligence.errorLoad"
+  | "territoryIntelligence.executiveModeToggle"
+  | "territoryIntelligence.executiveTopOpportunities"
+  | "territoryIntelligence.executiveWorstTerritories"
+  | "territoryIntelligence.executiveFastestWin"
+  | "territoryIntelligence.executiveBiggestRisk"
+  | "territoryIntelligence.executiveViewMap"
+  | "territoryIntelligence.quickToolsTitle"
+  | "territoryIntelligence.exportPpt"
+  | "territoryIntelligence.exportImage"
+  | "territoryIntelligence.selectTerritoryHint"
+  | "territoryIntelligence.comparisonPickSecond"
+  | "territoryIntelligence.comparisonTitle"
+  | "territoryIntelligence.noWhyItems"
+  | "territoryIntelligence.breadcrumbRoot"
+  | "territoryIntelligence.levelCity"
+  | "territoryIntelligence.levelCustomer"
+  | "territoryIntelligence.goUp"
+  | "territoryIntelligence.drillIntoHint"
+  | "territoryIntelligence.metricRiskLevel"
+  | "territoryIntelligence.riskHigh"
+  | "territoryIntelligence.riskMedium"
+  | "territoryIntelligence.riskLow"
+  | "territoryIntelligence.panelLastUpdated"
+  | "territoryIntelligence.panelRanking"
+  | "territoryIntelligence.panelRankingValue"
+  | "territoryIntelligence.panelVsLastMonth"
+  | "territoryIntelligence.panelAiInsightTitle"
+  | "territoryIntelligence.panelGrowthOpportunitiesTitle"
+  | "territoryIntelligence.panelVisitPlanTitle"
+  | "territoryIntelligence.panelVisitPlanHint"
+  | "territoryIntelligence.panelCompareBtn"
+  | "territoryIntelligence.panelExportBtn"
+  | "territoryIntelligence.panelShareBtn"
+  | "territoryIntelligence.customerLevelTitle"
+  | "territoryIntelligence.customerLevelHint"
+  | "territoryIntelligence.customerLevelEmpty"
+  | "territoryIntelligence.customerSalesLabel"
+  | "territoryIntelligence.boundarySourcePlaceholder"
+  | "territoryIntelligence.layersPanelTitle"
+  | "territoryIntelligence.layerActiveBadge"
+  | "territoryIntelligence.returnToDecisionStudio"
+  | "decisionAnalyticsStudio.title"
+  | "decisionAnalyticsStudio.subtitle"
+  | "decisionAnalyticsStudio.resetFilters"
+  | "decisionAnalyticsStudio.openTerritoryIntelligence"
+  | "decisionAnalyticsStudio.dateRangeSeparator"
+  | "decisionAnalyticsStudio.activeFiltersCount"
+  | "decisionAnalyticsStudio.loading"
+  | "decisionAnalyticsStudio.permissionDenied"
+  | "decisionAnalyticsStudio.errorLoad"
+  | "decisionAnalyticsStudio.noData"
+  | "decisionAnalyticsStudio.emptyResult"
+  | "decisionAnalyticsStudio.filterBranch"
+  | "decisionAnalyticsStudio.filterTerritory"
+  | "decisionAnalyticsStudio.filterChannel"
+  | "decisionAnalyticsStudio.filterCategory"
+  | "decisionAnalyticsStudio.filterBrand"
+  | "decisionAnalyticsStudio.filterProduct"
+  | "decisionAnalyticsStudio.filterCustomer"
+  | "decisionAnalyticsStudio.filterRepresentative"
+  | "decisionAnalyticsStudio.filterSupervisor"
+  | "decisionAnalyticsStudio.kpiSales"
+  | "decisionAnalyticsStudio.kpiGrowth"
+  | "decisionAnalyticsStudio.kpiCoverage"
+  | "decisionAnalyticsStudio.kpiOrders"
+  | "decisionAnalyticsStudio.kpiCollections"
+  | "decisionAnalyticsStudio.kpiStrikeRate"
+  | "decisionAnalyticsStudio.kpiActiveCustomers"
+  | "decisionAnalyticsStudio.kpiLostSales"
+  | "decisionAnalyticsStudio.kpiAverageOrder"
+  | "decisionAnalyticsStudio.kpiProductivity"
+  | "decisionAnalyticsStudio.dimTerritory"
+  | "decisionAnalyticsStudio.dimChannel"
+  | "decisionAnalyticsStudio.dimCategory"
+  | "decisionAnalyticsStudio.dimBrand"
+  | "decisionAnalyticsStudio.dimProduct"
+  | "decisionAnalyticsStudio.dimCustomer"
+  | "decisionAnalyticsStudio.dimRepresentative"
+  | "decisionAnalyticsStudio.dimSupervisor"
+  | "decisionAnalyticsStudio.drillHint"
+  | "decisionAnalyticsStudio.chartColumn"
+  | "decisionAnalyticsStudio.chartBar"
+  | "decisionAnalyticsStudio.chartLine"
+  | "decisionAnalyticsStudio.chartArea"
+  | "decisionAnalyticsStudio.chartStacked"
+  | "decisionAnalyticsStudio.chartPie"
+  | "decisionAnalyticsStudio.chartTreemap"
+  | "decisionAnalyticsStudio.chartScatter"
+  | "decisionAnalyticsStudio.chartPareto"
+  | "decisionAnalyticsStudio.chartTable"
+  | "decisionAnalyticsStudio.otherSlice"
+  | "decisionAnalyticsStudio.tooltipTarget"
+  | "decisionAnalyticsStudio.tooltipAchievement"
+  | "decisionAnalyticsStudio.tableColLabel"
+  | "decisionAnalyticsStudio.aiInsightTitle"
+  | "decisionAnalyticsStudio.aiInsightEmpty"
+  | "decisionAnalyticsStudio.severityHigh"
+  | "decisionAnalyticsStudio.severityMedium"
+  | "decisionAnalyticsStudio.severityLow"
+  | "decisionAnalyticsStudio.detailTableTitle"
+  | "decisionAnalyticsStudio.detailTableCount"
+  | "decisionAnalyticsStudio.colInvoice"
+  | "decisionAnalyticsStudio.colDate"
+  | "decisionAnalyticsStudio.colCustomer"
+  | "decisionAnalyticsStudio.colProduct"
+  | "decisionAnalyticsStudio.pageOf"
+  | "geoEngine.title"
+  | "geoEngine.subtitle"
+  | "geoEngine.phase1Notice"
+  | "geoEngine.phase2Notice"
+  | "geoEngine.phase3Notice"
+  | "geoEngine.modeLabel"
+  | "geoEngine.modeHeat"
+  | "geoEngine.modeBubble"
+  | "geoEngine.modeCluster"
+  | "geoEngine.modeTerritory"
+  | "geoEngine.dateFromLabel"
+  | "geoEngine.dateToLabel"
+  | "geoEngine.kpiLabel"
+  | "geoEngine.groupByLabel"
+  | "geoEngine.groupByCustomer"
+  | "geoEngine.groupByCity"
+  | "geoEngine.kpiSales"
+  | "geoEngine.kpiOrders"
+  | "geoEngine.kpiCustomers"
+  | "geoEngine.kpiVisits"
+  | "geoEngine.kpiCollections"
+  | "geoEngine.kpiReturns"
+  | "geoEngine.kpiLostSales"
+  | "geoEngine.filterBranch"
+  | "geoEngine.filterCity"
+  | "geoEngine.filterChannel"
+  | "geoEngine.filterCategory"
+  | "geoEngine.filterBrand"
+  | "geoEngine.filterProduct"
+  | "geoEngine.filterCustomer"
+  | "geoEngine.filterRepresentative"
+  | "geoEngine.filterSupervisor"
+  | "geoEngine.updateButton"
+  | "geoEngine.updatingButton"
+  | "geoEngine.loading"
+  | "geoEngine.errorLoad"
+  | "geoEngine.emptyResult"
+  | "geoEngine.pointsBadge"
+  | "geoEngine.totalBadge"
+  | "geoEngine.excludedBadge"
+  | "geoEngine.chartTitle"
+  | "geoEngine.kpiCardTotal"
+  | "geoEngine.kpiCardMax"
+  | "geoEngine.kpiCardPoints"
+  | "geoEngine.kpiCardExcluded"
+  | "geoEngine.executiveReset"
+  | "geoEngine.executiveFullscreen"
+  | "geoEngine.executiveExitFullscreen"
+  | "geoEngine.executiveExportImage"
+  | "geoEngine.executiveExportPdf"
+  | "geoEngine.executiveExportError"
   | "shell.brand"
   | "shell.tagline"
   | "shell.logout"
@@ -258,6 +454,20 @@ export type TranslationKey =
   | "heatmap.categoryFilterEnable"
   | "heatmap.categoryLabel"
   | "heatmap.categoryPlaceholder"
+  | "heatmap.layersEnable"
+  | "heatmap.layersDisable"
+  | "heatmap.layerDimensionLabel"
+  | "heatmap.layersHint"
+  | "heatmap.layersBadge"
+  | "heatmap.exportExcelButton"
+  | "heatmap.sheetName"
+  | "heatmap.fileName"
+  | "heatmap.colLayer"
+  | "heatmap.colLabel"
+  | "heatmap.colMetric"
+  | "heatmap.colValue"
+  | "heatmap.colLat"
+  | "heatmap.colLon"
   | "heatmap.dateFromLabel"
   | "heatmap.dateToLabel"
   | "heatmap.lostSalesHint"
@@ -753,11 +963,207 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "nav.visitEfficiency": "كفاءة الزيارات",
     "nav.customerLocations": "إحداثيات العملاء",
     "nav.teamPerformance": "أداء الفريق",
+    "nav.reports": "التقارير",
     "nav.sgi": "إزاي تزوّد مبيعاتك",
+    "nav.territoryIntelligence": "ذكاء الأقاليم",
+    "nav.decisionAnalyticsStudio": "استوديو تحليل القرارات",
+    "nav.geoEngine": "محرك الخرائط الذكي",
     "nav.visitCopilot": "مساعد الزيارات",
     "nav.team": "الفريق",
     "nav.employees": "الموظفون",
     "nav.settings": "الإعدادات",
+    "territoryIntelligence.title": "ذكاء الأقاليم",
+    "territoryIntelligence.subtitle": "مش خريطة بس — كل إقليم بيقولك مشكلته، السبب، والقرار المناسب.",
+    "territoryIntelligence.libraryTitle": "مكتبة الذكاء",
+    "territoryIntelligence.categoryPerformance": "📊 الأداء",
+    "territoryIntelligence.categoryRisk": "⚠️ المخاطر",
+    "territoryIntelligence.categoryOpportunity": "💡 الفرص",
+    "territoryIntelligence.categoryTerritory": "🗺️ ذكاء الإقليم",
+    "territoryIntelligence.metricHealthScore": "مؤشر الصحة",
+    "territoryIntelligence.metricSalesGrowth": "نمو المبيعات",
+    "territoryIntelligence.metricActiveCustomerRate": "نسبة العملاء النشطين",
+    "territoryIntelligence.metricLostSales": "مبيعات متوقفة",
+    "territoryIntelligence.metricVisitCoverage": "تغطية الزيارات",
+    "territoryIntelligence.metricCollectionHealth": "صحة التحصيل",
+    "territoryIntelligence.metricOpportunityValue": "قيمة الفرصة",
+    "territoryIntelligence.tierExcellent": "ممتاز",
+    "territoryIntelligence.tierGood": "جيد",
+    "territoryIntelligence.tierAverage": "متوسط",
+    "territoryIntelligence.tierWeak": "ضعيف",
+    "territoryIntelligence.tierVeryWeak": "ضعيف جدًا",
+    "territoryIntelligence.panelSummaryTab": "ملخص",
+    "territoryIntelligence.panelPerformanceTab": "الأداء",
+    "territoryIntelligence.panelRiskTab": "المخاطر",
+    "territoryIntelligence.panelOpportunityTab": "الفرص",
+    "territoryIntelligence.panelComparisonTab": "مقارنة",
+    "territoryIntelligence.panelWhyTitle": "ليه؟",
+    "territoryIntelligence.panelRecommendationTitle": "التوصية الذكية",
+    "territoryIntelligence.panelSuggestedActionsTitle": "القرار المقترح",
+    "territoryIntelligence.panelExpectedImpactTitle": "العائد المتوقع",
+    "territoryIntelligence.panelCtaCreateVisitPlan": "إنشاء خطة زيارات للإقليم",
+    "territoryIntelligence.panelClose": "إغلاق",
+    "territoryIntelligence.rankingTitle": "ترتيب الأقاليم",
+    "territoryIntelligence.rankingCustomersBadge": "{count} عميل",
+    "territoryIntelligence.emptyState": "لا توجد بيانات كافية لعرض الأقاليم حاليًا.",
+    "territoryIntelligence.loading": "جارٍ تحميل ذكاء الأقاليم...",
+    "territoryIntelligence.errorLoad": "حصل خطأ في تحميل بيانات الأقاليم.",
+    "territoryIntelligence.executiveModeToggle": "الوضع التنفيذي",
+    "territoryIntelligence.executiveTopOpportunities": "أفضل 5 فرص",
+    "territoryIntelligence.executiveWorstTerritories": "أضعف 5 أقاليم",
+    "territoryIntelligence.executiveFastestWin": "أسرع مكسب",
+    "territoryIntelligence.executiveBiggestRisk": "أكبر خطر",
+    "territoryIntelligence.executiveViewMap": "عرض الخريطة",
+    "territoryIntelligence.quickToolsTitle": "أدوات سريعة",
+    "territoryIntelligence.exportPpt": "تصدير PPT",
+    "territoryIntelligence.exportImage": "تصدير صورة",
+    "territoryIntelligence.selectTerritoryHint": "اختر إقليمًا من الخريطة أو الترتيب لعرض التفاصيل.",
+    "territoryIntelligence.comparisonPickSecond": "اختر إقليمًا ثانيًا للمقارنة",
+    "territoryIntelligence.comparisonTitle": "مقارنة الأقاليم",
+    "territoryIntelligence.noWhyItems": "مفيش ملاحظات مسجلة لهذا الإقليم دلوقتي.",
+    "territoryIntelligence.breadcrumbRoot": "كل الأقاليم",
+    "territoryIntelligence.levelCity": "المدينة",
+    "territoryIntelligence.levelCustomer": "العميل",
+    "territoryIntelligence.goUp": "رجوع لمستوى أعلى",
+    "territoryIntelligence.drillIntoHint": "اضغط لعرض العملاء داخل هذا الإقليم",
+    "territoryIntelligence.metricRiskLevel": "مستوى الخطورة",
+    "territoryIntelligence.riskHigh": "مرتفع",
+    "territoryIntelligence.riskMedium": "متوسط",
+    "territoryIntelligence.riskLow": "منخفض",
+    "territoryIntelligence.panelLastUpdated": "آخر تحديث",
+    "territoryIntelligence.panelRanking": "الترتيب",
+    "territoryIntelligence.panelRankingValue": "{rank} من {total}",
+    "territoryIntelligence.panelVsLastMonth": "مقارنة بالشهر السابق",
+    "territoryIntelligence.panelAiInsightTitle": "تحليل الذكاء الاصطناعي",
+    "territoryIntelligence.panelGrowthOpportunitiesTitle": "فرص النمو",
+    "territoryIntelligence.panelVisitPlanTitle": "خطة الزيارة المقترحة",
+    "territoryIntelligence.panelVisitPlanHint": "ابدأ بتنفيذ التوصيات دي في خطة الزيارات القادمة.",
+    "territoryIntelligence.panelCompareBtn": "مقارنة الأقاليم",
+    "territoryIntelligence.panelExportBtn": "تصدير التقرير",
+    "territoryIntelligence.panelShareBtn": "مشاركة",
+    "territoryIntelligence.customerLevelTitle": "عملاء {name}",
+    "territoryIntelligence.customerLevelHint": "أعلى العملاء من حيث المبيعات داخل هذا الإقليم",
+    "territoryIntelligence.customerLevelEmpty": "مفيش عملاء بإحداثيات صالحة في هذا الإقليم.",
+    "territoryIntelligence.customerSalesLabel": "المبيعات",
+    "territoryIntelligence.boundarySourcePlaceholder": "بيانات حدود تقريبية (نسخة تجريبية)",
+    "territoryIntelligence.layersPanelTitle": "طبقات التحليل",
+    "territoryIntelligence.layerActiveBadge": "نشطة",
+    "territoryIntelligence.returnToDecisionStudio": "الرجوع لاستوديو تحليل القرارات",
+    "decisionAnalyticsStudio.title": "استوديو تحليل القرارات",
+    "decisionAnalyticsStudio.subtitle": "حلل مبيعاتك من أي زاوية، واكتشف الفرص والمخاطر في لمحة واحدة.",
+    "decisionAnalyticsStudio.resetFilters": "إعادة تعيين الفلاتر",
+    "decisionAnalyticsStudio.openTerritoryIntelligence": "فتح ذكاء الأقاليم",
+    "decisionAnalyticsStudio.dateRangeSeparator": "إلى",
+    "decisionAnalyticsStudio.activeFiltersCount": "{count} فلتر نشط",
+    "decisionAnalyticsStudio.loading": "جارٍ تحميل التحليل...",
+    "decisionAnalyticsStudio.permissionDenied": "ليس لديك صلاحية لعرض هذه الشاشة.",
+    "decisionAnalyticsStudio.errorLoad": "حصل خطأ في تحميل بيانات التحليل.",
+    "decisionAnalyticsStudio.noData": "لا توجد بيانات فواتير مرفوعة بعد لعرض هذا التحليل.",
+    "decisionAnalyticsStudio.emptyResult": "لا توجد نتائج للفلاتر والفترة الزمنية المحددة.",
+    "decisionAnalyticsStudio.filterBranch": "الفرع",
+    "decisionAnalyticsStudio.filterTerritory": "الإقليم",
+    "decisionAnalyticsStudio.filterChannel": "القناة",
+    "decisionAnalyticsStudio.filterCategory": "الفئة",
+    "decisionAnalyticsStudio.filterBrand": "العلامة التجارية",
+    "decisionAnalyticsStudio.filterProduct": "المنتج",
+    "decisionAnalyticsStudio.filterCustomer": "العميل",
+    "decisionAnalyticsStudio.filterRepresentative": "المندوب",
+    "decisionAnalyticsStudio.filterSupervisor": "المشرف",
+    "decisionAnalyticsStudio.kpiSales": "المبيعات",
+    "decisionAnalyticsStudio.kpiGrowth": "النمو",
+    "decisionAnalyticsStudio.kpiCoverage": "التغطية",
+    "decisionAnalyticsStudio.kpiOrders": "عدد الطلبات",
+    "decisionAnalyticsStudio.kpiCollections": "التحصيلات",
+    "decisionAnalyticsStudio.kpiStrikeRate": "معدل نجاح الزيارات",
+    "decisionAnalyticsStudio.kpiActiveCustomers": "العملاء النشطون",
+    "decisionAnalyticsStudio.kpiLostSales": "مبيعات متوقفة",
+    "decisionAnalyticsStudio.kpiAverageOrder": "متوسط الطلب",
+    "decisionAnalyticsStudio.kpiProductivity": "الإنتاجية",
+    "decisionAnalyticsStudio.dimTerritory": "الإقليم",
+    "decisionAnalyticsStudio.dimChannel": "القناة",
+    "decisionAnalyticsStudio.dimCategory": "الفئة",
+    "decisionAnalyticsStudio.dimBrand": "العلامة التجارية",
+    "decisionAnalyticsStudio.dimProduct": "المنتج",
+    "decisionAnalyticsStudio.dimCustomer": "العميل",
+    "decisionAnalyticsStudio.dimRepresentative": "المندوب",
+    "decisionAnalyticsStudio.dimSupervisor": "المشرف",
+    "decisionAnalyticsStudio.drillHint": "اضغط على أي عنصر للتعمق فيه",
+    "decisionAnalyticsStudio.chartColumn": "أعمدة",
+    "decisionAnalyticsStudio.chartBar": "أشرطة",
+    "decisionAnalyticsStudio.chartLine": "خطي",
+    "decisionAnalyticsStudio.chartArea": "مساحي",
+    "decisionAnalyticsStudio.chartStacked": "متراكم",
+    "decisionAnalyticsStudio.chartPie": "دائري",
+    "decisionAnalyticsStudio.chartTreemap": "خريطة شجرية",
+    "decisionAnalyticsStudio.chartScatter": "تشتت",
+    "decisionAnalyticsStudio.chartPareto": "باريتو",
+    "decisionAnalyticsStudio.chartTable": "جدول",
+    "decisionAnalyticsStudio.otherSlice": "أخرى",
+    "decisionAnalyticsStudio.tooltipTarget": "الهدف",
+    "decisionAnalyticsStudio.tooltipAchievement": "نسبة التحقيق",
+    "decisionAnalyticsStudio.tableColLabel": "العنصر",
+    "decisionAnalyticsStudio.aiInsightTitle": "تحليل الذكاء الاصطناعي",
+    "decisionAnalyticsStudio.aiInsightEmpty": "لا توجد ملاحظات مسجلة للنطاق الحالي.",
+    "decisionAnalyticsStudio.severityHigh": "مرتفع",
+    "decisionAnalyticsStudio.severityMedium": "متوسط",
+    "decisionAnalyticsStudio.severityLow": "منخفض",
+    "decisionAnalyticsStudio.detailTableTitle": "تفاصيل الفواتير",
+    "decisionAnalyticsStudio.detailTableCount": "{count} سطر",
+    "decisionAnalyticsStudio.colInvoice": "رقم الفاتورة",
+    "decisionAnalyticsStudio.colDate": "التاريخ",
+    "decisionAnalyticsStudio.colCustomer": "العميل",
+    "decisionAnalyticsStudio.colProduct": "المنتج",
+    "decisionAnalyticsStudio.pageOf": "صفحة {page} من {total}",
+    "geoEngine.title": "محرك الخرائط الذكي",
+    "geoEngine.subtitle": "معاينة المرحلة الأولى: الفلاتر الموحدة ومحرك البيانات الجديد لكل خرائط FSOS.",
+    "geoEngine.phase1Notice": "هذه معاينة للمرحلة الأولى (المحرك والفلاتر فقط) — الخريطة الحرارية والفقاعية والعنقودية والمساحية بأسلوبها النهائي جزء من المرحلة الثانية. الهدف هنا التأكد إن الفلاتر الموحدة والبيانات صحيحة.",
+    "geoEngine.phase2Notice": "المرحلة الثانية: بدّل بين أنماط الخريطة (حرارية / فقاعية / عنقودية / مناطق) — كلها بتقرأ من نفس المحرك والفلاتر. الـ Drill Down وربط الذكاء الاصطناعي جزء من المرحلة الثالثة.",
+    "geoEngine.phase3Notice": "المرحلة الثالثة: اضغط على أي نقطة في الخريطة أو أي عمود في الرسم البياني للتنقل بين المدينة والعميل، وكل شيء في الشاشة (المؤشرات والرسم ولوحة الذكاء الاصطناعي وجدول التفاصيل) بيتحدث معاك تلقائيًا.",
+    "geoEngine.modeLabel": "نمط الخريطة",
+    "geoEngine.modeHeat": "حرارية",
+    "geoEngine.modeBubble": "فقاعية",
+    "geoEngine.modeCluster": "عنقودية",
+    "geoEngine.modeTerritory": "مناطق",
+    "geoEngine.dateFromLabel": "من تاريخ",
+    "geoEngine.dateToLabel": "إلى تاريخ",
+    "geoEngine.kpiLabel": "المؤشر",
+    "geoEngine.groupByLabel": "التجميع حسب",
+    "geoEngine.groupByCustomer": "عميل",
+    "geoEngine.groupByCity": "مدينة",
+    "geoEngine.kpiSales": "المبيعات",
+    "geoEngine.kpiOrders": "عدد الطلبات",
+    "geoEngine.kpiCustomers": "كثافة العملاء",
+    "geoEngine.kpiVisits": "الزيارات",
+    "geoEngine.kpiCollections": "التحصيلات",
+    "geoEngine.kpiReturns": "المرتجعات",
+    "geoEngine.kpiLostSales": "مبيعات متوقفة",
+    "geoEngine.filterBranch": "الفرع",
+    "geoEngine.filterCity": "المدينة",
+    "geoEngine.filterChannel": "القناة",
+    "geoEngine.filterCategory": "الفئة",
+    "geoEngine.filterBrand": "العلامة التجارية",
+    "geoEngine.filterProduct": "المنتج",
+    "geoEngine.filterCustomer": "العميل",
+    "geoEngine.filterRepresentative": "المندوب",
+    "geoEngine.filterSupervisor": "المشرف",
+    "geoEngine.updateButton": "تحديث الخريطة",
+    "geoEngine.updatingButton": "جارٍ التحديث...",
+    "geoEngine.loading": "جارٍ التحميل...",
+    "geoEngine.errorLoad": "حصل خطأ في تحميل البيانات.",
+    "geoEngine.emptyResult": "لا توجد نتائج للفلاتر والفترة الزمنية المحددة.",
+    "geoEngine.pointsBadge": "{count} نقطة",
+    "geoEngine.totalBadge": "الإجمالي: {total}",
+    "geoEngine.excludedBadge": "{count} بدون إحداثيات صحيحة",
+    "geoEngine.chartTitle": "أعلى 10 حسب القيمة",
+    "geoEngine.kpiCardTotal": "الإجمالي",
+    "geoEngine.kpiCardMax": "أعلى قيمة",
+    "geoEngine.kpiCardPoints": "عدد النقاط",
+    "geoEngine.kpiCardExcluded": "إحداثيات مستبعدة",
+    "geoEngine.executiveReset": "إعادة ضبط العرض",
+    "geoEngine.executiveFullscreen": "ملء الشاشة",
+    "geoEngine.executiveExitFullscreen": "الخروج من ملء الشاشة",
+    "geoEngine.executiveExportImage": "تصدير صورة",
+    "geoEngine.executiveExportPdf": "تصدير PDF",
+    "geoEngine.executiveExportError": "تعذّر التصدير، حاول مرة أخرى.",
     "shell.brand": "مرشدك",
     "shell.tagline": "ذكاء المبيعات في يدك",
     "shell.logout": "تسجيل الخروج",
@@ -983,6 +1389,20 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "heatmap.categoryFilterEnable": "فلترة بفئة صنف (Category Distribution)",
     "heatmap.categoryLabel": "الفئة",
     "heatmap.categoryPlaceholder": "اختر فئة…",
+    "heatmap.layersEnable": "طبقات متعددة (قارن أكتر من قيمة مع بعض)",
+    "heatmap.layersDisable": "إلغاء الطبقات المتعددة",
+    "heatmap.layerDimensionLabel": "بُعد الطبقة",
+    "heatmap.layersHint": "اختار قيمة أو أكتر — كل قيمة هتظهر كطبقة حرارية لوحدها تقدر تولّعها/تطفيها من القايمة اللي هتظهر جنب الخريطة في النتيجة.",
+    "heatmap.layersBadge": "{count} طبقة",
+    "heatmap.exportExcelButton": "تصدير Excel",
+    "heatmap.sheetName": "الخريطة الحرارية",
+    "heatmap.fileName": "الخريطة-الحرارية.xlsx",
+    "heatmap.colLayer": "الطبقة",
+    "heatmap.colLabel": "الموقع",
+    "heatmap.colMetric": "المقياس",
+    "heatmap.colValue": "القيمة",
+    "heatmap.colLat": "خط العرض",
+    "heatmap.colLon": "خط الطول",
     "heatmap.dateFromLabel": "من تاريخ (اختياري)",
     "heatmap.dateToLabel": "إلى تاريخ (اختياري)",
     "heatmap.lostSalesHint":
@@ -1488,11 +1908,207 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "nav.visitEfficiency": "Visit Efficiency",
     "nav.customerLocations": "Customer Locations",
     "nav.teamPerformance": "Team Performance",
+    "nav.reports": "Reports",
     "nav.sgi": "Grow Your Sales",
+    "nav.territoryIntelligence": "Territory Intelligence",
+    "nav.decisionAnalyticsStudio": "Decision Analytics Studio",
+    "nav.geoEngine": "Geo Intelligence Engine",
     "nav.visitCopilot": "Visit Copilot",
     "nav.team": "Team",
     "nav.employees": "Employees",
     "nav.settings": "Settings",
+    "territoryIntelligence.title": "Territory Intelligence",
+    "territoryIntelligence.subtitle": "Not just a map — every territory tells you the problem, the why, and the right decision.",
+    "territoryIntelligence.libraryTitle": "Intelligence Library",
+    "territoryIntelligence.categoryPerformance": "📊 Performance",
+    "territoryIntelligence.categoryRisk": "⚠️ Risk",
+    "territoryIntelligence.categoryOpportunity": "💡 Opportunity",
+    "territoryIntelligence.categoryTerritory": "🗺️ Territory Intelligence",
+    "territoryIntelligence.metricHealthScore": "Health Score",
+    "territoryIntelligence.metricSalesGrowth": "Sales Growth",
+    "territoryIntelligence.metricActiveCustomerRate": "Active Customer Rate",
+    "territoryIntelligence.metricLostSales": "Lost Sales",
+    "territoryIntelligence.metricVisitCoverage": "Visit Coverage",
+    "territoryIntelligence.metricCollectionHealth": "Collection Health",
+    "territoryIntelligence.metricOpportunityValue": "Opportunity Value",
+    "territoryIntelligence.tierExcellent": "Excellent",
+    "territoryIntelligence.tierGood": "Good",
+    "territoryIntelligence.tierAverage": "Average",
+    "territoryIntelligence.tierWeak": "Weak",
+    "territoryIntelligence.tierVeryWeak": "Very Weak",
+    "territoryIntelligence.panelSummaryTab": "Summary",
+    "territoryIntelligence.panelPerformanceTab": "Performance",
+    "territoryIntelligence.panelRiskTab": "Risk",
+    "territoryIntelligence.panelOpportunityTab": "Opportunity",
+    "territoryIntelligence.panelComparisonTab": "Comparison",
+    "territoryIntelligence.panelWhyTitle": "Why",
+    "territoryIntelligence.panelRecommendationTitle": "Smart Recommendation",
+    "territoryIntelligence.panelSuggestedActionsTitle": "Suggested Decision",
+    "territoryIntelligence.panelExpectedImpactTitle": "Expected Impact",
+    "territoryIntelligence.panelCtaCreateVisitPlan": "Create Visit Plan for Region",
+    "territoryIntelligence.panelClose": "Close",
+    "territoryIntelligence.rankingTitle": "Territory Ranking",
+    "territoryIntelligence.rankingCustomersBadge": "{count} customers",
+    "territoryIntelligence.emptyState": "Not enough data to show territories yet.",
+    "territoryIntelligence.loading": "Loading Territory Intelligence...",
+    "territoryIntelligence.errorLoad": "Failed to load territory data.",
+    "territoryIntelligence.executiveModeToggle": "Executive Mode",
+    "territoryIntelligence.executiveTopOpportunities": "Top 5 Opportunities",
+    "territoryIntelligence.executiveWorstTerritories": "Worst 5 Territories",
+    "territoryIntelligence.executiveFastestWin": "Fastest Win",
+    "territoryIntelligence.executiveBiggestRisk": "Biggest Risk",
+    "territoryIntelligence.executiveViewMap": "View Map",
+    "territoryIntelligence.quickToolsTitle": "Quick Tools",
+    "territoryIntelligence.exportPpt": "Export PPT",
+    "territoryIntelligence.exportImage": "Export Image",
+    "territoryIntelligence.selectTerritoryHint": "Select a territory from the map or ranking to see details.",
+    "territoryIntelligence.comparisonPickSecond": "Pick a second territory to compare",
+    "territoryIntelligence.comparisonTitle": "Territory Comparison",
+    "territoryIntelligence.noWhyItems": "No flagged situations for this territory right now.",
+    "territoryIntelligence.breadcrumbRoot": "All Territories",
+    "territoryIntelligence.levelCity": "City",
+    "territoryIntelligence.levelCustomer": "Customer",
+    "territoryIntelligence.goUp": "Back to parent level",
+    "territoryIntelligence.drillIntoHint": "Click to view customers inside this territory",
+    "territoryIntelligence.metricRiskLevel": "Risk Level",
+    "territoryIntelligence.riskHigh": "High",
+    "territoryIntelligence.riskMedium": "Medium",
+    "territoryIntelligence.riskLow": "Low",
+    "territoryIntelligence.panelLastUpdated": "Last updated",
+    "territoryIntelligence.panelRanking": "Ranking",
+    "territoryIntelligence.panelRankingValue": "{rank} of {total}",
+    "territoryIntelligence.panelVsLastMonth": "vs last month",
+    "territoryIntelligence.panelAiInsightTitle": "AI Insight",
+    "territoryIntelligence.panelGrowthOpportunitiesTitle": "Growth Opportunities",
+    "territoryIntelligence.panelVisitPlanTitle": "Suggested Visit Plan",
+    "territoryIntelligence.panelVisitPlanHint": "Start executing these recommendations in the next visit plan.",
+    "territoryIntelligence.panelCompareBtn": "Compare Territories",
+    "territoryIntelligence.panelExportBtn": "Export Report",
+    "territoryIntelligence.panelShareBtn": "Share",
+    "territoryIntelligence.customerLevelTitle": "{name} Customers",
+    "territoryIntelligence.customerLevelHint": "Top customers by sales inside this territory",
+    "territoryIntelligence.customerLevelEmpty": "No customers with valid coordinates in this territory.",
+    "territoryIntelligence.customerSalesLabel": "Sales",
+    "territoryIntelligence.boundarySourcePlaceholder": "Approximated boundary data (demo dataset)",
+    "territoryIntelligence.layersPanelTitle": "Analysis Layers",
+    "territoryIntelligence.layerActiveBadge": "Active",
+    "territoryIntelligence.returnToDecisionStudio": "Return to Decision Analytics Studio",
+    "decisionAnalyticsStudio.title": "Decision Analytics Studio",
+    "decisionAnalyticsStudio.subtitle": "Analyze your sales from any angle, and spot opportunities and risks at a glance.",
+    "decisionAnalyticsStudio.resetFilters": "Reset Filters",
+    "decisionAnalyticsStudio.openTerritoryIntelligence": "Open Territory Intelligence",
+    "decisionAnalyticsStudio.dateRangeSeparator": "to",
+    "decisionAnalyticsStudio.activeFiltersCount": "{count} active filters",
+    "decisionAnalyticsStudio.loading": "Loading analysis...",
+    "decisionAnalyticsStudio.permissionDenied": "You don't have permission to view this screen.",
+    "decisionAnalyticsStudio.errorLoad": "Failed to load analysis data.",
+    "decisionAnalyticsStudio.noData": "No invoice data uploaded yet to show this analysis.",
+    "decisionAnalyticsStudio.emptyResult": "No results for the selected filters and date range.",
+    "decisionAnalyticsStudio.filterBranch": "Branch",
+    "decisionAnalyticsStudio.filterTerritory": "Territory",
+    "decisionAnalyticsStudio.filterChannel": "Channel",
+    "decisionAnalyticsStudio.filterCategory": "Category",
+    "decisionAnalyticsStudio.filterBrand": "Brand",
+    "decisionAnalyticsStudio.filterProduct": "Product",
+    "decisionAnalyticsStudio.filterCustomer": "Customer",
+    "decisionAnalyticsStudio.filterRepresentative": "Representative",
+    "decisionAnalyticsStudio.filterSupervisor": "Supervisor",
+    "decisionAnalyticsStudio.kpiSales": "Sales",
+    "decisionAnalyticsStudio.kpiGrowth": "Growth",
+    "decisionAnalyticsStudio.kpiCoverage": "Coverage",
+    "decisionAnalyticsStudio.kpiOrders": "Orders",
+    "decisionAnalyticsStudio.kpiCollections": "Collections",
+    "decisionAnalyticsStudio.kpiStrikeRate": "Strike Rate",
+    "decisionAnalyticsStudio.kpiActiveCustomers": "Active Customers",
+    "decisionAnalyticsStudio.kpiLostSales": "Lost Sales",
+    "decisionAnalyticsStudio.kpiAverageOrder": "Average Order",
+    "decisionAnalyticsStudio.kpiProductivity": "Productivity",
+    "decisionAnalyticsStudio.dimTerritory": "Territory",
+    "decisionAnalyticsStudio.dimChannel": "Channel",
+    "decisionAnalyticsStudio.dimCategory": "Category",
+    "decisionAnalyticsStudio.dimBrand": "Brand",
+    "decisionAnalyticsStudio.dimProduct": "Product",
+    "decisionAnalyticsStudio.dimCustomer": "Customer",
+    "decisionAnalyticsStudio.dimRepresentative": "Representative",
+    "decisionAnalyticsStudio.dimSupervisor": "Supervisor",
+    "decisionAnalyticsStudio.drillHint": "Click any item to drill in",
+    "decisionAnalyticsStudio.chartColumn": "Column",
+    "decisionAnalyticsStudio.chartBar": "Bar",
+    "decisionAnalyticsStudio.chartLine": "Line",
+    "decisionAnalyticsStudio.chartArea": "Area",
+    "decisionAnalyticsStudio.chartStacked": "Stacked",
+    "decisionAnalyticsStudio.chartPie": "Pie",
+    "decisionAnalyticsStudio.chartTreemap": "Treemap",
+    "decisionAnalyticsStudio.chartScatter": "Scatter Plot",
+    "decisionAnalyticsStudio.chartPareto": "Pareto",
+    "decisionAnalyticsStudio.chartTable": "Data Table",
+    "decisionAnalyticsStudio.otherSlice": "Other",
+    "decisionAnalyticsStudio.tooltipTarget": "Target",
+    "decisionAnalyticsStudio.tooltipAchievement": "Achievement",
+    "decisionAnalyticsStudio.tableColLabel": "Item",
+    "decisionAnalyticsStudio.aiInsightTitle": "AI Insight",
+    "decisionAnalyticsStudio.aiInsightEmpty": "No flagged situations for the current scope right now.",
+    "decisionAnalyticsStudio.severityHigh": "High",
+    "decisionAnalyticsStudio.severityMedium": "Medium",
+    "decisionAnalyticsStudio.severityLow": "Low",
+    "decisionAnalyticsStudio.detailTableTitle": "Invoice Detail",
+    "decisionAnalyticsStudio.detailTableCount": "{count} rows",
+    "decisionAnalyticsStudio.colInvoice": "Invoice",
+    "decisionAnalyticsStudio.colDate": "Date",
+    "decisionAnalyticsStudio.colCustomer": "Customer",
+    "decisionAnalyticsStudio.colProduct": "Product",
+    "decisionAnalyticsStudio.pageOf": "Page {page} of {total}",
+    "geoEngine.title": "Geo Intelligence Engine",
+    "geoEngine.subtitle": "Phase 1 preview: the unified filters and data engine behind every FSOS map.",
+    "geoEngine.phase1Notice": "This is a Phase 1 preview (engine + filters only) — the polished Heat/Bubble/Cluster/Choropleth map modes are Phase 2. The goal here is to confirm the unified filters and underlying data are correct.",
+    "geoEngine.phase2Notice": "Phase 2: switch between map modes (Heat / Bubble / Cluster / Territory) — all reading from the same engine and filters. Drill-down and AI integration are Phase 3.",
+    "geoEngine.phase3Notice": "Phase 3: click any map point or chart bar to drill between City and Customer — everything on screen (KPIs, chart, AI panel, detail table) updates automatically.",
+    "geoEngine.modeLabel": "Map mode",
+    "geoEngine.modeHeat": "Heat",
+    "geoEngine.modeBubble": "Bubble",
+    "geoEngine.modeCluster": "Cluster",
+    "geoEngine.modeTerritory": "Territory",
+    "geoEngine.dateFromLabel": "From date",
+    "geoEngine.dateToLabel": "To date",
+    "geoEngine.kpiLabel": "KPI",
+    "geoEngine.groupByLabel": "Group by",
+    "geoEngine.groupByCustomer": "Customer",
+    "geoEngine.groupByCity": "City",
+    "geoEngine.kpiSales": "Sales",
+    "geoEngine.kpiOrders": "Orders",
+    "geoEngine.kpiCustomers": "Customer Density",
+    "geoEngine.kpiVisits": "Visits",
+    "geoEngine.kpiCollections": "Collections",
+    "geoEngine.kpiReturns": "Returns",
+    "geoEngine.kpiLostSales": "Lost Sales",
+    "geoEngine.filterBranch": "Branch",
+    "geoEngine.filterCity": "City",
+    "geoEngine.filterChannel": "Channel",
+    "geoEngine.filterCategory": "Category",
+    "geoEngine.filterBrand": "Brand",
+    "geoEngine.filterProduct": "Product",
+    "geoEngine.filterCustomer": "Customer",
+    "geoEngine.filterRepresentative": "Representative",
+    "geoEngine.filterSupervisor": "Supervisor",
+    "geoEngine.updateButton": "Update Map",
+    "geoEngine.updatingButton": "Updating...",
+    "geoEngine.loading": "Loading...",
+    "geoEngine.errorLoad": "Failed to load data.",
+    "geoEngine.emptyResult": "No results for the selected filters and date range.",
+    "geoEngine.pointsBadge": "{count} points",
+    "geoEngine.totalBadge": "Total: {total}",
+    "geoEngine.excludedBadge": "{count} without valid coordinates",
+    "geoEngine.chartTitle": "Top 10 by value",
+    "geoEngine.kpiCardTotal": "Total",
+    "geoEngine.kpiCardMax": "Max Value",
+    "geoEngine.kpiCardPoints": "Points",
+    "geoEngine.kpiCardExcluded": "Excluded Coordinates",
+    "geoEngine.executiveReset": "Reset View",
+    "geoEngine.executiveFullscreen": "Fullscreen",
+    "geoEngine.executiveExitFullscreen": "Exit Fullscreen",
+    "geoEngine.executiveExportImage": "Export Image",
+    "geoEngine.executiveExportPdf": "Export PDF",
+    "geoEngine.executiveExportError": "Export failed, please try again.",
     "shell.brand": "Murshidak",
     "shell.tagline": "Sales Intelligence in Your Hands",
     "shell.logout": "Log out",
@@ -1718,6 +2334,20 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "heatmap.categoryFilterEnable": "Filter by product category (Category Distribution)",
     "heatmap.categoryLabel": "Category",
     "heatmap.categoryPlaceholder": "Choose a category…",
+    "heatmap.layersEnable": "Multiple layers (compare several values at once)",
+    "heatmap.layersDisable": "Turn off multiple layers",
+    "heatmap.layerDimensionLabel": "Layer dimension",
+    "heatmap.layersHint": "Pick one or more values — each becomes its own heat layer you can toggle on/off from the list next to the map in the result.",
+    "heatmap.layersBadge": "{count} layers",
+    "heatmap.exportExcelButton": "Export Excel",
+    "heatmap.sheetName": "Heat Map",
+    "heatmap.fileName": "heat-map.xlsx",
+    "heatmap.colLayer": "Layer",
+    "heatmap.colLabel": "Location",
+    "heatmap.colMetric": "Metric",
+    "heatmap.colValue": "Value",
+    "heatmap.colLat": "Latitude",
+    "heatmap.colLon": "Longitude",
     "heatmap.dateFromLabel": "From date (optional)",
     "heatmap.dateToLabel": "To date (optional)",
     "heatmap.lostSalesHint":
