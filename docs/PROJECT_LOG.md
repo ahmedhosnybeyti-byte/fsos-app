@@ -3720,4 +3720,37 @@ Client pushed back correctly on my earlier "maybe it's the uploaded data" guess,
 
 **`visit-copilot.service.ts`**: `chat()` now checks `matchCustomer360()` first, then falls through to `matchLocalRule()`, then AI — unchanged fallthrough order otherwise. `BriefingFacts` (in `rule-engine.ts`) was widened with `customerCode`/`period`/`returns`/fuller `topProducts` fields (still structurally satisfied by `CustomerBriefingResult` with no changes to that interface).
 
+
 **Verification performed**: brace balance clean on all three changed files; grep for TODO/FIXME/console.log/debugger — none found. **Not performed**: `tsc --noEmit` (same sandbox limitation) and a live browser check — client should ask "Customer 360" (or "360") in an open Visit Mode chat and confirm every displayed line matches a real, currently-computed number with no invented status/classification anywhere in the reply.
+## إصلاح هندسي: نقطة نهاية موحدة `POST /gpt/execute-report` لإزالة تسلسل الأدوات متعدد الخطوات
+
+**التاريخ**: 2026-07-27 (استكمال مباشر لتحقيقي "Invalid access code" و"عدم استقرار tool-calling" أعلاه)
+
+**السياق**: اختبار عملي داخل شاشة Test المدمجة في GPT Builder (وليس محادثة ChatGPT العادية، والتي توفر تتبعًا لكل استدعاء أداة) أثبت أن التسلسل الكامل (`verify-access` → `getDataset` → `renderAnalysis`) ينجح فعليًا عند تنفيذه بشكل نظيف لطلب تحليلي واحد. لكن عند طلب تقرير ثانٍ داخل نفس الجلسة، أخطأ النموذج في التعامل مع `sessionToken` كأنه Launch Code جديد يحتاج لإعادة تحقق، ثم استدعى `renderAnalysis` مباشرة (الذي نجح بدون بيانات فعلية — مجرد Mirror فارغ) بدلاً من استدعاء `getDataset` أولاً لجلب البيانات.
+
+**التشخيص الجذري**: `renderAnalysis` مصمم فقط كـMirror يُخزّن `{narrative, blocks}` جاهزَين داخل `AiReport` — لا يجلب بيانات ولا يحسب أي شيء بنفسه. وصفه في الـSchema لم يكن كافيًا لمنع النموذج من استخدامه كبديل خاطئ عن `getDataset` عند حدوث ارتباك في تسلسل الاستدعاءات متعددة الخطوات — وهذا نمط فشل بنيوي (كل تقرير قياسي يتطلب تسلسل صحيح من 2-3 استدعاءات منفصلة)، وليس خطأ في أي استدعاء بمفرده.
+
+**القرار الهندسي (بموافقة صريحة من العميل، مع قرارات محددة لكل نقطة مفتوحة)**: إضافة نقطة نهاية واحدة موحدة `POST /gpt/execute-report` تنفذ التقرير القياسي (`salesSummary`) بالكامل من طرف الخادم في استدعاء واحد فقط — فلا يبقى أي تسلسل خطوات يمكن أن يخطئ فيه النموذج.
+
+**النطاق (الإصدار الأول فقط، بلا توسّع)**:
+- نوع تقرير واحد: `salesSummary`.
+- حقل Scope واحد فقط لكل طلب: `customerId` أو `employeeId` أو `branchId` (تُرفض القيم المتعددة أو الصفرية عبر Zod `.refine`). `regionId` مؤجل — لا يوجد Join على مستوى المنطقة بعد.
+- `branchId` يُحل عبر Join جديد كليًا في الكود: `Invoice.RouteID → Routes.RouteID → Routes.BranchID` (لا يوجد له سابقة في الكود؛ كل الشاشات الأخرى تقرأ `BranchID` مباشرة من ملف Customers).
+- `employeeId` يُحل عبر أعمدة `Routes.SalesRepID/SupervisorID/ManagerID` (نفس الأعمدة التي يقرأها `CanonicalHierarchyResolverService`)، مستقل عن نطاق صلاحيات المستخدم الطالب.
+- عدد الفواتير = عدد `InvoiceNo` الفريد بعد كل الفلاتر (وليس `computeAggregate("count", ...)`) — قرار العميل الصريح رقم 5.
+- Scope صحيح بدون بيانات مطابقة في الفترة → `200` مع `totalSales: 0, invoiceCount: 0` ورسالة عربية واضحة.
+- Scope غير موجود إطلاقًا (customerId/branchId غير موجود في أي بيانات) → `404`. مدخلات غير صالحة الشكل (Zod) → `400` تلقائيًا عبر `ZodValidationPipe`.
+- إنفاذ صلاحيات صف-بصف مطابق تمامًا لـ`getDataset` (نفس `applyHierarchyFilter` + `resolveAllowedRouteIds`).
+- تسجيل تلقائي في Analysis Studio (نفس آلية `AnalysisEventService.record` التي يستخدمها `renderAnalysis`) — بلا حاجة لاستدعاء `renderAnalysis` منفصل بعدها.
+
+**الملفات المعدّلة**:
+- `packages/schemas/src/gpt.schemas.ts`: أُضيف `executeReportScopeSchema` (بالضبط حقل واحد عبر `.refine`)، `executeReportPeriodSchema` (تحقق من تسلسل التواريخ)، و`executeReportSchema` المُصدَّر (`reportType: z.literal("salesSummary")`).
+- `apps/api/src/modules/gpt/gpt.service.ts`: أُضيفت دالة مساعدة خاصة `loadDatasetRowsByType` (تحميل مجموعة بيانات بالاسم القانوني `datasetType` بدل `fileId`)، ودالة عامة جديدة `executeReport` تنفذ: `assertValidSession` → تحميل Invoices+Invoice Items بالتوازي → `joinInvoiceHeaderAndItems` (نفس أداة `dataset-query.util.ts` المشتركة) → إنفاذ الصلاحيات → حل الـScope (فروع ثلاثة: customerId/employeeId/branchId) → فلترة الفترة → `computeAggregate("sum", ...)` على `LineTotal` → عدّ `InvoiceNo` الفريد → `groupBy` اختياري (route/employee/customer/month) → بناء `narrative` + `blocks` (KPICards دائمًا، Table عند وجود `groupBy`) → `analysisEventService.record` → إرجاع النتيجة الكاملة مباشرة.
+- `apps/api/src/modules/gpt/gpt.controller.ts`: أُضيفت `POST /gpt/execute-report` (نفس نمط مصادقة `@Public()` + `gpt-api-key` كباقي Actions)، مع `@ApiOperation` صريح يوجّه النموذج لاستخدامها لأي طلب "إجمالي مبيعات لعميل/موظف/فرع خلال فترة". تحديث وصف `getDataset` و`renderAnalysis` ليوجّها النموذج صراحة نحو `execute-report` لهذا النوع من الطلبات بدلاً من محاولة تسلسل استدعاءات متعددة بنفسه.
+
+**التحقق (بيئة الـsandbox لا تشغّل pnpm بسبب رموز رمزية معطوبة عبر جسر Windows↔Linux — تحقق بديل صارم)**:
+1. توازن الأقواس/الحاضنات في الملفات الثلاثة المعدّلة (فحص برمجي متجاهل للنصوص والتعليقات): متوازن بالكامل في الثلاثة.
+2. اختبار `executeReportSchema` فعليًا عبر Zod حقيقي (9 سيناريوهات): قبول Scope صحيح واحد (customerId، وbranchId+groupBy)، رفض Scope فارغ، رفض Scope مزدوج، رفض `regionId` (غير معرّف في الـschema فيُعامل كأنه Scope فارغ)، رفض `from` بعد `to`، رفض `reportType` غير `salesSummary`، رفض `groupBy` خارج القيم الأربعة، رفض تاريخ غير صالح — **كل الحالات التسع نجحت**.
+3. إعادة بناء منطق الأعمال الفعلي (حل Scope + فلترة الفترة + الـJoin + التجميع) بمحاكاة بيانات Invoices/Invoice Items/Routes اصطناعية تغطي معايير القبول السبعة المعتمدة: عميل بفترة صحيحة (المجموع والعدد الصحيحان)، فرع عبر Join حقيقي RouteID→BranchID (فرعان مختلفان بنتائج صحيحة مختلفة)، عميل موجود لكن بدون فواتير داخل الفترة (200 بقيم صفرية)، عميل/فرع غير موجودين إطلاقًا (404 لكل منهما) — **كل السيناريوهات الستة نجحت** ونتائجها مطابقة رقميًا للمتوقع يدويًا.
+
+**الخلاصة**: `renderAnalysis` بقي كما هو تمامًا (Mirror فقط لا يجلب بيانات) — لم تتغير مسؤوليته، فقط تحسّن وصفه في الـSchema. `getDataset` لم يتغير سلوكه إطلاقًا، فقط تحسّن وصفه. الإصلاح الوحيد الحقيقي هو نقطة نهاية جديدة كاملة تزيل الحاجة لأي تسلسل استدعاءات صحيح من طرف النموذج لأشيع نوع طلب تحليلي (تقرير مبيعات بنطاق وفترة). الخطوة التالية العملية: نشر على Railway واختبار طلب `salesSummary` حقيقي من داخل شاشة Test في GPT Builder أو محادثة ChatGPT جديدة، للتأكد من أن التسلسل بأكمله أصبح استدعاءً واحدًا بلا انحراف.

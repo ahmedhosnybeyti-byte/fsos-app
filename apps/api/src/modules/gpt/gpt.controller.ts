@@ -2,10 +2,12 @@ import { Body, Controller, ForbiddenException, Get, Headers, Post, Query, Unauth
 import { ApiBearerAuth, ApiBody, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
 import {
   configureGptSchema,
+  executeReportSchema,
   getGptDatasetSchema,
   renderAnalysisEventSchema,
   verifyGptAccessSchema,
   type ConfigureGptInput,
+  type ExecuteReportInput,
   type GetGptDatasetInput,
   type RenderAnalysisEventInput,
   type VerifyGptAccessInput,
@@ -199,7 +201,7 @@ export class GptController {
   @ApiOperation({
     summary: "Fetch a filtered, sorted, paginated, optionally projected page of rows from one dataset — never fetch the whole file.",
     description:
-      "Always narrow with customerId, invoiceId, routeId, salesRep, search, or filters first. Use aggregate (sum/count/avg/min/max, groupBy) for figures instead of raw rows. Check columns[].distinctValues from verifyAccess/listDatasets for exact filter values. Use columns/sortBy to shape results.",
+      "For a standard sales-by-scope-and-period report (total sales, invoice count, optional breakdown for one customer/employee/branch), call POST /gpt/execute-report instead — it does filtering+aggregation+access-control server-side in one call. Use getDataset only for everything else: raw row inspection, custom filters/aggregates, or datasets other than Invoices/Invoice Items. Always narrow with customerId, invoiceId, routeId, salesRep, search, or filters first. Use aggregate (sum/count/avg/min/max, groupBy) for figures instead of raw rows. Check columns[].distinctValues from verifyAccess/listDatasets for exact filter values. Use columns/sortBy to shape results.",
   })
   @ApiQuery({ name: "sessionToken", required: true, type: String, description: "Session token returned by verifyAccess." })
   @ApiQuery({ name: "fileId", required: true, type: String, description: "Dataset id, from verifyAccess's or listDatasets' response." })
@@ -296,7 +298,7 @@ export class GptController {
   @ApiOperation({
     summary: "Mirror the answer just given in chat into the user's Analysis Studio screen — call after every reply, not instead of it.",
     description:
-      "Call once after replying in chat, whether or not data was involved. Always pass a short narrative; add blocks only when a table/chart/map helps. Never call instead of replying, and never before the chat reply.",
+      "Call once after replying in chat, whether or not data was involved. Always pass a short narrative; add blocks only when a table/chart/map helps. Never call instead of replying, and never before the chat reply. Do NOT call this to generate or fetch a standard sales report — it only records a narrative/blocks payload you already computed; it has no access to data itself. For a total-sales/invoice-count report by customer, employee, or branch, call POST /gpt/execute-report instead, which fetches the data AND records the Analysis Studio event in one call — no separate render call needed afterward.",
   })
   @ApiQuery({ name: "sessionToken", required: true, type: String, description: "Session token returned by verifyAccess." })
   @ApiBody({
@@ -337,5 +339,77 @@ export class GptController {
     const apiKey = extractBearerToken(authorization);
     if (!sessionToken) throw new UnauthorizedException("Missing sessionToken");
     return this.gptService.renderAnalysis(apiKey, sessionToken, body);
+  }
+
+  // Unified, single-call standard report — built specifically to remove the
+  // multi-step tool-calling sequence (getDataset -> renderAnalysis) that a
+  // GPT conversation doesn't always execute correctly. The model sends only
+  // report type + scope + period; the server loads, joins, filters,
+  // aggregates, applies row-level access control, AND records the Analysis
+  // Studio event itself — the response already contains everything needed
+  // to answer the user, no follow-up Action call required.
+  @Post("execute-report")
+  @Public()
+  @ApiBearerAuth("gpt-api-key")
+  @ApiOperation({
+    summary: "Run a standard sales report for one scope + period in a single call — the preferred way to answer sales-total questions.",
+    description:
+      "Use this whenever the user asks for total sales, invoice count, or a sales breakdown for ONE customer, ONE employee, or ONE branch over a date range (e.g. \"مبيعات العميل X في يناير\", \"sales for branch Jeddah last quarter\"). Provide exactly one of scope.customerId / scope.employeeId / scope.branchId (regionId is not yet supported), plus period.from/period.to, and optionally groupBy (route/employee/customer/month) for a breakdown table. This single call fetches the data, computes the figures, applies the same row-level access control as getDataset, AND records the result into the user's Analysis Studio — do not also call renderAnalysis afterward for this same result. Still reply to the user in chat using the narrative/totals returned here.",
+  })
+  @ApiBody({
+    description: "Report type, scope (exactly one field), period, and optional groupBy.",
+    schema: jsonSchema31({
+      type: "object",
+      required: ["reportType", "scope", "period"],
+      properties: {
+        reportType: { type: "string", enum: ["salesSummary"] },
+        scope: {
+          type: "object",
+          description: "Exactly one of these three fields.",
+          properties: {
+            branchId: { type: "string" },
+            customerId: { type: "string" },
+            employeeId: { type: "string" },
+          },
+        },
+        period: {
+          type: "object",
+          required: ["from", "to"],
+          properties: {
+            from: { type: "string", description: "Inclusive start date (YYYY-MM-DD)." },
+            to: { type: "string", description: "Inclusive end date (YYYY-MM-DD)." },
+          },
+        },
+        groupBy: { type: "string", enum: ["route", "employee", "customer", "month"] },
+      },
+    }),
+  })
+  @ApiQuery({ name: "sessionToken", required: true, type: String, description: "Session token returned by verifyAccess." })
+  @ApiCreatedResponse({
+    description: "Computed report — reply to the user using narrative/totalSales/invoiceCount directly; already recorded in Analysis Studio.",
+    schema: jsonSchema31({
+      type: "object",
+      properties: {
+        reportType: { type: "string" },
+        scope: { type: "object" },
+        period: { type: "object" },
+        totalSales: { type: "number" },
+        invoiceCount: { type: "integer" },
+        currency: { type: "string" },
+        breakdown: { type: ["array", "null"], items: { type: "object", properties: { groupValue: { type: "string" }, totalSales: { type: "number" }, invoiceCount: { type: "integer" } } } },
+        narrative: { type: "string" },
+        blocks: { type: "array", items: { type: "object" } },
+        analysisEventId: { type: "string" },
+      },
+    }),
+  })
+  executeReport(
+    @Headers("authorization") authorization: string | undefined,
+    @Query("sessionToken") sessionToken: string | undefined,
+    @Body(new ZodValidationPipe(executeReportSchema)) body: ExecuteReportInput,
+  ) {
+    const apiKey = extractBearerToken(authorization);
+    if (!sessionToken) throw new UnauthorizedException("Missing sessionToken");
+    return this.gptService.executeReport(apiKey, sessionToken, body);
   }
 }

@@ -3,7 +3,7 @@ import { randomBytes, createHash } from "node:crypto";
 import * as argon2 from "argon2";
 import * as XLSX from "xlsx";
 import type { Gpt } from "@field-sales-os/database";
-import { TOKEN_TTL, type ConfigureGptInput, type GetGptDatasetInput, type RenderAnalysisEventInput } from "@field-sales-os/schemas";
+import { TOKEN_TTL, type ConfigureGptInput, type ExecuteReportInput, type GetGptDatasetInput, type RenderAnalysisEventInput } from "@field-sales-os/schemas";
 import { PrismaService, isUniqueConstraintError } from "../../common/prisma";
 import { SubscriptionsService } from "../subscriptions/subscriptions.service";
 import { FilesService } from "../files/files.service";
@@ -18,7 +18,9 @@ import {
   applyHierarchyFilter,
   computeAggregate,
   filterRows,
+  joinInvoiceHeaderAndItems,
   projectRow,
+  resolveColumnAlias,
   resolveColumns,
   resolveExactColumn,
   resolveGroupSortField,
@@ -511,5 +513,265 @@ export class GptService {
     });
 
     return { received: true, eventId: report.id };
+  }
+
+  // ---- POST /gpt/execute-report — unified single-call standard report ----
+
+  // Loads one dataset by its canonical datasetType (e.g. "Invoices",
+  // "Invoice Items", "Routes") rather than by fileId, since execute-report's
+  // caller never sees fileIds — it only names a report type + scope. Mirrors
+  // getDataset's own buffer-read/parse steps exactly (same sheet-restriction
+  // fix, same shape), just keyed differently. Returns null (not throwing) for
+  // "not uploaded yet" so callers can decide 404 vs empty-result themselves.
+  private async loadDatasetRowsByType(companyId: string, datasetType: string): Promise<{ rows: DatasetRow[]; headers: string[] } | null> {
+    const file = await this.prisma.file.findFirst({
+      where: { companyId, isActive: true, status: "READY", datasetTypeConfirmed: true, datasetType },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!file) return null;
+
+    const buffer = await this.filesService.downloadFileBuffer(file.id, companyId);
+    const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, sheets: Array.from(new Set([file.sheetIndex, 0])) });
+    const sheetName = workbook.SheetNames[file.sheetIndex] ?? workbook.SheetNames[0];
+    const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
+    const rows = (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as DatasetRow[];
+    const headers = Object.keys(rows[0] ?? {});
+    return { rows, headers };
+  }
+
+  // salesSummary is v1's only report type (Engineering Brief, 2026-07-27):
+  // one scope field per request (branchId | customerId | employeeId —
+  // regionId deferred), a required period, an optional groupBy. The server
+  // does every step the model previously had to sequence itself
+  // (getDataset -> filter -> aggregate -> renderAnalysis) in one call, so
+  // there is no multi-step tool-calling sequence left for the model to get
+  // wrong. branchId is resolved via Invoice.RouteID -> Routes.RouteID ->
+  // Routes.BranchID — the only join of its kind in the codebase; every
+  // other module reads BranchID straight off the Customers dataset instead.
+  async executeReport(rawApiKey: string, sessionToken: string, input: ExecuteReportInput) {
+    const { gpt, session } = await this.assertValidSession(rawApiKey, sessionToken);
+    const companyId = gpt.companyId;
+
+    const [header, items, requestingUser, currencyProfile] = await Promise.all([
+      this.loadDatasetRowsByType(companyId, "Invoices"),
+      this.loadDatasetRowsByType(companyId, "Invoice Items"),
+      this.prisma.user.findUnique({ where: { id: session.userId }, include: { role: true } }),
+      this.prisma.companyProfile.findUnique({ where: { companyId } }).catch(() => null),
+    ]);
+    const currency = currencyProfile?.currency?.trim() || "غير محدد";
+
+    if (!header || !items) {
+      throw new BadRequestException(
+        "Invoices and Invoice Items datasets are both required for salesSummary and are not both uploaded yet. Call GET /gpt/datasets to see what's currently active.",
+      );
+    }
+
+    const invoiceNoHeaderCol = resolveExactColumn(header.headers, "InvoiceNo");
+    const invoiceNoItemCol = resolveExactColumn(items.headers, "InvoiceNo");
+    const { rows: joinedAll } = joinInvoiceHeaderAndItems(header.rows, header.headers, invoiceNoHeaderCol, items.rows, items.headers, invoiceNoItemCol);
+    const joinedHeaders = Object.keys(joinedAll[0] ?? {});
+
+    // Row-level access control — identical enforcement to getDataset, so
+    // execute-report can never surface more than the requesting user's role
+    // is already allowed to see via the platform's other data paths.
+    let visibleRows = joinedAll;
+    if (requestingUser) {
+      const hierarchyUser = { roleCode: requestingUser.role.code, email: requestingUser.email };
+      const routeAllowed = await this.hierarchyResolver.resolveAllowedRouteIds(companyId, hierarchyUser);
+      visibleRows = applyHierarchyFilter(joinedAll, joinedHeaders, routeAllowed);
+    } else {
+      visibleRows = [];
+    }
+
+    // ---- Scope resolution -------------------------------------------------
+    let scopedRows = visibleRows;
+    let scopeLabel: string;
+
+    if (input.scope.customerId !== undefined) {
+      const customerCol = resolveColumnAlias(joinedHeaders, "customerId");
+      if (!customerCol) {
+        throw new BadRequestException('No customer id/code column was found on the Invoices dataset — cannot scope by customerId.');
+      }
+      const exists = visibleRows.some((r) => String(r[customerCol] ?? "").trim().toLowerCase() === input.scope.customerId!.trim().toLowerCase());
+      if (!exists) {
+        const anyRowAtAll = joinedAll.some((r) => String(r[customerCol] ?? "").trim().toLowerCase() === input.scope.customerId!.trim().toLowerCase());
+        if (!anyRowAtAll) throw new NotFoundException(`customerId "${input.scope.customerId}" was not found in the Invoices dataset.`);
+        // Exists overall but not within this user's visible scope, or exists
+        // but has zero invoices in the given period — both are legitimate
+        // "zero" results, not a 404; the period filter below will settle it.
+      }
+      scopedRows = filterRows(scopedRows, joinedHeaders, { customerId: input.scope.customerId });
+      scopeLabel = `العميل ${input.scope.customerId}`;
+    } else if (input.scope.employeeId !== undefined) {
+      // No direct EmployeeID column on Invoices/Invoice Items — resolved via
+      // Routes.SalesRepID/SupervisorID/ManagerID (the same three assignment
+      // columns CanonicalHierarchyResolverService itself reads), independent
+      // of the requesting user's own hierarchy scope: this finds every route
+      // assigned to the target employee in any of those three roles, then
+      // narrows the caller's already-visible rows down to just those routes.
+      const employeeId = input.scope.employeeId;
+      const routesForEmployee = await this.loadDatasetRowsByType(companyId, "Routes");
+      if (!routesForEmployee) {
+        throw new BadRequestException("Routes dataset is required to scope by employeeId and is not uploaded yet.");
+      }
+      const routeIdCol = resolveExactColumn(routesForEmployee.headers, "RouteID");
+      const assignmentCols = ["SalesRepID", "SupervisorID", "ManagerID"]
+        .map((name) => routesForEmployee.headers.find((h) => h.toLowerCase() === name.toLowerCase()))
+        .filter((c): c is string => !!c);
+      const employeeRouteIds = new Set<string>();
+      for (const row of routesForEmployee.rows) {
+        const matches = assignmentCols.some((col) => String(row[col] ?? "").trim().toLowerCase() === employeeId.trim().toLowerCase());
+        if (matches) {
+          const rid = String(row[routeIdCol] ?? "").trim().toLowerCase();
+          if (rid) employeeRouteIds.add(rid);
+        }
+      }
+      if (employeeRouteIds.size === 0) {
+        throw new NotFoundException(`employeeId "${employeeId}" was not found in the Routes dataset (no route assigned to this employee).`);
+      }
+      const routeCol = resolveColumnAlias(joinedHeaders, "routeId");
+      if (!routeCol) {
+        throw new BadRequestException('No RouteID column was found on the Invoices dataset — cannot scope by employeeId.');
+      }
+      scopedRows = visibleRows.filter((r) => {
+        const v = r[routeCol];
+        return v !== null && v !== undefined && employeeRouteIds.has(String(v).trim().toLowerCase());
+      });
+      scopeLabel = `الموظف ${employeeId}`;
+    } else {
+      // branchId — Invoice.RouteID -> Routes.RouteID -> Routes.BranchID.
+      const branchId = input.scope.branchId!;
+      const routes = await this.loadDatasetRowsByType(companyId, "Routes");
+      if (!routes) {
+        throw new BadRequestException("Routes dataset is required to scope by branchId and is not uploaded yet.");
+      }
+      const routeIdCol = resolveExactColumn(routes.headers, "RouteID");
+      const branchIdCol = resolveExactColumn(routes.headers, "BranchID");
+      const routeToBranch = new Map<string, string>();
+      for (const r of routes.rows) {
+        const rid = String(r[routeIdCol] ?? "").trim().toLowerCase();
+        if (rid) routeToBranch.set(rid, String(r[branchIdCol] ?? "").trim());
+      }
+      const branchExists = Array.from(routeToBranch.values()).some((b) => b.toLowerCase() === branchId.trim().toLowerCase());
+      if (!branchExists) {
+        throw new NotFoundException(`branchId "${branchId}" was not found in the Routes dataset.`);
+      }
+      const invoiceRouteCol = resolveColumnAlias(joinedHeaders, "routeId");
+      if (!invoiceRouteCol) {
+        throw new BadRequestException('No RouteID column was found on the Invoices dataset — cannot scope by branchId.');
+      }
+      scopedRows = visibleRows.filter((r) => {
+        const rid = String(r[invoiceRouteCol] ?? "").trim().toLowerCase();
+        const b = routeToBranch.get(rid);
+        return !!b && b.toLowerCase() === branchId.trim().toLowerCase();
+      });
+      scopeLabel = `الفرع ${branchId}`;
+    }
+
+    // ---- Period filter ------------------------------------------------------
+    const invoiceDateCol = resolveExactColumn(joinedHeaders, "InvoiceDate");
+    const periodRows = filterRows(scopedRows, joinedHeaders, {
+      filters: { [invoiceDateCol]: { dateFrom: input.period.from, dateTo: input.period.to } },
+    });
+
+    // ---- Aggregate ------------------------------------------------------
+    const lineTotalCol = resolveExactColumn(joinedHeaders, "LineTotal");
+    const { value: totalSales, skippedNonNumericRows } = computeAggregate("sum", periodRows, lineTotalCol);
+    const invoiceCount = new Set(periodRows.map((r) => String(r[invoiceNoHeaderCol] ?? "").trim()).filter(Boolean)).size;
+
+    // ---- Optional groupBy breakdown ------------------------------------
+    let breakdown: { groupValue: string; totalSales: number; invoiceCount: number }[] | undefined;
+    if (input.groupBy) {
+      const groupColumnName =
+        input.groupBy === "route" ? "routeId" : input.groupBy === "customer" ? "customerId" : input.groupBy === "employee" ? "salesRep" : null;
+      const groupCol = input.groupBy === "month" ? invoiceDateCol : groupColumnName ? resolveColumnAlias(joinedHeaders, groupColumnName) : null;
+      if (groupCol) {
+        const buckets = new Map<string, DatasetRow[]>();
+        for (const row of periodRows) {
+          let key: string;
+          if (input.groupBy === "month") {
+            const d = new Date(String(row[groupCol] ?? ""));
+            key = Number.isNaN(d.getTime()) ? "(blank)" : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+          } else {
+            const raw = row[groupCol];
+            key = raw === null || raw === undefined || raw === "" ? "(blank)" : String(raw);
+          }
+          const bucket = buckets.get(key);
+          if (bucket) bucket.push(row);
+          else buckets.set(key, [row]);
+        }
+        breakdown = Array.from(buckets.entries())
+          .map(([groupValue, rows]) => ({
+            groupValue,
+            totalSales: computeAggregate("sum", rows, lineTotalCol).value,
+            invoiceCount: new Set(rows.map((r) => String(r[invoiceNoHeaderCol] ?? "").trim()).filter(Boolean)).size,
+          }))
+          .sort((a, b) => b.totalSales - a.totalSales);
+      }
+    }
+
+    const narrative =
+      periodRows.length === 0
+        ? `لا توجد بيانات مطابقة لـ${scopeLabel} خلال الفترة من ${input.period.from} إلى ${input.period.to}.`
+        : `إجمالي المبيعات لـ${scopeLabel} خلال الفترة من ${input.period.from} إلى ${input.period.to}: ${totalSales.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${currency}، عدد الفواتير: ${invoiceCount}.`;
+
+    const blocks: RenderAnalysisEventInput["blocks"] = [
+      {
+        type: "KPICards",
+        id: "salesSummary-kpis",
+        title: "ملخص المبيعات",
+        purpose: "إجمالي المبيعات وعدد الفواتير للنطاق والفترة المطلوبة",
+        payload: {
+          items: [
+            { label: "إجمالي المبيعات", value: `${totalSales.toLocaleString("en-US", { maximumFractionDigits: 2 })} ${currency}` },
+            { label: "عدد الفواتير", value: invoiceCount },
+          ],
+        },
+      },
+    ];
+    if (breakdown && breakdown.length > 0) {
+      blocks.push({
+        type: "Table",
+        id: "salesSummary-breakdown",
+        title: `التوزيع حسب ${input.groupBy}`,
+        purpose: "تفصيل المبيعات حسب مجموعة العرض المطلوبة",
+        payload: {
+          columns: [
+            { key: "groupValue", label: "المجموعة" },
+            { key: "totalSales", label: "إجمالي المبيعات" },
+            { key: "invoiceCount", label: "عدد الفواتير" },
+          ],
+          rows: breakdown,
+        },
+      });
+    }
+
+    const report = await this.analysisEventService.record({
+      companyId,
+      userId: session.userId,
+      gptId: gpt.id,
+      event: { narrative, blocks },
+    });
+
+    await this.usageAnalyticsService.recordEvent({
+      companyId,
+      userId: session.userId,
+      gptId: gpt.id,
+      eventType: "ANALYSIS_RUN",
+      metadata: { reportType: input.reportType, scope: input.scope, period: input.period, groupBy: input.groupBy ?? null, totalSales, invoiceCount, skippedNonNumericRows },
+    });
+
+    return {
+      reportType: input.reportType,
+      scope: input.scope,
+      period: input.period,
+      totalSales,
+      invoiceCount,
+      currency,
+      breakdown: breakdown ?? null,
+      narrative,
+      blocks,
+      analysisEventId: report.id,
+    };
   }
 }

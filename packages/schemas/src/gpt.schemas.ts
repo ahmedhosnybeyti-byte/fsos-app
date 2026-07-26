@@ -195,3 +195,42 @@ export const getGptDatasetSchema = z
     },
   );
 export type GetGptDatasetInput = z.infer<typeof getGptDatasetSchema>;
+
+// POST /gpt/execute-report — unified, single-call standard-report endpoint.
+// Built to eliminate the multi-step-tool-calling failure mode observed in
+// real GPT conversations (verify → getDataset → renderAnalysis is 3 calls
+// the model must sequence correctly; it doesn't always). The model sends
+// only report type + scope + period; the server does all data loading,
+// filtering, joining, and aggregation itself and returns the finished
+// result directly — no follow-up Action call needed.
+//
+// v1 supports exactly one report type (salesSummary) and exactly one scope
+// field per request. regionId is intentionally not yet supported (deferred
+// — no Region-level join exists yet); branchId is resolved via
+// Invoice.RouteID -> Routes.RouteID -> Routes.BranchID.
+export const executeReportScopeSchema = z
+  .object({
+    branchId: z.string().min(1).max(200).optional(),
+    customerId: z.string().min(1).max(200).optional(),
+    employeeId: z.string().min(1).max(200).optional(),
+  })
+  .refine((v) => [v.branchId, v.customerId, v.employeeId].filter((x) => x !== undefined).length === 1, {
+    message: "Provide exactly one of branchId, customerId, or employeeId.",
+  });
+export type ExecuteReportScope = z.infer<typeof executeReportScopeSchema>;
+
+export const executeReportPeriodSchema = z
+  .object({
+    from: z.string().min(1).refine((s) => !Number.isNaN(Date.parse(s)), { message: "from must be a parseable date" }),
+    to: z.string().min(1).refine((s) => !Number.isNaN(Date.parse(s)), { message: "to must be a parseable date" }),
+  })
+  .refine((v) => Date.parse(v.from) <= Date.parse(v.to), { message: "from must be on or before to" });
+export type ExecuteReportPeriod = z.infer<typeof executeReportPeriodSchema>;
+
+export const executeReportSchema = z.object({
+  reportType: z.literal("salesSummary"),
+  scope: executeReportScopeSchema,
+  period: executeReportPeriodSchema,
+  groupBy: z.enum(["route", "employee", "customer", "month"]).optional(),
+});
+export type ExecuteReportInput = z.infer<typeof executeReportSchema>;
