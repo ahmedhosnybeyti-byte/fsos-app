@@ -201,28 +201,48 @@ export class GptService {
     if (!launchToken || launchToken.companyId !== gpt.companyId) {
       throw new UnauthorizedException("Invalid access code");
     }
-    if (launchToken.usedAt) {
-      throw new UnauthorizedException("This access code has already been used");
-    }
     if (launchToken.expiresAt < new Date()) {
-      throw new UnauthorizedException("This access code has expired");
+      // Distinguish the two expiry cases in the message: a code that was
+      // never used ran out its 10-minute paste window; a code that WAS
+      // used ran out its (session-length) window — either way the fix is
+      // the same (a brand new code from the dashboard), but the wording
+      // should match what actually happened.
+      throw new UnauthorizedException(
+        launchToken.usedAt ? "This session has expired. Please generate a new Launch Code." : "This access code has expired",
+      );
     }
 
-    // Promote the one-time code into a session token valid for the rest of
-    // the conversation — the model is instructed to pass it back on every
-    // subsequent /gpt/dataset call.
-    const sessionExpiresAt = new Date(Date.now() + TOKEN_TTL.gptSessionHours * 60 * 60 * 1000);
-    await this.prisma.gptLaunchToken.update({
-      where: { id: launchToken.id },
-      data: { usedAt: new Date(), expiresAt: sessionExpiresAt },
-    });
+    // 2026-07-26 — re-verifying an ALREADY-active session (same code,
+    // still within its still-valid session window) is now idempotent
+    // rather than an error. This is the recovery path for a real, observed
+    // ChatGPT behavior: the model sometimes reports "losing" the
+    // sessionToken mid-conversation even though the backend session is
+    // still perfectly valid (see PROJECT_LOG.md's Layer 4 retest) —
+    // previously the model's only recovery option was asking the user to
+    // fetch a BRAND NEW code from the dashboard, even though the one it
+    // already has is still good. Session isolation is unchanged by this:
+    // it only accepts the EXACT SAME secret the user already holds, for
+    // the SAME already-established session — it never falls back to any
+    // OTHER session, never grants access beyond what the original
+    // verifyAccess already did, and a genuinely expired code is still
+    // rejected above exactly as before.
+    if (!launchToken.usedAt) {
+      // First-time verification: promote the one-time code into a session
+      // token valid for the rest of the conversation — the model is
+      // instructed to pass it back on every subsequent /gpt/dataset call.
+      const sessionExpiresAt = new Date(Date.now() + TOKEN_TTL.gptSessionHours * 60 * 60 * 1000);
+      await this.prisma.gptLaunchToken.update({
+        where: { id: launchToken.id },
+        data: { usedAt: new Date(), expiresAt: sessionExpiresAt },
+      });
 
-    await this.usageAnalyticsService.recordEvent({
-      companyId: gpt.companyId,
-      userId: launchToken.userId,
-      gptId: gpt.id,
-      eventType: "VERIFY_ACCESS",
-    });
+      await this.usageAnalyticsService.recordEvent({
+        companyId: gpt.companyId,
+        userId: launchToken.userId,
+        gptId: gpt.id,
+        eventType: "VERIFY_ACCESS",
+      });
+    }
 
     // The model receives every active, CONFIRMED dataset's metadata right
     // away — no more guessing based on a fixed set of file "types"; it

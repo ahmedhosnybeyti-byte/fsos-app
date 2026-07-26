@@ -136,9 +136,9 @@ export class GptController {
   @Public()
   @ApiBearerAuth("gpt-api-key")
   @ApiOperation({
-    summary: "Verify the user's one-time access code and start a session — call this first, always.",
+    summary: "Verify the user's access code and start (or resume) a session — call this first, always.",
     description:
-      "Call first, always, before any other Action. Use the code the user pastes after \"Launch GPT\". Returns a sessionToken (send on every later call) and the active datasets list — the only valid source for \"what data\" questions and dataset metadata; never call getDataset just to inspect shape.",
+      "Call first, always, before any other Action. Use the code the user pastes after \"Launch GPT\". Returns a sessionToken (send on every later call) and the active datasets list — the only valid source for \"what data\" questions and dataset metadata; never call getDataset just to inspect shape. Recovery: if a later call ever returns an invalid/expired-session error, call this again with the SAME code before asking the user for a new one — re-verifying a still-active session is safe and just returns the same session again, no error, no new code needed.",
   })
   @ApiBody({
     description: "The one-time access code the user pastes.",
