@@ -65,7 +65,7 @@ export default function RegisterPage() {
           </div>
           <div className="space-y-2">
             <Label htmlFor="whatsapp">WhatsApp number</Label>
-            <Input id="whatsapp" type="tel" autoComplete="tel" placeholder="+20 100 000 0000" {...register("whatsapp")} />
+            <Input id="whatsapp" type="tel" autoComplete="tel" placeholder="+966 50 000 0000" {...register("whatsapp")} />
             {errors.whatsapp && <p className="text-xs text-destructive">{errors.whatsapp.message}</p>}
           </div>
           <div className="space-y-2">

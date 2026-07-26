@@ -942,6 +942,20 @@ export class FilesService {
     if (!file || file.companyId !== companyId) throw new NotFoundException("File not found");
     const updated = await this.prisma.file.update({ where: { id }, data: { isActive: false } });
 
+    // 2026-07-26 — same gap replaceFile() had (see comment there): deleting
+    // a file used to leave its materialized rows (Sales Calendar, Prospects)
+    // behind forever, since those two entities read straight from Postgres
+    // by companyId with no awareness of file status — the AI Assistant and
+    // GPT Action kept surfacing the "deleted" file's data indefinitely.
+    // Unlike replaceFile() (which only purges rows the NEW upload didn't
+    // re-claim), a straight delete has no replacement — purge every row
+    // still tagged with this file's id, unconditionally.
+    if (file.datasetType === SALES_CALENDAR_ENTITY) {
+      await this.prisma.salesCalendar.deleteMany({ where: { companyId, sourceFileId: id } }).catch(() => undefined);
+    } else if (file.datasetType === PROSPECTS_ENTITY) {
+      await this.prisma.prospect.deleteMany({ where: { companyId, sourceFileId: id } }).catch(() => undefined);
+    }
+
     // Same blob-cleanup gap as replaceFile() — see the comment there.
     const stillReferenced = await this.prisma.file.count({ where: { storageKey: file.storageKey, isActive: true } });
     if (stillReferenced === 0) {
