@@ -84,6 +84,7 @@ async function bootstrap() {
     `/api/${API_VERSION_PREFIX}/gpt/datasets`,
     `/api/${API_VERSION_PREFIX}/gpt/dataset`,
     `/api/${API_VERSION_PREFIX}/gpt/render`,
+    `/api/${API_VERSION_PREFIX}/gpt/execute-report`,
   ];
   const { cookie: _cookie, ...gptActionSecuritySchemes } = document.components?.securitySchemes ?? {};
   // The GPT Builder Action importer requires a genuine OpenAPI 3.1.x
