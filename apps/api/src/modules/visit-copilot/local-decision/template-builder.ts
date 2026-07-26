@@ -19,3 +19,23 @@ export function renderLocalAnswer(answer: LocalAnswer): string {
   if (answer.contextLine) lines.push(answer.contextLine);
   return lines.join("\n");
 }
+
+// Multi-section variant — for replies that summarize several already-
+// computed fields at once (e.g. Customer 360) instead of answering one
+// specific question. Same rule as renderLocalAnswer: every line here must
+// come from real computed data, never an invented value. A section with no
+// lines is simply omitted by the caller before this is invoked — this
+// function only renders what it's given.
+export interface LocalSection {
+  heading: string;
+  lines: string[];
+}
+
+export function renderLocalSections(title: string, sections: LocalSection[]): string {
+  const blocks = [title];
+  for (const section of sections) {
+    if (section.lines.length === 0) continue;
+    blocks.push([section.heading, ...section.lines].join("\n"));
+  }
+  return blocks.join("\n\n");
+}

@@ -24,7 +24,7 @@ import { categoryForChannel, type ProspectDiscoveryProvider } from "./discovery/
 import { GooglePlacesProvider } from "./discovery/google-places.provider";
 import { OverpassProvider } from "./discovery/overpass.provider";
 import { resolveMentionedCustomer } from "./local-decision/dictionary-engine";
-import { matchLocalRule } from "./local-decision/rule-engine";
+import { matchCustomer360, matchLocalRule } from "./local-decision/rule-engine";
 import { renderLocalAnswer } from "./local-decision/template-builder";
 
 // AI Visit Copilot — Phase 1. Decision-support screen for the field rep:
@@ -889,6 +889,15 @@ export class VisitCopilotService {
       // selected-customer state; the reply itself must not be the only
       // place that information lives.
       const switchFields = switched ? { activeCustomerCode: briefing.customerCode, activeCustomerName: briefing.customerName } : {};
+
+      // Customer 360 checked first — it's the more specific multi-section
+      // match; matchLocalRule's single-field patterns (e.g. "الرصيد",
+      // "أفضل منتج") would otherwise never get a chance to fire against a
+      // "Customer 360" message that also happens to contain their keywords.
+      const customer360Reply = matchCustomer360(body.message, briefing);
+      if (customer360Reply) {
+        return { reply: customer360Reply, source: "local", ...switchFields };
+      }
 
       const localAnswer = matchLocalRule(body.message, briefing);
       if (localAnswer) {
