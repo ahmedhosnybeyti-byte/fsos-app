@@ -8,6 +8,19 @@ import type { CandidateScore, ColumnMetadata, ColumnType, DetectedMetadata, Shee
 // silently pick one and discard the rest.
 const MIXED_CONFIDENCE_THRESHOLD = 70;
 const METADATA_SCAN_ROW_CAP = 2000;
+// 2026-07-26 — METADATA_SCAN_ROW_CAP=2000 is fine for TYPE classification
+// (scoreCandidates: a sample is plenty to tell "this is Invoices" from
+// header shape), but the SAME cap was also silently truncating the
+// ACCURACY-critical Smart Metadata (detected date period, region/branch/
+// rep distinct values, per-column min/max) — any file over 2000 rows had
+// its tail dropped from these, so a 2,150-row Invoices file could report a
+// completely wrong date range depending on where in the file the most
+// recent rows happened to fall. Real bug: the AI (native Assistant AND the
+// external ChatGPT GPT Action, both of which read this cached summary
+// verbatim) told the user "no 2026 data" based on a truncated scan of a
+// file that actually contained 2026 rows past row 2000. Separate, much
+// higher cap for these three accuracy-sensitive computations only.
+const METADATA_ACCURACY_ROW_CAP = 200_000;
 const DISTINCT_VALUE_CAP = 8;
 // Wider than DISTINCT_VALUE_CAP (which is for the named Smart Metadata
 // fields only) since this applies to every column — e.g. a "Status" or
@@ -100,7 +113,7 @@ export class DatasetClassifierService {
   // headers are numeric/dates and what a low-cardinality column's actual
   // values are — instead of guessing from header names alone.
   private buildColumnMetadata(headers: string[], dataRows: unknown[][]): ColumnMetadata[] {
-    const sampleRows = dataRows.slice(0, METADATA_SCAN_ROW_CAP);
+    const sampleRows = dataRows.slice(0, METADATA_ACCURACY_ROW_CAP);
 
     return headers.map((header, colIndex) => {
       let nullable = false;
@@ -232,7 +245,7 @@ export class DatasetClassifierService {
     const collectDistinct = (colIndex: number): string[] | undefined => {
       if (colIndex < 0) return undefined;
       const values = new Set<string>();
-      for (const row of dataRows.slice(0, METADATA_SCAN_ROW_CAP)) {
+      for (const row of dataRows.slice(0, METADATA_ACCURACY_ROW_CAP)) {
         const v = row[colIndex];
         if (v !== undefined && v !== null && String(v).trim() !== "") values.add(String(v).trim());
         if (values.size > DISTINCT_VALUE_CAP) return [`${values.size}+ distinct values`];
@@ -251,7 +264,7 @@ export class DatasetClassifierService {
     if (dateCol >= 0) {
       let min: Date | undefined;
       let max: Date | undefined;
-      for (const row of dataRows.slice(0, METADATA_SCAN_ROW_CAP)) {
+      for (const row of dataRows.slice(0, METADATA_ACCURACY_ROW_CAP)) {
         const v = row[dateCol];
         const d = v instanceof Date ? v : typeof v === "string" ? new Date(v) : undefined;
         if (!d || Number.isNaN(d.getTime())) continue;
