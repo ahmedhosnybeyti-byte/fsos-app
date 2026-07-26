@@ -139,6 +139,20 @@ export interface IgnoredSheetOutcome {
   sheetName: string;
 }
 
+// One sheet that WAS matched to an official entity but was skipped because
+// this exact entity, from this exact physical file (same bytes), is
+// already active for this company — re-importing it would just create a
+// duplicate File row with identical data. Reported separately from
+// `ignored` (sheets with no entity match at all) and `rejected` (real
+// validation failures) so a partial re-upload reads as "nothing changed
+// here, already up to date" rather than an error. See the Smart Merge
+// comment in processWorkbook for the full behavior this enables.
+export interface SkippedSheetOutcome {
+  sheetName: string;
+  entity: string;
+  message: string;
+}
+
 // One newly-provisioned employee account — tempPassword appears HERE, in
 // this one upload response, and nowhere else ever again (it's stored only
 // as an argon2 hash). The admin copies/distributes it; the employee must
@@ -167,6 +181,7 @@ export interface BatchUploadResult {
   accepted: FileRow[];
   rejected: RejectedSheetOutcome[];
   ignored: IgnoredSheetOutcome[];
+  skipped: SkippedSheetOutcome[];
   // Present only when this batch contained an accepted Employees sheet —
   // automatic account provisioning ran (see provisionEmployeeAccounts).
   provisioning?: ProvisioningResult;
@@ -381,21 +396,22 @@ export class FilesService {
   private async processWorkbook(params: { companyId: string; uploadedByUserId: string; file: Express.Multer.File; viaSuperAdmin?: boolean }): Promise<BatchUploadResult> {
     const { companyId, uploadedByUserId, file, viaSuperAdmin } = params;
 
-    // Duplicate-upload guard: the exact same bytes uploaded twice while the
-    // first copy is still active is always a mistake (double-import), never
-    // an update — an updated export has different bytes. Re-uploading after
-    // deleting the old copy is allowed (isActive filter). Files uploaded
-    // before this guard existed have a null hash and are never matched.
+    // 2026-07-26 — Smart Merge: this used to be a whole-file guard here
+    // (reject the entire upload outright if these exact bytes were already
+    // active for this company). That broke a real workflow: a multi-sheet
+    // batch shares ONE physical blob/contentHash across every sheet's File
+    // row, so deleting just a few sheets (meaning to re-import only those)
+    // and re-uploading the SAME unchanged file got rejected wholesale,
+    // because the file's hash still matched the sheets that were never
+    // deleted. Duplicate detection now happens per sheet, inside the loop
+    // below (see the `existingActiveSameEntity` check): each sheet's entity
+    // is checked independently against what's already active for this
+    // company with this exact content, so sheets that are missing/deleted
+    // get imported while sheets that are already active and unchanged are
+    // skipped (not duplicated) — a true partial re-upload instead of an
+    // all-or-nothing reject. contentHash itself is unchanged — still one
+    // hash per physical file, stored on every sheet's File row as before.
     const contentHash = createHash("sha256").update(file.buffer).digest("hex");
-    const duplicate = await this.prisma.file.findFirst({
-      where: { companyId, contentHash, isActive: true },
-      select: { fileName: true, createdAt: true },
-    });
-    if (duplicate) {
-      throw new BadRequestException(
-        `هذا الملف مرفوع بالفعل بنفس المحتوى تمامًا ("${duplicate.fileName}"، بتاريخ ${duplicate.createdAt.toISOString().slice(0, 10)}). لو ده تحديث، تأكد إنك بترفع النسخة الجديدة من الملف.`,
-      );
-    }
 
     let workbook: XLSX.WorkBook;
     try {
@@ -439,6 +455,7 @@ export class FilesService {
       message: `${a.sheets.length} sheets in this file are all named "${a.entity}" — ambiguous, none of them were imported. Keep only one sheet per official entity.`,
     }));
     const accepted: FileRow[] = [];
+    const skipped: SkippedSheetOutcome[] = [];
 
     // Trial data-volume cap — checked once per upload, only against the
     // "Customers" sheet (the clearest single proxy for "how big is this
@@ -450,6 +467,28 @@ export class FilesService {
     const isTrial = subscription?.status === "TRIAL";
 
     for (const { sheet, template } of toValidate) {
+      const datasetType = template.entity;
+
+      // Smart Merge (2026-07-26): per-sheet duplicate check, replacing the
+      // old whole-file guard (see comment above). This entity, from this
+      // exact physical file (same bytes), is already active for this
+      // company — importing it again would only create a duplicate File
+      // row with identical data, so skip it. A sheet whose entity was
+      // deleted (or never uploaded) simply won't match here and proceeds to
+      // import below, regardless of what else in the same file is a repeat.
+      const existingActiveSameEntity = await this.prisma.file.findFirst({
+        where: { companyId, datasetType, contentHash, isActive: true },
+        select: { fileName: true, createdAt: true },
+      });
+      if (existingActiveSameEntity) {
+        skipped.push({
+          sheetName: sheet.sheetName,
+          entity: datasetType,
+          message: `"${datasetType}" من هذا الملف نفسه (بنفس المحتوى) موجود بالفعل ونشط منذ ${existingActiveSameEntity.createdAt.toISOString().slice(0, 10)} — تم تجاهله لتفادي التكرار.`,
+        });
+        continue;
+      }
+
       const sheetName = workbook.SheetNames[sheet.sheetIndex];
       const xlsSheet = sheetName ? workbook.Sheets[sheetName] : undefined;
       if (!xlsSheet) {
@@ -481,7 +520,6 @@ export class FilesService {
         }
       }
 
-      const datasetType = template.entity;
       const fileRecord = await this.prisma.file.create({
         data: {
           companyId,
@@ -550,6 +588,7 @@ export class FilesService {
       accepted,
       rejected,
       ignored: ignored.map((s) => ({ sheetName: s.sheetName })),
+      skipped,
       provisioning,
     };
   }

@@ -1270,6 +1270,19 @@ export interface FileIgnoredSheetOutcome {
   sheetName: string;
 }
 
+// Smart Merge (2026-07-26) — a sheet skipped because this exact entity,
+// from this exact physical file (same bytes), is already active. Distinct
+// from `ignored` (no entity match at all): this is the "nothing changed
+// here, already up to date" outcome for a partial re-upload — e.g. the
+// admin deleted 2 of a 19-sheet file's entities and re-uploaded the same
+// file to pick up just those 2; the other 17 land here instead of being
+// duplicated or blocking the whole upload.
+export interface FileSkippedSheetOutcome {
+  sheetName: string;
+  entity: string;
+  message: string;
+}
+
 // Automatic employee-account provisioning (2026-07-19) — when an uploaded
 // workbook's "Employees" sheet is accepted, the backend also provisions
 // platform accounts from its rows. `tempPassword` appears in THIS response
@@ -1296,6 +1309,7 @@ export interface FileBatchUploadResult {
   accepted: FileRecord[];
   rejected: FileRejectedSheetOutcome[];
   ignored: FileIgnoredSheetOutcome[];
+  skipped: FileSkippedSheetOutcome[];
   // Present only when the upload contained an accepted Employees sheet.
   provisioning?: FileProvisioningResult;
 }

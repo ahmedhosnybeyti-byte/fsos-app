@@ -265,6 +265,16 @@ function UploadDropzone({
               .join(" | ");
             toast.error(t("files.batchRejected", { fileName: file.name, count: result.rejected.length, details }));
           }
+
+          // Smart Merge (2026-07-26): sheets whose entity is already active
+          // from this exact file are skipped rather than duplicated or
+          // blocking the whole upload — surfaced here so a partial
+          // re-upload (e.g. only some sheets were deleted before
+          // re-uploading) reads as "already up to date," not silence.
+          if (result.skipped.length > 0) {
+            const entities = result.skipped.map((s) => s.entity).join(", ");
+            toast.info(t("files.batchSkipped", { fileName: file.name, count: result.skipped.length, entities }));
+          }
         } catch (error) {
           if (error instanceof ApiError && error.status === 422 && error.errors) {
             const report = error.errors as { entity?: string; errorCount?: number; issues?: { message: string }[] };

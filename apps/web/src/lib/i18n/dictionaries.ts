@@ -340,6 +340,7 @@ export type TranslationKey =
   | "files.batchAccepted"
   | "files.batchAcceptedMore"
   | "files.batchRejected"
+  | "files.batchSkipped"
   | "files.replaceOtherAccepted"
   | "files.dropzoneText"
   | "files.classifying"
@@ -1274,6 +1275,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "files.batchAccepted": "\"{fileName}\" — اتقبل {accepted} من {attempted}: {entities}",
     "files.batchAcceptedMore": "و{count} كمان",
     "files.batchRejected": "\"{fileName}\" — {count} شيت اترفض ومكملش: {details}",
+    "files.batchSkipped": "\"{fileName}\" — {count} شيت متجاهل لأنه موجود بالفعل وشغال بنفس المحتوى: {entities}",
     "files.replaceOtherAccepted": "+ {count} كيان تاني اتقبل من نفس الملف",
     "files.dropzoneText": "اسحب وأفلت ملف إكسل أو أكتر هنا، أو",
     "files.classifying": "جارِ تصنيف {count}…",
@@ -2219,6 +2221,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "files.batchAccepted": "\"{fileName}\" — accepted {accepted} of {attempted}: {entities}",
     "files.batchAcceptedMore": "and {count} more",
     "files.batchRejected": "\"{fileName}\" — {count} sheet(s) rejected: {details}",
+    "files.batchSkipped": "\"{fileName}\" — {count} sheet(s) skipped, already active with identical content: {entities}",
     "files.replaceOtherAccepted": "+ {count} other entities accepted from the same file",
     "files.dropzoneText": "Drag and drop an Excel file (or more) here, or",
     "files.classifying": "Classifying {count}…",
