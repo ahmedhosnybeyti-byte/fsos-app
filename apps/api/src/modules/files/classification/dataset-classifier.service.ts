@@ -1,25 +1,21 @@
 import { Injectable } from "@nestjs/common";
 import * as XLSX from "xlsx";
-import { CLASSIFICATION_RULES, METADATA_FIELD_ALIASES } from "./dataset-classification-rules";
-import type { CandidateScore, ColumnMetadata, ColumnType, DetectedMetadata, SheetClassification, WorkbookClassification } from "./types";
+import { METADATA_FIELD_ALIASES } from "./dataset-classification-rules";
+import type { ColumnMetadata, ColumnType, DetectedMetadata, SheetClassification, WorkbookClassification } from "./types";
 
-// 2+ sheets each confidently (>=70) pointing at DIFFERENT dataset types
-// means this workbook holds more than one business dataset — never
-// silently pick one and discard the rest.
-const MIXED_CONFIDENCE_THRESHOLD = 70;
-const METADATA_SCAN_ROW_CAP = 2000;
-// 2026-07-26 — METADATA_SCAN_ROW_CAP=2000 is fine for TYPE classification
-// (scoreCandidates: a sample is plenty to tell "this is Invoices" from
-// header shape), but the SAME cap was also silently truncating the
-// ACCURACY-critical Smart Metadata (detected date period, region/branch/
-// rep distinct values, per-column min/max) — any file over 2000 rows had
-// its tail dropped from these, so a 2,150-row Invoices file could report a
-// completely wrong date range depending on where in the file the most
-// recent rows happened to fall. Real bug: the AI (native Assistant AND the
-// external ChatGPT GPT Action, both of which read this cached summary
-// verbatim) told the user "no 2026 data" based on a truncated scan of a
-// file that actually contained 2026 rows past row 2000. Separate, much
-// higher cap for these three accuracy-sensitive computations only.
+// 2026-07-26 — this used to also hold METADATA_SCAN_ROW_CAP=2000, shared
+// between two very different jobs: (1) scoreCandidates()'s confidence-based
+// dataset-TYPE guessing, and (2) the accuracy-critical Smart Metadata
+// (detected date period, region/branch/rep distinct values, per-column
+// min/max). Both are now gone/fixed: job (1) — scoreCandidates,
+// analyzeColumnShapes, detectMixed, and the candidates/primarySheetIndex/
+// isMixed fields — was confirmed fully vestigial post-ADR-002 (sheet
+// dataset-type has run entirely through ImportTemplateMatcherService's
+// strict sheet-name/column matching for a while; nothing ever read the
+// confidence guess) and has been removed outright. Job (2) kept its own,
+// much higher cap below — reusing the type-classification sample size for
+// an accuracy computation was the actual bug (a 2,150-row Invoices file had
+// its tail silently dropped from the detected date range).
 const METADATA_ACCURACY_ROW_CAP = 200_000;
 const DISTINCT_VALUE_CAP = 8;
 // Wider than DISTINCT_VALUE_CAP (which is for the named Smart Metadata
@@ -29,8 +25,7 @@ const DISTINCT_VALUE_CAP = 8;
 // and its values aren't worth handing the model.
 const COLUMN_DISTINCT_VALUE_CAP = 15;
 // A column counts as a given type when this share of its non-blank sampled
-// values match — mirrors the >0.6 threshold analyzeColumnShapes() already
-// used for classification scoring, so the two signals stay consistent.
+// values match.
 const COLUMN_TYPE_THRESHOLD = 0.6;
 
 function normalize(text: string): string {
@@ -45,39 +40,18 @@ function headerMatchesKeyword(normalizedHeader: string, normalizedKeyword: strin
   return normalizedHeader.includes(normalizedKeyword) || normalizedKeyword.includes(normalizedHeader);
 }
 
-// Rule-based classifier: scores every candidate dataset type against a
-// sheet's headers (primary signal), sheet name (minor bonus), and coarse
-// column data-shape (minor bonus). No LLM call — fully deterministic,
-// requires no external API key, and the entire "vocabulary" it knows lives
-// in dataset-classification-rules.ts as data, not branching logic. A future
-// model-based classifier can implement the same shape behind this service
-// without touching FilesModule.
+// Per-sheet Smart Metadata extraction (detected date period, region/branch/
+// rep distinct values, per-column type/min/max/distinct). Dataset-TYPE
+// classification is a separate, unrelated concern handled entirely by
+// ImportTemplateMatcherService's strict sheet-name/column matching
+// (ADR-002) — this service used to also run a confidence-scored guess at
+// dataset type, but that guess was never consulted by anything (removed
+// 2026-07-26).
 @Injectable()
 export class DatasetClassifierService {
   classifyWorkbook(workbook: XLSX.WorkBook): WorkbookClassification {
     const sheets = workbook.SheetNames.map((sheetName, sheetIndex) => this.classifySheet(workbook, sheetName, sheetIndex));
-
-    let primarySheetIndex = 0;
-    let bestConfidence = -1;
-    sheets.forEach((sheet, i) => {
-      const top = sheet.candidates[0]?.confidence ?? 0;
-      if (top > bestConfidence) {
-        bestConfidence = top;
-        primarySheetIndex = i;
-      }
-    });
-
-    return { sheets, primarySheetIndex, isMixed: this.detectMixed(sheets) };
-  }
-
-  private detectMixed(sheets: SheetClassification[]): boolean {
-    if (sheets.length < 2) return false;
-    const strongTypes = new Set<string>();
-    for (const sheet of sheets) {
-      const top = sheet.candidates[0];
-      if (top && top.confidence >= MIXED_CONFIDENCE_THRESHOLD) strongTypes.add(top.datasetType);
-    }
-    return strongTypes.size >= 2;
+    return { sheets };
   }
 
   private classifySheet(workbook: XLSX.WorkBook, sheetName: string, sheetIndex: number): SheetClassification {
@@ -100,7 +74,6 @@ export class DatasetClassifierService {
       sheetName,
       headers,
       rowCount: Math.max(rows.length - 1, 0),
-      candidates: this.scoreCandidates(headers, sheetName, dataRows.slice(0, METADATA_SCAN_ROW_CAP)),
       detected: this.extractMetadata(headers, dataRows),
       columns: this.buildColumnMetadata(headers, dataRows),
     };
@@ -177,62 +150,6 @@ export class DatasetClassifierService {
       }
       return meta;
     });
-  }
-
-  private scoreCandidates(headers: string[], sheetName: string, sampleRows: unknown[][]): CandidateScore[] {
-    const normalizedHeaders = headers.map(normalize);
-    const normalizedSheetName = normalize(sheetName);
-    const shapes = this.analyzeColumnShapes(headers, sampleRows);
-
-    const scored = CLASSIFICATION_RULES.map((rule) => {
-      let raw = 0;
-      let max = 0;
-      for (const group of rule.headerGroups) {
-        max += group.weight;
-        const matched = group.keywords.some((kw) => {
-          const nk = normalize(kw);
-          return normalizedHeaders.some((nh) => headerMatchesKeyword(nh, nk));
-        });
-        if (matched) raw += group.weight;
-      }
-
-      let score = max > 0 ? raw / max : 0;
-      if (rule.sheetNameKeywords.some((kw) => normalizedSheetName.includes(normalize(kw)))) {
-        score = Math.min(1, score + 0.15);
-      }
-      if (rule.expectsNumericColumn && shapes.hasNumericColumn) score = Math.min(1, score + 0.06);
-      if (rule.expectsDateColumn && shapes.hasDateColumn) score = Math.min(1, score + 0.06);
-
-      return { datasetType: rule.datasetType, confidence: Math.round(score * 100) };
-    });
-
-    return scored.sort((a, b) => b.confidence - a.confidence).slice(0, 5);
-  }
-
-  // Coarse structural signal: does an "amount"-ish header actually hold
-  // mostly numbers, does any column hold mostly real dates. Deliberately
-  // shallow — a full column-type inference pipeline is more than this
-  // signal needs to be useful as a tiebreaker on top of header matching.
-  private analyzeColumnShapes(headers: string[], sampleRows: unknown[][]): { hasNumericColumn: boolean; hasDateColumn: boolean } {
-    let hasNumericColumn = false;
-    let hasDateColumn = false;
-
-    for (let col = 0; col < headers.length; col++) {
-      const header = normalize(headers[col] ?? "");
-      const looksAmountish = /(amount|total|price|value|paid|cost|balance)/.test(header);
-      const values = sampleRows.map((r) => r[col]).filter((v) => v !== undefined && v !== null && v !== "");
-      if (values.length === 0) continue;
-
-      if (looksAmountish) {
-        const numericCount = values.filter((v) => typeof v === "number").length;
-        if (numericCount / values.length > 0.6) hasNumericColumn = true;
-      }
-
-      const dateCount = values.filter((v) => v instanceof Date).length;
-      if (dateCount / values.length > 0.6) hasDateColumn = true;
-    }
-
-    return { hasNumericColumn, hasDateColumn };
   }
 
   // Smart Metadata — independent of dataset-type classification. Applied to

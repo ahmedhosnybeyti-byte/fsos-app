@@ -10,8 +10,14 @@ export const TOKEN_TTL = {
   // "Launch GPT".
   gptLaunchTokenMinutes: 10,
   // Once verify-access succeeds, the code is promoted into a session token
-  // valid for the rest of the conversation.
-  gptSessionHours: 4,
+  // valid for the rest of the conversation. 2026-07-26: raised 4->8 per
+  // user request. Note (see PROJECT_LOG.md's Layer 4 retest): a prior test
+  // saw the model report a "lost" sessionToken by the 3rd question in a
+  // conversation while the backend session was still valid — i.e. some
+  // session-loss reports are the model forgetting the token itself, not
+  // this expiry. This change only helps the case where a conversation
+  // genuinely spans past the window (resumed hours/days later).
+  gptSessionHours: 8,
 } as const;
 
 export const FILE_UPLOAD_LIMITS = {

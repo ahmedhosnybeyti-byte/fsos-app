@@ -1,8 +1,3 @@
-export interface CandidateScore {
-  datasetType: string;
-  confidence: number; // 0-100
-}
-
 export interface DetectedMetadata {
   period?: { from: string; to: string };
   region?: string[];
@@ -31,16 +26,16 @@ export interface SheetClassification {
   sheetName: string;
   headers: string[];
   rowCount: number;
-  candidates: CandidateScore[]; // sorted descending, top few
   detected: DetectedMetadata;
   columns: ColumnMetadata[];
 }
 
+// 2026-07-26 — dropped the confidence-scored `candidates`/`primarySheetIndex`/
+// `isMixed` fields that used to live here. Confirmed dead post-ADR-002: sheet
+// dataset-type selection has run entirely through ImportTemplateMatcherService
+// (strict sheet-name/column matching) for a while now, and nothing else —
+// not the Files UI, not the GPT Action, not the native Assistant — ever read
+// these fields; they were computed on every upload and never consulted.
 export interface WorkbookClassification {
   sheets: SheetClassification[];
-  primarySheetIndex: number;
-  // True when 2+ sheets each have a confident (>=70) top candidate AND
-  // those top candidates disagree — this workbook holds more than one
-  // business dataset and must never be silently classified as one thing.
-  isMixed: boolean;
 }

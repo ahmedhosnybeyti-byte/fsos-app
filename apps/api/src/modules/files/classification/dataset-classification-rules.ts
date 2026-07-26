@@ -1,8 +1,12 @@
-// Data, not logic — this is the entire "learning" surface of the
-// classifier. Teaching the platform a new dataset type is adding one entry
-// here; DatasetClassifierService never changes. See dataset-classifier.service.ts
-// for how these are scored, and docs on a future move to DB-stored rules for
-// true zero-deploy extensibility (mirrors PlatformSettings' philosophy).
+// Data, not logic — this used to be the entire "learning" surface of a
+// confidence-scored dataset-TYPE guesser in DatasetClassifierService
+// (scoreCandidates/analyzeColumnShapes). That guesser was removed
+// 2026-07-26 (confirmed dead: dataset type has run entirely through
+// ImportTemplateMatcherService's strict sheet-name/column matching since
+// ADR-002, and nothing ever consulted the guess). CLASSIFICATION_RULES is
+// currently unused — kept here rather than deleted in case a future
+// heuristic pre-classifier (e.g. to guess a type for an unofficially-named
+// sheet) wants this vocabulary again.
 
 export interface HeaderSignalGroup {
   // Near-synonyms that count as ONE signal — a sheet earns the group's
@@ -16,7 +20,7 @@ export interface ClassificationRule {
   headerGroups: HeaderSignalGroup[];
   sheetNameKeywords: string[];
   // Lightweight structural (data-pattern) expectations, scored against the
-  // sampled rows rather than headers — see analyzeColumnShapes().
+  // sampled rows rather than headers (unused now — see file header comment).
   expectsNumericColumn?: boolean;
   expectsDateColumn?: boolean;
 }

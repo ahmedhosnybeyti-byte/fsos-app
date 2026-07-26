@@ -247,25 +247,12 @@ export interface Payment {
   company?: Company;
 }
 
-export interface DatasetCandidate {
-  datasetType: string;
-  confidence: number;
-}
-
 export interface DetectedFileMetadata {
   period?: { from: string; to: string };
   region?: string[];
   branch?: string[];
   salesRep?: string[];
   route?: string[];
-}
-
-export interface MixedSheetSummary {
-  sheetIndex: number;
-  sheetName: string;
-  topCandidate: DatasetCandidate | null;
-  rowCount: number;
-  headerCount: number;
 }
 
 export interface FileRecord {
@@ -296,11 +283,6 @@ export interface FileRecord {
     rowCount: number;
     headers: string[];
     headerCount: number;
-    classification?: {
-      candidates: DatasetCandidate[];
-      isMixed: boolean;
-      sheets?: MixedSheetSummary[];
-    };
     detected?: DetectedFileMetadata;
   } | null;
 }

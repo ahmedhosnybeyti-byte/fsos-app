@@ -57,7 +57,7 @@ function sanitizeDatasetType(datasetType: string): string {
   return (cleaned || "dataset").slice(0, 60);
 }
 
-function buildParsedMetadata(sheetNames: string[], sheet: SheetClassification, isMixed: boolean, allSheets: SheetClassification[]) {
+function buildParsedMetadata(sheetNames: string[], sheet: SheetClassification) {
   return {
     sheetNames,
     rowCount: sheet.rowCount,
@@ -68,21 +68,6 @@ function buildParsedMetadata(sheetNames: string[], sheet: SheetClassification, i
     // toDatasetSummary — see dataset-classifier.service.ts for how each is
     // computed.
     columns: sheet.columns,
-    classification: {
-      candidates: sheet.candidates,
-      isMixed,
-      // Only present when mixed — lets the UI explain what's on each sheet
-      // without forcing the user to inspect the workbook themselves.
-      sheets: isMixed
-        ? allSheets.map((s) => ({
-            sheetIndex: s.sheetIndex,
-            sheetName: s.sheetName,
-            topCandidate: s.candidates[0] ?? null,
-            rowCount: s.rowCount,
-            headerCount: s.headers.length,
-          }))
-        : undefined,
-    },
     detected: sheet.detected,
   };
 }
@@ -330,9 +315,10 @@ export class FilesService {
   //      (there's only one), so no ambiguity to resolve there.
   //   3. Official column names — the remaining signal for single-sheet
   //      files whose one sheet isn't named after an entity.
-  // It NEVER uses: the uploader's filename, the legacy classifier's
-  // primarySheetIndex/candidate-confidence guess, or any other metadata
-  // outside the template's own content.
+  // It NEVER uses: the uploader's filename, or any confidence-based
+  // guess (that whole mechanism was removed 2026-07-26 — see
+  // dataset-classifier.service.ts), or any other metadata outside the
+  // template's own content.
   //
   // Multi-sheet workbooks (2026-07-19 decision) are no longer rejected
   // outright — a single upload may contain up to all 18 canonical entities
@@ -420,10 +406,10 @@ export class FilesService {
 
     // classifyWorkbook still runs — it enumerates every sheet and builds the
     // Smart Metadata (headers/rowCount/detected period-region-branch-rep-
-    // route) used for display and the model's dataset summaries. Its own
-    // primarySheetIndex/dataset-type guess is a heuristic and is NEVER used
-    // to decide which sheet(s) get validated or accepted — see
-    // resolveSheetsAndTemplates above.
+    // route) used for display and the model's dataset summaries. It has no
+    // opinion on dataset TYPE at all (that guess was removed 2026-07-26) —
+    // resolveSheetsAndTemplates above is the sole decider of which sheet(s)
+    // get validated or accepted.
     const classification = this.classifier.classifyWorkbook(workbook);
     if (classification.sheets.length === 0) {
       throw new BadRequestException("Could not find any readable sheet with data in this file.");
@@ -516,7 +502,7 @@ export class FilesService {
       });
 
       try {
-        const metadata = buildParsedMetadata(workbook.SheetNames, sheet, classification.isMixed, classification.sheets);
+        const metadata = buildParsedMetadata(workbook.SheetNames, sheet);
         const updated = await this.prisma.file.update({
           where: { id: fileRecord.id },
           data: { status: "READY", parsedMetadata: metadata as unknown as Prisma.InputJsonValue },

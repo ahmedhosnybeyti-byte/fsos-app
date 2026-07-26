@@ -192,7 +192,7 @@ Two things stay true no matter what:
 | 2 | API | Mints a random one-time code (`POST /gpt/launch`, valid 10 minutes), returns it + the GPT's URL. |
 | 3 | User | Opens the GPT, pastes the code when asked. |
 | 4 | GPT Action | Calls `POST /gpt/verify-access` with the company's static API key (Bearer, configured in Step 3) **and** the code in the request body. |
-| 5 | API | Validates both. If the code is valid, unused, unexpired, and the company's subscription is `TRIAL` or `ACTIVE`, it's promoted into a session token valid for 4 hours, and the response includes the full list of the company's active datasets (id, datasetType, fileName, rowCount, headers). |
+| 5 | API | Validates both. If the code is valid, unused, unexpired, and the company's subscription is `TRIAL` or `ACTIVE`, it's promoted into a session token valid for 8 hours, and the response includes the full list of the company's active datasets (id, datasetType, fileName, rowCount, headers). |
 | 6 | GPT Action | Calls `GET /gpt/dataset?fileId=...&sessionToken=...` for each dataset it decides is relevant to the user's question, re-checking the subscription every time. It can call `GET /gpt/datasets?sessionToken=...` again anytime to refresh the list. |
 | 7 | GPT Action | Calls `POST /gpt/render?sessionToken=...` with its answer (narrative + optional blocks) — same session check again — so Analysis Studio can display it. |
 | 8 | Scheduled job | Hourly, the API flips lapsed subscriptions to `EXPIRED` and immediately invalidates all outstanding codes/sessions for that company — an in-progress conversation loses access within the hour, not at its next login. |
