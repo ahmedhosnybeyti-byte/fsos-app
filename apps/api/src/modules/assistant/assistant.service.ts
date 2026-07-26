@@ -566,9 +566,9 @@ export class AssistantService {
   // already reasoned over the full data in the call where it first arrived.
   private compactStaleToolResults(messages: ClaudeMessage[]): void {
     for (let i = 0; i < messages.length - 2; i++) {
-      const content = messages[i].content;
-      if (messages[i].role !== "user" || !Array.isArray(content)) continue;
-      for (const block of content) {
+      const message = messages[i];
+      if (!message || message.role !== "user" || !Array.isArray(message.content)) continue;
+      for (const block of message.content) {
         if ("type" in block && block.type === "tool_result" && "content" in block && block.content.length > STALE_TOOL_RESULT_CHARS) {
           block.content = STALE_TOOL_RESULT_PLACEHOLDER;
         }
