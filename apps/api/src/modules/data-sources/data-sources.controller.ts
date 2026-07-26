@@ -8,6 +8,7 @@ import {
   type UpdateDataSourceInput,
 } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
+import { RequiresPaidPlan } from "../../common/decorators/requires-paid-plan.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
@@ -38,6 +39,7 @@ export class DataSourcesController {
 
   @Post()
   @Auth("COMPANY_ADMIN")
+  @RequiresPaidPlan()
   create(
     @CurrentUser() user: AuthenticatedUser,
     @Body(new ZodValidationPipe(createDataSourceSchema)) body: CreateDataSourceInput,
@@ -48,6 +50,7 @@ export class DataSourcesController {
 
   @Patch(":id")
   @Auth("COMPANY_ADMIN")
+  @RequiresPaidPlan()
   update(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -59,6 +62,7 @@ export class DataSourcesController {
 
   @Delete(":id")
   @Auth("COMPANY_ADMIN")
+  @RequiresPaidPlan()
   async remove(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     if (!user.companyId) throw new ForbiddenException();
     await this.dataSourcesService.delete(user.companyId, id, user.userId);

@@ -2,6 +2,7 @@ import { Body, Controller, ForbiddenException, Post } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { assistantChatRequestSchema, type AssistantChatRequest } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
+import { RequiresPaidPlan } from "../../common/decorators/requires-paid-plan.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
@@ -19,6 +20,7 @@ export class AssistantController {
 
   @Post("chat")
   @Auth()
+  @RequiresPaidPlan()
   chat(@CurrentUser() user: AuthenticatedUser, @Body(new ZodValidationPipe(assistantChatRequestSchema)) body: AssistantChatRequest) {
     if (!user.companyId) throw new ForbiddenException();
     return this.assistantService.chat(user, body);

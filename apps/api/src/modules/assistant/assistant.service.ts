@@ -18,6 +18,7 @@ import {
   computeAggregate,
   filterRows,
   projectRow,
+  resolveColumnAlias,
   resolveColumns,
   resolveExactColumn,
   resolveGroupSortField,
@@ -62,6 +63,51 @@ const ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
 const MAX_TOOL_ITERATIONS = 6;
 const MAX_ROWS_RETURNED_TO_MODEL = 60;
 const MAX_TOKENS = 1500;
+
+// 2026-07-26 token-bloat fix (615k-token "prompt is too long" incident) —
+// two independent uncapped-growth sources found in the tool-use loop:
+//
+// 1. query_dataset had a row-count cap (MAX_ROWS_RETURNED_TO_MODEL) but no
+//    cap on ROW WIDTH or FIELD LENGTH — if the model omitted `columns`
+//    (never enforced), every column of a wide canonical entity came back
+//    for all 60 rows, and any long free-text field multiplied that further.
+// 2. The tool-use loop resends the ENTIRE growing `messages` array on every
+//    iteration (required by Anthropic's protocol), but nothing ever shrank
+//    OLDER tool_result content once the model had already consumed it —
+//    so a single big query_dataset payload got re-billed/re-sent in full on
+//    every subsequent iteration, compounding across up to
+//    MAX_TOOL_ITERATIONS turns (classic O(n^2) growth within one request).
+//
+// Fixes below address exactly these two, and only these two — no tool
+// behavior, tool selection, or response content visible to the user
+// changes. A normal query_dataset call (the vast majority of real usage)
+// never even touches these limits.
+const MAX_TOOL_RESULT_CHARS = 12000; // ~3k-token ceiling on a single query_dataset payload
+const MAX_FIELD_CHARS = 300; // per-field string truncation inside returned rows
+const STALE_TOOL_RESULT_CHARS = 200; // below this, compaction isn't worth the risk/complexity
+const STALE_TOOL_RESULT_PLACEHOLDER = JSON.stringify({
+  note: "نتيجة سابقة تم استخدامها بالفعل في هذا الحوار — غير معروضة هنا لتوفير المساحة. نادِ الأداة تاني لو احتجت البيانات دي تاني.",
+});
+
+// Truncates long string field values so a single verbose/free-text column
+// can't blow the token budget on its own, then — belt-and-braces — drops
+// trailing rows if the page is still too large even after truncation
+// (very wide entities with many columns). Only ever shrinks; never
+// changes which rows/columns were selected by the query logic above.
+function capRowsForModel(rows: DatasetRow[]): DatasetRow[] {
+  const trimmed = rows.map((row) => {
+    const out: DatasetRow = {};
+    for (const [key, value] of Object.entries(row)) {
+      out[key] = typeof value === "string" && value.length > MAX_FIELD_CHARS ? `${value.slice(0, MAX_FIELD_CHARS)}…` : value;
+    }
+    return out;
+  });
+  let result = trimmed;
+  while (result.length > 1 && JSON.stringify(result).length > MAX_TOOL_RESULT_CHARS) {
+    result = result.slice(0, Math.ceil(result.length / 2));
+  }
+  return result;
+}
 
 type ClaudeContentBlock =
   | { type: "text"; text: string }
@@ -214,6 +260,9 @@ export class AssistantService {
         toolResults.push({ type: "tool_result", tool_use_id: toolUse.id, content: JSON.stringify(result) });
       }
       messages.push({ role: "user", content: toolResults });
+      // Shrink everything except this just-pushed pair before it gets
+      // resent on the next iteration — see MAX_TOOL_RESULT_CHARS comment.
+      this.compactStaleToolResults(messages);
     }
 
     return { reply: finalText || "معرفتش أوصل لإجابة واضحة، جرب تصيغ سؤالك بشكل مختلف.", blocks };
@@ -381,6 +430,43 @@ export class AssistantService {
       return { error: err instanceof Error ? err.message : "فلتر غير صالح." };
     }
 
+    // 2026-07-26 — a text filter/search that matches zero rows used to come
+    // back as a bare empty result, forcing the model to either invent a
+    // guess or stop and ask the user (e.g. "جدة" vs "Jeddah" spelled
+    // differently in the source data). Surfacing the column's ACTUAL
+    // distinct values lets the model retry with the right one itself in the
+    // next tool call instead of dead-ending the conversation.
+    let noMatchHint: Record<string, string[]> | undefined;
+    if (matchingRows.length === 0) {
+      const hintColumns = new Set<string>();
+      for (const key of ["customerId", "invoiceId", "routeId", "salesRep"] as const) {
+        if (input[key]) {
+          const column = resolveColumnAlias(headers, key);
+          if (column) hintColumns.add(column);
+        }
+      }
+      if (input.filters) {
+        for (const key of Object.keys(input.filters)) {
+          const column = headers.find((h) => h.toLowerCase() === key.toLowerCase());
+          if (column) hintColumns.add(column);
+        }
+      }
+      if (hintColumns.size > 0) {
+        noMatchHint = {};
+        for (const column of hintColumns) {
+          const distinct = [
+            ...new Set(
+              allRows
+                .map((r) => r[column])
+                .filter((v) => v !== null && v !== undefined && v !== "")
+                .map((v) => String(v)),
+            ),
+          ].slice(0, 8);
+          if (distinct.length > 0) noMatchHint[column] = distinct;
+        }
+      }
+    }
+
     const limit = Math.min(Math.max(input.limit ?? 20, 1), MAX_ROWS_RETURNED_TO_MODEL);
     const offset = Math.max(input.offset ?? 0, 0);
     const sortDir = input.sortDir ?? "asc";
@@ -426,11 +512,16 @@ export class AssistantService {
           offset,
           hasMore: offset + groupPage.length < allGroups.length,
           groups: groupPage,
+          ...(noMatchHint ? { noMatchHint } : {}),
         };
       }
 
       const result = computeAggregate(input.aggregate.op, matchingRows, column);
-      return { totalMatchingRows: matchingRows.length, aggregate: { op: input.aggregate.op, column: column ?? null, ...result } };
+      return {
+        totalMatchingRows: matchingRows.length,
+        aggregate: { op: input.aggregate.op, column: column ?? null, ...result },
+        ...(noMatchHint ? { noMatchHint } : {}),
+      };
     }
 
     let sortedRows = matchingRows;
@@ -452,14 +543,36 @@ export class AssistantService {
       }
     }
     const rows = resolvedColumns ? page.map((row) => projectRow(row, resolvedColumns!)) : page;
+    // Safety cap — see MAX_TOOL_RESULT_CHARS comment above. hasMore is
+    // computed off the CAPPED length so the model correctly sees there's
+    // more data if this page had to be trimmed for size, not just for count.
+    const cappedRows = capRowsForModel(rows);
 
     return {
       totalMatchingRows: matchingRows.length,
-      returnedRows: rows.length,
+      returnedRows: cappedRows.length,
       limit,
       offset,
-      hasMore: offset + rows.length < matchingRows.length,
-      rows,
+      hasMore: offset + cappedRows.length < matchingRows.length,
+      rows: cappedRows,
+      ...(noMatchHint ? { noMatchHint } : {}),
     };
+  }
+
+  // Once the model has seen a tool_result (i.e. it's no longer the most
+  // recent pair in the array), shrink it before it gets resent again next
+  // iteration. Anthropic only requires structural tool_use/tool_result id
+  // pairing to stay intact — not the CONTENT — so this is safe: the model
+  // already reasoned over the full data in the call where it first arrived.
+  private compactStaleToolResults(messages: ClaudeMessage[]): void {
+    for (let i = 0; i < messages.length - 2; i++) {
+      const content = messages[i].content;
+      if (messages[i].role !== "user" || !Array.isArray(content)) continue;
+      for (const block of content) {
+        if ("type" in block && block.type === "tool_result" && "content" in block && block.content.length > STALE_TOOL_RESULT_CHARS) {
+          block.content = STALE_TOOL_RESULT_PLACEHOLDER;
+        }
+      }
+    }
   }
 }

@@ -132,7 +132,7 @@ export default function LandingPage() {
           <LineChart className="h-10 w-10 text-primary" />
           <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Ready to control access to your GPT?</h2>
           <p className="max-w-xl text-muted-foreground">
-            Set up your company workspace in minutes and start your 14-day trial — no credit card required.
+            Set up your company workspace in minutes and start your 7-day trial — no credit card required.
           </p>
           <Button size="lg" asChild>
             <Link href="/register">

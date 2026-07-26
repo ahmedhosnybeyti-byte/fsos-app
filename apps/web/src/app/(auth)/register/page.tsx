@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useForm } from "react-hook-form";
+import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
 
 export default function RegisterPage() {
@@ -22,6 +23,7 @@ export default function RegisterPage() {
   const {
     register,
     handleSubmit,
+    control,
     formState: { errors },
   } = useForm<RegisterInput>({ resolver: zodResolver(registerSchema) });
 
@@ -29,7 +31,7 @@ export default function RegisterPage() {
     mutationFn: authApi.register,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
-      toast.success("Your 14-day trial has started.");
+      toast.success("Your 7-day trial has started.");
       router.push("/dashboard");
     },
     onError: (error) => {
@@ -42,7 +44,7 @@ export default function RegisterPage() {
       <div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" />
       <CardHeader className="relative">
         <CardTitle>Start your free trial</CardTitle>
-        <CardDescription>Creates your company workspace and a 14-day trial — no card required.</CardDescription>
+        <CardDescription>Creates your company workspace and a 7-day trial — no card required.</CardDescription>
       </CardHeader>
       <form className="relative" onSubmit={handleSubmit((values) => mutation.mutate(values))}>
         <CardContent className="space-y-4">
@@ -60,6 +62,30 @@ export default function RegisterPage() {
             <Label htmlFor="email">Work email</Label>
             <Input id="email" type="email" autoComplete="email" placeholder="you@company.com" {...register("email")} />
             {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="whatsapp">WhatsApp number</Label>
+            <Input id="whatsapp" type="tel" autoComplete="tel" placeholder="+20 100 000 0000" {...register("whatsapp")} />
+            {errors.whatsapp && <p className="text-xs text-destructive">{errors.whatsapp.message}</p>}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="accountType">You are signing up as</Label>
+            <Controller
+              name="accountType"
+              control={control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger id="accountType" className="h-11 w-full">
+                    <SelectValue placeholder="Select one" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="COMPANY">A company</SelectItem>
+                    <SelectItem value="INDEPENDENT">An independent sales rep</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            />
+            {errors.accountType && <p className="text-xs text-destructive">{errors.accountType.message}</p>}
           </div>
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>

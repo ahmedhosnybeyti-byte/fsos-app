@@ -16,7 +16,7 @@ export function PricingSection() {
     <section id="pricing" className="container py-24">
       <div className="mx-auto max-w-2xl text-center">
         <h2 className="text-3xl font-semibold tracking-tight sm:text-4xl">Simple, transparent pricing</h2>
-        <p className="mt-3 text-muted-foreground">Every plan starts with a 14-day trial. No credit card required.</p>
+        <p className="mt-3 text-muted-foreground">Every plan starts with a 7-day trial. No credit card required.</p>
       </div>
 
       {isLoading && (

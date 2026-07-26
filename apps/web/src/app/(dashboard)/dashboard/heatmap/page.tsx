@@ -5,7 +5,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Brain, FileSpreadsheet, Flame, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { heatmapApi } from "@/lib/api";
-import { ApiError } from "@/lib/api-client";
+import { ApiError, isTrialFeatureLocked } from "@/lib/api-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,7 +36,7 @@ type HeatmapMetric = "sales" | "returns" | "collection" | "lostSales" | "opportu
 // business choices remain (metric, optional scope/category narrowing, date
 // windows).
 export default function HeatmapPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
 
   // Labels for the "value-column" metrics — mechanically identical
   // aggregation (see heatmap.service.ts), only the dataset/wording differs.
@@ -101,7 +101,14 @@ export default function HeatmapPage() {
       if (data.metric !== null) setMetric(data.metric);
       toast.success(data.explanation || t("heatmap.interpretSuccessFallback"));
     },
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : t("heatmap.interpretErrorFallback")),
+    onError: (error) =>
+      toast.error(
+        isTrialFeatureLocked(error)
+          ? ((locale === "ar" ? error.messageAr : error.message) ?? error.message)
+          : error instanceof ApiError
+            ? error.message
+            : t("heatmap.interpretErrorFallback"),
+      ),
   });
 
   const [result, setResult] = useState<HeatmapQueryResult | null>(null);
@@ -530,12 +537,19 @@ function ResultView({
   metricLabels: Record<HeatmapMetric, string>;
   layersTitle?: string;
 }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [decision, setDecision] = useState<HeatmapDecisionResult | null>(null);
   const decisionMutation = useMutation({
     mutationFn: heatmapApi.decisionSummary,
     onSuccess: setDecision,
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : t("heatmap.decisionErrorFallback")),
+    onError: (error) =>
+      toast.error(
+        isTrialFeatureLocked(error)
+          ? ((locale === "ar" ? error.messageAr : error.message) ?? error.message)
+          : error instanceof ApiError
+            ? error.message
+            : t("heatmap.decisionErrorFallback"),
+      ),
   });
 
   const allPoints: HeatmapPoint[] = layers ? layers.flatMap((l) => l.points) : (result?.points ?? []);

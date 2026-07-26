@@ -5,7 +5,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { GitCompare, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { geoIntelligenceApi } from "@/lib/api";
-import { ApiError } from "@/lib/api-client";
+import { ApiError, isTrialFeatureLocked } from "@/lib/api-client";
 import { useTranslation } from "@/components/translation-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,7 @@ import type { GeoIntelligenceCompareResult, GeoIntelligenceTalkingPointsResult }
 // business ones (which customer, how many neighbors, how many products).
 
 export default function CustomerComparisonPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
 
   const [nearestCount, setNearestCount] = useState(5);
   const [customerSearch, setCustomerSearch] = useState("");
@@ -57,7 +57,14 @@ export default function CustomerComparisonPage() {
   const talkingPointsMutation = useMutation({
     mutationFn: geoIntelligenceApi.talkingPoints,
     onSuccess: (data) => setTalkingPoints(data),
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : t("customerComparison.talkingPointsErrorFallback")),
+    onError: (error) =>
+      toast.error(
+        isTrialFeatureLocked(error)
+          ? ((locale === "ar" ? error.messageAr : error.message) ?? error.message)
+          : error instanceof ApiError
+            ? error.message
+            : t("customerComparison.talkingPointsErrorFallback"),
+      ),
   });
 
   const canCompare = !!targetCustomerId;

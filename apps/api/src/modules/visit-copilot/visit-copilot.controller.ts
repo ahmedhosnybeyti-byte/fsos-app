@@ -17,6 +17,7 @@ import {
   type VisitCopilotProspectStatusRequest,
 } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
+import { RequiresPaidPlan } from "../../common/decorators/requires-paid-plan.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
@@ -63,6 +64,7 @@ export class VisitCopilotController {
 
   @Post("chat")
   @Auth()
+  @RequiresPaidPlan()
   chat(@CurrentUser() user: AuthenticatedUser, @Body(new ZodValidationPipe(visitCopilotChatRequestSchema)) body: VisitCopilotChatRequest) {
     if (!user.companyId) throw new ForbiddenException();
     return this.visitCopilotService.chat(user, body);

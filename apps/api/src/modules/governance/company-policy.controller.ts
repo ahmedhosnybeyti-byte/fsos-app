@@ -2,6 +2,7 @@ import { Body, Controller, ForbiddenException, Get, Post } from "@nestjs/common"
 import { ApiTags } from "@nestjs/swagger";
 import { upsertCompanyPolicySchema, type UpsertCompanyPolicyInput } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
+import { RequiresPaidPlan } from "../../common/decorators/requires-paid-plan.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
@@ -25,6 +26,7 @@ export class CompanyPolicyController {
 
   @Post()
   @Auth("COMPANY_ADMIN")
+  @RequiresPaidPlan()
   upsert(@CurrentUser() user: AuthenticatedUser, @Body(new ZodValidationPipe(upsertCompanyPolicySchema)) body: UpsertCompanyPolicyInput) {
     if (!user.companyId) throw new ForbiddenException();
     return this.policyService.upsert(user.companyId, body, user.userId);

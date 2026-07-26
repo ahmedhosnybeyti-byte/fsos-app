@@ -1,5 +1,16 @@
 import { z } from "zod";
 import { PASSWORD_POLICY } from "./constants";
+import { companyAccountTypeSchema } from "./enums";
+
+// Loose on purpose — this only needs to be "clearly a phone/WhatsApp
+// number", not validated against a specific country format. Accepts
+// digits, spaces, +, -, () with a sane overall length.
+const whatsappSchema = z
+  .string()
+  .trim()
+  .min(6, "رقم واتساب غير صالح")
+  .max(20, "رقم واتساب غير صالح")
+  .regex(/^[0-9+\-() ]+$/, "رقم واتساب غير صالح");
 
 export const passwordSchema = z
   .string()
@@ -24,6 +35,8 @@ export const registerSchema = z.object({
   fullName: z.string().min(2).max(120),
   email: z.string().email().toLowerCase(),
   password: passwordSchema,
+  whatsapp: whatsappSchema,
+  accountType: companyAccountTypeSchema,
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
 

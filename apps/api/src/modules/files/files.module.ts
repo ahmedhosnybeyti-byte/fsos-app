@@ -6,9 +6,11 @@ import { STORAGE_PROVIDER } from "./storage/storage-provider.interface";
 import { S3StorageProvider } from "./storage/s3-storage.provider";
 import { DatasetClassifierService } from "./classification/dataset-classifier.service";
 import { ImportValidationModule } from "../import-validation/import-validation.module";
+import { SubscriptionsModule } from "../subscriptions/subscriptions.module";
+import { PlatformSettingsModule } from "../platform-settings/platform-settings.module";
 
 @Module({
-  imports: [AuditLogModule, ImportValidationModule],
+  imports: [AuditLogModule, ImportValidationModule, SubscriptionsModule, PlatformSettingsModule],
   providers: [
     FilesService,
     DatasetClassifierService,

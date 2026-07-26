@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { visitCopilotApi } from "@/lib/api";
-import { ApiError } from "@/lib/api-client";
+import { ApiError, isTrialFeatureLocked } from "@/lib/api-client";
 import { useTranslation } from "@/components/translation-provider";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -92,7 +92,7 @@ function priorityBadgeClass(score: number): string {
 }
 
 export default function VisitCopilotPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
 
   // Global controls — period + van-stock apply to the brief, the briefing
   // and the chat alike, so they live at page level.
@@ -147,7 +147,14 @@ export default function VisitCopilotPage() {
   const chatMutation = useMutation({
     mutationFn: visitCopilotApi.chat,
     onSuccess: (data) => setChatMessages((prev) => [...prev, { role: "assistant", content: data.reply }]),
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : t("copilot.chatError")),
+    onError: (error) =>
+      toast.error(
+        isTrialFeatureLocked(error)
+          ? ((locale === "ar" ? error.messageAr : error.message) ?? error.message)
+          : error instanceof ApiError
+            ? error.message
+            : t("copilot.chatError"),
+      ),
   });
 
   // ——— Phase 2: Discovery queries/mutations ———

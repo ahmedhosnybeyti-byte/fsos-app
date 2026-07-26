@@ -5,7 +5,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Crosshair, LayoutGrid, MapPin, Navigation, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { geoIntelligenceApi } from "@/lib/api";
-import { ApiError } from "@/lib/api-client";
+import { ApiError, isTrialFeatureLocked } from "@/lib/api-client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -166,7 +166,8 @@ function PointWizard() {
   const talkingPointsMutation = useMutation({
     mutationFn: geoIntelligenceApi.talkingPoints,
     onSuccess: (data) => setTalkingPoints(data),
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : "تعذر توليد نقاط الحديث"),
+    onError: (error) =>
+      toast.error(isTrialFeatureLocked(error) ? (error.messageAr ?? error.message) : error instanceof ApiError ? error.message : "تعذر توليد نقاط الحديث"),
   });
 
   const canAnalyze = hasLocation && (mode === "auto" || manualSelectedIds.size > 0);

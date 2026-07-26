@@ -8,6 +8,7 @@ import { HealthModule } from "./modules/health/health.module";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
 import { SubscriptionActiveGuard } from "./common/guards/subscription-active.guard";
+import { RequiresPaidPlanGuard } from "./common/guards/requires-paid-plan.guard";
 import { AuthModule } from "./modules/auth/auth.module";
 import { RolesModule } from "./modules/roles/roles.module";
 import { CompaniesModule } from "./modules/companies/companies.module";
@@ -98,6 +99,10 @@ import { GeoEngineModule } from "./modules/geo-engine/geo-engine.module";
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: SubscriptionActiveGuard },
+    // Opt-in: only routes marked @RequiresPaidPlan() are affected — narrows
+    // "TRIAL or ACTIVE" (above) to "ACTIVE only" for spend-triggering or
+    // system-config-mutating endpoints. See requires-paid-plan.guard.ts.
+    { provide: APP_GUARD, useClass: RequiresPaidPlanGuard },
   ],
 })
 export class AppModule {}

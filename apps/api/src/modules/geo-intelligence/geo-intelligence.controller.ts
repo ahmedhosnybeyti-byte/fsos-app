@@ -17,6 +17,7 @@ import {
   type GeoIntelligenceTalkingPointsInput,
 } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
+import { RequiresPaidPlan } from "../../common/decorators/requires-paid-plan.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
@@ -93,6 +94,7 @@ export class GeoIntelligenceController {
 
   @Post("talking-points")
   @Auth()
+  @RequiresPaidPlan()
   talkingPoints(
     @CurrentUser() user: AuthenticatedUser,
     @Body(new ZodValidationPipe(geoIntelligenceTalkingPointsSchema)) body: GeoIntelligenceTalkingPointsInput,

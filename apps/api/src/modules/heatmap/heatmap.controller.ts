@@ -11,6 +11,7 @@ import {
   type HeatmapScopeValuesQueryInput,
 } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
+import { RequiresPaidPlan } from "../../common/decorators/requires-paid-plan.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
@@ -53,6 +54,7 @@ export class HeatmapController {
   // the user can review/edit it) rather than querying blindly off it.
   @Post("interpret")
   @Auth()
+  @RequiresPaidPlan()
   interpret(@CurrentUser() user: AuthenticatedUser, @Body(new ZodValidationPipe(heatmapInterpretSchema)) body: HeatmapInterpretInput) {
     if (!user.companyId) throw new ForbiddenException();
     return this.heatmapService.interpret(user.companyId, body);
@@ -62,6 +64,7 @@ export class HeatmapController {
   // short prioritized action list via Claude. See heatmap.schemas.ts.
   @Post("decision-summary")
   @Auth()
+  @RequiresPaidPlan()
   decisionSummary(@CurrentUser() user: AuthenticatedUser, @Body(new ZodValidationPipe(heatmapDecisionSchema)) body: HeatmapDecisionInput) {
     if (!user.companyId) throw new ForbiddenException();
     return this.heatmapService.decisionSummary(user.companyId, body);

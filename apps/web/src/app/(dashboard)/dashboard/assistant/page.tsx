@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useMutation } from "@tanstack/react-query";
 import { Bot, Send, User } from "lucide-react";
 import { assistantApi } from "@/lib/api";
-import { ApiError } from "@/lib/api-client";
+import { ApiError, isTrialFeatureLocked } from "@/lib/api-client";
 import { AnalysisBlockRenderer } from "@/components/analysis-studio/registry";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -43,7 +43,7 @@ export default function AssistantPage() {
 }
 
 function AssistantChat() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [input, setInput] = useState("");
   const endRef = useRef<HTMLDivElement>(null);
@@ -56,7 +56,11 @@ function AssistantChat() {
       setMessages((prev) => [...prev, { role: "assistant", content: data.reply, blocks: data.blocks }]);
     },
     onError: (error) => {
-      const message = error instanceof ApiError ? error.message : t("assistant.errorFallback");
+      const message = isTrialFeatureLocked(error)
+        ? ((locale === "ar" ? error.messageAr : error.message) ?? error.message)
+        : error instanceof ApiError
+          ? error.message
+          : t("assistant.errorFallback");
       setMessages((prev) => [...prev, { role: "assistant", content: message }]);
     },
   });

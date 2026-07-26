@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomBytes } from "node:crypto";
-import type { CompanyStatus, CompanyLifecycleEvent, DiscoveryProvider } from "@field-sales-os/schemas";
+import type { CompanyStatus, CompanyLifecycleEvent, CompanyAccountType, DiscoveryProvider } from "@field-sales-os/schemas";
 import { AppConfigService } from "../../common/config/app-config.service";
 import { PrismaService, type PrismaTx, isUniqueConstraintError } from "../../common/prisma";
 import { AuditLogService } from "../audit-log/audit-log.service";
@@ -94,7 +94,7 @@ export class CompaniesService {
     private readonly appConfig: AppConfigService,
   ) {}
 
-  async createCompany(name: string, tx: PrismaTx = this.prisma) {
+  async createCompany(name: string, tx: PrismaTx = this.prisma, accountType?: CompanyAccountType) {
     const base = slugify(name);
     for (let attempt = 0; attempt < 5; attempt++) {
       const slug = attempt === 0 ? base : `${base}-${randomBytes(2).toString("hex")}`;
@@ -103,7 +103,7 @@ export class CompaniesService {
         // status (defaulted at the DB level). Phase 2 makes the lifecycle
         // explicit: a brand-new company starts life as DRAFT, not ACTIVE —
         // see provisionCompany() for the full Create -> Configuring flow.
-        return await tx.company.create({ data: { name, slug, status: "DRAFT" } });
+        return await tx.company.create({ data: { name, slug, status: "DRAFT", accountType } });
       } catch (err) {
         if (isUniqueConstraintError(err, "slug") && attempt < 4) continue;
         throw err;
@@ -119,8 +119,8 @@ export class CompaniesService {
   // subscriptions, or any operational data — those remain the caller's
   // responsibility (see AuthService.register, which composes this with
   // UsersService/SubscriptionsService in its own transaction).
-  async provisionCompany(name: string, tx: PrismaTx = this.prisma) {
-    const company = await this.createCompany(name, tx);
+  async provisionCompany(name: string, tx: PrismaTx = this.prisma, accountType?: CompanyAccountType) {
+    const company = await this.createCompany(name, tx, accountType);
 
     await tx.companyProfile.create({ data: { companyId: company.id } });
 

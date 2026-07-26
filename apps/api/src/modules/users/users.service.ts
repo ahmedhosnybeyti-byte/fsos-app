@@ -51,7 +51,7 @@ export class UsersService {
   }
 
   async createCompanyAdmin(
-    params: { companyId: string; email: string; fullName: string; password: string },
+    params: { companyId: string; email: string; fullName: string; password: string; whatsapp?: string },
     tx: PrismaTx = this.prisma,
   ) {
     const role = await this.rolesService.findByCode("COMPANY_ADMIN");
@@ -62,6 +62,7 @@ export class UsersService {
         email: params.email,
         fullName: params.fullName,
         password: params.password,
+        whatsapp: params.whatsapp,
       },
       tx,
     );
@@ -80,7 +81,7 @@ export class UsersService {
   }
 
   private async createUserInternal(
-    params: { companyId: string; roleId: string; email: string; fullName: string; password: string },
+    params: { companyId: string; roleId: string; email: string; fullName: string; password: string; whatsapp?: string },
     tx: PrismaTx = this.prisma,
   ) {
     try {
@@ -91,6 +92,7 @@ export class UsersService {
           email: params.email,
           fullName: params.fullName,
           passwordHash: await argon2.hash(params.password),
+          whatsapp: params.whatsapp,
         },
         select: publicUserSelect,
       });

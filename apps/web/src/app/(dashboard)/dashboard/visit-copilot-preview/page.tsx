@@ -17,7 +17,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { visitCopilotApi } from "@/lib/api";
-import { ApiError } from "@/lib/api-client";
+import { ApiError, isTrialFeatureLocked } from "@/lib/api-client";
 import type { VisitCopilotChatMessage, VisitCopilotPeriod } from "@/lib/types";
 
 const PERIODS: { value: VisitCopilotPeriod; label: string }[] = [
@@ -52,7 +52,8 @@ export default function VisitCopilotPreviewPage() {
   const chatMutation = useMutation({
     mutationFn: visitCopilotApi.chat,
     onSuccess: (response) => setChatMessages((messages) => [...messages, { role: "assistant", content: response.reply }]),
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : "تعذر الحصول على إجابة الآن"),
+    onError: (error) =>
+      toast.error(isTrialFeatureLocked(error) ? (error.messageAr ?? error.message) : error instanceof ApiError ? error.message : "تعذر الحصول على إجابة الآن"),
   });
 
   function resetVisitContext() {

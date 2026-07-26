@@ -19,6 +19,13 @@ export const COMPANY_STATUSES = ["DRAFT", "CONFIGURING", "ACTIVE", "SUSPENDED", 
 export const companyStatusSchema = z.enum(COMPANY_STATUSES);
 export type CompanyStatus = z.infer<typeof companyStatusSchema>;
 
+// Mandatory choice at signup — mirrors Prisma's CompanyAccountType. Purely
+// informational/segmentation (reporting, future plan-tailoring); does not
+// itself gate any feature.
+export const COMPANY_ACCOUNT_TYPES = ["COMPANY", "INDEPENDENT"] as const;
+export const companyAccountTypeSchema = z.enum(COMPANY_ACCOUNT_TYPES);
+export type CompanyAccountType = z.infer<typeof companyAccountTypeSchema>;
+
 // Company Lifecycle Management (Phase 2) — audit-logged transitions, no
 // dedicated table; recorded via the existing generic AuditLog service with
 // action = `company.lifecycle.<event>`.

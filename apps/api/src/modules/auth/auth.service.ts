@@ -55,9 +55,9 @@ export class AuthService {
       // Phase 2: signup now runs the full Company Provisioning Engine
       // (Company + CompanyProfile + default Branch) instead of just creating
       // the bare Company row — see CompaniesService.provisionCompany.
-      const { company } = await this.companiesService.provisionCompany(dto.companyName, tx);
+      const { company } = await this.companiesService.provisionCompany(dto.companyName, tx, dto.accountType);
       const user = await this.usersService.createCompanyAdmin(
-        { companyId: company.id, email: dto.email, fullName: dto.fullName, password: dto.password },
+        { companyId: company.id, email: dto.email, fullName: dto.fullName, password: dto.password, whatsapp: dto.whatsapp },
         tx,
       );
       await this.subscriptionsService.createInitialSubscription(company.id, tx);

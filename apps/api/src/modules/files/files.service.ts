@@ -14,6 +14,8 @@ import { ImportTemplateMatcherService } from "../import-validation/import-templa
 import { ImportValidationService } from "../import-validation/import-validation.service";
 import { ImportValidationRejectedException } from "../import-validation/import-validation.errors";
 import type { ImportTemplate, ValidationReport } from "../import-validation/import-validation.types";
+import { SubscriptionsService } from "../subscriptions/subscriptions.service";
+import { PlatformSettingsService } from "../platform-settings/platform-settings.service";
 
 const SALES_CALENDAR_ENTITY = "Sales Calendar";
 const EMPLOYEES_ENTITY = "Employees";
@@ -245,6 +247,8 @@ export class FilesService {
     @Inject(STORAGE_PROVIDER) private readonly storage: StorageProvider,
     private readonly importTemplateMatcher: ImportTemplateMatcherService,
     private readonly importValidation: ImportValidationService,
+    private readonly subscriptionsService: SubscriptionsService,
+    private readonly platformSettingsService: PlatformSettingsService,
   ) {}
 
   private validateUpload(file: Express.Multer.File) {
@@ -450,6 +454,15 @@ export class FilesService {
     }));
     const accepted: FileRow[] = [];
 
+    // Trial data-volume cap — checked once per upload, only against the
+    // "Customers" sheet (the clearest single proxy for "how big is this
+    // company's real dataset"). Deliberately NOT enforced for
+    // ACTIVE/paid companies at all. Balances letting a genuine evaluator
+    // test with a realistic dataset against unbounded storage growth from
+    // repeated throwaway trial uploads (see PlatformSettings.trialMaxActiveCustomers).
+    const subscription = await this.subscriptionsService.findCurrentForCompany(companyId);
+    const isTrial = subscription?.status === "TRIAL";
+
     for (const { sheet, template } of toValidate) {
       const sheetName = workbook.SheetNames[sheet.sheetIndex];
       const xlsSheet = sheetName ? workbook.Sheets[sheetName] : undefined;
@@ -467,6 +480,19 @@ export class FilesService {
       if (!report.valid) {
         rejected.push({ sheetName: sheet.sheetName, entity: template.entity, report });
         continue;
+      }
+
+      if (isTrial && template.entity === "Customers") {
+        const settings = await this.platformSettingsService.get();
+        if (rows.length > settings.trialMaxActiveCustomers) {
+          rejected.push({
+            sheetName: sheet.sheetName,
+            entity: template.entity,
+            report: null,
+            message: `Trial accounts are limited to ${settings.trialMaxActiveCustomers} customers (this file has ${rows.length}). Upgrade to a paid plan to upload larger datasets.`,
+          });
+          continue;
+        }
       }
 
       const datasetType = template.entity;
@@ -843,6 +869,33 @@ export class FilesService {
 
     await this.prisma.file.update({ where: { id: oldFileId }, data: { isActive: false } });
 
+    // Cleanup — the bug the user flagged: replacing a file used to leave
+    // two kinds of garbage behind forever. Fix both here, best-effort (a
+    // cleanup failure must never fail the replace itself — the new data is
+    // already correctly in place by this point).
+    //
+    // 1. Materialized entities (Sales Calendar, Prospects) upsert by
+    // business key, not by file — a row's `sourceFileId` gets overwritten
+    // to the NEW file's id for every row still present in the new upload,
+    // so any row still tagged with the OLD file's id after processWorkbook
+    // ran is, by definition, one the new upload no longer contains. Purge
+    // those orphans.
+    if (oldFile.datasetType === SALES_CALENDAR_ENTITY) {
+      await this.prisma.salesCalendar.deleteMany({ where: { companyId, sourceFileId: oldFileId } }).catch(() => undefined);
+    } else if (oldFile.datasetType === PROSPECTS_ENTITY) {
+      await this.prisma.prospect.deleteMany({ where: { companyId, sourceFileId: oldFileId } }).catch(() => undefined);
+    }
+
+    // 2. The old file's uploaded blob itself — never deleted before. Only
+    // safe once nothing else active still points at the same storageKey
+    // (a multi-sheet batch upload shares one blob across several File
+    // rows, so another still-active sheet from the same upload may need
+    // it).
+    const stillReferenced = await this.prisma.file.count({ where: { storageKey: oldFile.storageKey, isActive: true } });
+    if (stillReferenced === 0) {
+      await this.storage.delete(oldFile.storageKey).catch(() => undefined);
+    }
+
     await this.auditLogService.record({
       companyId,
       userId: uploadedByUserId,
@@ -887,7 +940,15 @@ export class FilesService {
   async deactivate(id: string, companyId: string) {
     const file = await this.prisma.file.findUnique({ where: { id } });
     if (!file || file.companyId !== companyId) throw new NotFoundException("File not found");
-    return this.prisma.file.update({ where: { id }, data: { isActive: false } });
+    const updated = await this.prisma.file.update({ where: { id }, data: { isActive: false } });
+
+    // Same blob-cleanup gap as replaceFile() — see the comment there.
+    const stillReferenced = await this.prisma.file.count({ where: { storageKey: file.storageKey, isActive: true } });
+    if (stillReferenced === 0) {
+      await this.storage.delete(file.storageKey).catch(() => undefined);
+    }
+
+    return updated;
   }
 
   async getDownloadUrl(id: string, companyId: string): Promise<string> {

@@ -34,6 +34,16 @@ enum CompanyStatus {
   DISABLED
 }
 
+// Captured once at signup (mandatory field on /register): whether the
+// account represents a multi-user company or a single independent sales
+// rep working alone. Nullable at the DB level only because companies
+// created before this field existed have no value — every new signup is
+// required to pick one (enforced in registerSchema, not here).
+enum CompanyAccountType {
+  COMPANY
+  INDEPENDENT
+}
+
 // The lifecycle events that move a Company between CompanyStatus states
 // (Phase 2's "Lifecycle Events" diagram). Recorded via the existing
 // AuditLog table (action: "company.lifecycle.<event>") rather than a new
@@ -183,6 +193,9 @@ model Company {
   name      String
   slug      String        @unique
   status    CompanyStatus @default(ACTIVE)
+  // Captured at signup — see CompanyAccountType. Nullable for pre-existing
+  // companies created before this field was added.
+  accountType CompanyAccountType? @map("account_type")
   createdAt DateTime      @default(now()) @map("created_at")
   updatedAt DateTime      @updatedAt @map("updated_at")
 
@@ -374,6 +387,10 @@ model User {
   email        String     @unique
   passwordHash String     @map("password_hash")
   fullName     String     @map("full_name")
+  // WhatsApp/contact phone number — mandatory on the /register form for new
+  // signups. Nullable at the DB level for users created before this field
+  // existed (Employees-sheet auto-provisioning, admin-created accounts).
+  whatsapp     String?    @map("whatsapp")
   status       UserStatus @default(ACTIVE)
   // Phase 4: "Organizational Unit" on the User Profile — a reference-only
   // link into Phase 3's structure (e.g. which Branch this user belongs to).
@@ -968,9 +985,15 @@ model Target {
 model PlatformSettings {
   id                           String   @id @default("platform_settings")
   trialEnabled                 Boolean  @default(true) @map("trial_enabled")
-  trialDurationDays            Int      @default(14) @map("trial_duration_days")
+  trialDurationDays            Int      @default(7) @map("trial_duration_days")
   defaultPlanCode              String   @default("trial") @map("default_plan_code")
   autoStartTrialOnRegistration Boolean  @default(true) @map("auto_start_trial_on_registration")
+  // Aggregate cap on active Customer rows a TRIAL-status company may hold
+  // (checked at file-upload time only — see FilesService). Balances letting
+  // genuine evaluators test with a realistic dataset against unbounded
+  // storage growth from repeated throwaway uploads. Configurable so it can
+  // be tuned from the admin UI without a redeploy.
+  trialMaxActiveCustomers      Int      @default(500) @map("trial_max_active_customers")
   // There is one Custom GPT for the whole platform (every company's users
   // authenticate into it with their own company API key, entered on first
   // use) — so the launch link is platform config, not a per-company field.
