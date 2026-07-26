@@ -56,4 +56,10 @@ COPY --from=installer /app/apps/web/public ./apps/web/public
 
 EXPOSE 3000
 ENV PORT=3000
+# Next.js's standalone server.js binds to "localhost" unless HOSTNAME says
+# otherwise — inside a container that means Railway's proxy (connecting
+# from outside the container's loopback namespace) gets connection refused
+# even though the process is alive and "Online". This is the classic
+# Next-standalone-on-Railway 502 cause.
+ENV HOSTNAME="0.0.0.0"
 CMD ["node", "apps/web/server.js"]
