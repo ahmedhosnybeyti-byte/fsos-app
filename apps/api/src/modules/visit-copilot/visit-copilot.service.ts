@@ -23,6 +23,9 @@ import { decryptCredentials } from "../data-sources/credential-cipher.util";
 import { categoryForChannel, type ProspectDiscoveryProvider } from "./discovery/discovery-provider.interface";
 import { GooglePlacesProvider } from "./discovery/google-places.provider";
 import { OverpassProvider } from "./discovery/overpass.provider";
+import { resolveMentionedCustomer } from "./local-decision/dictionary-engine";
+import { matchLocalRule } from "./local-decision/rule-engine";
+import { renderLocalAnswer } from "./local-decision/template-builder";
 
 // AI Visit Copilot — Phase 1. Decision-support screen for the field rep:
 // today's visit plan + a per-customer pre-visit briefing that must be
@@ -201,6 +204,17 @@ export interface RouteOpportunitiesResult {
 // renders it unchanged — only isProspect flags the mode.
 export interface ProspectBriefingResult extends CustomerBriefingResult {
   isProspect: true;
+}
+
+// POST /visit-copilot/chat result. activeCustomerCode/Name are present only
+// when the Local Decision Layer resolved a customer mentioned in the
+// message text that differs from the one the request was scoped to —
+// backward compatible (optional) for any caller still reading just `reply`.
+export interface VisitCopilotChatResult {
+  reply: string;
+  source: "local" | "ai";
+  activeCustomerCode?: string;
+  activeCustomerName?: string;
 }
 
 // Internal per-request stats shared by every discovery computation.
@@ -850,19 +864,60 @@ export class VisitCopilotService {
   // 4) POST /visit-copilot/chat
   // ------------------------------------------------------------------
 
-  async chat(user: AuthenticatedUser, body: VisitCopilotChatRequest): Promise<{ reply: string }> {
-    const apiKey = this.appConfig.values.anthropic.apiKey;
-    if (!apiKey) {
-      throw new BadRequestException("مساعد الزيارة يحتاج ANTHROPIC_API_KEY مضبوط على السيرفر. راجع فريقك التقني لضبطه في متغيرات البيئة.");
+  async chat(user: AuthenticatedUser, body: VisitCopilotChatRequest): Promise<VisitCopilotChatResult> {
+    // ------------------------------------------------------------------
+    // FDA Local Decision Layer — tried BEFORE any AI call ("Cheapest Path
+    // Wins"). Customer mode only: Dictionary Engine resolves a customer
+    // mentioned by code or name in the message text against the same
+    // hierarchy-scoped Customers rows Permission Check already narrowed
+    // (no new RIE call, no new permission logic). This is a per-request
+    // context switch only — it is NOT persisted anywhere (no session
+    // table, no server memory). It is a deliberately temporary stand-in
+    // for a platform-level Conversation Context Manager that would let
+    // Smart Loading / Collections / Sales Coach share the same mechanism;
+    // it must not grow into a VisitCopilot-specific session architecture.
+    if (!body.prospectId) {
+      const ctx = this.rieContext(user);
+      const customers = await this.requireCustomers(ctx);
+      const mentioned = resolveMentionedCustomer(body.message, customers);
+      const switched = mentioned !== null && mentioned.customerCode !== body.customerCode;
+      const activeCode = switched ? mentioned!.customerCode : body.customerCode!;
+
+      const briefing = await this.buildBriefing(user, activeCode, body);
+      // The switch is reported structurally (activeCustomerCode/Name), not
+      // folded into the reply text — the frontend uses it to move its own
+      // selected-customer state; the reply itself must not be the only
+      // place that information lives.
+      const switchFields = switched ? { activeCustomerCode: briefing.customerCode, activeCustomerName: briefing.customerName } : {};
+
+      const localAnswer = matchLocalRule(body.message, briefing);
+      if (localAnswer) {
+        // Matched a known direct question — answered entirely from
+        // already-computed rule-based data, zero AI calls.
+        return { reply: renderLocalAnswer(localAnswer), source: "local", ...switchFields };
+      }
+      // No local rule matched — fall through to AI, using whichever
+      // customer's briefing is now active (possibly just switched).
+      return this.chatWithAi(briefing, body, switchFields);
     }
 
     // Same briefing computation as the GET endpoints — the model gets the
     // finished, already-scoped numbers injected directly (no tool loop).
     // Phase 2: exactly one of customerCode | prospectId (schema-enforced) —
     // prospectId switches the context to the prospect briefing.
-    const briefing = body.prospectId
-      ? await this.buildProspectBriefing(user, body.prospectId, body)
-      : await this.buildBriefing(user, body.customerCode!, body);
+    const briefing = await this.buildProspectBriefing(user, body.prospectId, body);
+    return this.chatWithAi(briefing, body, {});
+  }
+
+  private async chatWithAi(
+    briefing: CustomerBriefingResult,
+    body: VisitCopilotChatRequest,
+    switchFields: { activeCustomerCode?: string; activeCustomerName?: string },
+  ): Promise<VisitCopilotChatResult> {
+    const apiKey = this.appConfig.values.anthropic.apiKey;
+    if (!apiKey) {
+      throw new BadRequestException("مساعد الزيارة يحتاج ANTHROPIC_API_KEY مضبوط على السيرفر. راجع فريقك التقني لضبطه في متغيرات البيئة.");
+    }
 
     const systemPrompt = [
       'أنت "مساعد الزيارة" داخل منصة FSOS — مساعد قرارات ميداني يساعد مندوب المبيعات قبل وأثناء زيارة عميل واحد محدد.',
@@ -913,7 +968,7 @@ export class VisitCopilotService {
       .join("\n")
       .trim();
 
-    return { reply: reply || "معرفتش أوصل لإجابة واضحة، جرب تصيغ سؤالك بشكل مختلف." };
+    return { reply: reply || "معرفتش أوصل لإجابة واضحة، جرب تصيغ سؤالك بشكل مختلف.", source: "ai", ...switchFields };
   }
 
   // ------------------------------------------------------------------

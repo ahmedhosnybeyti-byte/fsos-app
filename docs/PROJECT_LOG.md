@@ -189,6 +189,32 @@ but reducing how much cross-turn state the model has to carry itself
 (e.g. a session token that survives being "forgotten," or collapsing
 multi-step joins into fewer required tool calls).
 
+**2026-07-26 — closed out as a confirmed platform limitation, not a bug.**
+Two independent fixes were tried and both shipped: (1) backend —
+`verifyAccess` made idempotent for a still-valid session (same code can be
+re-sent safely instead of erroring "already used"), `gptSessionHours`
+raised 4->8; (2) prompt — `gpt_instructions.txt` rewritten ~28% shorter
+with an ABSOLUTE RULE + explicit no-memory-for-sessionToken instruction
+placed in the first 10 lines (session/tool-calling rules are the most
+likely casualty of ChatGPT's own context compression in long
+conversations — user's diagnosis, correct in hindsight). Retested live
+after both fixes, deployed and Instructions field confirmed updated
+(screenshot-verified word-for-word match): the model now correctly PLANS
+the Customers-by-City -> Invoices-by-date multi-step join (right columns,
+right filters, written out explicitly) in a conversation with a
+freshly-proven-valid session — a real improvement over the old prompt,
+which used to refuse outright. But it then states the getDataset tool
+itself is "not available for execution in this message," without
+attempting the call (confirmed via Railway's RequestTrace log: no
+corresponding request hit the API for that turn). This rules out session
+expiry (proven valid seconds earlier in the same conversation) and
+sessionToken memory loss (the model never even tries the call) as the
+cause — it's OpenAI's Custom GPT Actions runtime not making tool-calling
+available for that specific turn, a platform-level constraint outside
+this codebase's or this prompt's control. No further prompt/backend
+iteration is planned for this specific failure mode; documented here as a
+known limitation of the ChatGPT Actions integration.
+
 ## Backlog / future ideas (not started)
 
 - **Auto-convert uploaded Excel to CSV**: let the platform convert .xlsx/.xls
@@ -3659,3 +3685,25 @@ Column/Bar tooltips in `chart-engine.tsx` now show Target + Achievement % lines 
 **Date**: 2026-07-22
 
 Client pushed back correctly on my earlier "maybe it's the uploaded data" guess, asking for a full query -> filters -> aggregation -> map-payload trace. Traced it and compared line-by-line against Geo Engine's equivalent (which shows the same data fine): `buildHeatmap()`'s per-row loop had `if (!c || !c.city) continue;` — silently dropping a customer's sales from the map entirely whenever their `City` text field was blank, even with perfectly valid Latitude/Longitude. Geo Engine's own point-builder never gates on `City` at all (only requires a sane coordinate pair, and falls back to `city || name` as the grouping label in its own `groupByCity`) — that asymmetry is why Geo Engine could show many points from the same dataset while this map collapsed to almost none. Fixed to match Geo Engine exactly: drop the `City` requirement, fall back to `c.city || c.name` as the bucket key/label, and reuse the same `isSaneCoordinate` rejection (rejects out-of-range values and literal (0,0)) instead of a bare non-null check. Root cause was in the aggregation pipeline, not the uploaded data or active filters. Not verified in browser.
+
+## Visit Copilot — FDA Local Decision Layer (Phase 3, chat only)
+
+**Date**: 2026-07-26
+
+**Context**: client supplied two governing documents — "FSOS Decision Architecture (FDA)" v1.0 and "FSOS Implementation Kit v1.0" — with an explicit instruction to implement against them, not redesign them, and to stop for approval before each phase. FDA's core mandate: "Cheapest Path Wins" — every request must pass through a Local Decision Layer (Rule Engine / Regex Engine / Dictionary Engine) *before* any AI call; AI is last-resort only and must never touch the database directly (always `AI → Business Logic → Data Access Layer → Database`). The Implementation Kit's phase list (Phase 0 project setup, Phase 1 Auth/Multi-tenant, Phase 2 Core Platform, Phase 3 Visit Copilot MVP...) assumes a greenfield build; after research confirmed Phase 0-2's equivalents already exist in this codebase (Auth, hierarchy-scoped RBAC, `RieFacade` as the mandatory Data Access Layer, SGI's rule-based Decision Objects), client agreed to start directly at Phase 3, scoped to the one genuine gap: `VisitCopilotService.chat()` (and `AssistantService.chat()`, out of scope for this phase) called Claude unconditionally on every turn with no Local Decision Layer in front of it.
+
+**Scope agreed with client** (three explicit constraints, all honored): (1) Local Decision Layer only — no Business Logic Layer changes, `composeGuidance()` untouched; (2) local and AI replies must render through one unified Template Builder so the user can never tell which path answered; (3) any "session context" for customer-switching must be temporary/request-scoped only — explicitly NOT a VisitCopilot-specific persistence mechanism, deferred to a future platform-level Conversation Context Manager that Smart Loading/Collections/Sales Coach could all share later. Client's closing instruction: "Do not increase complexity to achieve optimization. Every added component must measurably reduce AI calls or improve maintainability."
+
+**New files** (all under `apps/api/src/modules/visit-copilot/local-decision/`):
+- `regex-engine.ts` — `extractCandidateCodes()`: pulls code-shaped tokens (e.g. `C-1023`) out of free text via one regex, zero AI.
+- `dictionary-engine.ts` — `resolveMentionedCustomer()`: resolves a candidate code, or a customer name appearing as a substring of the message, against the **already-loaded, already hierarchy-scoped** Customers rows for the request (no new RIE call, no new permission logic — reuses `requireCustomers()`/`rieContext()` exactly as every other Visit Copilot method does).
+- `rule-engine.ts` — `matchLocalRule()`: a small ordered list of Arabic keyword patterns (overdue balance, top opportunity, visit goal, missing products, top product, total sales) mapped directly onto fields already present on `CustomerBriefingResult` — deliberately kept to patterns that remove a real AI call today, per the client's complexity constraint, not a general intent classifier.
+- `template-builder.ts` — `renderLocalAnswer()`: title/value/context-line shape, per the client's explicit instruction that local and AI replies must be visually indistinguishable.
+
+**`visit-copilot.service.ts` changes**: `chat()` now runs Dictionary Engine (customer-mode only; prospect-mode chat is unaffected) before anything else. If the message names a *different* customer than the request was scoped to, that customer's briefing is built instead (still zero AI cost — `buildBriefing()` is already pure rule-based computation) and the switch is reported structurally via new `activeCustomerCode`/`activeCustomerName` fields — not folded into the reply text, so the frontend has a real signal to move its own selected-customer state instead of parsing prose. Then Rule Engine tries to answer from that briefing; a match returns immediately with `source: "local"` and genuinely zero AI calls. No match falls through unchanged to the existing Claude call (extracted into a new private `chatWithAi()` with no behavior change), now returning `source: "ai"` plus the same switch fields. `VisitCopilotChatResult` is a new interface (`reply`, `source`, optional `activeCustomerCode`/`activeCustomerName`) — backward compatible, since the two existing frontend call sites (`visit-copilot/page.tsx`, `visit-copilot-preview/page.tsx`) only ever read `.reply`.
+
+**Frontend**: `apps/web/src/lib/types.ts`'s `VisitCopilotChatResponse` gained the same optional fields. `dashboard/visit-copilot/page.tsx`'s `chatMutation.onSuccess` now calls `setSelectedCode(data.activeCustomerCode)` when a switch is reported, which — because `briefingQuery` is already keyed on `selectedCode` — automatically refetches and re-renders Visit Mode's briefing panel/header/map for the newly active customer. `visit-copilot-preview/page.tsx` (an older, separate preview screen) was left untouched — out of the approved scope, and unaffected since it only reads `.reply`.
+
+**What was deliberately NOT done** (per the client's explicit scope limits): no session/conversation persistence table, no platform-level Conversation Context Manager (that's a future phase), no change to `AssistantService.chat()` (the general company-wide assistant — separate module, not part of this phase's approval), no new intent classifier beyond the small fixed rule list, no changes to `composeGuidance()` or any Business Logic Layer code.
+
+**Verification performed**: manual brace/paren balance check on every new file (clean) and the diffed region of `visit-copilot.service.ts`; traced every call site of `VisitCopilotService.chat()` (controller only, passthrough, no destructuring — unaffected by new response fields) and every frontend caller of `visitCopilotApi.chat` (both confirmed compatible with the additive schema). **Not performed**: `tsc --noEmit` — same persistent sandbox limitation as every prior log entry (Windows-native pnpm symlinks don't resolve over the Linux mount). Client should run `pnpm typecheck` and manually exercise: (1) a direct question like "الرصيد المتأخر؟" while a customer's Visit Mode is open — should get an instant reply with no network delay to Claude; (2) typing another customer's code or name mid-chat — should see Visit Mode's briefing panel switch to that customer.

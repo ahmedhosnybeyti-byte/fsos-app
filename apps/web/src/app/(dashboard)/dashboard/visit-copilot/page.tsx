@@ -146,7 +146,17 @@ export default function VisitCopilotPage() {
 
   const chatMutation = useMutation({
     mutationFn: visitCopilotApi.chat,
-    onSuccess: (data) => setChatMessages((prev) => [...prev, { role: "assistant", content: data.reply }]),
+    onSuccess: (data) => {
+      setChatMessages((prev) => [...prev, { role: "assistant", content: data.reply }]);
+      // Local Decision Layer resolved a DIFFERENT customer than the one the
+      // request was scoped to (message named another customer by code/name)
+      // — move Visit Mode's own selected-customer state to match, so the
+      // briefing panel/header/map reflect who the chat is now about instead
+      // of silently drifting from the reply text.
+      if (data.activeCustomerCode && data.activeCustomerCode !== selectedCode) {
+        setSelectedCode(data.activeCustomerCode);
+      }
+    },
     onError: (error) =>
       toast.error(
         isTrialFeatureLocked(error)

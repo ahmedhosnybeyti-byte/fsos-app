@@ -1422,6 +1422,16 @@ export interface VisitCopilotChatRequest {
 
 export interface VisitCopilotChatResponse {
   reply: string;
+  // Present only when the Local Decision Layer resolved a DIFFERENT
+  // customer than the one the request was scoped to (the message named
+  // another customer by code/name). Optional so existing callers that
+  // ignore it keep working unchanged — the frontend uses this to update
+  // its own selected-customer state instead of guessing from reply text.
+  activeCustomerCode?: string;
+  activeCustomerName?: string;
+  // "local" = answered entirely from rule-based data, zero AI calls;
+  // "ai" = the existing Claude path answered. Diagnostics only.
+  source?: "local" | "ai";
 }
 
 // AI Visit Copilot — Phase 2: Customer Discovery (2026-07-19). Map-based
