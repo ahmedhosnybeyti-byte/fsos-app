@@ -160,6 +160,41 @@ export class GptController {
         companyName: { type: ["string", "null"] },
         datasets: { type: "array", items: datasetSummarySchema },
         sessionExpiresInHours: { type: "number" },
+        workspaceSummary: {
+          type: ["object", "null"],
+          description:
+            "Pre-aggregated overview of the last 6 COMPLETED calendar months (current month always excluded), already scoped to the requesting user's own hierarchy permissions — no extra call needed. Use this directly for any \"my/his/her sales over the last N months\", \"performance summary\", or \"top customers\" question about the requesting user's own scope before calling execute-report or getDataset. Null if it could not be computed (e.g. no Invoices dataset uploaded yet) — fall back to execute-report/getDataset in that case.",
+          properties: {
+            windowFrom: { type: "string", description: "First day of the 6-month window, YYYY-MM-01." },
+            windowTo: { type: "string", description: "Last completed month in the window, YYYY-MM." },
+            months: {
+              type: "array",
+              description: "One entry per month in the window, oldest first.",
+              items: {
+                type: "object",
+                properties: {
+                  month: { type: "string", description: "YYYY-MM." },
+                  totalSales: { type: "number" },
+                  invoiceCount: { type: "integer" },
+                  collections: { type: ["number", "null"], description: "Null if no Collections dataset is uploaded." },
+                  returns: { type: ["number", "null"], description: "Null if no Returns dataset is uploaded." },
+                },
+              },
+            },
+            topCustomers: {
+              type: "array",
+              description: "Up to 10 customers, sorted by total sales descending, within the requesting user's authorized scope.",
+              items: {
+                type: "object",
+                properties: {
+                  customerId: { type: "string" },
+                  totalSales: { type: "number" },
+                  invoiceCount: { type: "integer" },
+                },
+              },
+            },
+          },
+        },
       },
     }),
   })
