@@ -229,12 +229,14 @@ export class GptService {
     // still in progress and excluded).
     const now = new Date();
     const startOfCurrentMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    // Computed directly (not via monthStarts[0]) so this is a definite Date,
+    // not Date | undefined under noUncheckedIndexedAccess.
+    const windowFrom = new Date(Date.UTC(startOfCurrentMonth.getUTCFullYear(), startOfCurrentMonth.getUTCMonth() - 6, 1));
+    const windowTo = new Date(startOfCurrentMonth.getTime() - 1); // 23:59:59.999 of the last completed month
     const monthStarts: Date[] = [];
     for (let i = 6; i >= 1; i--) {
       monthStarts.push(new Date(Date.UTC(startOfCurrentMonth.getUTCFullYear(), startOfCurrentMonth.getUTCMonth() - i, 1)));
     }
-    const windowFrom = monthStarts[0];
-    const windowTo = new Date(startOfCurrentMonth.getTime() - 1); // 23:59:59.999 of the last completed month
 
     const monthKey = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
     const monthBuckets = new Map<string, { totalSales: number; invoiceCount: number; collections: number; returns: number }>();
@@ -405,11 +407,12 @@ export class GptService {
       const json = JSON.stringify(rows);
       const uncompressedBytes = Buffer.byteLength(json, "utf8");
       const compressedBytes = gzipSync(Buffer.from(json, "utf8")).length;
+      const firstRow = rows[0];
       datasets[label] = {
         recordCount: rows.length,
         uncompressedBytes,
         compressedBytes,
-        sampleFields: rows.length > 0 ? Object.keys(rows[0]) : [],
+        sampleFields: firstRow ? Object.keys(firstRow) : [],
       };
     };
 
