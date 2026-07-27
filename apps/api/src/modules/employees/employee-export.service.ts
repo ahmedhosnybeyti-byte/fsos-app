@@ -71,9 +71,18 @@ const EXPORT_SHEETS: readonly ExportSheetSpec[] = [
   { sheetName: "الفواتير", entityName: "Invoices", scoped: true, dateField: "InvoiceDate" },
   { sheetName: "بنود الفواتير", entityName: "Invoice Items", scoped: true },
   { sheetName: "المرتجعات", entityName: "Returns", scoped: true, dateField: "ReturnDate" },
+  // Return Items has no date column of its own (FKs to ReturnNo, not a
+  // date) — same reasoning as Invoice Items above; still hierarchy-scoped,
+  // just never date-filtered.
+  { sheetName: "بنود المرتجعات", entityName: "Return Items", scoped: true },
   { sheetName: "الزيارات", entityName: "Visits", scoped: true, dateField: "VisitDate" },
   { sheetName: "التحصيلات", entityName: "Collections", scoped: true, dateField: "CollectionDate" },
   { sheetName: "الأهداف", entityName: "Targets", scoped: true },
+  // Van Loads/Van Inventory added 2026-07-27 per explicit user request —
+  // both route-scoped operational data (loaded/returned stock, van stock
+  // snapshots), same hierarchy-scoping treatment as Visits/Collections.
+  { sheetName: "تحميل السيارات", entityName: "Van Loads", scoped: true, dateField: "LoadDate" },
+  { sheetName: "مخزون السيارات", entityName: "Van Inventory", scoped: true, dateField: "ReportDate" },
   { sheetName: "التقويم البيعي", entityName: "Sales Calendar", scoped: false },
   { sheetName: "المنتجات", entityName: "Products", scoped: false },
   { sheetName: "قائمة الأسعار", entityName: "Price List", scoped: false },
