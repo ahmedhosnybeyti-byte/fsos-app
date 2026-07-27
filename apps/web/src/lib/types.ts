@@ -102,6 +102,35 @@ export interface Employee {
   updatedAt: string;
 }
 
+export interface EmployeeExportSheet {
+  sheetName: string;
+  entityName: string;
+  scoped: boolean;
+  available: boolean;
+  rowCount: number;
+  fields: string[];
+  rows: Record<string, unknown>[];
+}
+
+export interface EmployeeExportResult {
+  employee: { id: string; employeeCode: string; fullName: string };
+  generatedAt: string;
+  sheets: EmployeeExportSheet[];
+}
+
+// Scoped picker row for the Files screen's "Employee Exports" section —
+// the server has already filtered this list to only employees the caller
+// is authorized to pull an export for (see
+// EmployeeExportService.listExportableEmployees).
+export interface ExportableEmployee {
+  id: string;
+  employeeCode: string;
+  fullName: string;
+  jobTitle: string | null;
+  managerId: string | null;
+  status: EmploymentStatus;
+}
+
 export interface DataSourceType {
   id: string;
   typeCode: string;
@@ -590,7 +619,13 @@ export interface AssistantChatRequest {
 }
 
 export interface AssistantChatResponse {
-  reply: string;
+  // Structured Response Contract (2026-07-26) — analysis is always present;
+  // advice/decision are null when the question is direct and doesn't call
+  // for a recommendation or a decision. Render in this fixed order:
+  // analysis always, then advice/decision only when non-null.
+  analysis: string;
+  advice: string | null;
+  decision: string | null;
   blocks: AnalysisBlock[];
 }
 

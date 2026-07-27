@@ -45,6 +45,12 @@ const STATUS_GLOW: Record<string, "glow-success" | "glow-warning" | "glow-critic
   ARCHIVED: "",
 };
 
+// Per-Employee Scoped Excel Export moved to the Files screen's "Employee
+// Exports" section (2026-07-27, per product decision) so every role — not
+// just COMPANY_ADMIN, which is all that can reach this screen — can
+// self-serve their own scoped export. See files/page.tsx's
+// EmployeeExportsSection + downloadEmployeeExport.
+
 export default function EmployeesPage() {
   // Matches the sidebar's own visibility rule for this link (dashboard
   // layout.tsx only lists it for COMPANY_ADMIN) — this is a client-side

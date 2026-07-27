@@ -325,6 +325,16 @@ export type TranslationKey =
   | "files.uploadedFiles"
   | "files.pendingConfirmation"
   | "files.empty"
+  | "files.employeeExportsTitle"
+  | "files.employeeExportsSubtitle"
+  | "files.employeeExportsEmpty"
+  | "files.exportRangeAll"
+  | "files.exportRangeLast1Month"
+  | "files.exportRangeLast3Months"
+  | "files.exportRangeLast6Months"
+  | "files.exportRangeLast12Months"
+  | "files.exportRangeFrom"
+  | "files.exportRangeTo"
   | "files.deleteSuccess"
   | "files.deleteError"
   | "files.downloadUrlError"
@@ -432,6 +442,8 @@ export type TranslationKey =
   | "assistant.inputPlaceholder"
   | "assistant.thinking"
   | "assistant.errorFallback"
+  | "assistant.adviceLabel"
+  | "assistant.decisionLabel"
   | "heatmap.title"
   | "heatmap.subtitle"
   | "heatmap.settingsTitle"
@@ -595,6 +607,8 @@ export type TranslationKey =
   | "employees.unlinkAccount"
   | "employees.linkAccount"
   | "employees.archive"
+  | "employees.exportData"
+  | "employees.toastExportError"
   | "employees.editDialogTitle"
   | "employees.hireDateLabel"
   | "employees.statusLabel"
@@ -1260,6 +1274,16 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "files.uploadedFiles": "الملفات المرفوعة",
     "files.pendingConfirmation": "{count} محتاج تأكيدك",
     "files.empty": "مفيش ملفات مرفوعة لسه. ارفع ملف من فوق عشان تبدأ.",
+    "files.employeeExportsTitle": "تصدير بيانات الموظفين",
+    "files.employeeExportsSubtitle": "صدّر ملف إكسل مفلتر لموظف معيّن — يحتوي فقط على البيانات المصرح لهذا الموظف برؤيتها، جاهز لرفعه في محادثة GPT الخاصة به.",
+    "files.employeeExportsEmpty": "لا يوجد موظفون متاحون للتصدير حاليًا.",
+    "files.exportRangeAll": "كل الفترات",
+    "files.exportRangeLast1Month": "آخر شهر",
+    "files.exportRangeLast3Months": "آخر 3 شهور",
+    "files.exportRangeLast6Months": "آخر 6 شهور",
+    "files.exportRangeLast12Months": "آخر 12 شهر",
+    "files.exportRangeFrom": "من تاريخ",
+    "files.exportRangeTo": "إلى تاريخ",
     "files.deleteSuccess": "تم حذف الملف",
     "files.deleteError": "تعذر حذف الملف",
     "files.downloadUrlError": "تعذر إنشاء رابط التحميل",
@@ -1367,6 +1391,8 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "assistant.inputPlaceholder": "اسأل عن عميل، منطقة، صنف، أو خطة اليوم...",
     "assistant.thinking": "بيحلل...",
     "assistant.errorFallback": "تعذر الوصول للمساعد الآن، حاول تاني.",
+    "assistant.adviceLabel": "نصيحة",
+    "assistant.decisionLabel": "القرار",
     "heatmap.title": "الخريطة الحرارية",
     "heatmap.subtitle":
       "كثافة المبيعات أو المرتجعات أو التحصيل أو العملاء جغرافيًا. اضبط الإعدادات مرة، وبعد كده استخدم مربع الطلب الحر تحت تحدّث الفلاتر تلقائيًا.",
@@ -1533,6 +1559,8 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "employees.unlinkAccount": "فك الربط بحساب المستخدم",
     "employees.linkAccount": "ربط بحساب: {email}",
     "employees.archive": "أرشفة",
+    "employees.exportData": "تصدير بيانات الموظف (Excel)",
+    "employees.toastExportError": "تعذر تصدير بيانات الموظف",
     "employees.editDialogTitle": "تعديل بيانات {name}",
     "employees.hireDateLabel": "تاريخ التعيين",
     "employees.statusLabel": "الحالة",
@@ -2206,6 +2234,16 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "files.uploadedFiles": "Uploaded Files",
     "files.pendingConfirmation": "{count} need your confirmation",
     "files.empty": "No files uploaded yet. Upload a file above to get started.",
+    "files.employeeExportsTitle": "Employee Exports",
+    "files.employeeExportsSubtitle": "Export a filtered Excel file for a specific employee — containing only the data they're authorized to see, ready to upload to their own GPT conversation.",
+    "files.employeeExportsEmpty": "No employees available to export right now.",
+    "files.exportRangeAll": "All time",
+    "files.exportRangeLast1Month": "Last month",
+    "files.exportRangeLast3Months": "Last 3 months",
+    "files.exportRangeLast6Months": "Last 6 months",
+    "files.exportRangeLast12Months": "Last 12 months",
+    "files.exportRangeFrom": "From",
+    "files.exportRangeTo": "To",
     "files.deleteSuccess": "File deleted",
     "files.deleteError": "Failed to delete file",
     "files.downloadUrlError": "Failed to create download link",
@@ -2313,6 +2351,8 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "assistant.inputPlaceholder": "Ask about a customer, region, product, or today's plan...",
     "assistant.thinking": "Thinking...",
     "assistant.errorFallback": "Couldn't reach the assistant right now, please try again.",
+    "assistant.adviceLabel": "Advice",
+    "assistant.decisionLabel": "Decision",
     "heatmap.title": "Heat Map",
     "heatmap.subtitle":
       "Geographic density of sales, returns, collections, or customers. Set the filters once, then use the free-text box below to update them automatically.",
@@ -2479,6 +2519,8 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "employees.unlinkAccount": "Unlink user account",
     "employees.linkAccount": "Link to account: {email}",
     "employees.archive": "Archive",
+    "employees.exportData": "Export Employee Data (Excel)",
+    "employees.toastExportError": "Could not export employee data",
     "employees.editDialogTitle": "Edit details for {name}",
     "employees.hireDateLabel": "Hire date",
     "employees.statusLabel": "Status",

@@ -2,10 +2,10 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, Copy, Download, FileSpreadsheet, KeyRound, RefreshCw, Trash2, Upload } from "lucide-react";
+import { Building2, Copy, Download, FileSpreadsheet, KeyRound, RefreshCw, Trash2, Upload, Users } from "lucide-react";
 import { toast } from "sonner";
 import { FILE_UPLOAD_LIMITS } from "@field-sales-os/schemas";
-import { companiesApi, filesApi } from "@/lib/api";
+import { companiesApi, employeesApi, filesApi } from "@/lib/api";
 import { ApiError } from "@/lib/api-client";
 import { useAuth } from "@/hooks/use-auth";
 import { useTranslation } from "@/components/translation-provider";
@@ -14,7 +14,20 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { formatDate } from "@/lib/utils";
-import type { FileProvisioningResult, FileRecord } from "@/lib/types";
+import type { EmployeeExportResult, ExportableEmployee, FileProvisioningResult, FileRecord } from "@/lib/types";
+
+// Per-Employee Scoped Excel Export (2026-07-27) — same client-side workbook
+// build used by employees/page.tsx: the server already filters every sheet
+// (see employee-export.service.ts), this just writes the returned JSON to
+// an .xlsx.
+async function downloadEmployeeExport(result: EmployeeExportResult) {
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.utils.book_new();
+  for (const sheet of result.sheets) {
+    XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(sheet.rows), sheet.sheetName);
+  }
+  XLSX.writeFile(workbook, `${result.employee.employeeCode}-${result.employee.fullName}.xlsx`);
+}
 
 // One upload group — every FileRecord sharing a batchId came from the SAME
 // physical upload (multi-sheet upload change, 2026-07-19 — see
@@ -186,6 +199,153 @@ export default function FilesPage() {
             ))
           )}
         </div>
+      </div>
+
+      <EmployeeExportsSection />
+    </div>
+  );
+}
+
+// Per-Employee Scoped Excel Export (2026-07-27) — lives on the Files
+// screen (per explicit product decision) rather than the Employees screen,
+// so that every role (not just COMPANY_ADMIN, which is all that can reach
+// Employees today) can self-serve their own scoped export. The employee
+// list itself is ALREADY filtered server-side by employeesApi.listExportable
+// (self, or self+subtree for a scoped role, or everyone for an admin role)
+// — a rep never even sees a colleague's name here, on top of (never instead
+// of) the export endpoint's own independent 403 check.
+// Date-range presets shown above the employee list — a click sets both
+// fields at once. "كل الفترات" clears the range entirely (full history,
+// today's default/only behavior before this filter existed).
+const DATE_RANGE_PRESETS = [
+  { key: "files.exportRangeAll", months: null },
+  { key: "files.exportRangeLast1Month", months: 1 },
+  { key: "files.exportRangeLast3Months", months: 3 },
+  { key: "files.exportRangeLast6Months", months: 6 },
+  { key: "files.exportRangeLast12Months", months: 12 },
+] as const;
+
+function monthsAgoIso(months: number): string {
+  const d = new Date();
+  d.setMonth(d.getMonth() - months);
+  return d.toISOString().slice(0, 10);
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function EmployeeExportsSection() {
+  const { t } = useTranslation();
+  const { data: employees, isLoading } = useQuery({
+    queryKey: ["employees", "exportable"],
+    queryFn: () => employeesApi.listExportable(),
+  });
+
+  // Shared across the whole list — applied to whichever row's export button
+  // is clicked. Only narrows sheets that carry a real transaction date
+  // (Invoices/Returns/Visits/Collections — see EXPORT_SHEETS' dateField);
+  // reference sheets (Employees, Routes, Customers, Products, ...) are
+  // unaffected regardless of this range.
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+
+  function applyPreset(months: number | null) {
+    if (months === null) {
+      setFromDate("");
+      setToDate("");
+    } else {
+      setFromDate(monthsAgoIso(months));
+      setToDate(todayIso());
+    }
+  }
+
+  const exportMutation = useMutation({
+    mutationFn: (id: string) => employeesApi.export(id, { fromDate: fromDate || undefined, toDate: toDate || undefined }),
+    onSuccess: (result) => downloadEmployeeExport(result),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t("employees.toastExportError")),
+  });
+
+  return (
+    <div className="glass-card rise-in rise-d3 p-6">
+      <div className="flex flex-row items-center justify-between">
+        <h3 className="flex items-center gap-2.5 text-base font-semibold leading-none tracking-tight">
+          <span className="crystal-badge h-9 w-9 bg-primary/15 text-primary">
+            <Users className="h-4 w-4" />
+          </span>
+          {t("files.employeeExportsTitle")}
+        </h3>
+      </div>
+      <p className="mt-1 text-sm text-muted-foreground">{t("files.employeeExportsSubtitle")}</p>
+
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        {DATE_RANGE_PRESETS.map((preset) => {
+          const isActive =
+            preset.months === null ? !fromDate && !toDate : fromDate === monthsAgoIso(preset.months) && !!toDate;
+          return (
+            <button
+              key={preset.key}
+              type="button"
+              onClick={() => applyPreset(preset.months)}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition ${
+                isActive ? "bg-primary text-primary-foreground" : "bg-background/60 text-muted-foreground hover:bg-background"
+              }`}
+            >
+              {t(preset.key)}
+            </button>
+          );
+        })}
+        <div className="flex items-center gap-2 ps-2 text-xs text-muted-foreground">
+          <input
+            type="date"
+            value={fromDate}
+            max={toDate || undefined}
+            onChange={(e) => setFromDate(e.target.value)}
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+            aria-label={t("files.exportRangeFrom")}
+          />
+          <span>{t("files.exportRangeTo")}</span>
+          <input
+            type="date"
+            value={toDate}
+            min={fromDate || undefined}
+            onChange={(e) => setToDate(e.target.value)}
+            className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+            aria-label={t("files.exportRangeTo")}
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-2">
+        {isLoading ? (
+          <Skeleton className="h-24" />
+        ) : !employees || employees.length === 0 ? (
+          <p className="text-sm text-muted-foreground">{t("files.employeeExportsEmpty")}</p>
+        ) : (
+          employees.map((employee: ExportableEmployee) => (
+            <div
+              key={employee.id}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border/60 bg-background/40 px-4 py-3"
+            >
+              <div>
+                <p className="text-sm font-medium">{employee.fullName}</p>
+                <p className="text-xs text-muted-foreground">
+                  {employee.employeeCode}
+                  {employee.jobTitle ? ` · ${employee.jobTitle}` : ""}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={exportMutation.isPending}
+                onClick={() => exportMutation.mutate(employee.id)}
+              >
+                <Download className="me-2 h-4 w-4" />
+                {t("employees.exportData")}
+              </Button>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );
