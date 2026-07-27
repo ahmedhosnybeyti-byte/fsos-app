@@ -140,7 +140,7 @@ export class GptController {
   @ApiOperation({
     summary: "Verify the user's access code and start (or resume) a session — call this first, always.",
     description:
-      "Call first, always, before any other Action. Use the code the user pastes after \"Launch GPT\". Returns a sessionToken (send on every later call) and the active datasets list — the only valid source for \"what data\" questions and dataset metadata; never call getDataset just to inspect shape. Recovery: if a later call ever returns an invalid/expired-session error, call this again with the SAME code before asking the user for a new one — re-verifying a still-active session is safe and just returns the same session again, no error, no new code needed.",
+      "Call first, always, before any other Action. Use the code the user pastes after \"Launch GPT\". Returns sessionToken (send on every later call) plus the active datasets list. On an invalid/expired-session error from any later call, call this again with the SAME code before asking for a new one.",
   })
   @ApiBody({
     description: "The one-time access code the user pastes.",
@@ -201,7 +201,7 @@ export class GptController {
   @ApiOperation({
     summary: "Fetch a filtered, sorted, paginated, optionally projected page of rows from one dataset — never fetch the whole file.",
     description:
-      "For a standard sales-by-scope-and-period report (total sales, invoice count, optional breakdown for one customer/employee/branch), call POST /gpt/execute-report instead — it does filtering+aggregation+access-control server-side in one call. Use getDataset only for everything else: raw row inspection, custom filters/aggregates, or datasets other than Invoices/Invoice Items. Always narrow with customerId, invoiceId, routeId, salesRep, search, or filters first. Use aggregate (sum/count/avg/min/max, groupBy) for figures instead of raw rows. Check columns[].distinctValues from verifyAccess/listDatasets for exact filter values. Use columns/sortBy to shape results.",
+      "For a standard sales report (total/count/breakdown for one customer/employee/branch), call POST /gpt/execute-report instead. Use getDataset for raw rows, custom filters, or other datasets. Narrow first (customerId/invoiceId/routeId/salesRep/filters); use aggregate for figures.",
   })
   @ApiQuery({ name: "sessionToken", required: true, type: String, description: "Session token returned by verifyAccess." })
   @ApiQuery({ name: "fileId", required: true, type: String, description: "Dataset id, from verifyAccess's or listDatasets' response." })
@@ -298,7 +298,7 @@ export class GptController {
   @ApiOperation({
     summary: "Mirror the answer just given in chat into the user's Analysis Studio screen — call after every reply, not instead of it.",
     description:
-      "Call once after replying in chat, whether or not data was involved. Always pass a short narrative; add blocks only when a table/chart/map helps. Never call instead of replying, and never before the chat reply. Do NOT call this to generate or fetch a standard sales report — it only records a narrative/blocks payload you already computed; it has no access to data itself. For a total-sales/invoice-count report by customer, employee, or branch, call POST /gpt/execute-report instead, which fetches the data AND records the Analysis Studio event in one call — no separate render call needed afterward.",
+      "Call once after replying in chat. Pass a short narrative; add blocks only if helpful. Never call instead of replying or before it. Do NOT use for a standard sales report (no data access) — call POST /gpt/execute-report instead, which fetches data AND records this event in one call.",
   })
   @ApiQuery({ name: "sessionToken", required: true, type: String, description: "Session token returned by verifyAccess." })
   @ApiBody({
@@ -354,7 +354,7 @@ export class GptController {
   @ApiOperation({
     summary: "Run a standard sales report for one scope + period in a single call — the preferred way to answer sales-total questions.",
     description:
-      "Use this whenever the user asks for total sales, invoice count, or a sales breakdown for ONE customer, ONE employee, or ONE branch over a date range (e.g. \"مبيعات العميل X في يناير\", \"sales for branch Jeddah last quarter\"). Provide exactly one of scope.customerId / scope.employeeId / scope.branchId (regionId is not yet supported), plus period.from/period.to, and optionally groupBy (route/employee/customer/month) for a breakdown table. This single call fetches the data, computes the figures, applies the same row-level access control as getDataset, AND records the result into the user's Analysis Studio — do not also call renderAnalysis afterward for this same result. Still reply to the user in chat using the narrative/totals returned here.",
+      "Use for total sales, invoice count, or a breakdown for ONE customer, employee, or branch over a date range. Provide exactly one of scope.customerId/employeeId/branchId, period.from/to, optional groupBy. Fetches data and records Analysis Studio in one call — skip renderAnalysis.",
   })
   @ApiBody({
     description: "Report type, scope (exactly one field), period, and optional groupBy.",
