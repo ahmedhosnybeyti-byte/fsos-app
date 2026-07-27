@@ -415,7 +415,12 @@ export class GptController {
             to: { type: "string", description: "Inclusive end date (YYYY-MM-DD)." },
           },
         },
-        groupBy: { type: "string", enum: ["route", "employee", "customer", "month"] },
+        groupBy: {
+          type: "string",
+          enum: ["route", "employee", "customer", "month"],
+          description:
+            'Turns the single totalSales/invoiceCount figure into a "breakdown" array, one entry per group, sorted by totalSales descending — already the ranking, no extra step needed. Examples: top customers for one employee -> scope.employeeId + groupBy="customer" (the breakdown IS the top-customers list); monthly sales trend -> groupBy="month"; sales by customer -> groupBy="customer"; sales by route -> groupBy="route". Do not call getDataset to answer these — this endpoint already returns the grouped, sorted result in one call.',
+        },
       },
     }),
   })
