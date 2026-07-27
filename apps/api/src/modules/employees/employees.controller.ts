@@ -88,6 +88,18 @@ export class EmployeesController {
     return this.employeeExportService.exportForEmployee(user.companyId, user, id, { fromDate, toDate });
   }
 
+  // One-off backfill for companies whose Employees sheet was uploaded before
+  // FilesService started auto-provisioning Employee records on every
+  // accepted Employees sheet — see EmployeeExportService.resyncFromUploadedDataset's
+  // header comment. COMPANY_ADMIN-only: this is an administrative resync
+  // over the whole company's roster, not a per-user data read.
+  @Post("resync-from-upload")
+  @Auth("COMPANY_ADMIN")
+  resyncFromUpload(@CurrentUser() user: AuthenticatedUser) {
+    if (!user.companyId) throw new ForbiddenException();
+    return this.employeeExportService.resyncFromUploadedDataset(user.companyId);
+  }
+
   @Post()
   @Auth("COMPANY_ADMIN")
   create(

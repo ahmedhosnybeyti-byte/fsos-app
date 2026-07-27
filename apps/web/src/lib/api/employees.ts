@@ -25,6 +25,11 @@ export const employeesApi = {
   // server has already filtered this to only employees the caller may
   // export (see EmployeeExportService.listExportableEmployees).
   listExportable: () => apiFetch<ExportableEmployee[]>("/companies/me/employees/exportable"),
+  // One-off backfill for companies whose Employees sheet was uploaded before
+  // auto-provisioning existed — re-syncs the Employee registry from the
+  // currently uploaded Employees dataset without requiring a re-upload.
+  resyncFromUpload: () =>
+    apiFetch<{ processed: number; available: boolean }>("/companies/me/employees/resync-from-upload", { method: "POST" }),
   create: (input: CreateEmployeeInput) =>
     apiFetch<Employee>("/companies/me/employees", { method: "POST", body: input }),
   update: (id: string, input: UpdateEmployeeInput) =>

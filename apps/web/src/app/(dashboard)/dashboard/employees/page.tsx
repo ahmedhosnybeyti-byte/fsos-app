@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal, IdCard } from "lucide-react";
+import { MoreHorizontal, IdCard, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { createEmployeeSchema, updateEmployeeSchema, EMPLOYMENT_STATUSES, type CreateEmployeeInput, type UpdateEmployeeInput } from "@field-sales-os/schemas";
 import { branchesApi, employeesApi, usersApi } from "@/lib/api";
@@ -66,6 +66,25 @@ export default function EmployeesPage() {
   const { data: employees, isLoading } = useQuery({ queryKey: ["employees"], queryFn: () => employeesApi.list(), enabled: !!user });
   const { data: branches } = useQuery({ queryKey: ["branches"], queryFn: branchesApi.list });
   const { data: users } = useQuery({ queryKey: ["users"], queryFn: () => usersApi.list(1, 100) });
+
+  // One-off backfill for companies whose Employees sheet was uploaded before
+  // FilesService started auto-provisioning Employee records on every
+  // accepted upload (2026-07-27) — re-reads the currently uploaded
+  // Employees dataset and fills this registry from it without requiring a
+  // re-upload. Safe to click repeatedly; existing manually-entered records
+  // are upserted by employeeCode, never duplicated.
+  const resyncMutation = useMutation({
+    mutationFn: employeesApi.resyncFromUpload,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+      if (!result.available) {
+        toast.info(t("employees.resyncNoDataset"));
+      } else {
+        toast.success(t("employees.resyncSuccess", { count: String(result.processed) }));
+      }
+    },
+    onError: () => toast.error(t("employees.resyncError")),
+  });
 
   const {
     register,
@@ -188,12 +207,21 @@ export default function EmployeesPage() {
             <p className="text-muted-foreground">{t("employees.subtitle")}</p>
           </div>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <IdCard className="h-4 w-4" /> {t("employees.addEmployee")}
-            </Button>
-          </DialogTrigger>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => resyncMutation.mutate()}
+            disabled={resyncMutation.isPending}
+          >
+            <RefreshCw className={`h-4 w-4 ${resyncMutation.isPending ? "animate-spin" : ""}`} />
+            {t("employees.resyncFromUpload")}
+          </Button>
+          <Dialog open={open} onOpenChange={setOpen}>
+            <DialogTrigger asChild>
+              <Button>
+                <IdCard className="h-4 w-4" /> {t("employees.addEmployee")}
+              </Button>
+            </DialogTrigger>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>{t("employees.addEmployeeDialogTitle")}</DialogTitle>
@@ -261,7 +289,8 @@ export default function EmployeesPage() {
               </DialogFooter>
             </form>
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        </div>
       </div>
 
       <div className="glass-hero rise-in rise-d1 relative p-6">

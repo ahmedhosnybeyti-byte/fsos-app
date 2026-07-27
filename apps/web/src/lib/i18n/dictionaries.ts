@@ -577,6 +577,10 @@ export type TranslationKey =
   | "employees.title"
   | "employees.subtitle"
   | "employees.addEmployee"
+  | "employees.resyncFromUpload"
+  | "employees.resyncSuccess"
+  | "employees.resyncNoDataset"
+  | "employees.resyncError"
   | "employees.addEmployeeDialogTitle"
   | "employees.employeeCodeLabel"
   | "employees.fullNameLabel"
@@ -1529,6 +1533,10 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "employees.title": "الموظفون",
     "employees.subtitle": "السجل الرسمي لموظفي الشركة — مستقل تمامًا عن حسابات الدخول (المستخدمين). الموظف سجل عمل، مش حساب دخول.",
     "employees.addEmployee": "إضافة موظف",
+    "employees.resyncFromUpload": "مزامنة من الملف المرفوع",
+    "employees.resyncSuccess": "تمت المزامنة — {count} موظف من الملف المرفوع.",
+    "employees.resyncNoDataset": "لا يوجد ملف موظفين مرفوع حاليًا للمزامنة منه.",
+    "employees.resyncError": "تعذّرت المزامنة. حاول مرة أخرى.",
     "employees.addEmployeeDialogTitle": "إضافة موظف جديد",
     "employees.employeeCodeLabel": "كود الموظف",
     "employees.fullNameLabel": "الاسم بالكامل",
@@ -2489,6 +2497,10 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "employees.title": "Employees",
     "employees.subtitle": "The company's official employee roster — completely separate from login accounts (users). An employee is an employment record, not a login account.",
     "employees.addEmployee": "Add employee",
+    "employees.resyncFromUpload": "Sync from uploaded file",
+    "employees.resyncSuccess": "Synced — {count} employees from the uploaded file.",
+    "employees.resyncNoDataset": "No Employees file is currently uploaded to sync from.",
+    "employees.resyncError": "Sync failed. Please try again.",
     "employees.addEmployeeDialogTitle": "Add a new employee",
     "employees.employeeCodeLabel": "Employee code",
     "employees.fullNameLabel": "Full name",

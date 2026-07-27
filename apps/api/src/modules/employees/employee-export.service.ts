@@ -283,6 +283,86 @@ export class EmployeeExportService {
     throw new ForbiddenException("You are not authorized to export this employee's data.");
   }
 
+  // One-off backfill (2026-07-27) for companies whose Employees sheet was
+  // uploaded BEFORE FilesService started auto-provisioning Employee records
+  // on every accepted Employees sheet (see files.service.ts's
+  // provisionEmployeeRecords) — those companies have real User accounts and
+  // a real uploaded Employees dataset, but an empty `employees` table, which
+  // is exactly what left the export picker list showing nothing. Re-reads
+  // the company's currently accepted Employees dataset via RieFacade
+  // (unscoped — this is an admin resync, not a per-user data read) and
+  // upserts Employee records from it, same field mapping as
+  // provisionEmployeeRecords. Safe to call repeatedly.
+  async resyncFromUploadedDataset(companyId: string): Promise<{ processed: number; available: boolean }> {
+    const result = await this.rieFacade.getEntityRecords("Employees", { companyId });
+    if (!result.available || result.records.length === 0) return { processed: 0, available: result.available };
+
+    const col = (name: string) => result.fields.find((f) => normalizeHeader(f) === normalizeHeader(name));
+    const idCol = col("EmployeeID");
+    const nameCol = col("EmployeeName");
+    const emailCol = col("Email");
+    const managerCol = col("DirectManagerID");
+    const hireDateCol = col("HireDate");
+    const statusCol = col("Status");
+    if (!idCol || !nameCol) return { processed: 0, available: true };
+
+    const existingUsers = await this.prisma.user.findMany({ where: { companyId }, select: { id: true, email: true } });
+    const userIdByEmail = new Map(existingUsers.map((u) => [u.email.trim().toLowerCase(), u.id]));
+
+    const employeeIdByCode = new Map<string, string>();
+    const seenCodes = new Set<string>();
+    let processed = 0;
+    for (const row of result.records) {
+      const employeeCode = String(row[idCol] ?? "").trim();
+      const fullName = String(row[nameCol] ?? "").trim();
+      if (!employeeCode || !fullName || seenCodes.has(employeeCode)) continue;
+      seenCodes.add(employeeCode);
+
+      const email = emailCol ? String(row[emailCol] ?? "").trim().toLowerCase() : "";
+      const sheetStatus = statusCol ? String(row[statusCol] ?? "").trim().toLowerCase() : "active";
+      const status: "ACTIVE" | "INACTIVE" = sheetStatus === "inactive" ? "INACTIVE" : "ACTIVE";
+      const hireDateRaw = hireDateCol ? row[hireDateCol] : undefined;
+      const hireDate = hireDateRaw ? new Date(String(hireDateRaw)) : undefined;
+      const linkedUserId = email ? userIdByEmail.get(email) : undefined;
+
+      const saved = await this.prisma.employee.upsert({
+        where: { companyId_employeeCode: { companyId, employeeCode } },
+        create: {
+          companyId,
+          employeeCode,
+          fullName,
+          status,
+          contactEmail: email || undefined,
+          hireDate: hireDate && !Number.isNaN(hireDate.getTime()) ? hireDate : undefined,
+          userId: linkedUserId,
+        },
+        update: {
+          fullName,
+          status,
+          contactEmail: email || undefined,
+          hireDate: hireDate && !Number.isNaN(hireDate.getTime()) ? hireDate : undefined,
+          ...(linkedUserId ? { userId: linkedUserId } : {}),
+        },
+        select: { id: true },
+      });
+      employeeIdByCode.set(employeeCode, saved.id);
+      processed++;
+    }
+
+    if (managerCol) {
+      for (const row of result.records) {
+        const employeeCode = String(row[idCol] ?? "").trim();
+        const managerCode = String(row[managerCol] ?? "").trim();
+        const selfId = employeeIdByCode.get(employeeCode);
+        const managerId = managerCode ? employeeIdByCode.get(managerCode) : undefined;
+        if (!selfId || !managerId || managerId === selfId) continue;
+        await this.prisma.employee.update({ where: { id: selfId }, data: { managerId } });
+      }
+    }
+
+    return { processed, available: true };
+  }
+
   // Confirms the target's email actually appears in the company's currently
   // uploaded "Employees" dataset before we let CanonicalHierarchyResolverService
   // near it — without this, an unmapped email would silently fall through to

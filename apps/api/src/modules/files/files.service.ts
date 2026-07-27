@@ -551,6 +551,14 @@ export class FilesService {
         }
         if (datasetType === EMPLOYEES_ENTITY) {
           provisioning = await this.provisionEmployeeAccounts({ companyId, uploadedByUserId, headers: sheet.headers, rows });
+          // Phase 5's Employee registry (employees table) is a separate
+          // structure from the User accounts provisionEmployeeAccounts just
+          // created/updated above — screens like the per-employee scoped
+          // Excel export and Priority Center hierarchy grouping read the
+          // Employee registry, not User, so an Employees sheet upload must
+          // keep both in sync or those screens see an empty roster despite
+          // real accounts existing. See provisionEmployeeRecords below.
+          await this.provisionEmployeeRecords({ companyId, headers: sheet.headers, rows });
         }
         if (datasetType === PROSPECTS_ENTITY) {
           await this.ingestProspects({ companyId, fileId: updated.id, headers: sheet.headers, rows });
@@ -713,6 +721,103 @@ export class FilesService {
     }
 
     return result;
+  }
+
+  // Employee Registry Auto-Provisioning (2026-07-27) — keeps Phase 5's
+  // `employees` table in sync with every accepted Employees sheet, the same
+  // way provisionEmployeeAccounts keeps `User` in sync. Discovered as a gap
+  // when the per-employee scoped Excel export's picker list (Files screen)
+  // came back empty for a real company that HAD an accepted Employees
+  // upload: accounts existed, but nobody had ever manually added the
+  // matching Employee record, because until now nothing did it
+  // automatically. Upsert keyed on (companyId, employeeCode=EmployeeID) —
+  // safe to run on every re-upload. managerId is resolved in a second pass
+  // once every row's Employee record exists, so declaration order in the
+  // sheet (a manager listed after their own report) never matters — this is
+  // the same two-pass shape as provisionEmployeeAccounts' self-referencing
+  // DirectManagerID handling used elsewhere in this codebase (Routes
+  // hierarchy resolution). Row-level problems skip that row silently (this
+  // is a best-effort sync, not a validated form — provisionEmployeeAccounts
+  // above already surfaces the user-facing skip reasons for the same rows).
+  // Deliberately does not touch orgUnitId/BranchID mapping — Employee's org
+  // unit linkage is reference-only per the Phase 5 constitution and is left
+  // for a company admin to set explicitly, same as before this method
+  // existed.
+  private async provisionEmployeeRecords(params: {
+    companyId: string;
+    headers: string[];
+    rows: Record<string, unknown>[];
+  }): Promise<void> {
+    const { companyId, headers, rows } = params;
+    const headerLookup = new Map(headers.map((h) => [normalizeHeader(h), h]));
+    const col = (name: string) => headerLookup.get(normalizeHeader(name));
+
+    const idCol = col("EmployeeID");
+    const nameCol = col("EmployeeName");
+    const emailCol = col("Email");
+    const managerCol = col("DirectManagerID");
+    const hireDateCol = col("HireDate");
+    const statusCol = col("Status");
+    if (!idCol || !nameCol) return; // required fields missing — provisionEmployeeAccounts already reported this sheet as unusable.
+
+    const existingUsers = await this.prisma.user.findMany({ where: { companyId }, select: { id: true, email: true } });
+    const userIdByEmail = new Map(existingUsers.map((u) => [u.email.trim().toLowerCase(), u.id]));
+
+    // Pass 1: upsert every row's own Employee fields (never managerId yet —
+    // the target row may not exist as an Employee record until this same
+    // pass creates it).
+    const employeeIdByCode = new Map<string, string>();
+    const seenCodes = new Set<string>();
+    for (const row of rows) {
+      const employeeCode = String(row[idCol] ?? "").trim();
+      const fullName = String(row[nameCol] ?? "").trim();
+      if (!employeeCode || !fullName || seenCodes.has(employeeCode)) continue;
+      seenCodes.add(employeeCode);
+
+      const email = emailCol ? String(row[emailCol] ?? "").trim().toLowerCase() : "";
+      const sheetStatus = statusCol ? String(row[statusCol] ?? "").trim().toLowerCase() : "active";
+      const status: "ACTIVE" | "INACTIVE" = sheetStatus === "inactive" ? "INACTIVE" : "ACTIVE";
+      const hireDateRaw = hireDateCol ? row[hireDateCol] : undefined;
+      const hireDate = hireDateRaw ? new Date(String(hireDateRaw)) : undefined;
+      const linkedUserId = email ? userIdByEmail.get(email) : undefined;
+
+      const saved = await this.prisma.employee.upsert({
+        where: { companyId_employeeCode: { companyId, employeeCode } },
+        create: {
+          companyId,
+          employeeCode,
+          fullName,
+          status,
+          contactEmail: email || undefined,
+          hireDate: hireDate && !Number.isNaN(hireDate.getTime()) ? hireDate : undefined,
+          userId: linkedUserId,
+        },
+        update: {
+          fullName,
+          status,
+          contactEmail: email || undefined,
+          hireDate: hireDate && !Number.isNaN(hireDate.getTime()) ? hireDate : undefined,
+          // Never clobber a manually-set userId link with undefined; only
+          // overwrite it when this sheet actually resolves one.
+          ...(linkedUserId ? { userId: linkedUserId } : {}),
+        },
+        select: { id: true },
+      });
+      employeeIdByCode.set(employeeCode, saved.id);
+    }
+
+    // Pass 2: resolve DirectManagerID -> Employee.managerId now that every
+    // row in this sheet has a real Employee.id.
+    if (managerCol) {
+      for (const row of rows) {
+        const employeeCode = String(row[idCol] ?? "").trim();
+        const managerCode = String(row[managerCol] ?? "").trim();
+        const selfId = employeeIdByCode.get(employeeCode);
+        const managerId = managerCode ? employeeIdByCode.get(managerCode) : undefined;
+        if (!selfId || !managerId || managerId === selfId) continue;
+        await this.prisma.employee.update({ where: { id: selfId }, data: { managerId } });
+      }
+    }
   }
 
   // Ingests one accepted Sales Calendar sheet's rows into the real
