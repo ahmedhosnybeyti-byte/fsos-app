@@ -4175,3 +4175,21 @@ if (!sessionToken) throw new UnauthorizedException("Missing sessionToken");
 **التحقق**: تأكّدت إن الأسماء الرسمية الأربعة موجودة فعلًا في `import-templates.data.ts` (`IMPORT-VANLOADS-v1.0`, `IMPORT-VANINVENTORY-v1.0`, `IMPORT-RETURN-ITEMS-v1.0`) وفي سجل العلاقات (`relationship-registry.data.ts`، مؤكَّد الربط بـRouteID/ReturnNo). تأكّدت إن التسميتين القديمتين (`Pricing`/`Inventory`) مش مستخدمتين في أي مكان تاني في الكود غير الملف الميت نفسه (`grep` شامل على `apps/api/src` و`apps/web/src`). توازن الأقواس بسكريبت Node على الملفين المعدَّلين: صفر. لا `pnpm`/`tsc` فعلي متاح في بيئة هذه الجلسة (سيشن جديدة بدون تثبيت سابق).
 
 **غير منفّذ**: رفع ملف Price_List_Template.xlsx المُجهَّز (لسه محتاج بيانات حقيقية من العميل)، ورفع فعلي لملفات Van Loads/Van Inventory/Return Items الحقيقية، ثم تأكيد على بيئة Railway الحية إن الشيتات الثلاثة الجديدة بترجع بيانات فعلية بعد الرفع لا "unavailable".
+
+**تحديث 2026-07-27 — التحقق الثلاثي مكتمل وناجح**: العميل نفّذ الاختبار المطلوب صراحة من أول الفيتشر (تسجيل دخول بثلاث هويات حقيقية: مندوب، مشرف، مدير) على بيئة Railway الحية. النتيجة: المشرف شاف بيانات المناديب التابعين له فقط (مش الشركة كلها)، والمندوب والمدير اتأكدوا بنفس الطريقة — الـscoping (authorization عبر Employee.managerId + data scoping عبر CanonicalHierarchyResolverService) بيشتغل صح فعليًا على بيانات حقيقية، مش نظريًا بس. الفيتشر يُعتبر مكتمل ومُتحقَّق منه end-to-end.
+
+## تنظيف Legacy تكامل ChatGPT — تدقيق كامل + قرار الإبقاء (2026-07-27)
+
+**الطلب**: العميل طلب صراحة تنظيف تكامل ChatGPT من أي إرث معماري قديم (session tokens، workspace summaries، listDatasets/getDataset/renderAnalysis/executeReport، سياق موظف/مسار/فرع ثابت زي EMP-027/RT-09/BR-05) بدون المساس بالـDNA أو منطق التحليل الحالي — تنظيف/refactoring فقط.
+
+**التدقيق (مهام #412–415)**: راجعت `gpt.controller.ts` (442 سطر كامل)، `main.ts` (128 سطر كامل)، `docs/GPT_SETUP.md` (146 سطر كامل)، و`gpt.service.ts` (طريقة `verifyAccess` كاملة + grep شامل على `workspaceSummary|sessionToken|SESSION_RECOVERY`)، وgrep شامل على `EMP-027|RT-09|BR-05` عبر `apps/api/src`, `apps/web/src`, `docs`. النتيجة: الجانب اللي فعليًا شايفه ChatGPT مطبَّق بالكامل بالمعمار الجديد بالفعل من جلسة سابقة (نفس اليوم) —
+  - `main.ts` بيفلتر الـOpenAPI document المُصدَّر لـGPT Builder (`gptActionsDocument`) لمسار واحد بس: `POST /gpt/verify-access` (`gptActionPaths` array).
+  - `verifyAccess` بترجّع `{ verified, companyName, role }` فقط — مفيش session token ولا dataset list ولا workspace summary بيتسرّب للموديل.
+  - `docs/GPT_SETUP.md` موثّق بالفعل بشكل صحيح ومحدّث، وقالب الـsystem prompt (أسطر 37-80) بيقول صراحة للموديل إن عنده أداة واحدة بس (verifyAccess) ومفيش سياق تطبيقي/قاعدة بيانات إلا من الملفات المرفوعة في المحادثة نفسها.
+  - مفيش أي EMP-027/RT-09/BR-05 حرفيًا في أي كود حي أو prompt موجّه لـGPT — النتيجة الوحيدة كانت سطر توثيقي قديم في هذا الملف نفسه (PROJECT_LOG)، مش كود فعلي.
+
+**القرار (بعد عرض الوضع على العميل)**: الكود القديم (`listDatasets`, `getDataset`, `renderAnalysis`, `executeReport`, `SESSION_RECOVERY_MESSAGE`, `WorkspaceSummary`, `buildWorkspaceSummary`, `assertValidSession`/session tokens) لسه موجود فعليًا في `gpt.service.ts`/`gpt.controller.ts` لكنه معزول تمامًا عن ChatGPT بفلتر الـOpenAPI في `main.ts` — مش معماريًا نشط، بس مش محذوف. العميل اختار الإبقاء عليه كما هو الآن (مش حذفه في هذه المهمة)، وطلب إضافة تعليقات `TODO` واضحة توضّح إنه إرث محتفظ به لاستخدام مستقبلي محتمل خارج ChatGPT، على إن حذفه الفعلي يُراجَع في مهمة تنظيف منفصلة بعد استقرار المعمار الجديد في الإنتاج لفترة.
+
+**التنفيذ**: أُضيف تعليق `TODO(legacy-cleanup, 2026-07-27)` في أعلى `gpt.service.ts` (قبل `SESSION_RECOVERY_MESSAGE`) وفي `gpt.controller.ts` (قبل تعليق "Architecture pivot" الموجود مسبقًا فوق `listDatasets`) — كلاهما يوضّح صراحة إن هذا الكود غير قابل للوصول من ChatGPT فعليًا (بسبب فلتر `gptActionPaths`)، محتفظ به عمدًا لمستهلك مستقبلي محتمل غير ChatGPT، ومطلوب مراجعة حذفه الفعلي في مهمة منفصلة لاحقًا.
+
+**غير منفّذ عمدًا في هذه المهمة**: أي حذف فعلي للكود القديم — بقرار صريح من العميل، مش لأنه غير آمن أو معقّد. لا تعديل على `main.ts`/`docs/GPT_SETUP.md` — كانا بالفعل مطابقين للمعمار المطلوب بدون أي تعديل.

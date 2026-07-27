@@ -35,6 +35,19 @@ function hashLaunchCode(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
 }
 
+// TODO(legacy-cleanup, 2026-07-27): SESSION_RECOVERY_MESSAGE and everything
+// that depends on it (assertValidSession, sessionToken, WorkspaceSummary,
+// buildWorkspaceSummary, and the listDatasets/getDataset/renderAnalysis/
+// executeReport bodies further below) belong to the pre-verifyAccess-only
+// GPT Action architecture. They are NOT reachable by ChatGPT today — main.ts
+// filters the GPT-scoped OpenAPI document down to POST /gpt/verify-access
+// only (see gptActionPaths in main.ts), so none of this legacy surface is
+// exposed to the model. Retained here, not deleted, in case a future
+// non-ChatGPT/dashboard consumer of the full /docs schema wants it. Revisit
+// physically removing this block in a dedicated cleanup task once the
+// verifyAccess-only architecture has been stable in production for a while —
+// do not remove as a side effect of an unrelated change.
+//
 // Session-continuation fix (2026-07-27): thrown for BOTH "sessionToken sent
 // but invalid/expired" (assertValidSession below) AND "sessionToken omitted
 // entirely from this call" (the controller's own `if (!sessionToken)` guard
@@ -456,33 +469,25 @@ export class GptService {
       });
     }
 
-    // The model receives every active, CONFIRMED dataset's metadata right
-    // away — no more guessing based on a fixed set of file "types"; it
-    // decides which dataset(s) matter based on the user's actual question.
-    // Files still awaiting classification confirmation are withheld: the
-    // AI should never analyze a dataset the platform hasn't finished
-    // labeling correctly.
-    const activeFiles = await this.filesService.listConfirmedActiveForCompany(gpt.companyId);
-
-    // Workspace Summary v1 (2026-07-27) — a small, pre-aggregated overview of
-    // the last 6 completed calendar months, scoped by the requesting user's
-    // existing hierarchy permissions. Additive field on this same response,
-    // proven safe by a prior spike (workspaceTest) to reach and be usable by
-    // the model with zero OpenAPI/Instructions changes. Never throws: a
-    // failure here must not break verifyAccess itself.
-    let workspaceSummary: WorkspaceSummary | null = null;
-    try {
-      workspaceSummary = await this.buildWorkspaceSummary(gpt.companyId, launchToken.userId);
-    } catch {
-      workspaceSummary = null;
-    }
+    // Architecture pivot (2026-07-27): verifyAccess is now a pure access
+    // gate — it proves the user is a subscribed, authorized Field Sales OS
+    // user and nothing else. It used to also return the company's dataset
+    // list and a pre-aggregated workspaceSummary so the model could analyze
+    // app-held data directly; both are removed from this response (and from
+    // the GPT Action's OpenAPI schema entirely — see main.ts's
+    // gptActionPaths). Operational analysis now comes exclusively from
+    // files the user uploads inside the ChatGPT conversation, never from
+    // this API, so nothing resembling operational data should be returned
+    // here for the model to lean on. See PROJECT_LOG.md for the decision.
+    // (listConfirmedActiveForCompany/toDatasetSummary and
+    // buildWorkspaceSummary are left defined and unused, in case a
+    // non-GPT/dashboard surface wants them later — nothing else called them.)
+    const requestingUser = await this.prisma.user.findUnique({ where: { id: launchToken.userId }, include: { role: true } });
 
     return {
-      sessionToken: rawLaunchCode,
-      companyName: (await this.prisma.company.findUnique({ where: { id: gpt.companyId } }))?.name,
-      datasets: activeFiles.map(toDatasetSummary),
-      sessionExpiresInHours: TOKEN_TTL.gptSessionHours,
-      workspaceSummary,
+      verified: true,
+      companyName: (await this.prisma.company.findUnique({ where: { id: gpt.companyId } }))?.name ?? null,
+      role: requestingUser?.role?.code ?? null,
     };
   }
 

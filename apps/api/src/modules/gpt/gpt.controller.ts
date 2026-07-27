@@ -134,13 +134,21 @@ export class GptController {
   // @Public() bypasses the cookie-based JwtAuthGuard — these authenticate via
   // the company's static Bearer API key instead, verified inside GptService.
 
+  // Architecture pivot (2026-07-27): this is now a pure access gate — it
+  // confirms the user is a subscribed, authorized Field Sales OS user and
+  // returns nothing resembling operational data. It's the ONLY endpoint
+  // exposed to the GPT Action (see main.ts's gptActionPaths) — the model
+  // has no other app-data tool to reach for. Operational analysis comes
+  // exclusively from files the user uploads directly in the conversation.
+  // See PROJECT_LOG.md for the decision and docs/GPT_SETUP.md for the
+  // current Instructions template.
   @Post("verify-access")
   @Public()
   @ApiBearerAuth("gpt-api-key")
   @ApiOperation({
-    summary: "Verify the user's access code and start (or resume) a session — call this first, always.",
+    summary: "Verify the user's access code — call this once, first, before anything else.",
     description:
-      "Call first, always, before any other Action. Use the code the user pastes after \"Launch GPT\". Returns sessionToken (send on every later call) plus the active datasets list. On an invalid/expired-session error from any later call, call this again with the SAME code before asking for a new one.",
+      "Call first, always, before responding. Use the code the user pastes after \"Launch GPT\". This only confirms the user is authorized to use this GPT — it never returns company data. All operational analysis comes from files the user uploads in this conversation.",
   })
   @ApiBody({
     description: "The one-time access code the user pastes.",
@@ -152,49 +160,13 @@ export class GptController {
     },
   })
   @ApiCreatedResponse({
-    description: "Access verified. Carry sessionToken forward on every subsequent call for the rest of this conversation.",
+    description: "Access verified. This confirms authorization only — it carries no company data; ask the user to upload the file(s) needed to answer their question.",
     schema: jsonSchema31({
       type: "object",
       properties: {
-        sessionToken: { type: "string" },
+        verified: { type: "boolean" },
         companyName: { type: ["string", "null"] },
-        datasets: { type: "array", items: datasetSummarySchema },
-        sessionExpiresInHours: { type: "number" },
-        workspaceSummary: {
-          type: ["object", "null"],
-          description:
-            "Pre-aggregated overview of the last 6 COMPLETED calendar months (current month always excluded), already scoped to the requesting user's own hierarchy permissions — no extra call needed. Use this directly for any \"my/his/her sales over the last N months\", \"performance summary\", or \"top customers\" question about the requesting user's own scope before calling execute-report or getDataset. Null if it could not be computed (e.g. no Invoices dataset uploaded yet) — fall back to execute-report/getDataset in that case.",
-          properties: {
-            windowFrom: { type: "string", description: "First day of the 6-month window, YYYY-MM-01." },
-            windowTo: { type: "string", description: "Last completed month in the window, YYYY-MM." },
-            months: {
-              type: "array",
-              description: "One entry per month in the window, oldest first.",
-              items: {
-                type: "object",
-                properties: {
-                  month: { type: "string", description: "YYYY-MM." },
-                  totalSales: { type: "number" },
-                  invoiceCount: { type: "integer" },
-                  collections: { type: ["number", "null"], description: "Null if no Collections dataset is uploaded." },
-                  returns: { type: ["number", "null"], description: "Null if no Returns dataset is uploaded." },
-                },
-              },
-            },
-            topCustomers: {
-              type: "array",
-              description: "Up to 10 customers, sorted by total sales descending, within the requesting user's authorized scope.",
-              items: {
-                type: "object",
-                properties: {
-                  customerId: { type: "string" },
-                  totalSales: { type: "number" },
-                  invoiceCount: { type: "integer" },
-                },
-              },
-            },
-          },
-        },
+        role: { type: ["string", "null"], description: "The requesting user's role code, if available." },
       },
     }),
   })
@@ -205,6 +177,19 @@ export class GptController {
     const apiKey = extractBearerToken(authorization);
     return this.gptService.verifyAccess(apiKey, body.launchCode ?? "");
   }
+
+  // TODO(legacy-cleanup, 2026-07-27): keep, don't delete, per explicit user
+  // decision — revisit physical removal in a dedicated cleanup task once the
+  // verifyAccess-only architecture has been stable in production for a
+  // while.
+  //
+  // Architecture pivot (2026-07-27): listDatasets/getDataset/renderAnalysis/
+  // executeReport below are NOT part of the GPT Action anymore — main.ts's
+  // gptActionPaths only exports verify-access, so GPT Builder never imports
+  // these and the model never sees them as callable tools. They're kept
+  // exactly as-is (unchanged logic, still real, still authenticated the
+  // same way) for any other consumer of the full /docs schema — nothing
+  // was deleted, only excluded from the GPT-scoped document.
 
   // Re-list active datasets mid-conversation (e.g. the model wants to
   // double-check what's available before asking the user to clarify).
