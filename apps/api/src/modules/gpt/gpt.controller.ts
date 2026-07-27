@@ -130,6 +130,21 @@ export class GptController {
     return this.gptService.mintLaunchCode(user.userId, user.companyId);
   }
 
+  // TEMPORARY diagnostic-only endpoint (2026-07-27) — measures the real
+  // JSON size of a "Raw Rep Workspace" (last 6 months, Invoices/Items/
+  // Collections/Returns/Customers, post-hierarchy-filter) for ONE target
+  // user, to inform an architecture decision (raw vs. summarized delivery
+  // to the GPT). NOT a GPT Action: session-cookie auth only, COMPANY_ADMIN-
+  // gated, never listed in main.ts's gptActionPaths, never reachable by
+  // ChatGPT. Delete this endpoint once the measurement is done — it is not
+  // meant to ship.
+  @Get("_debug-workspace-size")
+  @Auth("COMPANY_ADMIN")
+  async debugWorkspaceSize(@CurrentUser() user: AuthenticatedUser, @Query("targetUserId") targetUserId?: string) {
+    if (!user.companyId) throw new ForbiddenException();
+    return this.gptService.debugMeasureRawWorkspaceSize(user.companyId, targetUserId || user.userId);
+  }
+
   // ---- ChatGPT Action entry points (company API-key auth) -----------------
   // @Public() bypasses the cookie-based JwtAuthGuard — these authenticate via
   // the company's static Bearer API key instead, verified inside GptService.

@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import { randomBytes, createHash } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import * as argon2 from "argon2";
 import * as XLSX from "xlsx";
 import type { Gpt } from "@field-sales-os/database";
@@ -27,10 +28,26 @@ import {
   sortGroups,
   sortRows,
   toDatasetSummary,
+  toDate,
+  toNumeric,
 } from "../files/dataset-query.util";
 
 function hashLaunchCode(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
+}
+
+// Workspace Summary v1 response shape — see buildWorkspaceSummary below.
+interface WorkspaceSummary {
+  windowFrom: string; // "YYYY-MM-01", first day of the 6-month window
+  windowTo: string; // "YYYY-MM", last completed month (inclusive)
+  months: Array<{
+    month: string; // "YYYY-MM"
+    totalSales: number;
+    invoiceCount: number;
+    collections: number | null; // null when Collections dataset isn't uploaded
+    returns: number | null; // null when Returns dataset isn't uploaded
+  }>;
+  topCustomers: Array<{ customerId: string; totalSales: number; invoiceCount: number }>;
 }
 
 interface ApiKeyParts {
@@ -189,6 +206,326 @@ export class GptService {
     return gpt;
   }
 
+  // ---- Workspace Summary v1 -----------------------------------------------
+  // A small, pre-aggregated overview of the last 6 completed calendar months
+  // (the current month is always excluded — it isn't finished yet), scoped by
+  // the SAME hierarchy permissions already enforced everywhere else in this
+  // service (CanonicalHierarchyResolverService + applyHierarchyFilter — no
+  // new permission logic). v1 is intentionally narrow: monthly totals only
+  // (sales/invoices always; collections/returns only if those datasets are
+  // uploaded), plus a top-10 customer list within the authorized scope. No
+  // raw rows, ever. This is delivered as an additive field on verifyAccess's
+  // existing response — proven reachable by a prior spike (see PROJECT_LOG).
+  private async buildWorkspaceSummary(companyId: string, userId: string): Promise<WorkspaceSummary | null> {
+    const requestingUser = await this.prisma.user.findUnique({ where: { id: userId }, include: { role: true } });
+    if (!requestingUser) return null;
+
+    const hierarchyUser = { roleCode: requestingUser.role.code, email: requestingUser.email };
+    const routeAllowed = await this.hierarchyResolver.resolveAllowedRouteIds(companyId, hierarchyUser);
+
+    // Last 6 COMPLETED calendar months before the current one — computed
+    // fresh from "now" on every call, never hardcoded to a year. E.g. if
+    // today is 2026-07-27, the window is 2026-01-01..2026-06-30 (July is
+    // still in progress and excluded).
+    const now = new Date();
+    const startOfCurrentMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const monthStarts: Date[] = [];
+    for (let i = 6; i >= 1; i--) {
+      monthStarts.push(new Date(Date.UTC(startOfCurrentMonth.getUTCFullYear(), startOfCurrentMonth.getUTCMonth() - i, 1)));
+    }
+    const windowFrom = monthStarts[0];
+    const windowTo = new Date(startOfCurrentMonth.getTime() - 1); // 23:59:59.999 of the last completed month
+
+    const monthKey = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    const monthBuckets = new Map<string, { totalSales: number; invoiceCount: number; collections: number; returns: number }>();
+    for (const start of monthStarts) {
+      monthBuckets.set(monthKey(start), { totalSales: 0, invoiceCount: 0, collections: 0, returns: 0 });
+    }
+
+    // ---- Sales (Invoices + Invoice Items, header/items join) --------------
+    const [header, items] = await Promise.all([
+      this.loadDatasetRowsByType(companyId, "Invoices"),
+      this.loadDatasetRowsByType(companyId, "Invoice Items"),
+    ]);
+
+    const topCustomers = new Map<string, { totalSales: number; invoiceCount: Set<string> }>();
+
+    if (header && items) {
+      const invoiceNoHeaderCol = resolveExactColumn(header.headers, "InvoiceNo");
+      const invoiceNoItemCol = resolveExactColumn(items.headers, "InvoiceNo");
+      const { rows: joinedAll } = joinInvoiceHeaderAndItems(header.rows, header.headers, invoiceNoHeaderCol, items.rows, items.headers, invoiceNoItemCol);
+      const joinedHeaders = Object.keys(joinedAll[0] ?? {});
+
+      if (joinedAll.length > 0) {
+        const scopedRows = applyHierarchyFilter(joinedAll, joinedHeaders, routeAllowed);
+        const invoiceDateCol = resolveExactColumn(joinedHeaders, "InvoiceDate");
+        const lineTotalCol = resolveExactColumn(joinedHeaders, "LineTotal");
+        const customerCol = resolveColumnAlias(joinedHeaders, "customerId");
+
+        const windowRows = filterRows(scopedRows, joinedHeaders, {
+          filters: { [invoiceDateCol]: { dateFrom: windowFrom.toISOString(), dateTo: windowTo.toISOString() } },
+        });
+
+        for (const row of windowRows) {
+          const d = toDate(row[invoiceDateCol]);
+          if (!d) continue;
+          const key = monthKey(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)));
+          const bucket = monthBuckets.get(key);
+          if (!bucket) continue; // outside the 6-month window after all (e.g. timezone edge) — skip rather than misfile
+          const amount = toNumeric(row[lineTotalCol]) ?? 0;
+          bucket.totalSales += amount;
+
+          const invoiceNo = String(row[invoiceNoHeaderCol] ?? "").trim();
+
+          if (customerCol) {
+            const custId = String(row[customerCol] ?? "").trim();
+            if (custId) {
+              const existing = topCustomers.get(custId) ?? { totalSales: 0, invoiceCount: new Set<string>() };
+              existing.totalSales += amount;
+              if (invoiceNo) existing.invoiceCount.add(invoiceNo);
+              topCustomers.set(custId, existing);
+            }
+          }
+        }
+
+        // Invoice counts per month need distinct InvoiceNo, not row count
+        // (a multi-line invoice would otherwise be counted once per line) —
+        // computed as a second pass per month bucket.
+        const invoicesByMonth = new Map<string, Set<string>>();
+        for (const row of windowRows) {
+          const d = toDate(row[invoiceDateCol]);
+          if (!d) continue;
+          const key = monthKey(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)));
+          if (!monthBuckets.has(key)) continue;
+          const invoiceNo = String(row[invoiceNoHeaderCol] ?? "").trim();
+          if (!invoiceNo) continue;
+          const set = invoicesByMonth.get(key) ?? new Set<string>();
+          set.add(invoiceNo);
+          invoicesByMonth.set(key, set);
+        }
+        for (const [key, set] of invoicesByMonth) {
+          const bucket = monthBuckets.get(key);
+          if (bucket) bucket.invoiceCount = set.size;
+        }
+      }
+    }
+
+    // ---- Collections (optional — only if uploaded) -------------------------
+    const collections = await this.loadDatasetRowsByType(companyId, "Collections");
+    if (collections && collections.rows.length > 0) {
+      const dateCol = collections.headers.find((h) => h.toLowerCase() === "collectiondate");
+      const amountCol = collections.headers.find((h) => h.toLowerCase() === "amount");
+      if (dateCol && amountCol) {
+        const scopedRows = applyHierarchyFilter(collections.rows, collections.headers, routeAllowed);
+        const windowRows = filterRows(scopedRows, collections.headers, {
+          filters: { [dateCol]: { dateFrom: windowFrom.toISOString(), dateTo: windowTo.toISOString() } },
+        });
+        for (const row of windowRows) {
+          const d = toDate(row[dateCol]);
+          if (!d) continue;
+          const key = monthKey(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)));
+          const bucket = monthBuckets.get(key);
+          if (!bucket) continue;
+          bucket.collections += toNumeric(row[amountCol]) ?? 0;
+        }
+      }
+    }
+
+    // ---- Returns (optional — only if uploaded) ------------------------------
+    const returns = await this.loadDatasetRowsByType(companyId, "Returns");
+    if (returns && returns.rows.length > 0) {
+      const dateCol = returns.headers.find((h) => h.toLowerCase() === "returndate");
+      const amountCol = returns.headers.find((h) => h.toLowerCase() === "totalamount");
+      if (dateCol && amountCol) {
+        const scopedRows = applyHierarchyFilter(returns.rows, returns.headers, routeAllowed);
+        const windowRows = filterRows(scopedRows, returns.headers, {
+          filters: { [dateCol]: { dateFrom: windowFrom.toISOString(), dateTo: windowTo.toISOString() } },
+        });
+        for (const row of windowRows) {
+          const d = toDate(row[dateCol]);
+          if (!d) continue;
+          const key = monthKey(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)));
+          const bucket = monthBuckets.get(key);
+          if (!bucket) continue;
+          bucket.returns += toNumeric(row[amountCol]) ?? 0;
+        }
+      }
+    }
+
+    // ---- Top 10 customers within scope, by total sales in the window ------
+    const topCustomersList = Array.from(topCustomers.entries())
+      .map(([customerId, v]) => ({ customerId, totalSales: v.totalSales, invoiceCount: v.invoiceCount.size }))
+      .sort((a, b) => b.totalSales - a.totalSales)
+      .slice(0, 10);
+
+    const months = monthStarts.map((start) => {
+      const key = monthKey(start);
+      const bucket = monthBuckets.get(key)!;
+      return {
+        month: key,
+        totalSales: Math.round(bucket.totalSales * 100) / 100,
+        invoiceCount: bucket.invoiceCount,
+        collections: collections ? Math.round(bucket.collections * 100) / 100 : null,
+        returns: returns ? Math.round(bucket.returns * 100) / 100 : null,
+      };
+    });
+
+    return {
+      windowFrom: `${monthKey(windowFrom)}-01`,
+      windowTo: monthKey(windowTo),
+      months,
+      topCustomers: topCustomersList,
+    };
+  }
+
+  // TEMPORARY diagnostic method (2026-07-27) — measures the real JSON size
+  // of a "Raw Rep Workspace" for one target user: last 6 completed months of
+  // Invoices (joined with Items), Collections, and Returns, all post-
+  // hierarchy-filter, plus every Customer within that scope. Returns counts
+  // and byte sizes only — never called by verifyAccess, never reachable by
+  // ChatGPT. Delete once the size decision is made (see PROJECT_LOG).
+  async debugMeasureRawWorkspaceSize(companyId: string, targetUserId: string) {
+    const targetUser = await this.prisma.user.findUnique({ where: { id: targetUserId }, include: { role: true } });
+    if (!targetUser) throw new NotFoundException("targetUserId not found");
+
+    const hierarchyUser = { roleCode: targetUser.role.code, email: targetUser.email };
+    const routeAllowed = await this.hierarchyResolver.resolveAllowedRouteIds(companyId, hierarchyUser);
+
+    const now = new Date();
+    const startOfCurrentMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const windowFrom = new Date(Date.UTC(startOfCurrentMonth.getUTCFullYear(), startOfCurrentMonth.getUTCMonth() - 6, 1));
+    const windowTo = new Date(startOfCurrentMonth.getTime() - 1);
+
+    const datasets: Record<
+      string,
+      { recordCount: number; uncompressedBytes: number; compressedBytes: number; sampleFields: string[] }
+    > = {};
+
+    const measure = (label: string, rows: DatasetRow[]) => {
+      const json = JSON.stringify(rows);
+      const uncompressedBytes = Buffer.byteLength(json, "utf8");
+      const compressedBytes = gzipSync(Buffer.from(json, "utf8")).length;
+      datasets[label] = {
+        recordCount: rows.length,
+        uncompressedBytes,
+        compressedBytes,
+        sampleFields: rows.length > 0 ? Object.keys(rows[0]) : [],
+      };
+    };
+
+    // ---- Invoices + Invoice Items (joined, full rows, in window, scoped) --
+    const [header, items] = await Promise.all([
+      this.loadDatasetRowsByType(companyId, "Invoices"),
+      this.loadDatasetRowsByType(companyId, "Invoice Items"),
+    ]);
+    let invoiceWindowRows: DatasetRow[] = [];
+    if (header && items) {
+      const invoiceNoHeaderCol = resolveExactColumn(header.headers, "InvoiceNo");
+      const invoiceNoItemCol = resolveExactColumn(items.headers, "InvoiceNo");
+      const { rows: joinedAll } = joinInvoiceHeaderAndItems(header.rows, header.headers, invoiceNoHeaderCol, items.rows, items.headers, invoiceNoItemCol);
+      const joinedHeaders = Object.keys(joinedAll[0] ?? {});
+      if (joinedAll.length > 0) {
+        const scopedRows = applyHierarchyFilter(joinedAll, joinedHeaders, routeAllowed);
+        const invoiceDateCol = resolveExactColumn(joinedHeaders, "InvoiceDate");
+        invoiceWindowRows = filterRows(scopedRows, joinedHeaders, {
+          filters: { [invoiceDateCol]: { dateFrom: windowFrom.toISOString(), dateTo: windowTo.toISOString() } },
+        });
+      }
+    }
+    measure("Invoices+Items (joined, full rows)", invoiceWindowRows);
+
+    // Also measure a trimmed field set — the fields actually useful for
+    // analysis vs. every raw column (which may include internal/import
+    // metadata not worth sending).
+    const proposedInvoiceFields = ["InvoiceNo", "InvoiceDate", "CustomerCode", "RouteID", "SKU", "ProductName", "Quantity", "UnitPrice", "LineTotal"];
+    const trimmedInvoiceRows = invoiceWindowRows.map((r) => {
+      const trimmed: DatasetRow = {};
+      for (const f of proposedInvoiceFields) if (f in r) trimmed[f] = r[f];
+      return trimmed;
+    });
+    measure("Invoices+Items (trimmed fields)", trimmedInvoiceRows);
+
+    // ---- Collections --------------------------------------------------------
+    const collections = await this.loadDatasetRowsByType(companyId, "Collections");
+    let collectionsWindowRows: DatasetRow[] = [];
+    if (collections && collections.rows.length > 0) {
+      const dateCol = collections.headers.find((h) => h.toLowerCase() === "collectiondate");
+      if (dateCol) {
+        const scopedRows = applyHierarchyFilter(collections.rows, collections.headers, routeAllowed);
+        collectionsWindowRows = filterRows(scopedRows, collections.headers, {
+          filters: { [dateCol]: { dateFrom: windowFrom.toISOString(), dateTo: windowTo.toISOString() } },
+        });
+      }
+    }
+    measure("Collections (full rows)", collectionsWindowRows);
+
+    // ---- Returns --------------------------------------------------------------
+    const returns = await this.loadDatasetRowsByType(companyId, "Returns");
+    let returnsWindowRows: DatasetRow[] = [];
+    if (returns && returns.rows.length > 0) {
+      const dateCol = returns.headers.find((h) => h.toLowerCase() === "returndate");
+      if (dateCol) {
+        const scopedRows = applyHierarchyFilter(returns.rows, returns.headers, routeAllowed);
+        returnsWindowRows = filterRows(scopedRows, returns.headers, {
+          filters: { [dateCol]: { dateFrom: windowFrom.toISOString(), dateTo: windowTo.toISOString() } },
+        });
+      }
+    }
+    measure("Returns (full rows)", returnsWindowRows);
+
+    // ---- Customers within scope (not period-filtered — a fixed roster) ------
+    const customersDataset = await this.loadDatasetRowsByType(companyId, "Customers");
+    let scopedCustomerRows: DatasetRow[] = [];
+    if (customersDataset && customersDataset.rows.length > 0) {
+      // Customers usually has no RouteID column directly — derive the
+      // allowed CustomerCode set from the invoice rows already in scope
+      // instead, since that's the actual "customers this rep touched"
+      // definition that matters for a workspace.
+      const custCol = resolveColumnAlias(customersDataset.headers, "customerId");
+      if (custCol) {
+        const invoiceCustCol = resolveColumnAlias(Object.keys(invoiceWindowRows[0] ?? {}), "customerId");
+        const allowedCustomerIds = new Set(
+          invoiceCustCol ? invoiceWindowRows.map((r) => String(r[invoiceCustCol] ?? "").trim().toLowerCase()).filter(Boolean) : [],
+        );
+        scopedCustomerRows = customersDataset.rows.filter((r) => allowedCustomerIds.has(String(r[custCol] ?? "").trim().toLowerCase()));
+      }
+    }
+    measure("Customers (in-scope roster)", scopedCustomerRows);
+
+    // ---- Combined total (what would actually go over the wire) --------------
+    const combinedFullRaw = {
+      invoicesFull: invoiceWindowRows,
+      collections: collectionsWindowRows,
+      returns: returnsWindowRows,
+      customers: scopedCustomerRows,
+    };
+    const combinedTrimmed = {
+      invoicesTrimmed: trimmedInvoiceRows,
+      collections: collectionsWindowRows,
+      returns: returnsWindowRows,
+      customers: scopedCustomerRows,
+    };
+    const measureCombined = (label: string, obj: Record<string, unknown>, totalRecordCount: number) => {
+      const json = JSON.stringify(obj);
+      const uncompressedBytes = Buffer.byteLength(json, "utf8");
+      const compressedBytes = gzipSync(Buffer.from(json, "utf8")).length;
+      datasets[label] = { recordCount: totalRecordCount, uncompressedBytes, compressedBytes, sampleFields: Object.keys(obj) };
+    };
+    const combinedRecordCount = invoiceWindowRows.length + collectionsWindowRows.length + returnsWindowRows.length + scopedCustomerRows.length;
+    measureCombined("COMBINED (full raw, all 4 datasets)", combinedFullRaw, combinedRecordCount);
+    measureCombined("COMBINED (trimmed invoices, all 4 datasets)", combinedTrimmed, combinedRecordCount);
+
+    return {
+      targetUserId,
+      targetUserEmail: targetUser.email,
+      targetUserRole: targetUser.role.code,
+      windowFrom: windowFrom.toISOString().slice(0, 10),
+      windowTo: windowTo.toISOString().slice(0, 10),
+      datasets,
+      proposedTrimmedInvoiceFields: proposedInvoiceFields,
+    };
+  }
+
   async verifyAccess(rawApiKey: string, rawLaunchCode: string) {
     const gpt = await this.resolveCompanyByApiKey(rawApiKey);
 
@@ -254,19 +591,25 @@ export class GptService {
     // labeling correctly.
     const activeFiles = await this.filesService.listConfirmedActiveForCompany(gpt.companyId);
 
+    // Workspace Summary v1 (2026-07-27) — a small, pre-aggregated overview of
+    // the last 6 completed calendar months, scoped by the requesting user's
+    // existing hierarchy permissions. Additive field on this same response,
+    // proven safe by a prior spike (workspaceTest) to reach and be usable by
+    // the model with zero OpenAPI/Instructions changes. Never throws: a
+    // failure here must not break verifyAccess itself.
+    let workspaceSummary: WorkspaceSummary | null = null;
+    try {
+      workspaceSummary = await this.buildWorkspaceSummary(gpt.companyId, launchToken.userId);
+    } catch {
+      workspaceSummary = null;
+    }
+
     return {
       sessionToken: rawLaunchCode,
       companyName: (await this.prisma.company.findUnique({ where: { id: gpt.companyId } }))?.name,
       datasets: activeFiles.map(toDatasetSummary),
       sessionExpiresInHours: TOKEN_TTL.gptSessionHours,
-      // SPIKE (2026-07-27) — proves an additive, UNDOCUMENTED field on this
-      // response is actually visible to and usable by the model at runtime,
-      // with zero changes to the OpenAPI doc or GPT Builder Instructions
-      // (verifyAccess's response is never Zod/schema-validated, see
-      // gpt.service.ts's verifyAccess — only decorated for docs). If the
-      // model can read and repeat this back, a real Workspace Summary field
-      // can safely follow the same path. Remove once proven either way.
-      workspaceTest: "TEST_VALUE_7391",
+      workspaceSummary,
     };
   }
 
