@@ -17,7 +17,7 @@ import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { Public } from "../../common/decorators/public.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
-import { GptService } from "./gpt.service";
+import { GptService, SESSION_RECOVERY_MESSAGE } from "./gpt.service";
 
 function extractBearerToken(authorizationHeader: string | undefined): string {
   if (!authorizationHeader?.startsWith("Bearer ")) {
@@ -226,7 +226,7 @@ export class GptController {
     @Query("sessionToken") sessionToken: string | undefined,
   ) {
     const apiKey = extractBearerToken(authorization);
-    if (!sessionToken) throw new UnauthorizedException("Missing sessionToken");
+    if (!sessionToken) throw new UnauthorizedException(SESSION_RECOVERY_MESSAGE);
     return this.gptService.listDatasets(apiKey, sessionToken);
   }
 
@@ -319,7 +319,7 @@ export class GptController {
     @Query(new ZodValidationPipe(getGptDatasetSchema)) query: GetGptDatasetInput,
   ) {
     const apiKey = extractBearerToken(authorization);
-    if (!sessionToken) throw new UnauthorizedException("Missing sessionToken");
+    if (!sessionToken) throw new UnauthorizedException(SESSION_RECOVERY_MESSAGE);
     return this.gptService.getDataset(apiKey, sessionToken, query);
   }
 
@@ -372,7 +372,7 @@ export class GptController {
     @Body(new ZodValidationPipe(renderAnalysisEventSchema)) body: RenderAnalysisEventInput,
   ) {
     const apiKey = extractBearerToken(authorization);
-    if (!sessionToken) throw new UnauthorizedException("Missing sessionToken");
+    if (!sessionToken) throw new UnauthorizedException(SESSION_RECOVERY_MESSAGE);
     return this.gptService.renderAnalysis(apiKey, sessionToken, body);
   }
 
@@ -455,7 +455,7 @@ export class GptController {
     @Body(new ZodValidationPipe(executeReportSchema)) body: ExecuteReportInput,
   ) {
     const apiKey = extractBearerToken(authorization);
-    if (!sessionToken) throw new UnauthorizedException("Missing sessionToken");
+    if (!sessionToken) throw new UnauthorizedException(SESSION_RECOVERY_MESSAGE);
     return this.gptService.executeReport(apiKey, sessionToken, body);
   }
 }

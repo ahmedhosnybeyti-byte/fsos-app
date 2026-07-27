@@ -35,6 +35,26 @@ function hashLaunchCode(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
 }
 
+// Session-continuation fix (2026-07-27): thrown for BOTH "sessionToken sent
+// but invalid/expired" (assertValidSession below) AND "sessionToken omitted
+// entirely from this call" (the controller's own `if (!sessionToken)` guard
+// on every gated endpoint). Those two cases used to have different error
+// text — the omitted-param case was a bare "Missing sessionToken" with no
+// recovery instruction, unlike this one. That asymmetry is the likely cause
+// of the model asking the user for a brand new Launch Code after a short
+// clarifying turn (e.g. a bare "1"): if the model's next tool call drops the
+// sessionToken query param altogether rather than sending a stale value, it
+// hit the uninstructive message and had nothing telling it to retry
+// verify-access first — so it fell back to its default instinct of asking
+// the user. The system prompt already tells the model to hold and reuse the
+// sessionToken (GPT_SETUP.md's SESSION BOOTSTRAP, points 4-6) and this
+// message already told it to self-recover when the token IS sent but
+// rejected; this only closes the gap for when the token isn't sent at all,
+// so recovery guidance is consistent no matter which of the two ways the
+// model manages to arrive at "I don't have a good session right now."
+export const SESSION_RECOVERY_MESSAGE =
+  "Invalid or missing session. Automatically call verify-access again using the same launchCode already provided earlier in this conversation — do not ask the user for a new code unless re-verification with that same code also fails.";
+
 // Workspace Summary v1 response shape — see buildWorkspaceSummary below.
 interface WorkspaceSummary {
   windowFrom: string; // "YYYY-MM-01", first day of the 6-month window
@@ -498,9 +518,7 @@ export class GptService {
     const session = await this.prisma.gptLaunchToken.findUnique({ where: { tokenHash } });
 
     if (!session || session.companyId !== gpt.companyId || !session.usedAt || session.expiresAt < new Date()) {
-      throw new UnauthorizedException(
-        "Invalid or expired session. Automatically call verify-access again using the same launchCode previously provided in this conversation. Do not ask the user for a new code unless re-verification with the same code fails.",
-      );
+      throw new UnauthorizedException(SESSION_RECOVERY_MESSAGE);
     }
 
     return { gpt, session };
