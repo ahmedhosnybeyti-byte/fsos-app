@@ -26,9 +26,35 @@ const MAX_HISTORY_SENT = 20;
 
 interface DisplayMessage extends AssistantChatMessage {
   blocks?: AnalysisBlock[];
+  // Structured Response Contract (2026-07-26). `content` is the composed
+  // history string (analysis + advice + decision, see composeHistoryContent
+  // below) — it's what actually gets sent back to the backend as history,
+  // so it must never silently drop advice/decision. `analysis` duplicates
+  // just the first section, kept separately ONLY so the split UI below can
+  // render the analysis paragraph on its own instead of re-parsing it back
+  // out of `content`. advice/decision are only ever set on assistant
+  // messages, and only when the server returned a non-null value.
+  analysis?: string;
+  advice?: string | null;
+  decision?: string | null;
 }
 
 const SUGGESTION_KEYS: TranslationKey[] = ["assistant.suggestion1", "assistant.suggestion2", "assistant.suggestion3"];
+
+// Structured Response Contract (2026-07-26) — `content` on a DisplayMessage
+// is what gets sent back to the backend as conversation history (history
+// only knows `content: string`, per assistantChatMessageSchema). If it only
+// ever held `analysis`, advice/decision would silently vanish from the
+// model's own view of the conversation on the next turn. This composes all
+// present sections (in the fixed analysis -> advice -> decision order) into
+// one string used ONLY for history; the split UI rendering below still
+// reads analysis/advice/decision as separate fields, unaffected by this.
+function composeHistoryContent(analysis: string, advice: string | null, decision: string | null): string {
+  const parts = [analysis];
+  if (advice) parts.push(advice);
+  if (decision) parts.push(decision);
+  return parts.join("\n\n");
+}
 
 // useSearchParams() requires a Suspense boundary above it in the App
 // Router — this wrapper is that boundary. The actual page lives in
@@ -53,7 +79,8 @@ function AssistantChat() {
   const mutation = useMutation({
     mutationFn: assistantApi.chat,
     onSuccess: (data) => {
-      setMessages((prev) => [...prev, { role: "assistant", content: data.reply, blocks: data.blocks }]);
+      const content = composeHistoryContent(data.analysis, data.advice, data.decision);
+      setMessages((prev) => [...prev, { role: "assistant", content, analysis: data.analysis, advice: data.advice, decision: data.decision, blocks: data.blocks }]);
     },
     onError: (error) => {
       const message = isTrialFeatureLocked(error)
@@ -160,7 +187,24 @@ function AssistantChat() {
                   : "glass-card",
               )}
             >
-              <p className="whitespace-pre-wrap">{m.content}</p>
+              {/* assistant messages: render the analysis section alone (not
+                  the composed history `content`, which also embeds advice/
+                  decision — those get their own labeled sections below).
+                  user/error messages have no `analysis`, so content is the
+                  right (and only) text to show for them. */}
+              <p className="whitespace-pre-wrap">{m.role === "assistant" ? (m.analysis ?? m.content) : m.content}</p>
+              {m.role === "assistant" && m.advice && (
+                <div className="rounded-lg border border-ai/20 bg-ai/5 p-3">
+                  <p className="mb-1 text-xs font-semibold text-ai">{t("assistant.adviceLabel")}</p>
+                  <p className="whitespace-pre-wrap text-sm">{m.advice}</p>
+                </div>
+              )}
+              {m.role === "assistant" && m.decision && (
+                <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
+                  <p className="mb-1 text-xs font-semibold text-primary">{t("assistant.decisionLabel")}</p>
+                  <p className="whitespace-pre-wrap text-sm">{m.decision}</p>
+                </div>
+              )}
               {m.blocks && m.blocks.length > 0 && (
                 <div className="space-y-3">
                   {m.blocks.map((block) => (
