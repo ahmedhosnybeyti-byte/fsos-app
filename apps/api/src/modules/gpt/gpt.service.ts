@@ -259,6 +259,14 @@ export class GptService {
       companyName: (await this.prisma.company.findUnique({ where: { id: gpt.companyId } }))?.name,
       datasets: activeFiles.map(toDatasetSummary),
       sessionExpiresInHours: TOKEN_TTL.gptSessionHours,
+      // SPIKE (2026-07-27) — proves an additive, UNDOCUMENTED field on this
+      // response is actually visible to and usable by the model at runtime,
+      // with zero changes to the OpenAPI doc or GPT Builder Instructions
+      // (verifyAccess's response is never Zod/schema-validated, see
+      // gpt.service.ts's verifyAccess — only decorated for docs). If the
+      // model can read and repeat this back, a real Workspace Summary field
+      // can safely follow the same path. Remove once proven either way.
+      workspaceTest: "TEST_VALUE_7391",
     };
   }
 
