@@ -498,7 +498,9 @@ export class GptService {
     const session = await this.prisma.gptLaunchToken.findUnique({ where: { tokenHash } });
 
     if (!session || session.companyId !== gpt.companyId || !session.usedAt || session.expiresAt < new Date()) {
-      throw new UnauthorizedException("Invalid or expired session. Please verify access again.");
+      throw new UnauthorizedException(
+        "Invalid or expired session. Automatically call verify-access again using the same launchCode previously provided in this conversation. Do not ask the user for a new code unless re-verification with the same code fails.",
+      );
     }
 
     return { gpt, session };

@@ -419,7 +419,13 @@ export class GptController {
       },
     }),
   })
-  @ApiQuery({ name: "sessionToken", required: true, type: String, description: "Session token returned by verifyAccess." })
+  @ApiQuery({
+    name: "sessionToken",
+    required: true,
+    type: String,
+    description:
+      "Session token returned by verifyAccess. If unavailable or expired, automatically call verify-access again using the same launchCode already provided earlier in this conversation, then retry this report. Do not ask the user for a new code unless re-verification with the same code fails.",
+  })
   @ApiCreatedResponse({
     description: "Computed report — reply to the user using narrative/totalSales/invoiceCount directly; already recorded in Analysis Studio.",
     schema: jsonSchema31({
