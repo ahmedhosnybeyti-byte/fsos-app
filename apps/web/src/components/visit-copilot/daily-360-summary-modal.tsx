@@ -2,20 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import {
-  AlertTriangle,
-  Banknote,
-  FileDown,
-  Flag,
-  ListChecks,
-  Package,
-  Quote,
-  RefreshCw,
-  Sparkles,
-  Target,
-  TrendingDown,
-  Users,
-} from "lucide-react";
+import { AlertTriangle, FileDown, Package, Quote, RefreshCw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { visitCopilotApi } from "@/lib/api";
 import { ApiError } from "@/lib/api-client";
@@ -87,36 +74,31 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
       <DialogContent
         // Full-screen on mobile, large centered card from sm: up — per
         // explicit product requirement ("نافذة كاملة الشاشة على الموبايل").
+        // !important overrides beat DialogContent's own baked-in
+        // `grid gap-4 p-6` (see components/ui/dialog.tsx) — those defaults
+        // were fighting this component's flex/height layout and silently
+        // breaking the inner scroll container in production (confirmed via
+        // live screenshot: the body rendered with no scrollbar at all).
         className={cn(
-          "grid max-w-none translate-x-0 translate-y-0 gap-0 overflow-hidden rounded-none border-0 p-0",
-          "left-0 top-0 h-[100dvh] w-screen",
-          "sm:left-1/2 sm:top-1/2 sm:h-[90vh] sm:w-[min(900px,92vw)] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-2xl sm:border sm:border-border",
+          "!grid !max-w-none !translate-x-0 !translate-y-0 !gap-0 overflow-hidden !rounded-none !border-0 !p-0",
+          "!left-0 !top-0 !h-[100dvh] !w-screen",
+          "sm:!left-1/2 sm:!top-1/2 sm:!h-[90vh] sm:!w-[min(900px,92vw)] sm:!-translate-x-1/2 sm:!-translate-y-1/2 sm:!rounded-2xl sm:!border sm:border-border",
         )}
       >
-        <div id="daily-360-summary-print-root" className="flex h-full flex-col">
-          {/* ——— Header: title + scope block ——— */}
-          <div className="glass-hero relative shrink-0 border-b border-border/60 p-5">
+        <div id="daily-360-summary-print-root" className="grid h-full min-h-0 grid-rows-[auto_1fr]">
+          {/* ——— Header: title + export only — scope moves into its own
+              "نطاق التقرير" bulleted section in the body, matching the
+              reference report's structure exactly instead of one merged
+              line. ——— */}
+          <div className="glass-hero relative shrink-0 border-b border-border/60 p-5 pe-14">
             <div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" />
-            <div className="relative flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <DialogTitle className="flex items-center gap-2 text-xl font-bold">
-                  <span className="crystal-badge h-10 w-10 bg-ai/15 text-ai">
-                    <Sparkles className="h-5 w-5" />
-                  </span>
-                  {t("copilot.summary360Title")}
-                </DialogTitle>
-                {summary && (
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {t("copilot.summary360ScopeLine", {
-                      scope: summary.scopeLabel,
-                      role: summary.roleLabel,
-                      user: summary.userName,
-                      from: summary.period.from,
-                      to: summary.period.to,
-                    })}
-                  </p>
-                )}
-              </div>
+            <div className="relative flex flex-wrap items-center justify-between gap-3">
+              <DialogTitle className="flex items-center gap-2 text-xl font-bold">
+                <span className="crystal-badge h-10 w-10 bg-ai/15 text-ai">
+                  <Sparkles className="h-5 w-5" />
+                </span>
+                {t("copilot.summary360Title")}
+              </DialogTitle>
               {summary && (
                 <Button
                   variant="secondary"
@@ -132,7 +114,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
           </div>
 
           {/* ——— Body ——— */}
-          <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          <div className="min-h-0 overflow-y-auto p-5">
             {query.isLoading ? (
               <div className="space-y-4">
                 <Skeleton className="h-24" />
@@ -155,10 +137,38 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
               <p className="py-16 text-center text-sm text-muted-foreground">{t("copilot.summary360Empty")}</p>
             ) : (
               <div className="space-y-6" dir="rtl">
+                {/* نطاق التقرير — bulleted, matching the reference report's
+                    own structure (route/rep/visit-date/customer-count as
+                    separate lines, not one merged sentence). */}
+                <section className="glass-card space-y-1.5 p-4">
+                  <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold">
+                    <span aria-hidden>📊</span>
+                    نطاق التقرير
+                  </h3>
+                  <ul className="space-y-1 text-sm">
+                    <li>
+                      <span className="font-medium text-muted-foreground">النطاق: </span>
+                      {summary.scopeLabel}
+                    </li>
+                    <li>
+                      <span className="font-medium text-muted-foreground">{summary.roleLabel}: </span>
+                      {summary.userName}
+                    </li>
+                    <li>
+                      <span className="font-medium text-muted-foreground">التاريخ: </span>
+                      {summary.reportDate}
+                    </li>
+                    <li>
+                      <span className="font-medium text-muted-foreground">الفترة المقارنة: </span>
+                      {summary.period.from} إلى {summary.period.to}
+                    </li>
+                  </ul>
+                </section>
+
                 {/* Executive summary */}
                 <section className="glass-card space-y-2 p-4">
                   <h3 className="flex items-center gap-2 text-sm font-semibold">
-                    <Sparkles className="h-4 w-4 text-ai" />
+                    <span aria-hidden>📈</span>
                     {t("copilot.summary360ExecutiveSummary")}
                   </h3>
                   <p className="text-sm leading-relaxed">{summary.executiveSummary}</p>
@@ -168,7 +178,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
                 {summary.topIssue && (
                   <section className="glow-ai rounded-lg p-4">
                     <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold">
-                      <Flag className="h-4 w-4 text-ai" />
+                      <span aria-hidden>🔴</span>
                       {t("copilot.summary360TopIssue")}
                     </h3>
                     <p className="text-sm leading-relaxed">{summary.topIssue}</p>
@@ -178,7 +188,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
                 {/* Goal */}
                 <section className="glass-card p-4">
                   <h3 className="mb-3 flex items-center gap-2 text-sm font-semibold">
-                    <Target className="h-4 w-4 text-ai" />
+                    <span aria-hidden>🎯</span>
                     {t("copilot.summary360Goal")}
                   </h3>
                   {summary.goal.targetTotal !== null ? (
@@ -195,10 +205,12 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
                   )}
                 </section>
 
-                {/* Lost opportunities — numbered customer cards */}
+                {/* Lost opportunities — numbered customer cards ("1. اسم
+                    العميل" prefix, matching the reference report's own
+                    numbering style instead of a separate round badge). */}
                 <section className="space-y-3">
                   <h3 className="flex items-center gap-2 text-sm font-semibold">
-                    <TrendingDown className="h-4 w-4 text-rose-500" />
+                    <span aria-hidden>🎯</span>
                     {t("copilot.summary360LostOpportunities")}
                   </h3>
                   {summary.lostOpportunities.length === 0 ? (
@@ -208,10 +220,9 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
                       {summary.lostOpportunities.map((op, i) => (
                         <div key={`${op.customerName}-${i}`} className="glass-card space-y-2.5 p-4">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="crystal-badge h-7 w-7 shrink-0 bg-rose-500/15 text-rose-600 dark:text-rose-300">
-                              {i + 1}
+                            <span className="text-sm font-bold">
+                              {i + 1}. {op.customerName}
                             </span>
-                            <span className="text-sm font-semibold">{op.customerName}</span>
                             <Badge variant="secondary" className="ms-auto font-normal">
                               {t("copilot.summary360DeclineValue", { value: op.declineValue.toLocaleString() })}
                             </Badge>
@@ -263,7 +274,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
                 {/* Collections */}
                 <section className="glass-card space-y-3 p-4">
                   <h3 className="flex items-center gap-2 text-sm font-semibold">
-                    <Banknote className="h-4 w-4 text-ai" />
+                    <span aria-hidden>💰</span>
                     {t("copilot.summary360Collections")}
                   </h3>
                   <div className="grid grid-cols-3 gap-3">
@@ -289,7 +300,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
                 {summary.interventionNeeded.length > 0 && (
                   <section className="glass-card space-y-2 p-4">
                     <h3 className="flex items-center gap-2 text-sm font-semibold">
-                      <Users className="h-4 w-4 text-ai" />
+                      <span aria-hidden>⚠️</span>
                       {t("copilot.summary360InterventionNeeded")}
                     </h3>
                     <ul className="space-y-1.5">
@@ -312,7 +323,10 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
 
                 {/* Root causes — 3-item numbered list */}
                 <section className="glass-card space-y-2 p-4">
-                  <h3 className="text-sm font-semibold">{t("copilot.summary360RootCauses")}</h3>
+                  <h3 className="flex items-center gap-2 text-sm font-semibold">
+                    <span aria-hidden>🧩</span>
+                    {t("copilot.summary360RootCauses")}
+                  </h3>
                   <p className="text-sm text-muted-foreground">{summary.rootCauses.narrative}</p>
                   <ol className="space-y-1.5 ps-1">
                     {summary.rootCauses.gaps.map((g, i) => (
@@ -327,7 +341,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
                 {/* Executive decision */}
                 <section className="glow-ai rounded-lg p-4">
                   <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold">
-                    <Flag className="h-4 w-4 text-ai" />
+                    <span aria-hidden>🎯</span>
                     {t("copilot.summary360ExecutiveDecision")}
                   </h3>
                   <p className="text-sm leading-relaxed">{summary.executiveDecision}</p>
@@ -336,7 +350,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
                 {/* Execution plan — 4-column table */}
                 <section className="glass-card space-y-3 p-4">
                   <h3 className="flex items-center gap-2 text-sm font-semibold">
-                    <ListChecks className="h-4 w-4 text-ai" />
+                    <span aria-hidden>📋</span>
                     {t("copilot.summary360ExecutionPlan")}
                   </h3>
                   <ExecutionPlanTable steps={summary.executionPlan} t={t} />

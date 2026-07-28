@@ -1082,12 +1082,17 @@ export class VisitCopilotService {
     };
 
     // ---- Sales + lost opportunities (PRODUCT_DECLINE + LOST_SALES, ranked
-    // by decline value, top 5 — matching the reference report's 5 numbered
-    // customer cards).
+    // by decline value. 2026-07-28: was previously capped at top 5 to
+    // mirror the reference report's 5 numbered cards, but the customer
+    // explicitly asked for every affected route customer to show, not a
+    // fixed sample — capping was silently hiding real lost-opportunity
+    // customers from the rep. No cap now; every PRODUCT_DECLINE/LOST_SALES
+    // situation visible to this viewer (already hierarchy-scoped by
+    // SgiService.getLatest) appears here, ranked by decline value.
     const declineSituations = situations.filter((s) => s.type === "PRODUCT_DECLINE" || s.type === "LOST_SALES");
-    const topDeclines = [...declineSituations]
-      .sort((a, b) => (b.metricValuePrior ?? 0) - b.metricValue - ((a.metricValuePrior ?? 0) - a.metricValue))
-      .slice(0, 5);
+    const topDeclines = [...declineSituations].sort(
+      (a, b) => (b.metricValuePrior ?? 0) - b.metricValue - ((a.metricValuePrior ?? 0) - a.metricValue),
+    );
 
     const lastVisitByCustomerName = new Map<string, string | null>();
     for (const c of brief.customers) lastVisitByCustomerName.set(c.customerName, c.lastVisitDate);
