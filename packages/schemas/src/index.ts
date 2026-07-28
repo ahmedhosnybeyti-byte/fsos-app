@@ -29,6 +29,7 @@ export * from "./customer-location.schemas";
 export * from "./visit-copilot.schemas";
 export * from "./territory-intelligence.schemas";
 export * from "./decision-analytics-studio.schemas";
+export * from "./fsos-360.schemas";
 export * from "./geo-engine.schemas";
 export {
   smartLoadingPrioritySchema,
