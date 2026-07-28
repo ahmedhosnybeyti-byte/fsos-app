@@ -1082,14 +1082,18 @@ export class VisitCopilotService {
     };
 
     // ---- Sales + lost opportunities (PRODUCT_DECLINE + LOST_SALES, ranked
-    // by decline value. 2026-07-28: was previously capped at top 5 to
-    // mirror the reference report's 5 numbered cards, but the customer
-    // explicitly asked for every affected route customer to show, not a
-    // fixed sample — capping was silently hiding real lost-opportunity
-    // customers from the rep. No cap now; every PRODUCT_DECLINE/LOST_SALES
-    // situation visible to this viewer (already hierarchy-scoped by
-    // SgiService.getLatest) appears here, ranked by decline value.
-    const declineSituations = situations.filter((s) => s.type === "PRODUCT_DECLINE" || s.type === "LOST_SALES");
+    // by decline value). 2026-07-28, corrected per explicit customer
+    // feedback: scoped to TODAY'S route customers only (brief.customers —
+    // the same "today's plan" set the rest of this screen already uses),
+    // not every historically-declining customer across the viewer's whole
+    // hierarchy. An earlier version first capped this at top-5 (too few),
+    // then removed the cap entirely (too many — showed customers who
+    // aren't even on today's route). This is the right scope: no numeric
+    // cap, but bounded to today's actual visit list.
+    const todayCustomerNames = new Set(brief.customers.map((c) => c.customerName));
+    const declineSituations = situations.filter(
+      (s) => (s.type === "PRODUCT_DECLINE" || s.type === "LOST_SALES") && todayCustomerNames.has(s.entityLabel),
+    );
     const topDeclines = [...declineSituations].sort(
       (a, b) => (b.metricValuePrior ?? 0) - b.metricValue - ((a.metricValuePrior ?? 0) - a.metricValue),
     );

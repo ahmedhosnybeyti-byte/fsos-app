@@ -62,7 +62,12 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
     setExporting(true);
     try {
       await exportDaily360SummaryPdf(summary, t);
-    } catch {
+    } catch (err) {
+      // 2026-07-28: was a bare `catch {}` swallowing the real error —
+      // impossible to diagnose from a bug report alone. Logging the actual
+      // exception so the browser Console shows the real cause instead of
+      // just the generic toast message.
+      console.error("[daily-360-summary] PDF export failed:", err);
       toast.error(t("copilot.summary360ExportError"));
     } finally {
       setExporting(false);

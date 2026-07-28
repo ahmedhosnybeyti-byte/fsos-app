@@ -30,10 +30,15 @@ export async function exportDaily360SummaryPdf(
 
   // Capture only the scrollable report body, not the whole (viewport-
   // clipped) modal shell — otherwise we'd only ever get whatever fit on
-  // screen. We temporarily clone the node's scroll height into view instead
-  // of touching the live, still-interactive modal DOM.
-  const scrollBody = root.querySelector<HTMLElement>(".min-h-0.flex-1.overflow-y-auto");
+  // screen. Selector kept in lockstep with the modal's own body div
+  // className (see daily-360-summary-modal.tsx) — it drifted out of sync
+  // once (still said "flex-1" after the modal moved to a CSS grid layout),
+  // which silently fell back to capturing the whole root including the
+  // header. Falls back to `root` only if the selector ever mismatches
+  // again, so this never hard-fails just because of a className rename.
+  const scrollBody = root.querySelector<HTMLElement>(".min-h-0.overflow-y-auto");
   const captureTarget = scrollBody ?? root;
+  console.info("[daily-360-summary] PDF export: captureTarget=", captureTarget === root ? "root (fallback)" : "scrollBody", "scrollHeight=", captureTarget.scrollHeight);
 
   const canvas = await html2canvas(captureTarget, {
     useCORS: true,
@@ -44,6 +49,7 @@ export async function exportDaily360SummaryPdf(
     height: captureTarget.scrollHeight,
     windowHeight: captureTarget.scrollHeight,
   });
+  console.info("[daily-360-summary] PDF export: canvas captured", canvas.width, "x", canvas.height);
 
   const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
   const pageWidth = pdf.internal.pageSize.getWidth();
@@ -77,5 +83,6 @@ export async function exportDaily360SummaryPdf(
 
   void t; // reserved for a future filename/localized-metadata pass
 
+  console.info("[daily-360-summary] PDF export: saving", pageIndex, "page(s)");
   pdf.save(`daily-360-summary-${summary.reportDate}.pdf`);
 }
