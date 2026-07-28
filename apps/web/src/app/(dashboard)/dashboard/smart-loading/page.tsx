@@ -12,7 +12,11 @@ export default function SmartLoadingPage() {
       session={session.data}
       isLoading={session.isLoading}
       isError={session.isError}
-      onRetry={() => session.refetch()}
+      onRetry={async () => {
+        const result = await session.refetch();
+        if (result.isError) throw result.error;
+        return result.data;
+      }}
     />
   );
 }

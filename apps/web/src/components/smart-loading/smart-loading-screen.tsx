@@ -7,7 +7,9 @@ import {
   ChevronDown,
   ClipboardCheck,
   Download,
+  Minus,
   PackagePlus,
+  Plus,
   RefreshCw,
   RotateCcw,
   Route,
@@ -23,7 +25,7 @@ import type { SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Inputs = { confirmedOrders: number; safetyStock: number; manual?: number };
-type Row = { product: SmartLoadingProduct; original: number; suggested: number; input: Inputs };
+type Row = { product: SmartLoadingProduct; original: number; suggested: number; input: Inputs; manuallyAdded: boolean };
 
 const HIGH_PRIORITY_DAYS_STALE = 4;
 
@@ -62,13 +64,25 @@ export function SmartLoadingScreen({
   onRetry: () => Promise<unknown> | void;
 }) {
   const { t } = useTranslation();
+  const label = (key: string, fallback: string) => {
+    const translated = t(key as never);
+    return translated === key ? fallback : translated;
+  };
   const [inputs, setInputs] = useState<Record<string, Inputs>>({});
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
   const [openRows, setOpenRows] = useState<Set<string>>(new Set());
   const [attentionOpen, setAttentionOpen] = useState(false);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [panel, setPanel] = useState<"priority" | "stale" | null>(null);
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
+  const [removedProductCodes, setRemovedProductCodes] = useState<Set<string>>(new Set());
+  const [manuallyAddedProductCodes, setManuallyAddedProductCodes] = useState<Set<string>>(new Set());
+  const [addProductOpen, setAddProductOpen] = useState(false);
+  const [productSearch, setProductSearch] = useState("");
+  const [selectedProductCode, setSelectedProductCode] = useState<string | null>(null);
+  const [addedQuantity, setAddedQuantity] = useState(1);
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -88,11 +102,14 @@ export function SmartLoadingScreen({
     return session.products.map((product) => {
       const input = inputs[product.productCode] ?? { confirmedOrders: 0, safetyStock: 0 };
       const original = product.weeklyAverageSales + input.confirmedOrders + input.safetyStock - product.currentVehicleStock;
-      return { product, input, original, suggested: input.manual ?? original };
+      return { product, input, original, suggested: input.manual ?? original, manuallyAdded: manuallyAddedProductCodes.has(product.productCode) };
     });
-  }, [inputs, session]);
+  }, [inputs, manuallyAddedProductCodes, session]);
 
-  const rows = useMemo(() => allRows.filter((row) => row.suggested > 0), [allRows]);
+  const rows = useMemo(
+    () => allRows.filter((row) => !removedProductCodes.has(row.product.productCode) && (row.suggested > 0 || row.manuallyAdded)),
+    [allRows, removedProductCodes],
+  );
 
   const groupedByCategory = useMemo(() => {
     return rows.reduce<Record<string, Row[]>>((acc, row) => {
@@ -104,6 +121,15 @@ export function SmartLoadingScreen({
 
   const priorityRows = useMemo(() => rows.filter((row) => row.product.priority === "high"), [rows]);
 
+  const availableProducts = useMemo(() => {
+    if (session?.state !== "ready") return [];
+    const query = productSearch.trim().toLocaleLowerCase();
+    return session.products.filter((product) => {
+      if (rows.some((row) => row.product.productCode === product.productCode)) return false;
+      return !query || `${product.productName} ${product.productCode} ${product.category ?? ""}`.toLocaleLowerCase().includes(query);
+    });
+  }, [productSearch, rows, session]);
+
   const staleRows = useMemo(() => {
     return allRows.filter((row) => {
       const days = daysSinceLastSale(row.product.lastSaleDate);
@@ -111,21 +137,51 @@ export function SmartLoadingScreen({
     });
   }, [allRows]);
 
-  const staleRowsByCategory = useMemo(() => {
-    return staleRows.reduce<Record<string, Row[]>>((acc, row) => {
-      const key = row.product.category ?? t("smartLoading.uncategorized");
-      (acc[key] ??= []).push(row);
-      return acc;
-    }, {});
-  }, [staleRows, t]);
-
   async function refresh() {
     setRefreshing(true);
     try {
       await onRetry();
+      setRefreshError(null);
+      setInputs({});
+      setRemovedProductCodes(new Set());
+      setManuallyAddedProductCodes(new Set());
+      setOpenRows(new Set());
+    } catch {
+      setRefreshError(label("smartLoading.refreshFailed", "Unable to refresh loading data. Try again."));
     } finally {
       setRefreshing(false);
     }
+  }
+
+  function addProduct() {
+    if (!selectedProductCode || addedQuantity <= 0) return;
+    setInputs((current) => ({
+      ...current,
+      [selectedProductCode]: {
+        ...(current[selectedProductCode] ?? { confirmedOrders: 0, safetyStock: 0 }),
+        manual: addedQuantity,
+      },
+    }));
+    setRemovedProductCodes((current) => {
+      const next = new Set(current);
+      next.delete(selectedProductCode);
+      return next;
+    });
+    setManuallyAddedProductCodes((current) => new Set(current).add(selectedProductCode));
+    setSelectedProductCode(null);
+    setProductSearch("");
+    setAddedQuantity(1);
+    setAddProductOpen(false);
+  }
+
+  function removeProduct(productCode: string) {
+    setRemovedProductCodes((current) => new Set(current).add(productCode));
+  }
+
+  function restoreOriginalList() {
+    setInputs({});
+    setRemovedProductCodes(new Set());
+    setManuallyAddedProductCodes(new Set());
   }
 
   function setInput(productCode: string, key: keyof Inputs, value: string) {
@@ -152,10 +208,17 @@ export function SmartLoadingScreen({
       [t("smartLoading.confirmedOrders")]: row.input.confirmedOrders,
       [t("smartLoading.safetyStock")]: row.input.safetyStock,
       [t("smartLoading.suggestedLoading")]: row.suggested,
+      [label("smartLoading.exportColumnSource", "نوع الإضافة")]: row.manuallyAdded
+        ? label("smartLoading.addedManually", "مضاف يدويًا")
+        : label("smartLoading.recommended", "مقترح")
     }));
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(data), "Smart Loading");
-    XLSX.writeFile(book, `smart-loading.${bookType}`, { bookType });
+    const date = new Date()
+      .toLocaleDateString("en-CA", { calendar: "gregory", year: "numeric", month: "2-digit", day: "2-digit" })
+      .replaceAll("/", "-");
+    XLSX.writeFile(book, `smart-loading-${date}.${bookType}`, { bookType });
+    setExportOpen(false);
   }
 
   if (isLoading) {
@@ -207,10 +270,22 @@ export function SmartLoadingScreen({
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("smartLoading.subtitle")}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <div className="relative">
+            <Button variant="outline" onClick={() => setExportOpen((open) => !open)}>
+              <Download className="h-4 w-4" />
+              {label("smartLoading.export", "تصدير")}
+            </Button>
+            {exportOpen && (
+              <div className="absolute left-0 z-20 mt-2 w-48 rounded-md border bg-popover p-1 shadow-lg">
+                <Button className="w-full justify-start" variant="ghost" onClick={() => exportSheet("xlsx")}>.xlsx</Button>
+                <Button className="w-full justify-start" variant="ghost" onClick={() => exportSheet("ods")}>.ods</Button>
+              </div>
+            )}
+          </div>
           <Button variant="outline" disabled={isLoading || refreshing} onClick={refresh}>
-            <RefreshCw className="h-4 w-4" />
-            {t("smartLoading.refresh")}
+            <RefreshCw className={cn("h-4 w-4", refreshing && "animate-spin")} />
+            {refreshing ? label("smartLoading.refreshing", "Refreshing") : t("smartLoading.refresh")}
           </Button>
           <Button asChild>
             <Link href="/dashboard/visit-copilot">
@@ -220,6 +295,12 @@ export function SmartLoadingScreen({
           </Button>
         </div>
       </header>
+
+      {refreshError && (
+        <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {refreshError}
+        </div>
+      )}
 
       <section className="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
         <Card className="glass-hero">
@@ -283,24 +364,7 @@ export function SmartLoadingScreen({
                   </button>
                   {attentionOpen && (
                     <div className="max-h-72 space-y-3 overflow-y-auto border-t p-3">
-                      {Object.entries(staleRowsByCategory).map(([category, items]) => (
-                        <div key={category}>
-                          <p className="mb-1 text-xs font-semibold text-muted-foreground">{category}</p>
-                          {items.map((row) => (
-                            <div
-                              key={row.product.productCode}
-                              className="grid grid-cols-[1fr_auto] gap-2 border-b py-1.5 text-xs last:border-0"
-                            >
-                              <span>{row.product.productName}</span>
-                              <span className="text-left text-muted-foreground">
-                                {t("smartLoading.vehicleStock")} {formatQuantity(row.product.currentVehicleStock)} ·{" "}
-                                {t("smartLoading.lastSale")} {formatGregorianDate(row.product.lastSaleDate) ?? "—"} ·{" "}
-                                {daysSinceLastSale(row.product.lastSaleDate) ?? "—"} {t("smartLoading.staleDaysUnit")}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ))}
+                      <CategoryProductGroups rows={staleRows} stale />
                     </div>
                   )}
                 </div>
@@ -313,6 +377,21 @@ export function SmartLoadingScreen({
           </CardContent>
         </Card>
       </section>
+
+      {addProductOpen && (
+        <AddProductDialog
+          products={availableProducts}
+          productSearch={productSearch}
+          selectedProductCode={selectedProductCode}
+          quantity={addedQuantity}
+          onSearchChange={setProductSearch}
+          onSelectedProductChange={setSelectedProductCode}
+          onQuantityChange={(value) => setAddedQuantity(parsePositiveNumber(value))}
+          onClose={() => setAddProductOpen(false)}
+          onAdd={addProduct}
+          label={label}
+        />
+      )}
 
       {panel && (
         <ProductListPopover
@@ -365,11 +444,23 @@ export function SmartLoadingScreen({
                       }
                       setInput={setInput}
                       resetManualOverride={resetManualOverride}
+                      removeProduct={removeProduct}
                     />
                   ))}
               </section>
             );
           })}
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Button variant="outline" onClick={() => setAddProductOpen(true)}>
+              <Plus className="h-4 w-4" />
+              {label("smartLoading.addProduct", "Add product")}
+            </Button>
+            <Button variant="ghost" onClick={restoreOriginalList} disabled={rows.length === 0 && manuallyAddedProductCodes.size === 0}>
+              <RotateCcw className="h-4 w-4" />
+              {label("smartLoading.restoreOriginalList", "Restore original list")}
+            </Button>
+          </div>
 
           <div className="mt-3 border-t pt-3">
             <h3 className="mb-1 flex items-center gap-2 font-semibold">
@@ -406,17 +497,6 @@ export function SmartLoadingScreen({
               ))}
             </div>
           </div>
-
-          <div className="mt-3 flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => exportSheet("xlsx")}>
-              <Download className="h-4 w-4" />
-              {t("smartLoading.exportExcel")}
-            </Button>
-            <Button variant="outline" onClick={() => exportSheet("ods")}>
-              <Download className="h-4 w-4" />
-              {t("smartLoading.exportOds")}
-            </Button>
-          </div>
         </CardContent>
       </Card>
     </div>
@@ -429,14 +509,20 @@ function ProductRow({
   toggle,
   setInput,
   resetManualOverride,
+  removeProduct,
 }: {
   row: Row;
   open: boolean;
   toggle: () => void;
   setInput: (productCode: string, key: keyof Inputs, value: string) => void;
   resetManualOverride: (productCode: string) => void;
+  removeProduct: (productCode: string) => void;
 }) {
   const { t } = useTranslation();
+  const label = (key: string, fallback: string) => {
+    const translated = t(key as never);
+    return translated === key ? fallback : translated;
+  };
   const hasManualOverride = row.input.manual !== undefined;
 
   return (
@@ -449,15 +535,33 @@ function ProductRow({
             {formatQuantity(row.product.currentVehicleStock)}
           </p>
         </button>
-        <div className="text-left">
-          <p className="text-[10px] text-muted-foreground">{t("smartLoading.suggestedLoading")}</p>
+        <div className="flex items-start gap-2 text-left">
+          <div>
+            <p className="text-[10px] text-muted-foreground">{t("smartLoading.suggestedLoading")}</p>
           <Input
             className="h-8 w-20 text-center font-bold text-teal-700"
             type="number"
-            min="0"
+            min={row.manuallyAdded ? "1" : "0"}
             value={row.suggested}
-            onChange={(event) => setInput(row.product.productCode, "manual", event.target.value)}
+            onChange={(event) => {
+              const nextValue = row.manuallyAdded ? Math.max(1, parsePositiveNumber(event.target.value)) : parsePositiveNumber(event.target.value);
+              setInput(row.product.productCode, "manual", String(nextValue));
+            }}
           />
+            {row.manuallyAdded && (
+              <p className="mt-1 text-[10px] font-medium text-teal-700">{label("smartLoading.addedManually", "Added manually")}</p>
+            )}
+          </div>
+          <Button
+            aria-label={label("smartLoading.removeProduct", "Remove product")}
+            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+            size="icon"
+            type="button"
+            variant="ghost"
+            onClick={() => removeProduct(row.product.productCode)}
+          >
+            <Minus className="h-4 w-4" />
+          </Button>
           {hasManualOverride && (
             <button
               onClick={() => resetManualOverride(row.product.productCode)}
@@ -549,6 +653,139 @@ function Field({
   );
 }
 
+function AddProductDialog({
+  products,
+  productSearch,
+  selectedProductCode,
+  quantity,
+  onSearchChange,
+  onSelectedProductChange,
+  onQuantityChange,
+  onClose,
+  onAdd,
+  label,
+}: {
+  products: SmartLoadingProduct[];
+  productSearch: string;
+  selectedProductCode: string | null;
+  quantity: number;
+  onSearchChange: (value: string) => void;
+  onSelectedProductChange: (value: string) => void;
+  onQuantityChange: (value: string) => void;
+  onClose: () => void;
+  onAdd: () => void;
+  label: (key: string, fallback: string) => string;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <Card className="w-full max-w-xl shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <CardHeader className="pb-2">
+          <CardTitle>{label("smartLoading.addProduct", "Add product")}</CardTitle>
+          <CardDescription>{label("smartLoading.addProductDescription", "Search the session products and set a positive loading quantity.")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Input
+            autoFocus
+            placeholder={label("smartLoading.searchProducts", "Search products")}
+            value={productSearch}
+            onChange={(event) => onSearchChange(event.target.value)}
+          />
+          <div className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-1">
+            {products.length === 0 && (
+              <p className="p-3 text-sm text-muted-foreground">{label("smartLoading.noProductsFound", "No products found")}</p>
+            )}
+            {products.map((product) => (
+              <button
+                key={product.productCode}
+                className={cn(
+                  "flex w-full items-center justify-between rounded px-3 py-2 text-right text-sm hover:bg-secondary",
+                  selectedProductCode === product.productCode && "bg-secondary",
+                )}
+                onClick={() => onSelectedProductChange(product.productCode)}
+                type="button"
+              >
+                <span>{product.productName}</span>
+                <span className="text-xs text-muted-foreground">{product.category ?? ""}</span>
+              </button>
+            ))}
+          </div>
+          <div className="flex items-end justify-between gap-3">
+            <div className="w-32">
+              <Label className="text-xs">{label("smartLoading.manualQuantity", "Loading quantity")}</Label>
+              <Input
+                className="mt-1"
+                min="1"
+                type="number"
+                value={quantity}
+                onChange={(event) => onQuantityChange(event.target.value)}
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={onClose}>{label("smartLoading.close", "Close")}</Button>
+              <Button disabled={!selectedProductCode || quantity <= 0} onClick={onAdd}>
+                <Plus className="h-4 w-4" />
+                {label("smartLoading.addProduct", "Add product")}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function CategoryProductGroups({ rows, stale }: { rows: Row[]; stale: boolean }) {
+  const { t } = useTranslation();
+  const [closedCategories, setClosedCategories] = useState<Set<string>>(new Set());
+  const groups = useMemo(() => {
+    return rows.reduce<Record<string, Row[]>>((current, row) => {
+      const category = row.product.category ?? t("smartLoading.uncategorized");
+      (current[category] ??= []).push(row);
+      return current;
+    }, {});
+  }, [rows, t]);
+
+  return (
+    <div className="space-y-2">
+      {Object.entries(groups).map(([category, items]) => {
+        const closed = closedCategories.has(category);
+        return (
+          <section key={category} className="rounded border">
+            <button
+              className="flex w-full items-center justify-between px-2 py-1.5 text-right text-xs font-semibold"
+              onClick={() => setClosedCategories((current) => {
+                const next = new Set(current);
+                if (next.has(category)) next.delete(category); else next.add(category);
+                return next;
+              })}
+              type="button"
+            >
+              <span>{category} ({formatQuantity(items.length)})</span>
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", closed && "-rotate-90")} />
+            </button>
+            {!closed && (
+              <div className="max-h-56 overflow-y-auto border-t px-2">
+                {items.map((row) => (
+                  <div key={row.product.productCode} className="grid grid-cols-[1fr_auto] gap-2 border-b py-1.5 text-xs last:border-0">
+                    <span className="min-w-0 truncate font-medium">{row.product.productName}</span>
+                    <span className="text-left text-muted-foreground">
+                      {t("smartLoading.vehicleStock")} {formatQuantity(row.product.currentVehicleStock)}
+                      {stale && (
+                        <> · {t("smartLoading.lastSale")} {formatGregorianDate(row.product.lastSaleDate) ?? "—"} · {daysSinceLastSale(row.product.lastSaleDate) ?? "—"} {t("smartLoading.staleDaysUnit")}</>
+                      )}
+                      {!stale && <> · {t("smartLoading.suggestedLoading")} {formatQuantity(row.suggested)}</>}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        );
+      })}
+    </div>
+  );
+}
+
 function ProductListPopover({ rows, stale, onClose }: { rows: Row[]; stale: boolean; onClose: () => void }) {
   const { t } = useTranslation();
   return (
@@ -556,26 +793,10 @@ function ProductListPopover({ rows, stale, onClose }: { rows: Row[]; stale: bool
       <Card className="w-[min(92vw,520px)] shadow-xl" onClick={(event) => event.stopPropagation()}>
         <CardHeader className="flex-row items-center justify-between p-4">
           <CardTitle>{stale ? t("smartLoading.staleProductsPanelTitle") : t("smartLoading.priorityProductsPanelTitle")}</CardTitle>
-          <Button size="sm" variant="ghost" onClick={onClose}>
-            {t("smartLoading.close")}
-          </Button>
+          <Button size="sm" variant="ghost" onClick={onClose}>{t("smartLoading.close")}</Button>
         </CardHeader>
-        <CardContent className="max-h-80 space-y-2 overflow-auto p-4 pt-0">
-          {rows.map((row) => (
-            <div key={row.product.productCode} className="rounded border p-2 text-sm">
-              <p className="font-medium">{row.product.productName}</p>
-              <p className="text-xs text-muted-foreground">
-                {row.product.category ?? t("smartLoading.uncategorized")} · {t("smartLoading.vehicleStock")}{" "}
-                {formatQuantity(row.product.currentVehicleStock)} · {formatQuantity(row.suggested)}
-              </p>
-              {stale && (
-                <p className="mt-1 text-xs">
-                  {t("smartLoading.lastSale")}: {formatGregorianDate(row.product.lastSaleDate) ?? "—"} ·{" "}
-                  {daysSinceLastSale(row.product.lastSaleDate) ?? "—"} {t("smartLoading.staleDaysUnit")}
-                </p>
-              )}
-            </div>
-          ))}
+        <CardContent className="max-h-[60vh] overflow-y-auto p-4 pt-0">
+          <CategoryProductGroups rows={rows} stale={stale} />
         </CardContent>
       </Card>
     </div>

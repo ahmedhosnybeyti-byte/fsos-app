@@ -1061,7 +1061,20 @@ export type TranslationKey =
   | "smartLoading.exportExcel"
   | "smartLoading.exportOds"
   | "smartLoading.exportColumnProduct"
-  | "smartLoading.exportColumnCategory";
+  | "smartLoading.exportColumnCategory"
+  | "smartLoading.export"
+  | "smartLoading.refreshing"
+  | "smartLoading.refreshFailed"
+  | "smartLoading.exportColumnSource"
+  | "smartLoading.addedManually"
+  | "smartLoading.recommended"
+  | "smartLoading.addProduct"
+  | "smartLoading.addProductDescription"
+  | "smartLoading.searchProducts"
+  | "smartLoading.noProductsFound"
+  | "smartLoading.manualQuantity"
+  | "smartLoading.removeProduct"
+  | "smartLoading.restoreOriginalList";
 
 export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
   ar: {
@@ -2122,6 +2135,19 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.exportOds": "ODS",
     "smartLoading.exportColumnProduct": "الصنف",
     "smartLoading.exportColumnCategory": "القسم",
+    "smartLoading.export": "تصدير",
+    "smartLoading.refreshing": "جارٍ التحديث",
+    "smartLoading.refreshFailed": "تعذر تحديث بيانات التحميل. حاول مرة أخرى.",
+    "smartLoading.exportColumnSource": "نوع الإضافة",
+    "smartLoading.addedManually": "مضاف يدويًا",
+    "smartLoading.recommended": "مقترح",
+    "smartLoading.addProduct": "إضافة صنف",
+    "smartLoading.addProductDescription": "ابحث ضمن أصناف الجلسة وحدد كمية تحميل موجبة.",
+    "smartLoading.searchProducts": "بحث عن الأصناف",
+    "smartLoading.noProductsFound": "لا توجد أصناف مطابقة",
+    "smartLoading.manualQuantity": "كمية التحميل",
+    "smartLoading.removeProduct": "إزالة الصنف",
+    "smartLoading.restoreOriginalList": "استعادة القائمة الأصلية",
   },
   en: {
     "nav.overview": "Overview",
@@ -3182,5 +3208,18 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.exportOds": "ODS",
     "smartLoading.exportColumnProduct": "Product",
     "smartLoading.exportColumnCategory": "Category",
+    "smartLoading.export": "Export",
+    "smartLoading.refreshing": "Refreshing",
+    "smartLoading.refreshFailed": "Unable to refresh loading data. Try again.",
+    "smartLoading.exportColumnSource": "Addition Type",
+    "smartLoading.addedManually": "Added manually",
+    "smartLoading.recommended": "Recommended",
+    "smartLoading.addProduct": "Add product",
+    "smartLoading.addProductDescription": "Search the session products and set a positive loading quantity.",
+    "smartLoading.searchProducts": "Search products",
+    "smartLoading.noProductsFound": "No products found",
+    "smartLoading.manualQuantity": "Loading quantity",
+    "smartLoading.removeProduct": "Remove product",
+    "smartLoading.restoreOriginalList": "Restore original list",
   },
 };
