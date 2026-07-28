@@ -4,6 +4,7 @@ import {
   visitCopilotBriefingQuerySchema,
   visitCopilotChatRequestSchema,
   visitCopilotDailyBriefQuerySchema,
+  visitCopilotDaily360SummaryQuerySchema,
   visitCopilotDiscoveryQuerySchema,
   visitCopilotGoogleSearchRequestSchema,
   visitCopilotPlanRequestSchema,
@@ -11,6 +12,7 @@ import {
   type VisitCopilotBriefingQuery,
   type VisitCopilotChatRequest,
   type VisitCopilotDailyBriefQuery,
+  type VisitCopilotDaily360SummaryQuery,
   type VisitCopilotDiscoveryQuery,
   type VisitCopilotGoogleSearchRequest,
   type VisitCopilotPlanRequest,
@@ -68,6 +70,20 @@ export class VisitCopilotController {
   chat(@CurrentUser() user: AuthenticatedUser, @Body(new ZodValidationPipe(visitCopilotChatRequestSchema)) body: VisitCopilotChatRequest) {
     if (!user.companyId) throw new ForbiddenException();
     return this.visitCopilotService.chat(user, body);
+  }
+
+  // "ملخص اليوم 360°" — see visit-copilot.schemas.ts's DTO comment. No scope
+  // query param on purpose: role scoping is entirely server-derived from
+  // `user` (SgiService.getLatest's own hierarchy filter), same as every
+  // other endpoint in this controller.
+  @Get("daily-360-summary")
+  @Auth()
+  daily360Summary(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query(new ZodValidationPipe(visitCopilotDaily360SummaryQuerySchema)) query: VisitCopilotDaily360SummaryQuery,
+  ) {
+    if (!user.companyId) throw new ForbiddenException();
+    return this.visitCopilotService.daily360Summary(user, query);
   }
 
   // ------------------------------------------------------------------

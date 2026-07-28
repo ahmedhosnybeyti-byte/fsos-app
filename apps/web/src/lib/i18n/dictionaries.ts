@@ -966,7 +966,51 @@ export type TranslationKey =
   | "copilot.oppShowMap"
   | "copilot.prospectBadge"
   | "copilot.markVisited"
-  | "copilot.markedVisited";
+  | "copilot.markedVisited"
+  | "copilot.summary360Button"
+  | "copilot.summary360Title"
+  | "copilot.summary360Loading"
+  | "copilot.summary360Error"
+  | "copilot.summary360Retry"
+  | "copilot.summary360Empty"
+  | "copilot.summary360ScopeLine"
+  | "copilot.summary360ExecutiveSummary"
+  | "copilot.summary360TopIssue"
+  | "copilot.summary360Goal"
+  | "copilot.summary360GoalTarget"
+  | "copilot.summary360GoalActual"
+  | "copilot.summary360GoalRemaining"
+  | "copilot.summary360NoGoal"
+  | "copilot.summary360LostOpportunities"
+  | "copilot.summary360NoLostOpportunities"
+  | "copilot.summary360DeclineValue"
+  | "copilot.summary360BeforeAfter"
+  | "copilot.summary360LastVisit"
+  | "copilot.summary360LastVisitUnknown"
+  | "copilot.summary360StoppedProducts"
+  | "copilot.summary360Diagnosis"
+  | "copilot.summary360VisitDecision"
+  | "copilot.summary360Collections"
+  | "copilot.summary360Collected"
+  | "copilot.summary360Pending"
+  | "copilot.summary360Bounced"
+  | "copilot.summary360PriorityDebtors"
+  | "copilot.summary360Returns"
+  | "copilot.summary360InterventionNeeded"
+  | "copilot.summary360RootCauses"
+  | "copilot.summary360ExecutiveDecision"
+  | "copilot.summary360ExecutionPlan"
+  | "copilot.summary360PlanPriority"
+  | "copilot.summary360PlanAction"
+  | "copilot.summary360PlanOwner"
+  | "copilot.summary360PlanMetric"
+  | "copilot.summary360ClosingPhrase"
+  | "copilot.summary360AiSourced"
+  | "copilot.summary360TemplateSourced"
+  | "copilot.summary360ExportPdf"
+  | "copilot.summary360ExportingPdf"
+  | "copilot.summary360ExportError"
+  | "copilot.summary360Close";
 
 export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
   ar: {
@@ -1932,6 +1976,50 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.prospectBadge": "عميل محتمل",
     "copilot.markVisited": "علّم كزيارة تمت",
     "copilot.markedVisited": "اتعلّمت كزيارة تمت",
+    "copilot.summary360Button": "ملخص اليوم 360°",
+    "copilot.summary360Title": "ملخص اليوم 360°",
+    "copilot.summary360Loading": "بنجهّز ملخص اليوم…",
+    "copilot.summary360Error": "معرفناش نجيب ملخص اليوم",
+    "copilot.summary360Retry": "حاول تاني",
+    "copilot.summary360Empty": "لا توجد بيانات كافية لعرض الملخص حاليًا.",
+    "copilot.summary360ScopeLine": "{scope} — {role} {user} — {from} إلى {to}",
+    "copilot.summary360ExecutiveSummary": "الملخص التنفيذي",
+    "copilot.summary360TopIssue": "أهم مشكلة اليوم",
+    "copilot.summary360Goal": "الهدف الشهري",
+    "copilot.summary360GoalTarget": "الهدف",
+    "copilot.summary360GoalActual": "المحقق",
+    "copilot.summary360GoalRemaining": "المتبقي",
+    "copilot.summary360NoGoal": "لا يوجد هدف محدد لنطاقك",
+    "copilot.summary360LostOpportunities": "الفرص الضائعة",
+    "copilot.summary360NoLostOpportunities": "لا توجد فرص ضائعة بارزة حاليًا",
+    "copilot.summary360DeclineValue": "قيمة التراجع: {value}",
+    "copilot.summary360BeforeAfter": "قبل: {before} ← بعد: {after}",
+    "copilot.summary360LastVisit": "آخر زيارة: {date}",
+    "copilot.summary360LastVisitUnknown": "آخر زيارة: غير معروفة",
+    "copilot.summary360StoppedProducts": "الأصناف المتوقفة",
+    "copilot.summary360Diagnosis": "التشخيص",
+    "copilot.summary360VisitDecision": "قرار الزيارة",
+    "copilot.summary360Collections": "التحصيل",
+    "copilot.summary360Collected": "تم تحصيله",
+    "copilot.summary360Pending": "معلّق",
+    "copilot.summary360Bounced": "مرتجع",
+    "copilot.summary360PriorityDebtors": "عملاء أولوية التحصيل",
+    "copilot.summary360Returns": "المرتجعات",
+    "copilot.summary360InterventionNeeded": "يحتاجون تدخل",
+    "copilot.summary360RootCauses": "الأسباب الجذرية المحتملة",
+    "copilot.summary360ExecutiveDecision": "القرار التنفيذي",
+    "copilot.summary360ExecutionPlan": "خطة التنفيذ",
+    "copilot.summary360PlanPriority": "الأولوية",
+    "copilot.summary360PlanAction": "الإجراء",
+    "copilot.summary360PlanOwner": "المسؤول",
+    "copilot.summary360PlanMetric": "مقياس النجاح",
+    "copilot.summary360ClosingPhrase": "الميدان هو مصدر الحقيقة",
+    "copilot.summary360AiSourced": "تمت صياغة النص بمساعدة الذكاء الاصطناعي بناءً على أرقام حقيقية",
+    "copilot.summary360TemplateSourced": "تم إنشاء التقرير من قالب ثابت",
+    "copilot.summary360ExportPdf": "تصدير PDF",
+    "copilot.summary360ExportingPdf": "بيتم التصدير…",
+    "copilot.summary360ExportError": "معرفناش نصدّر ملف PDF",
+    "copilot.summary360Close": "إغلاق",
   },
   en: {
     "nav.overview": "Overview",
@@ -2897,5 +2985,49 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.prospectBadge": "Prospect",
     "copilot.markVisited": "Mark as visited",
     "copilot.markedVisited": "Marked as visited",
+    "copilot.summary360Button": "Today's 360° Summary",
+    "copilot.summary360Title": "Today's 360° Summary",
+    "copilot.summary360Loading": "Preparing today's summary…",
+    "copilot.summary360Error": "Could not load today's summary",
+    "copilot.summary360Retry": "Retry",
+    "copilot.summary360Empty": "Not enough data to show a summary right now.",
+    "copilot.summary360ScopeLine": "{scope} — {role} {user} — {from} to {to}",
+    "copilot.summary360ExecutiveSummary": "Executive Summary",
+    "copilot.summary360TopIssue": "Top Issue Today",
+    "copilot.summary360Goal": "Monthly Goal",
+    "copilot.summary360GoalTarget": "Target",
+    "copilot.summary360GoalActual": "Achieved",
+    "copilot.summary360GoalRemaining": "Remaining",
+    "copilot.summary360NoGoal": "No target set for your scope",
+    "copilot.summary360LostOpportunities": "Lost Opportunities",
+    "copilot.summary360NoLostOpportunities": "No notable lost opportunities right now",
+    "copilot.summary360DeclineValue": "Decline value: {value}",
+    "copilot.summary360BeforeAfter": "Before: {before} → After: {after}",
+    "copilot.summary360LastVisit": "Last visit: {date}",
+    "copilot.summary360LastVisitUnknown": "Last visit: unknown",
+    "copilot.summary360StoppedProducts": "Stopped products",
+    "copilot.summary360Diagnosis": "Diagnosis",
+    "copilot.summary360VisitDecision": "Visit decision",
+    "copilot.summary360Collections": "Collections",
+    "copilot.summary360Collected": "Collected",
+    "copilot.summary360Pending": "Pending",
+    "copilot.summary360Bounced": "Bounced",
+    "copilot.summary360PriorityDebtors": "Priority debtors",
+    "copilot.summary360Returns": "Returns",
+    "copilot.summary360InterventionNeeded": "Needs intervention",
+    "copilot.summary360RootCauses": "Likely root causes",
+    "copilot.summary360ExecutiveDecision": "Executive decision",
+    "copilot.summary360ExecutionPlan": "Execution plan",
+    "copilot.summary360PlanPriority": "Priority",
+    "copilot.summary360PlanAction": "Action",
+    "copilot.summary360PlanOwner": "Owner",
+    "copilot.summary360PlanMetric": "Success metric",
+    "copilot.summary360ClosingPhrase": "The field is the source of truth",
+    "copilot.summary360AiSourced": "Phrased with AI assistance, based on real numbers",
+    "copilot.summary360TemplateSourced": "Generated from a fixed template",
+    "copilot.summary360ExportPdf": "Export PDF",
+    "copilot.summary360ExportingPdf": "Exporting…",
+    "copilot.summary360ExportError": "Could not export the PDF",
+    "copilot.summary360Close": "Close",
   },
 };

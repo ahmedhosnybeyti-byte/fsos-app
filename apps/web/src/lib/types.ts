@@ -1539,3 +1539,66 @@ export interface VisitCopilotRouteOpportunities {
   totalExpectedValue: number;
   disabled: boolean;
 }
+
+// "ملخص اليوم 360°" (2026-07-28) — GET /visit-copilot/daily-360-summary.
+// Mirrors packages/schemas/src/visit-copilot.schemas.ts's
+// visitCopilot360SummarySchema exactly; keep in lockstep with that file.
+export interface VisitCopilot360StoppedProduct {
+  productName: string;
+  quantity: number;
+  unit: string;
+  value: number;
+}
+
+export interface VisitCopilot360LostOpportunity {
+  customerName: string;
+  declineValue: number;
+  valueBefore: number;
+  valueAfter: number;
+  lastVisitDate: string | null;
+  stoppedProducts: VisitCopilot360StoppedProduct[];
+  diagnosis: string;
+  visitDecision: string;
+}
+
+export type VisitCopilot360Priority = "عالية" | "متوسطة" | "منخفضة";
+
+export interface VisitCopilot360ExecutionStep {
+  priority: VisitCopilot360Priority;
+  action: string;
+  owner: string;
+  successMetric: string;
+}
+
+export interface VisitCopilot360Summary {
+  generatedAt: string;
+  reportDate: string;
+  period: { from: string; to: string };
+  scopeLabel: string;
+  userName: string;
+  roleLabel: string;
+  narrativeSource: "ai" | "template";
+  executiveSummary: string;
+  topIssue: string | null;
+  goal: {
+    targetTotal: number | null;
+    actualTotal: number;
+    progressPct: number | null;
+    remainingGap: number | null;
+  };
+  sales: { total: number; invoiceCount: number; visitCount: number };
+  lostOpportunities: VisitCopilot360LostOpportunity[];
+  collections: {
+    collected: number;
+    pending: number;
+    bounced: number;
+    priorityDebtors: { customerName: string; amount: number; dueDate: string | null }[];
+  };
+  returns: { total: number; rate: number | null; recurringRisks: string[] };
+  interventionNeeded: { name: string; reason: string; severity: "high" | "medium" | "low" }[];
+  rootCauses: { narrative: string; gaps: string[] };
+  executiveDecision: string;
+  executionPlan: VisitCopilot360ExecutionStep[];
+  closingPhrase: string;
+  warnings: string[];
+}

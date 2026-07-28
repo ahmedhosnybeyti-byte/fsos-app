@@ -74,6 +74,12 @@ interface CustomerAcc {
   // GROWTH_OPPORTUNITY's `products` above).
   productValuesCurrent: Map<string, number>;
   productValuesPrior: Map<string, number>;
+  // 2026-07-28 ("ملخص اليوم 360°"): raw as-sold quantity per product per
+  // window, plus the last-seen Unit for that product — powers
+  // stoppedProducts on PRODUCT_DECLINE (see sgi.schemas.ts). Quantity is
+  // never unit-converted (see that schema comment).
+  productQtyPrior: Map<string, number>;
+  productUnit: Map<string, string>;
 }
 
 interface ProductAgg {
@@ -106,6 +112,8 @@ function getOrCreateCustomer(map: Map<string, CustomerAcc>, key: string, label: 
       products: new Set(),
       productValuesCurrent: new Map(),
       productValuesPrior: new Map(),
+      productQtyPrior: new Map(),
+      productUnit: new Map(),
     };
     map.set(key, acc);
   } else if (acc.label === key && label !== key) {
@@ -416,6 +424,13 @@ export class SgiService {
         cAcc.prior += amount;
         if (productCode) {
           cAcc.productValuesPrior.set(productCode, (cAcc.productValuesPrior.get(productCode) ?? 0) + amount);
+          // stoppedProducts (see sgi.schemas.ts): raw as-sold quantity/unit
+          // from the prior window only — "كان يسحب X كرتونًا" is what the
+          // customer used to buy, which is the prior window by definition.
+          const lineQty = toFiniteNumber(item.Quantity) ?? 0;
+          cAcc.productQtyPrior.set(productCode, (cAcc.productQtyPrior.get(productCode) ?? 0) + lineQty);
+          const lineUnit = String(item.Unit ?? "").trim();
+          if (lineUnit) cAcc.productUnit.set(productCode, lineUnit);
         }
       }
     }
@@ -710,6 +725,18 @@ export class SgiService {
     // including all the way to zero) — same "one concrete signal per
     // customer" shape as every other candidate list in this method.
     const PRODUCT_DECLINE_DROP_RATIO = 0.7;
+    // 2026-07-28 ("ملخص اليوم 360°"): cap on how many declining products ride
+    // along on stoppedProducts per customer — the reference report shows up
+    // to ~5-8 per lost-opportunity card. Purely additive to the "worst
+    // single product" logic below (title/detail/recommendation/metricValue
+    // stay driven by `worst` exactly as before, for backward compatibility
+    // with the Sales Growth screen and the Reports/PowerPoint wizard).
+    const PRODUCT_DECLINE_STOPPED_LIMIT = 8;
+    const UNIT_LABEL_AR: Record<string, string> = {
+      Carton: "كرتونة",
+      Pack: "باكيت",
+      Piece: "قطعة",
+    };
     const declineCandidates: Array<{
       key: string;
       acc: CustomerAcc;
@@ -718,19 +745,33 @@ export class SgiService {
       productCategory: string | null;
       priorValue: number;
       currentValue: number;
+      stoppedProducts: Array<{ productName: string; quantity: number; unit: string; value: number }>;
     }> = [];
     for (const [key, acc] of customers) {
       if (acc.current <= 0) continue;
       let worst: { code: string; priorValue: number; currentValue: number; drop: number } | null = null;
+      const declining: Array<{ code: string; priorValue: number; currentValue: number; drop: number }> = [];
       for (const [code, priorValue] of acc.productValuesPrior) {
         if (priorValue <= 0) continue;
         const currentValue = acc.productValuesCurrent.get(code) ?? 0;
         if (currentValue >= priorValue * PRODUCT_DECLINE_DROP_RATIO) continue;
         const drop = priorValue - currentValue;
+        declining.push({ code, priorValue, currentValue, drop });
         if (!worst || drop > worst.drop) worst = { code, priorValue, currentValue, drop };
       }
       if (!worst) continue;
       const meta = productMeta.get(worst.code);
+      declining.sort((a, b) => b.drop - a.drop);
+      const stoppedProducts = declining.slice(0, PRODUCT_DECLINE_STOPPED_LIMIT).map((d) => {
+        const dMeta = productMeta.get(d.code);
+        const rawUnit = acc.productUnit.get(d.code) ?? "";
+        return {
+          productName: dMeta?.name ?? d.code,
+          quantity: Math.round(acc.productQtyPrior.get(d.code) ?? 0),
+          unit: UNIT_LABEL_AR[rawUnit] ?? rawUnit,
+          value: Math.round(d.drop),
+        };
+      });
       declineCandidates.push({
         key,
         acc,
@@ -739,6 +780,7 @@ export class SgiService {
         productCategory: meta?.category ?? null,
         priorValue: worst.priorValue,
         currentValue: worst.currentValue,
+        stoppedProducts,
       });
     }
 
@@ -759,6 +801,7 @@ export class SgiService {
         metricValuePrior: c.priorValue,
         periodMonth: input.periodMonth,
         ownerRepEmail: dominantVote(c.acc.repVotes),
+        stoppedProducts: c.stoppedProducts.length > 0 ? c.stoppedProducts : undefined,
       });
     }
 

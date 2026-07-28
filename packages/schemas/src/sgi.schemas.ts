@@ -89,6 +89,27 @@ export const sgiSituationSchema = z.object({
   recommendation: z.string(),
   metricValue: z.number(),
   metricValuePrior: z.number().nullable(),
+  // PRODUCT_DECLINE only (2026-07-28, "ملخص اليوم 360°" per Visit Copilot)
+  // — up to 8 products this customer cut back on or stopped buying
+  // entirely, beyond the single "worst" product already summarized in
+  // title/detail/recommendation/metricValue above. Additive, optional: every
+  // other situation type (and every existing consumer of this schema — the
+  // Sales Growth screen, the Reports/PowerPoint wizard) simply never sees
+  // this field populated and is unaffected. `quantity`/`unit` are the RAW,
+  // as-sold Excel values (e.g. Unit="Carton" -> quantity is already in
+  // cartons) — never unit-converted, since Products.CartonQty/PackQty/
+  // PieceQty's exact conversion semantics aren't confidently known; honest
+  // native-unit quantities beat a guessed conversion.
+  stoppedProducts: z
+    .array(
+      z.object({
+        productName: z.string(),
+        quantity: z.number(),
+        unit: z.string(),
+        value: z.number(),
+      }),
+    )
+    .optional(),
   periodMonth: z.string(),
   // The rep considered "responsible" for this situation, for row-level
   // visibility filtering only (see sgi.service.ts) — not necessarily shown

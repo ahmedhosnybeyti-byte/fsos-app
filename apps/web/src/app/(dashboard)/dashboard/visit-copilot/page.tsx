@@ -35,6 +35,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
+import { Daily360SummaryModal } from "@/components/visit-copilot/daily-360-summary-modal";
 import type {
   VisitCopilotChatMessage,
   VisitCopilotPeriod,
@@ -118,6 +119,12 @@ export default function VisitCopilotPage() {
   const [chatMessages, setChatMessages] = useState<VisitCopilotChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [doneActions, setDoneActions] = useState<Set<number>>(new Set());
+
+  // "ملخص اليوم 360°" (2026-07-28) — its own modal, opened on demand; the
+  // query inside Daily360SummaryModal only runs while this is true, and the
+  // button itself is disabled while a fetch is already in flight to
+  // prevent double-click/repeat generation (see the Button below).
+  const [show360Summary, setShow360Summary] = useState(false);
 
   const customPeriodReady = period !== "custom" || (!!from && !!to);
   const periodParams = {
@@ -337,16 +344,37 @@ export default function VisitCopilotPage() {
           </h1>
           <p className="text-muted-foreground">{t("copilot.subtitle")}</p>
         </div>
-        {/* Persistent Discovery toggle — never auto-opens the section. */}
-        <Button
-          variant={showDiscovery ? "default" : "secondary"}
-          className="h-11 gap-2"
-          onClick={() => setShowDiscovery((v) => !v)}
-        >
-          <Search className="h-4 w-4" />
-          {t("copilot.discoverButton")}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* "ملخص اليوم 360°" — visible and reachable from the top of the
+              screen at all times, per the acceptance criteria. */}
+          <Button
+            variant="secondary"
+            className="glow-ai h-11 gap-2"
+            onClick={() => setShow360Summary(true)}
+            disabled={show360Summary}
+          >
+            <Sparkles className="h-4 w-4 text-ai" />
+            {t("copilot.summary360Button")}
+          </Button>
+          {/* Persistent Discovery toggle — never auto-opens the section. */}
+          <Button
+            variant={showDiscovery ? "default" : "secondary"}
+            className="h-11 gap-2"
+            onClick={() => setShowDiscovery((v) => !v)}
+          >
+            <Search className="h-4 w-4" />
+            {t("copilot.discoverButton")}
+          </Button>
+        </div>
       </div>
+
+      <Daily360SummaryModal
+        open={show360Summary}
+        onOpenChange={setShow360Summary}
+        period={period}
+        from={period === "custom" && from ? from : undefined}
+        to={period === "custom" && to ? to : undefined}
+      />
 
       {/* Global controls — small, always visible (they also drive Visit Mode). */}
       <div className="glass-card rise-in rise-d1 flex flex-wrap items-end gap-4 p-4">

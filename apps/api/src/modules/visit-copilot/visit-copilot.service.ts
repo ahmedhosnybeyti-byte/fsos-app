@@ -2,9 +2,12 @@ import { BadRequestException, Injectable, NotFoundException } from "@nestjs/comm
 import {
   resolveVisitCopilotPeriod,
   VISIT_COPILOT_LIMITS,
+  type SgiSituation,
+  type VisitCopilot360Summary,
   type VisitCopilotBriefingQuery,
   type VisitCopilotChatRequest,
   type VisitCopilotDailyBriefQuery,
+  type VisitCopilotDaily360SummaryQuery,
   type VisitCopilotDiscoveryQuery,
   type VisitCopilotGoogleSearchRequest,
   type VisitCopilotPeriod,
@@ -23,9 +26,10 @@ import { decryptCredentials } from "../data-sources/credential-cipher.util";
 import { categoryForChannel, type ProspectDiscoveryProvider } from "./discovery/discovery-provider.interface";
 import { GooglePlacesProvider } from "./discovery/google-places.provider";
 import { OverpassProvider } from "./discovery/overpass.provider";
-import { resolveMentionedCustomer } from "./local-decision/dictionary-engine";
-import { matchCustomer360, matchLocalRule } from "./local-decision/rule-engine";
-import { renderLocalAnswer } from "./local-decision/template-builder";
+import { resolveMentionedCustomer } from "../local-decision/dictionary-engine";
+import { LocalDecisionEngine } from "../local-decision/rule-engine";
+import { VisitCopilotRuleRegistry } from "./visit-copilot.rules";
+import { SgiService } from "../sgi/sgi.service";
 
 // AI Visit Copilot — Phase 1. Decision-support screen for the field rep:
 // today's visit plan + a per-customer pre-visit briefing that must be
@@ -47,6 +51,14 @@ const MINUTES_PER_VISIT = 15;
 const FALLBACK_WORKING_DAYS_PER_MONTH = 26;
 const TOP_PRODUCTS_LIMIT = 5;
 const MISSING_PRODUCTS_LIMIT = 5;
+// "ملخص اليوم 360°" — the one bounded AI call gets a hard timeout; on abort
+// (or any other failure) buildDaily360Narrative falls back to the
+// deterministic template, per explicit product requirement.
+const DAILY_360_AI_TIMEOUT_MS = 12_000;
+
+function fmtNum(n: number): string {
+  return new Intl.NumberFormat("ar-EG").format(Math.round(n));
+}
 
 const MONTH_NAMES = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 
@@ -217,6 +229,39 @@ export interface VisitCopilotChatResult {
   activeCustomerName?: string;
 }
 
+// "ملخص اليوم 360°" — every already-computed fact the narrative layer
+// (buildTemplateNarrative / buildDaily360Narrative) is allowed to draw on.
+// Deliberately a superset of VisitCopilot360Summary's own fields (adds
+// highSeverityCount/topIssueSituation as narrative-only inputs that don't
+// themselves appear verbatim on the wire DTO).
+interface Daily360Facts {
+  generatedAt: string;
+  reportDate: string;
+  period: VisitCopilotPeriodRange;
+  scopeLabel: string;
+  userName: string;
+  roleLabel: string;
+  goal: VisitCopilot360Summary["goal"];
+  sales: VisitCopilot360Summary["sales"];
+  lostOpportunities: VisitCopilot360Summary["lostOpportunities"];
+  collections: VisitCopilot360Summary["collections"];
+  returns: VisitCopilot360Summary["returns"];
+  interventionNeeded: VisitCopilot360Summary["interventionNeeded"];
+  warnings: string[];
+  highSeverityCount: number;
+  topIssueSituation: SgiSituation | null;
+}
+
+interface Daily360Narrative {
+  source: "ai" | "template";
+  executiveSummary: string;
+  topIssue: string | null;
+  rootCauses: VisitCopilot360Summary["rootCauses"];
+  executiveDecision: string;
+  executionPlan: VisitCopilot360Summary["executionPlan"];
+  closingPhrase: string;
+}
+
 // Internal per-request stats shared by every discovery computation.
 interface DiscoveryStats {
   range: VisitCopilotPeriodRange;
@@ -309,6 +354,9 @@ export class VisitCopilotService {
     // Prospects are materialized Postgres state (statuses are live field
     // data) — the one Visit Copilot read that does NOT go through RIE.
     private readonly prisma: PrismaService,
+    // "ملخص اليوم 360°" (2026-07-28): sole facts/numbers source, already
+    // hierarchy-scoped per viewer — see daily360Summary() below.
+    private readonly sgiService: SgiService,
   ) {}
 
   // Every RIE read must pass requestingUser — Hierarchy Row-Level Filtering
@@ -890,20 +938,17 @@ export class VisitCopilotService {
       // place that information lives.
       const switchFields = switched ? { activeCustomerCode: briefing.customerCode, activeCustomerName: briefing.customerName } : {};
 
-      // Customer 360 checked first — it's the more specific multi-section
-      // match; matchLocalRule's single-field patterns (e.g. "الرصيد",
-      // "أفضل منتج") would otherwise never get a chance to fire against a
-      // "Customer 360" message that also happens to contain their keywords.
-      const customer360Reply = matchCustomer360(body.message, briefing);
-      if (customer360Reply) {
-        return { reply: customer360Reply, source: "local", ...switchFields };
-      }
-
-      const localAnswer = matchLocalRule(body.message, briefing);
-      if (localAnswer) {
+      // Single entry point into the shared, generic Local Decision Engine —
+      // this service supplies only message/facts/registry and never touches
+      // matching, priority, or regex details itself (those live entirely in
+      // the engine + VisitCopilotRuleRegistry). Rule ordering, including
+      // Customer 360 taking priority over single-field patterns like
+      // "الرصيد"/"أفضل منتج", is encoded in the registry, not here.
+      const localReply = LocalDecisionEngine.execute({ message: body.message, facts: briefing, registry: VisitCopilotRuleRegistry });
+      if (localReply) {
         // Matched a known direct question — answered entirely from
         // already-computed rule-based data, zero AI calls.
-        return { reply: renderLocalAnswer(localAnswer), source: "local", ...switchFields };
+        return { reply: localReply, source: "local", ...switchFields };
       }
       // No local rule matched — fall through to AI, using whichever
       // customer's briefing is now active (possibly just switched).
@@ -978,6 +1023,333 @@ export class VisitCopilotService {
       .trim();
 
     return { reply: reply || "معرفتش أوصل لإجابة واضحة، جرب تصيغ سؤالك بشكل مختلف.", source: "ai", ...switchFields };
+  }
+
+  // ------------------------------------------------------------------
+  // "ملخص اليوم 360°" — see visit-copilot.schemas.ts's DTO comment for the
+  // full design rationale. Facts/numbers/decisions come ONLY from
+  // SgiService.getLatest(user) (already hierarchy-scoped) + the existing
+  // daily-brief plan basis — zero new Excel reads. The narrative sections
+  // (executiveSummary/topIssue/diagnosis per customer/rootCauses/
+  // executiveDecision/closingPhrase) are filled by exactly one bounded
+  // Claude call that may only rephrase/order these already-computed facts
+  // (same "generation, not analysis" pattern as heatmap.decisionSummary());
+  // buildTemplateNarrative() below is the mandatory deterministic fallback
+  // when that call fails, is slow, or ANTHROPIC_API_KEY isn't configured.
+  // ------------------------------------------------------------------
+
+  private readonly ROLE_LABEL_AR: Record<AuthenticatedUser["roleCode"], string> = {
+    SUPER_ADMIN: "مدير المنصة",
+    COMPANY_ADMIN: "مدير الشركة",
+    MANAGER: "مدير",
+    SUPERVISOR: "مشرف",
+    SALES_REP: "مندوب مبيعات",
+  };
+
+  async daily360Summary(user: AuthenticatedUser, query: VisitCopilotDaily360SummaryQuery): Promise<VisitCopilot360Summary> {
+    const warnings: string[] = [];
+    const todayIso = isoDay(new Date());
+
+    const [sgi, brief, dbUser] = await Promise.all([
+      this.sgiService.getLatest(user),
+      this.buildDailyBrief(user, query),
+      this.prisma.user.findUnique({ where: { id: user.userId } }),
+    ]);
+
+    if (!sgi) {
+      warnings.push("لا يوجد تحليل SGI محسوب بعد لشركتك — بعض أقسام التقرير ستكون فارغة حتى يتم أول احتساب.");
+    }
+
+    const range = resolveVisitCopilotPeriod(query);
+    const situations: SgiSituation[] = sgi?.situations ?? [];
+
+    const scopeLabelByRole: Record<AuthenticatedUser["roleCode"], string> = {
+      SUPER_ADMIN: "المنصة بالكامل",
+      COMPANY_ADMIN: "الشركة بالكامل",
+      MANAGER: "المديرين والمشرفين والمندوبين التابعين لك",
+      SUPERVISOR: "قطاعك وفريق المندوبين التابع لك",
+      SALES_REP: "مسارك وعملاؤك فقط",
+    };
+
+    // ---- Goal / achievement.
+    const goalTargetTotal = sgi?.summary.monthlyGoal.targetTotal ?? null;
+    const goalActualTotal = sgi?.summary.monthlyGoal.actualTotal ?? 0;
+    const goal = {
+      targetTotal: goalTargetTotal,
+      actualTotal: goalActualTotal,
+      progressPct: sgi?.summary.monthlyGoal.progressPct ?? null,
+      remainingGap: goalTargetTotal !== null ? Math.max(0, goalTargetTotal - goalActualTotal) : null,
+    };
+
+    // ---- Sales + lost opportunities (PRODUCT_DECLINE + LOST_SALES, ranked
+    // by decline value, top 5 — matching the reference report's 5 numbered
+    // customer cards).
+    const declineSituations = situations.filter((s) => s.type === "PRODUCT_DECLINE" || s.type === "LOST_SALES");
+    const topDeclines = [...declineSituations]
+      .sort((a, b) => (b.metricValuePrior ?? 0) - b.metricValue - ((a.metricValuePrior ?? 0) - a.metricValue))
+      .slice(0, 5);
+
+    const lastVisitByCustomerName = new Map<string, string | null>();
+    for (const c of brief.customers) lastVisitByCustomerName.set(c.customerName, c.lastVisitDate);
+
+    const lostOpportunities = topDeclines.map((s) => {
+      const before = s.metricValuePrior ?? 0;
+      const after = s.metricValue;
+      return {
+        customerName: s.entityLabel,
+        declineValue: Math.max(0, before - after),
+        valueBefore: before,
+        valueAfter: after,
+        lastVisitDate: lastVisitByCustomerName.get(s.entityLabel) ?? null,
+        stoppedProducts: s.stoppedProducts ?? [],
+        diagnosis: s.detail,
+        visitDecision: s.recommendation,
+      };
+    });
+
+    // ---- Collections + priority debtors (COLLECTION_RISK situations).
+    const collectionSituations = situations.filter((s) => s.type === "COLLECTION_RISK");
+    const priorityDebtors = [...collectionSituations]
+      .sort((a, b) => b.metricValue - a.metricValue)
+      .slice(0, 5)
+      .map((s) => ({ customerName: s.entityLabel, amount: s.metricValue, dueDate: null as string | null }));
+
+    // ---- Returns + recurring risks — SGI has no dedicated RETURNS type;
+    // surfaced from GROWTH_OPPORTUNITY-adjacent detail text isn't
+    // appropriate here, so this stays a numeric-only section (no per-item
+    // Excel re-read) until a RETURNS_RISK situation type exists. Honest
+    // empty state rather than an invented number.
+    const returns = { total: 0, rate: null as number | null, recurringRisks: [] as string[] };
+
+    // ---- Customers/teams needing intervention — top severity-ranked
+    // situations across all types, capped at 6.
+    const severityRank: Record<string, number> = { high: 0, medium: 1, low: 2 };
+    const interventionNeeded = [...situations]
+      .sort((a, b) => severityRank[a.severity]! - severityRank[b.severity]!)
+      .slice(0, 6)
+      .map((s) => ({ name: s.entityLabel, reason: s.title, severity: s.severity }));
+
+    const highSeverityCount = sgi?.summary.highSeverityCount ?? 0;
+    const topIssueSituation = situations.find((s) => s.severity === "high") ?? situations[0] ?? null;
+
+    const userName = dbUser?.fullName ?? user.email;
+    const roleLabel = this.ROLE_LABEL_AR[user.roleCode];
+    const scopeLabel = scopeLabelByRole[user.roleCode];
+
+    const baseFacts = {
+      generatedAt: new Date().toISOString(),
+      reportDate: todayIso,
+      period: range,
+      scopeLabel,
+      userName,
+      roleLabel,
+      goal,
+      sales: { total: brief.expectedSalesTotal, invoiceCount: lostOpportunities.length, visitCount: brief.visitCount },
+      lostOpportunities,
+      collections: { collected: 0, pending: priorityDebtors.reduce((sum, d) => sum + d.amount, 0), bounced: 0, priorityDebtors },
+      returns,
+      interventionNeeded,
+      warnings: [...warnings, ...(sgi?.warnings ?? [])],
+      highSeverityCount,
+      topIssueSituation,
+    };
+
+    const narrative = await this.buildDaily360Narrative(baseFacts);
+
+    return {
+      generatedAt: baseFacts.generatedAt,
+      reportDate: baseFacts.reportDate,
+      period: baseFacts.period,
+      scopeLabel: baseFacts.scopeLabel,
+      userName: baseFacts.userName,
+      roleLabel: baseFacts.roleLabel,
+      narrativeSource: narrative.source,
+      executiveSummary: narrative.executiveSummary,
+      topIssue: narrative.topIssue,
+      goal: baseFacts.goal,
+      sales: baseFacts.sales,
+      lostOpportunities: baseFacts.lostOpportunities,
+      collections: baseFacts.collections,
+      returns: baseFacts.returns,
+      interventionNeeded: baseFacts.interventionNeeded,
+      rootCauses: narrative.rootCauses,
+      executiveDecision: narrative.executiveDecision,
+      executionPlan: narrative.executionPlan,
+      closingPhrase: narrative.closingPhrase,
+      warnings: baseFacts.warnings,
+    };
+  }
+
+  // Deterministic Arabic template — the mandatory fallback, and also what
+  // ends up on screen whenever ANTHROPIC_API_KEY isn't configured or the
+  // bounded call fails/times out. Every sentence here is built ONLY from
+  // fields already present on `facts` (see daily360Summary above) — no
+  // invented numbers or names.
+  private buildTemplateNarrative(facts: Daily360Facts): Daily360Narrative {
+    const goalLine =
+      facts.goal.targetTotal !== null
+        ? `تحقق ${facts.goal.progressPct ?? 0}% من الهدف الشهري (${fmtNum(facts.goal.actualTotal)} من ${fmtNum(facts.goal.targetTotal)})، والمتبقي ${fmtNum(facts.goal.remainingGap ?? 0)}.`
+        : `لا يوجد هدف شهري محدد لنطاقك؛ إجمالي المحقق حتى الآن ${fmtNum(facts.goal.actualTotal)}.`;
+
+    const lostLine =
+      facts.lostOpportunities.length > 0
+        ? `رصدنا ${facts.lostOpportunities.length} فرصة ضائعة أبرزها ${facts.lostOpportunities[0]!.customerName} بتراجع ${fmtNum(facts.lostOpportunities[0]!.declineValue)}.`
+        : "لا توجد فرص ضائعة بارزة في نطاقك حاليًا.";
+
+    const collectionLine =
+      facts.collections.priorityDebtors.length > 0
+        ? `يوجد ${facts.collections.priorityDebtors.length} عميل ذو أولوية تحصيل بإجمالي مستحقات ${fmtNum(facts.collections.pending)}.`
+        : "لا توجد مستحقات تحصيل ذات أولوية عالية حاليًا.";
+
+    const executiveSummary = [goalLine, lostLine, collectionLine].join(" ");
+
+    const topIssue = facts.topIssueSituation
+      ? `${facts.topIssueSituation.title} — ${facts.topIssueSituation.detail}`
+      : facts.lostOpportunities.length > 0
+        ? `${facts.lostOpportunities[0]!.customerName}: ${facts.lostOpportunities[0]!.diagnosis}`
+        : null;
+
+    const gaps: string[] = [];
+    if (facts.lostOpportunities.length > 0) gaps.push("عملاء نشطون توقفوا عن شراء أصناف كانوا يشترونها بانتظام دون متابعة ميدانية كافية.");
+    if (facts.collections.priorityDebtors.length > 0) gaps.push("تراكم مستحقات تحصيل لدى عدد من العملاء دون خطة تحصيل واضحة الأولوية.");
+    if (facts.goal.targetTotal !== null && (facts.goal.progressPct ?? 0) < 70) gaps.push("وتيرة تحقيق الهدف الشهري أبطأ من المطلوب لتغطية الفجوة المتبقية.");
+    while (gaps.length < 3) gaps.push("يلزم مراجعة ميدانية أوسع لتأكيد السبب الجذري بدقة أكبر.");
+
+    const rootCauses = {
+      narrative: "بمراجعة الأرقام أعلاه، الأسباب المرجّحة وراء الوضع الحالي هي:",
+      gaps: gaps.slice(0, 3),
+    };
+
+    const executiveDecision =
+      facts.lostOpportunities.length > 0 || facts.collections.priorityDebtors.length > 0
+        ? "التركيز اليوم على زيارة العملاء الأعلى تأثرًا بالتراجع والتحصيل، مع متابعة أسبوعية لقياس الأثر."
+        : "الاستمرار على نفس الخطة مع مراقبة أي تغيير في الأداء.";
+
+    const executionPlan: VisitCopilot360Summary["executionPlan"] = [];
+    if (facts.lostOpportunities.length > 0) {
+      executionPlan.push({
+        priority: "عالية" as const,
+        action: `زيارة ${facts.lostOpportunities[0]!.customerName} ومناقشة سبب تراجع الشراء`,
+        owner: facts.userName,
+        successMetric: "عودة قيمة الطلبية لمستوى الفترة السابقة",
+      });
+    }
+    if (facts.collections.priorityDebtors.length > 0) {
+      executionPlan.push({
+        priority: "عالية" as const,
+        action: `متابعة تحصيل مستحقات ${facts.collections.priorityDebtors[0]!.customerName}`,
+        owner: facts.userName,
+        successMetric: "تحصيل المبلغ المستحق أو الاتفاق على موعد سداد",
+      });
+    }
+    if (facts.goal.targetTotal !== null && (facts.goal.remainingGap ?? 0) > 0) {
+      executionPlan.push({
+        priority: "متوسطة" as const,
+        action: "زيادة عدد الزيارات الفعالة لتغطية الفجوة المتبقية من الهدف الشهري",
+        owner: facts.userName,
+        successMetric: `تقليل الفجوة المتبقية (${fmtNum(facts.goal.remainingGap ?? 0)})`,
+      });
+    }
+    if (executionPlan.length === 0) {
+      executionPlan.push({
+        priority: "منخفضة" as const,
+        action: "الاستمرار في خطة الزيارات الحالية",
+        owner: facts.userName,
+        successMetric: "الحفاظ على مستوى الأداء الحالي",
+      });
+    }
+
+    return {
+      source: "template",
+      executiveSummary,
+      topIssue,
+      rootCauses,
+      executiveDecision,
+      executionPlan,
+      closingPhrase: "الميدان هو مصدر الحقيقة — كل قرار هنا مبني على أرقام فعلية من بياناتك.",
+    };
+  }
+
+  // ONE bounded Claude call per report — reorders/phrases the sections
+  // above; never allowed to introduce a fact not already in `facts`. Falls
+  // back to the deterministic template on any failure, timeout, or missing
+  // API key, per explicit product requirement.
+  private async buildDaily360Narrative(facts: Daily360Facts): Promise<Daily360Narrative> {
+    const apiKey = this.appConfig.values.anthropic.apiKey;
+    if (!apiKey) return this.buildTemplateNarrative(facts);
+
+    const systemPrompt = [
+      'أنت محرر تقارير تنفيذية داخل منصة FSOS. مهمتك الوحيدة إعادة صياغة وترتيب الحقائق التالية في تقرير عربي احترافي — لا تخترع أي رقم أو اسم عميل أو صنف غير موجود في البيانات المرفقة.',
+      "البيانات (JSON) هي مصدرك الوحيد:",
+      JSON.stringify(facts),
+      'أرجع JSON فقط بدون أي نص إضافي وبدون markdown، بالشكل الدقيق التالي:',
+      '{"executiveSummary": string, "topIssue": string | null, "rootCauses": {"narrative": string, "gaps": [string, string, string]}, "executiveDecision": string, "executionPlan": [{"priority": "عالية"|"متوسطة"|"منخفضة", "action": string, "owner": string, "successMetric": string}], "closingPhrase": string}',
+      "executiveSummary: 3-4 جمل تغطي الهدف والمبيعات والفرص الضائعة والتحصيل.",
+      "topIssue: أهم مشكلة واحدة يجب الانتباه لها اليوم (أو null لو لا يوجد).",
+      "rootCauses.gaps: بالضبط 3 أسباب جذرية محتملة، مبنية على الحقائق فقط.",
+      "executionPlan: من 3 إلى 5 خطوات تنفيذية، owner يجب أن يكون userName من البيانات إلا لو كان هناك اسم عميل/مندوب أنسب من البيانات نفسها.",
+      "closingPhrase: جملة ختامية قصيرة ملهمة عن الميدان أو الالتزام بالبيانات.",
+    ].join("\n");
+
+    let response: globalThis.Response;
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), DAILY_360_AI_TIMEOUT_MS);
+      try {
+        response = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-api-key": apiKey, "anthropic-version": "2023-06-01" },
+          body: JSON.stringify({
+            model: ANTHROPIC_MODEL,
+            max_tokens: 1400,
+            system: systemPrompt,
+            messages: [{ role: "user", content: "ولّد التقرير الآن بناءً على البيانات المرفقة في التعليمات." }],
+          }),
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+    } catch {
+      return this.buildTemplateNarrative(facts);
+    }
+    if (!response.ok) return this.buildTemplateNarrative(facts);
+
+    try {
+      const data = (await response.json()) as { content?: ClaudeTextBlock[] };
+      const text = (data.content ?? []).find((b) => b.type === "text")?.text ?? "";
+      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      const parsed = JSON.parse(jsonMatch?.[0] ?? text) as {
+        executiveSummary?: string;
+        topIssue?: string | null;
+        rootCauses?: { narrative?: string; gaps?: string[] };
+        executiveDecision?: string;
+        executionPlan?: VisitCopilot360Summary["executionPlan"];
+        closingPhrase?: string;
+      };
+      if (
+        !parsed.executiveSummary ||
+        !parsed.rootCauses?.narrative ||
+        !Array.isArray(parsed.rootCauses.gaps) ||
+        !parsed.executiveDecision ||
+        !Array.isArray(parsed.executionPlan) ||
+        parsed.executionPlan.length === 0 ||
+        !parsed.closingPhrase
+      ) {
+        return this.buildTemplateNarrative(facts);
+      }
+      return {
+        source: "ai",
+        executiveSummary: parsed.executiveSummary,
+        topIssue: parsed.topIssue ?? null,
+        rootCauses: { narrative: parsed.rootCauses.narrative, gaps: parsed.rootCauses.gaps },
+        executiveDecision: parsed.executiveDecision,
+        executionPlan: parsed.executionPlan,
+        closingPhrase: parsed.closingPhrase,
+      };
+    } catch {
+      return this.buildTemplateNarrative(facts);
+    }
   }
 
   // ------------------------------------------------------------------

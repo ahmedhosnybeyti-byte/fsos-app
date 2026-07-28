@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { sgiSeveritySchema } from "./sgi.schemas";
 
 // AI Visit Copilot — Phase 1 (شاشة دعم قرار المندوب قبل/أثناء الزيارة).
 // One "Analysis Scope" period governs every number on the screen: default
@@ -153,3 +154,121 @@ export function resolveVisitCopilotPeriod(input: PeriodFieldsShape, today: Date 
   fromDate.setUTCMonth(fromDate.getUTCMonth() - months);
   return { from: fromDate.toISOString().slice(0, 10), to };
 }
+
+// ------------------------------------------------------------------
+// GET /visit-copilot/daily-360-summary — "ملخص اليوم 360°"
+// ------------------------------------------------------------------
+//
+// 2026-07-28. Zero new Excel reads: the entire report is assembled from
+// SgiService.getLatest(user) (already hierarchy-scoped per viewer — see
+// sgi.service.ts getLatest()) plus the same daily-brief plan basis the
+// screen already computes. facts/numbers/decisions all come from these two
+// already-computed sources; the only AI involvement allowed anywhere in
+// this feature is ONE bounded call that orders/phrases the narrative
+// sections (see visit-copilot.service.ts buildDaily360Summary) — it may
+// never introduce a number, customer, or product that isn't already in this
+// DTO. A fixed deterministic Arabic template (buildTemplateNarrative) is the
+// mandatory fallback when that call fails or is slow.
+//
+// Scope is derived server-side from the requesting user + org hierarchy —
+// there is no scope parameter here at all (see the controller: no query
+// field for it), matching SgiService.getLatest's own role-based filtering
+// exactly (SALES_REP: own; SUPERVISOR: sector+reps; MANAGER/COMPANY_ADMIN:
+// broader). Only `period` (the screen's existing Analysis Scope control) is
+// accepted, as the comparison reference for the report's numbers.
+export const visitCopilotDaily360SummaryQuerySchema = z
+  .object({ ...periodFields })
+  .refine(customPeriodRefinement.check, customPeriodRefinement.options);
+export type VisitCopilotDaily360SummaryQuery = z.infer<typeof visitCopilotDaily360SummaryQuerySchema>;
+
+export const visitCopilot360StoppedProductSchema = z.object({
+  productName: z.string(),
+  quantity: z.number(),
+  unit: z.string(),
+  value: z.number(),
+});
+export type VisitCopilot360StoppedProduct = z.infer<typeof visitCopilot360StoppedProductSchema>;
+
+// One "lost opportunity" customer card — up to 5 shown, ranked by decline
+// value, mirroring the ChatGPT reference report's per-customer breakdown.
+export const visitCopilot360LostOpportunitySchema = z.object({
+  customerName: z.string(),
+  declineValue: z.number(),
+  valueBefore: z.number(),
+  valueAfter: z.number(),
+  lastVisitDate: z.string().nullable(),
+  stoppedProducts: z.array(visitCopilot360StoppedProductSchema),
+  diagnosis: z.string(),
+  visitDecision: z.string(),
+});
+export type VisitCopilot360LostOpportunity = z.infer<typeof visitCopilot360LostOpportunitySchema>;
+
+export const visitCopilot360ExecutionStepSchema = z.object({
+  priority: z.enum(["عالية", "متوسطة", "منخفضة"]),
+  action: z.string(),
+  owner: z.string(),
+  successMetric: z.string(),
+});
+export type VisitCopilot360ExecutionStep = z.infer<typeof visitCopilot360ExecutionStepSchema>;
+
+// The full report DTO — every field here is either a raw computed number
+// (from SGI / daily-brief) or plain Arabic narrative text (either the
+// deterministic template or the one bounded Claude call — never both, see
+// `narrativeSource`). The frontend renders this directly; the PDF export
+// (task #85) serializes the exact same DTO.
+export const visitCopilot360SummarySchema = z.object({
+  generatedAt: z.string(),
+  reportDate: z.string(), // YYYY-MM-DD, today
+  period: z.object({ from: z.string(), to: z.string() }),
+  scopeLabel: z.string(), // e.g. "مندوبك: أحمد حسني" / "قطاعك وفريقك" / "الشركة بالكامل"
+  userName: z.string(),
+  roleLabel: z.string(),
+
+  narrativeSource: z.enum(["ai", "template"]),
+
+  executiveSummary: z.string(),
+  topIssue: z.string().nullable(),
+
+  goal: z.object({
+    targetTotal: z.number().nullable(),
+    actualTotal: z.number(),
+    progressPct: z.number().nullable(),
+    remainingGap: z.number().nullable(),
+  }),
+
+  sales: z.object({
+    total: z.number(),
+    invoiceCount: z.number(),
+    visitCount: z.number(),
+  }),
+
+  lostOpportunities: z.array(visitCopilot360LostOpportunitySchema),
+
+  collections: z.object({
+    collected: z.number(),
+    pending: z.number(),
+    bounced: z.number(),
+    priorityDebtors: z.array(z.object({ customerName: z.string(), amount: z.number(), dueDate: z.string().nullable() })),
+  }),
+
+  returns: z.object({
+    total: z.number(),
+    rate: z.number().nullable(),
+    recurringRisks: z.array(z.string()),
+  }),
+
+  interventionNeeded: z.array(z.object({ name: z.string(), reason: z.string(), severity: sgiSeveritySchema })),
+
+  rootCauses: z.object({
+    narrative: z.string(),
+    gaps: z.array(z.string()),
+  }),
+
+  executiveDecision: z.string(),
+  executionPlan: z.array(visitCopilot360ExecutionStepSchema),
+
+  closingPhrase: z.string(),
+
+  warnings: z.array(z.string()),
+});
+export type VisitCopilot360Summary = z.infer<typeof visitCopilot360SummarySchema>;

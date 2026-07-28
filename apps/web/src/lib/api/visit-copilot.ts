@@ -1,5 +1,6 @@
 import { apiFetch } from "../api-client";
 import type {
+  VisitCopilot360Summary,
   VisitCopilotBriefing,
   VisitCopilotChatRequest,
   VisitCopilotChatResponse,
@@ -64,5 +65,12 @@ export const visitCopilotApi = {
   prospectBriefing: (params: PeriodParams & { id: string; vanStock: boolean }) =>
     apiFetch<VisitCopilotBriefing>(`/visit-copilot/prospect-briefing/${encodeURIComponent(params.id)}`, {
       query: { period: params.period, from: params.from, to: params.to, vanStock: params.vanStock },
+    }),
+
+  // "ملخص اليوم 360°" (2026-07-28) — no scope param; role scoping is
+  // entirely server-derived (see visit-copilot.controller.ts).
+  daily360Summary: (params: PeriodParams) =>
+    apiFetch<VisitCopilot360Summary>("/visit-copilot/daily-360-summary", {
+      query: { period: params.period, from: params.from, to: params.to },
     }),
 };
