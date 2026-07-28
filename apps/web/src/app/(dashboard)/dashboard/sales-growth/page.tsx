@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Clock, RefreshCw, Settings2, Target } from "lucide-react";
+import { Bot, Clock, Download, RefreshCw, Settings2, Target } from "lucide-react";
 import { toast } from "sonner";
 import { sgiApi } from "@/lib/api";
 import { ApiError } from "@/lib/api-client";
@@ -17,6 +17,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { buildAssistantDeepLink, toSgiContext } from "@/lib/sgi-context";
 import type { SgiSituation } from "@/lib/types";
 import { useTranslation } from "@/components/translation-provider";
+import { exportSgiReportPdf } from "@/lib/export/sgi-report-pdf";
 import { PriorityCenter } from "./priority-tree";
 
 // Sales Growth Intelligence (SGI) Phase 1 — "How to Increase Your Sales",
@@ -96,6 +97,7 @@ export default function SalesGrowthPage() {
   const [dateTo, setDateTo] = useState(todayIsoDate());
   const [priorDateFrom, setPriorDateFrom] = useState("");
   const [priorDateTo, setPriorDateTo] = useState("");
+  const [exportingPdf, setExportingPdf] = useState(false);
 
   const recalculateMutation = useMutation({
     mutationFn: sgiApi.recalculate,
@@ -149,6 +151,23 @@ export default function SalesGrowthPage() {
   function discussSituation(s: SgiSituation) {
     const context = toSgiContext(s, "sales-growth", result?.generatedAt ?? new Date().toISOString());
     router.push(buildAssistantDeepLink(context));
+  }
+
+  // Full report PDF (2026-07-29, explicit product request) — see
+  // lib/export/sgi-report-pdf.ts. Renders the exact `result` this page
+  // already has in memory (no new fetch); Target Achievement is included
+  // only if result.summary.monthlyGoal.targetTotal is already non-null.
+  async function handleExportPdf() {
+    if (!result) return;
+    setExportingPdf(true);
+    try {
+      await exportSgiReportPdf(result, t);
+    } catch (error) {
+      console.error("[sgi] PDF export failed", error);
+      toast.error(t("sgi.exportPdfError"));
+    } finally {
+      setExportingPdf(false);
+    }
   }
 
   return (
@@ -228,17 +247,23 @@ export default function SalesGrowthPage() {
               {t("sgi.lastUpdatedPrefix", { date: new Date(result.generatedAt).toLocaleString("ar-EG") })}
               {result.scopedToOwnTeam && t("sgi.scopedToOwnTeamSuffix")}
             </p>
-            {canConfigure && !showSetupForm && (
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={() => recalculateNowMutation.mutate()} disabled={recalculateNowMutation.isPending}>
-                  {recalculateNowMutation.isPending ? <Spinner /> : <RefreshCw className="h-3.5 w-3.5" />}
-                  {t("sgi.refreshNow")}
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => setShowSetupForm(true)}>
-                  <Settings2 className="h-3.5 w-3.5" /> {t("sgi.customPeriod")}
-                </Button>
-              </div>
-            )}
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={exportingPdf}>
+                {exportingPdf ? <Spinner /> : <Download className="h-3.5 w-3.5" />}
+                {exportingPdf ? t("sgi.exportPdfPending") : t("sgi.exportPdf")}
+              </Button>
+              {canConfigure && !showSetupForm && (
+                <>
+                  <Button variant="outline" size="sm" onClick={() => recalculateNowMutation.mutate()} disabled={recalculateNowMutation.isPending}>
+                    {recalculateNowMutation.isPending ? <Spinner /> : <RefreshCw className="h-3.5 w-3.5" />}
+                    {t("sgi.refreshNow")}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setShowSetupForm(true)}>
+                    <Settings2 className="h-3.5 w-3.5" /> {t("sgi.customPeriod")}
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
 
           {/* Conversational opener — SgiService's own briefing text

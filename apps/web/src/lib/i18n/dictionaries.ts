@@ -1,4 +1,4 @@
-﻿// Lightweight in-house i18n — deliberately not a library (no new npm
+// Lightweight in-house i18n — deliberately not a library (no new npm
 // dependency to install; see components/theme-provider.tsx for the same
 // reasoning applied to the light/dark toggle). Flat, dot-namespaced keys so
 // this can grow key-by-key as more screens get converted, without needing a
@@ -114,6 +114,11 @@ export type TranslationKey =
   | "territoryIntelligence.boundarySourcePlaceholder"
   | "territoryIntelligence.layersPanelTitle"
   | "territoryIntelligence.layerActiveBadge"
+  | "territoryIntelligence.displayModeHeat"
+  | "territoryIntelligence.displayModeCluster"
+  | "territoryIntelligence.displayModeBubble"
+  | "territoryIntelligence.displayModeSectionTitle"
+  | "territoryIntelligence.metricSectionTitle"
   | "territoryIntelligence.returnToDecisionStudio"
   | "decisionAnalyticsStudio.title"
   | "decisionAnalyticsStudio.subtitle"
@@ -574,6 +579,22 @@ export type TranslationKey =
   | "sgi.noTargetsMessage"
   | "sgi.progressOf"
   | "sgi.priorityCenterTitle"
+  | "sgi.exportPdf"
+  | "sgi.exportPdfPending"
+  | "sgi.exportPdfError"
+  | "sgi.pdfReportTitle"
+  | "sgi.pdfGeneratedAtLabel"
+  | "sgi.pdfExecutiveSummaryTitle"
+  | "sgi.pdfTotalOpportunitiesLabel"
+  | "sgi.pdfHighSeverityLabel"
+  | "sgi.pdfTargetAchievementTitle"
+  | "sgi.pdfTargetAchievedOf"
+  | "sgi.pdfNoTargetNote"
+  | "sgi.pdfTopByCategoryTitle"
+  | "sgi.pdfDeferredTitle"
+  | "sgi.pdfDeferredNote"
+  | "sgi.pdfFullListTitle"
+  | "sgi.pdfNoOwnerLabel"
   | "employees.title"
   | "employees.subtitle"
   | "employees.addEmployee"
@@ -996,6 +1017,9 @@ export type TranslationKey =
   | "copilot.summary360Bounced"
   | "copilot.summary360PriorityDebtors"
   | "copilot.summary360Returns"
+  | "copilot.summary360ReturnsTotal"
+  | "copilot.summary360ReturnsRate"
+  | "copilot.summary360NoReturns"
   | "copilot.summary360InterventionNeeded"
   | "copilot.summary360RootCauses"
   | "copilot.summary360ExecutiveDecision"
@@ -1093,7 +1117,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "nav.customerLocations": "إحداثيات العملاء",
     "nav.teamPerformance": "أداء الفريق",
     "nav.reports": "التقارير",
-    "nav.sgi": "إزاي تزوّد مبيعاتك",
+    "nav.sgi": "مركز فرص النمو",
     "nav.territoryIntelligence": "ذكاء الأقاليم",
     "nav.decisionAnalyticsStudio": "استوديو تحليل القرارات",
     "nav.geoEngine": "محرك الخرائط الذكي",
@@ -1176,6 +1200,11 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "territoryIntelligence.boundarySourcePlaceholder": "بيانات حدود تقريبية (نسخة تجريبية)",
     "territoryIntelligence.layersPanelTitle": "طبقات التحليل",
     "territoryIntelligence.layerActiveBadge": "نشطة",
+    "territoryIntelligence.displayModeHeat": "حرارية",
+    "territoryIntelligence.displayModeCluster": "عنقودية",
+    "territoryIntelligence.displayModeBubble": "فقاعة",
+    "territoryIntelligence.displayModeSectionTitle": "نوع الخريطة",
+    "territoryIntelligence.metricSectionTitle": "المؤشر",
     "territoryIntelligence.returnToDecisionStudio": "الرجوع لاستوديو تحليل القرارات",
     "decisionAnalyticsStudio.title": "استوديو تحليل القرارات",
     "decisionAnalyticsStudio.subtitle": "حلل مبيعاتك من أي زاوية، واكتشف الفرص والمخاطر في لمحة واحدة.",
@@ -1474,7 +1503,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "files.close": "إغلاق",
     "files.rowCountChip": "{count} صف",
     "files.columnCountChip": "{count} عمود",
-    "files.periodChip": "{from} â†’ {to}",
+    "files.periodChip": "{from} → {to}",
     "files.regionChip": "المنطقة: {values}",
     "files.branchChip": "الفرع: {values}",
     "files.salesRepChip": "المندوب: {values}",
@@ -1615,8 +1644,8 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "team.toastPasswordResetError": "تعذر إعادة تعيين كلمة المرور",
     "team.toastSessionsRevoked": "تم إنهاء كل جلسات المستخدم",
     "team.toastSessionsRevokeError": "تعذر إنهاء الجلسات",
-    "sgi.title": "إزاي تزوّد مبيعاتك",
-    "sgi.subtitle": "أهم الفرص والمخاطر اللي تحتاج قرار منك النهارده.",
+    "sgi.title": "مركز فرص النمو",
+    "sgi.subtitle": "أفضل فرص النمو والتحصيل والاسترجاع المتاحة حاليًا، مرتبة حسب الأولوية.",
     "sgi.toastRecalculateSuccess": "تم الحساب — {count} موقف ({highCount} منهم أولوية عالية)",
     "sgi.toastRecalculateError": "تعذر تنفيذ الحساب",
     "sgi.toastRecalculateNowSuccess": "تم التحديث — {count} موقف ({highCount} منهم أولوية عالية)",
@@ -1640,6 +1669,22 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "sgi.noTargetsMessage": "لسه مفيش أهداف مسجلة لشهر {month} — المبيعات المحققة لحد دلوقتي: {amount}.",
     "sgi.progressOf": "{actual} من {target}",
     "sgi.priorityCenterTitle": "مركز الأولويات",
+    "sgi.exportPdf": "تصدير تقرير PDF",
+    "sgi.exportPdfPending": "جاري إنشاء التقرير…",
+    "sgi.exportPdfError": "تعذّر تصدير التقرير",
+    "sgi.pdfReportTitle": "مركز فرص النمو — تقرير",
+    "sgi.pdfGeneratedAtLabel": "تاريخ التقرير",
+    "sgi.pdfExecutiveSummaryTitle": "ملخص تنفيذي",
+    "sgi.pdfTotalOpportunitiesLabel": "إجمالي الفرص",
+    "sgi.pdfHighSeverityLabel": "أولوية عالية",
+    "sgi.pdfTargetAchievementTitle": "نسبة تحقيق الهدف الشهري",
+    "sgi.pdfTargetAchievedOf": "{actual} من {target} ({pct}%)",
+    "sgi.pdfNoTargetNote": "لا يوجد هدف شهري مسجّل لهذه الفترة.",
+    "sgi.pdfTopByCategoryTitle": "أهم الفرص حسب التصنيف",
+    "sgi.pdfDeferredTitle": "أنواع فرص غير مدعومة حاليًا",
+    "sgi.pdfDeferredNote": "الأنواع التالية (متوسط الفاتورة، موعد الاستحقاق، Up-sell، الفرص الجغرافية) تحتاج بيانات وقواعد أعمال معتمدة غير متوفرة حاليًا في نظام SGI — لم يتم اختراع منطق لها. Deferred — requires approved backend data and business rules.",
+    "sgi.pdfFullListTitle": "التفاصيل الكاملة مرتبة حسب الأولوية",
+    "sgi.pdfNoOwnerLabel": "غير محدد",
     "employees.title": "الموظفون",
     "employees.subtitle": "السجل الرسمي لموظفي الشركة — مستقل تمامًا عن حسابات الدخول (المستخدمين). الموظف سجل عمل، مش حساب دخول.",
     "employees.addEmployee": "إضافة موظف",
@@ -2071,6 +2116,9 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360Bounced": "مرتجع",
     "copilot.summary360PriorityDebtors": "عملاء أولوية التحصيل",
     "copilot.summary360Returns": "المرتجعات",
+    "copilot.summary360ReturnsTotal": "إجمالي المرتجعات",
+    "copilot.summary360ReturnsRate": "نسبة المرتجعات من المبيعات",
+    "copilot.summary360NoReturns": "لا توجد مرتجعات مسجّلة لعملاء اليوم في هذه الفترة",
     "copilot.summary360InterventionNeeded": "يحتاجون تدخل",
     "copilot.summary360RootCauses": "الأسباب الجذرية المحتملة",
     "copilot.summary360ExecutiveDecision": "القرار التنفيذي",
@@ -2167,7 +2215,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "nav.customerLocations": "Customer Locations",
     "nav.teamPerformance": "Team Performance",
     "nav.reports": "Reports",
-    "nav.sgi": "Grow Your Sales",
+    "nav.sgi": "Growth Opportunity Center",
     "nav.territoryIntelligence": "Territory Intelligence",
     "nav.decisionAnalyticsStudio": "Decision Analytics Studio",
     "nav.geoEngine": "Geo Intelligence Engine",
@@ -2250,6 +2298,11 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "territoryIntelligence.boundarySourcePlaceholder": "Approximated boundary data (demo dataset)",
     "territoryIntelligence.layersPanelTitle": "Analysis Layers",
     "territoryIntelligence.layerActiveBadge": "Active",
+    "territoryIntelligence.displayModeHeat": "Heat",
+    "territoryIntelligence.displayModeCluster": "Cluster",
+    "territoryIntelligence.displayModeBubble": "Bubble",
+    "territoryIntelligence.displayModeSectionTitle": "Map Type",
+    "territoryIntelligence.metricSectionTitle": "Metric",
     "territoryIntelligence.returnToDecisionStudio": "Return to Decision Analytics Studio",
     "decisionAnalyticsStudio.title": "Decision Analytics Studio",
     "decisionAnalyticsStudio.subtitle": "Analyze your sales from any angle, and spot opportunities and risks at a glance.",
@@ -2548,7 +2601,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "files.close": "Close",
     "files.rowCountChip": "{count} rows",
     "files.columnCountChip": "{count} columns",
-    "files.periodChip": "{from} â†’ {to}",
+    "files.periodChip": "{from} → {to}",
     "files.regionChip": "Region: {values}",
     "files.branchChip": "Branch: {values}",
     "files.salesRepChip": "Rep: {values}",
@@ -2689,8 +2742,8 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "team.toastPasswordResetError": "Could not reset the password",
     "team.toastSessionsRevoked": "All user sessions have been ended",
     "team.toastSessionsRevokeError": "Could not end the sessions",
-    "sgi.title": "Grow Your Sales",
-    "sgi.subtitle": "The top opportunities and risks that need a decision from you today.",
+    "sgi.title": "Growth Opportunity Center",
+    "sgi.subtitle": "The best sales, collection, and win-back opportunities available right now, ranked by priority.",
     "sgi.toastRecalculateSuccess": "Calculated — {count} situations ({highCount} high priority)",
     "sgi.toastRecalculateError": "Could not run the calculation",
     "sgi.toastRecalculateNowSuccess": "Updated — {count} situations ({highCount} high priority)",
@@ -2714,6 +2767,22 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "sgi.noTargetsMessage": "No targets set yet for {month} — sales achieved so far: {amount}.",
     "sgi.progressOf": "{actual} of {target}",
     "sgi.priorityCenterTitle": "Priority Center",
+    "sgi.exportPdf": "Export PDF report",
+    "sgi.exportPdfPending": "Generating report…",
+    "sgi.exportPdfError": "Couldn't export the report",
+    "sgi.pdfReportTitle": "Growth Opportunity Center — Report",
+    "sgi.pdfGeneratedAtLabel": "Report date",
+    "sgi.pdfExecutiveSummaryTitle": "Executive Summary",
+    "sgi.pdfTotalOpportunitiesLabel": "Total opportunities",
+    "sgi.pdfHighSeverityLabel": "High priority",
+    "sgi.pdfTargetAchievementTitle": "Monthly target achievement",
+    "sgi.pdfTargetAchievedOf": "{actual} of {target} ({pct}%)",
+    "sgi.pdfNoTargetNote": "No monthly target set for this period.",
+    "sgi.pdfTopByCategoryTitle": "Top opportunities by category",
+    "sgi.pdfDeferredTitle": "Opportunity types not yet supported",
+    "sgi.pdfDeferredNote": "The following (average invoice, due-date collection, up-sell, geo-based opportunities) require approved backend data and business rules not currently available in SGI — no logic was invented for them. Deferred — requires approved backend data and business rules.",
+    "sgi.pdfFullListTitle": "Full priority-ranked details",
+    "sgi.pdfNoOwnerLabel": "Unassigned",
     "employees.title": "Employees",
     "employees.subtitle": "The company's official employee roster — completely separate from login accounts (users). An employee is an employment record, not a login account.",
     "employees.addEmployee": "Add employee",
@@ -3134,7 +3203,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360LostOpportunities": "Lost Opportunities",
     "copilot.summary360NoLostOpportunities": "No notable lost opportunities right now",
     "copilot.summary360DeclineValue": "Decline value: {value}",
-    "copilot.summary360BeforeAfter": "Before: {before} â†’ After: {after}",
+    "copilot.summary360BeforeAfter": "Before: {before} → After: {after}",
     "copilot.summary360LastVisit": "Last visit: {date}",
     "copilot.summary360LastVisitUnknown": "Last visit: unknown",
     "copilot.summary360StoppedProducts": "Stopped products",
@@ -3146,6 +3215,9 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360Bounced": "Bounced",
     "copilot.summary360PriorityDebtors": "Priority debtors",
     "copilot.summary360Returns": "Returns",
+    "copilot.summary360ReturnsTotal": "Total returns",
+    "copilot.summary360ReturnsRate": "Returns rate of sales",
+    "copilot.summary360NoReturns": "No returns recorded for today's customers in this period",
     "copilot.summary360InterventionNeeded": "Needs intervention",
     "copilot.summary360RootCauses": "Likely root causes",
     "copilot.summary360ExecutiveDecision": "Executive decision",
