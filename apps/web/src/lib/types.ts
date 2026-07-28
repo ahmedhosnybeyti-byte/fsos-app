@@ -757,7 +757,7 @@ export interface VisitEfficiencyResult {
 // RoutePlanningRecord's exact shape (before === after here — no
 // geographic "before" state) so the frontend renders it with the same
 // RouteSplitMap component used by Route Planning.
-// "أساس التشابه" (July 2026) — which behavioral signal drives the
+// "ط£ط³ط§ط³ ط§ظ„طھط´ط§ط¨ظ‡" (July 2026) — which behavioral signal drives the
 // clustering. "sales" (default) optionally narrows to one category first
 // (salesCategoryColumn/salesCategoryValue); "collection"/"returns" cluster
 // on those files instead. See packages/schemas/customer-similarity.schemas.ts.
@@ -883,7 +883,7 @@ export interface SgiRepDirectoryEntry {
 }
 
 // Reports feature (Task #259) — per-rep KPI snapshot backing the "360
-// درجة" section of the Reports wizard. Filtered server-side to exactly the
+// ط¯ط±ط¬ط©" section of the Reports wizard. Filtered server-side to exactly the
 // emails in repDirectory (same visibility boundary).
 export interface SgiRepStats {
   salesActual: number;
@@ -1255,7 +1255,7 @@ export interface FileSearchRowsResult {
   rows: FileSearchRow[];
 }
 
-// "استبدال ملف" — what got carried over automatically from the file being
+// "ط§ط³طھط¨ط¯ط§ظ„ ظ…ظ„ظپ" — what got carried over automatically from the file being
 // replaced. Post-ADR-001 the only per-file state left to carry over is
 // SGI's saved file selection — hierarchy scoping is resolved fresh every
 // time from the Canonical Routes/Employees Datasets, not from anything
@@ -1546,7 +1546,7 @@ export interface VisitCopilotRouteOpportunities {
   disabled: boolean;
 }
 
-// "ملخص اليوم 360°" (2026-07-28) — GET /visit-copilot/daily-360-summary.
+// "ظ…ظ„ط®طµ ط§ظ„ظٹظˆظ… 360آ°" (2026-07-28) — GET /visit-copilot/daily-360-summary.
 // Mirrors packages/schemas/src/visit-copilot.schemas.ts's
 // visitCopilot360SummarySchema exactly; keep in lockstep with that file.
 export interface VisitCopilot360StoppedProduct {
@@ -1612,8 +1612,9 @@ export interface VisitCopilot360Summary {
 // Smart Loading — a read-only loading-preparation session scoped by the signed-in account.
 export type SmartLoadingSessionState = "ready" | "vehicle-stock-unavailable";
 export type SmartLoadingPriority = "high" | "normal";
-export interface SmartLoadingProduct { productCode: string; productName: string; currentVehicleStock: number; weeklyAverageSales: number; priority: SmartLoadingPriority; }
+export interface SmartLoadingProduct { productCode: string; productName: string; currentVehicleStock: number; weeklyAverageSales: number; priority: SmartLoadingPriority; category: string | null; lastSaleDate: string | null; }
 export interface SmartLoadingAttention { id: string; message: string; }
 export interface SmartLoadingReadySession { state: "ready"; products: SmartLoadingProduct[]; attention: SmartLoadingAttention[]; calculatedAt: string; }
 export interface SmartLoadingVehicleStockUnavailableSession { state: "vehicle-stock-unavailable"; }
 export type SmartLoadingSession = SmartLoadingReadySession | SmartLoadingVehicleStockUnavailableSession;
+

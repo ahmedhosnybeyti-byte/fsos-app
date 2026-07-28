@@ -1,4 +1,4 @@
-// Lightweight in-house i18n — deliberately not a library (no new npm
+﻿// Lightweight in-house i18n — deliberately not a library (no new npm
 // dependency to install; see components/theme-provider.tsx for the same
 // reasoning applied to the light/dark toggle). Flat, dot-namespaced keys so
 // this can grow key-by-key as more screens get converted, without needing a
@@ -1010,7 +1010,58 @@ export type TranslationKey =
   | "copilot.summary360ExportPdf"
   | "copilot.summary360ExportingPdf"
   | "copilot.summary360ExportError"
-  | "copilot.summary360Close";
+  | "copilot.summary360Close"
+  | "nav.smartLoading"
+  | "smartLoading.title"
+  | "smartLoading.subtitle"
+  | "smartLoading.summaryTitle"
+  | "smartLoading.summaryDescription"
+  | "smartLoading.productsToLoad"
+  | "smartLoading.totalQuantity"
+  | "smartLoading.priorityProducts"
+  | "smartLoading.lastCalculation"
+  | "smartLoading.attentionTitle"
+  | "smartLoading.attentionDescription"
+  | "smartLoading.recommendationsTitle"
+  | "smartLoading.recommendationsDescription"
+  | "smartLoading.suggestedLoading"
+  | "smartLoading.showReason"
+  | "smartLoading.vehicleStock"
+  | "smartLoading.weeklyAverage"
+  | "smartLoading.confirmedOrders"
+  | "smartLoading.confirmedOrdersHint"
+  | "smartLoading.safetyStock"
+  | "smartLoading.safetyStockHint"
+  | "smartLoading.empty"
+  | "smartLoading.error"
+  | "smartLoading.retry"
+  | "smartLoading.vehicleStockUnavailable"
+  | "smartLoading.vehicleStockUnavailableHint"
+  | "smartLoading.checklistTitle"
+  | "smartLoading.checklistDescription"
+  | "smartLoading.checklist.quantities"
+  | "smartLoading.checklist.priority"
+  | "smartLoading.checklist.cartons"
+  | "smartLoading.checklist.verified"
+  | "smartLoading.checklist.organized"
+  | "smartLoading.checklist.approved"
+  | "smartLoading.startRoute"
+  | "smartLoading.refresh"
+  | "smartLoading.noOtherAlerts"
+  | "smartLoading.staleProducts"
+  | "smartLoading.staleProductsPanelTitle"
+  | "smartLoading.priorityProductsPanelTitle"
+  | "smartLoading.close"
+  | "smartLoading.uncategorized"
+  | "smartLoading.restore"
+  | "smartLoading.manualOverrideNote"
+  | "smartLoading.quantityUnit"
+  | "smartLoading.lastSale"
+  | "smartLoading.staleDaysUnit"
+  | "smartLoading.exportExcel"
+  | "smartLoading.exportOds"
+  | "smartLoading.exportColumnProduct"
+  | "smartLoading.exportColumnCategory";
 
 export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
   ar: {
@@ -1408,7 +1459,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "files.close": "إغلاق",
     "files.rowCountChip": "{count} صف",
     "files.columnCountChip": "{count} عمود",
-    "files.periodChip": "{from} → {to}",
+    "files.periodChip": "{from} â†’ {to}",
     "files.regionChip": "المنطقة: {values}",
     "files.branchChip": "الفرع: {values}",
     "files.salesRepChip": "المندوب: {values}",
@@ -2020,6 +2071,57 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360ExportingPdf": "بيتم التصدير…",
     "copilot.summary360ExportError": "معرفناش نصدّر ملف PDF",
     "copilot.summary360Close": "إغلاق",
+    "nav.smartLoading": "التحميل الذكي",
+    "smartLoading.title": "التحميل الذكي",
+    "smartLoading.subtitle": "تجهيز المركبة قبل بدء خط السير.",
+    "smartLoading.summaryTitle": "ملخص التحميل",
+    "smartLoading.summaryDescription": "نظرة تشغيلية سريعة قبل الانطلاق.",
+    "smartLoading.productsToLoad": "أصناف للتحميل",
+    "smartLoading.totalQuantity": "إجمالي الكمية",
+    "smartLoading.priorityProducts": "أصناف أولوية",
+    "smartLoading.lastCalculation": "آخر حساب",
+    "smartLoading.attentionTitle": "انتباه اليوم",
+    "smartLoading.attentionDescription": "حقائق تشغيلية تستحق المراجعة.",
+    "smartLoading.recommendationsTitle": "توصيات التحميل",
+    "smartLoading.recommendationsDescription": "تظهر فقط الكميات الإضافية المقترحة.",
+    "smartLoading.suggestedLoading": "الكمية المقترحة",
+    "smartLoading.showReason": "عرض سبب الكمية",
+    "smartLoading.vehicleStock": "مخزون السيارة",
+    "smartLoading.weeklyAverage": "المتوسط الأسبوعي",
+    "smartLoading.confirmedOrders": "طلبات مؤكدة",
+    "smartLoading.confirmedOrdersHint": "تُحدد هذه الكمية بواسطة المندوب أو المشرف بناءً على الطلبات المؤكدة من العملاء.",
+    "smartLoading.safetyStock": "مخزون الأمان",
+    "smartLoading.safetyStockHint": "يُحدد مخزون الأمان بواسطة المندوب أو المشرف وفق قوة حركة الصنف وظروف خط السير.",
+    "smartLoading.empty": "لا توجد توصيات تحميل إضافية حاليًا.",
+    "smartLoading.error": "تعذر حساب توصيات التحميل.",
+    "smartLoading.retry": "إعادة المحاولة",
+    "smartLoading.vehicleStockUnavailable": "مخزون السيارة غير متوفر حاليًا.",
+    "smartLoading.vehicleStockUnavailableHint": "لا يمكن إنشاء توصيات تحميل قبل توفر رصيد السيارة للمسار المحدد تلقائيًا.",
+    "smartLoading.checklistTitle": "قائمة المراجعة قبل الانطلاق",
+    "smartLoading.checklistDescription": "مراجعة تنفيذية لا تغيّر قرار التحميل.",
+    "smartLoading.checklist.quantities": "مراجعة كميات التحميل",
+    "smartLoading.checklist.priority": "تحميل أصناف الأولوية",
+    "smartLoading.checklist.cartons": "فحص الكراتين",
+    "smartLoading.checklist.verified": "التحقق من الكميات",
+    "smartLoading.checklist.organized": "تنظيم الأصناف داخل السيارة",
+    "smartLoading.checklist.approved": "اعتماد التحميل",
+    "smartLoading.startRoute": "بدء خط السير",
+    "smartLoading.refresh": "تحديث",
+    "smartLoading.noOtherAlerts": "لا توجد تنبيهات إضافية.",
+    "smartLoading.staleProducts": "أصناف راكدة",
+    "smartLoading.staleProductsPanelTitle": "أصناف راكدة",
+    "smartLoading.priorityProductsPanelTitle": "أصناف أولوية",
+    "smartLoading.close": "إغلاق",
+    "smartLoading.uncategorized": "غير مصنف",
+    "smartLoading.restore": "استعادة",
+    "smartLoading.manualOverrideNote": "تم تعديل الكمية يدويًا (الأصل: {value})",
+    "smartLoading.quantityUnit": "صنف",
+    "smartLoading.lastSale": "آخر بيع",
+    "smartLoading.staleDaysUnit": "يوم",
+    "smartLoading.exportExcel": "Excel",
+    "smartLoading.exportOds": "ODS",
+    "smartLoading.exportColumnProduct": "الصنف",
+    "smartLoading.exportColumnCategory": "القسم",
   },
   en: {
     "nav.overview": "Overview",
@@ -2046,10 +2148,10 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "territoryIntelligence.title": "Territory Intelligence",
     "territoryIntelligence.subtitle": "Not just a map — every territory tells you the problem, the why, and the right decision.",
     "territoryIntelligence.libraryTitle": "Intelligence Library",
-    "territoryIntelligence.categoryPerformance": "📊 Performance",
-    "territoryIntelligence.categoryRisk": "⚠️ Risk",
-    "territoryIntelligence.categoryOpportunity": "💡 Opportunity",
-    "territoryIntelligence.categoryTerritory": "🗺️ Territory Intelligence",
+    "territoryIntelligence.categoryPerformance": "ًں“ٹ Performance",
+    "territoryIntelligence.categoryRisk": "âڑ ï¸ڈ Risk",
+    "territoryIntelligence.categoryOpportunity": "ًں’، Opportunity",
+    "territoryIntelligence.categoryTerritory": "ًں—؛ï¸ڈ Territory Intelligence",
     "territoryIntelligence.metricHealthScore": "Health Score",
     "territoryIntelligence.metricSalesGrowth": "Sales Growth",
     "territoryIntelligence.metricActiveCustomerRate": "Active Customer Rate",
@@ -2344,7 +2446,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "files.deleteError": "Failed to delete file",
     "files.downloadUrlError": "Failed to create download link",
     "files.confidenceSuffix": " ({percent}% confidence)",
-    "files.classifiedSuccess": "✓ {fileName} — detected as {datasetType}{confidence}",
+    "files.classifiedSuccess": "âœ“ {fileName} — detected as {datasetType}{confidence}",
     "files.needsConfirmation": "{fileName} needs quick confirmation below",
     "files.uploadFailed": "One of the files failed to upload",
     "files.validationRejected": "\"{fileName}\" was rejected — closest official Import Template is \"{entity}\" with {count} error(s). Example: {detail}",
@@ -2416,7 +2518,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "files.close": "Close",
     "files.rowCountChip": "{count} rows",
     "files.columnCountChip": "{count} columns",
-    "files.periodChip": "{from} → {to}",
+    "files.periodChip": "{from} â†’ {to}",
     "files.regionChip": "Region: {values}",
     "files.branchChip": "Branch: {values}",
     "files.salesRepChip": "Rep: {values}",
@@ -2436,7 +2538,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "files.updateError": "Failed to update file",
     "files.mixedWorkbookExplanation": "This file appears to contain more than one dataset. Choose which sheet you want to use as",
     "files.unknownType": "unknown type",
-    "files.sheetInfo": "— appears to be {type}{confidencePart} · {count} rows",
+    "files.sheetInfo": "— appears to be {type}{confidencePart} آ· {count} rows",
     "files.useThisSheet": "Use this sheet",
     "files.chooseTypePlaceholder": "Choose type…",
     "assistant.title": "Murshidak",
@@ -2985,8 +3087,8 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.prospectBadge": "Prospect",
     "copilot.markVisited": "Mark as visited",
     "copilot.markedVisited": "Marked as visited",
-    "copilot.summary360Button": "Today's 360° Summary",
-    "copilot.summary360Title": "Today's 360° Summary",
+    "copilot.summary360Button": "Today's 360آ° Summary",
+    "copilot.summary360Title": "Today's 360آ° Summary",
     "copilot.summary360Loading": "Preparing today's summary…",
     "copilot.summary360Error": "Could not load today's summary",
     "copilot.summary360Retry": "Retry",
@@ -3002,7 +3104,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360LostOpportunities": "Lost Opportunities",
     "copilot.summary360NoLostOpportunities": "No notable lost opportunities right now",
     "copilot.summary360DeclineValue": "Decline value: {value}",
-    "copilot.summary360BeforeAfter": "Before: {before} → After: {after}",
+    "copilot.summary360BeforeAfter": "Before: {before} â†’ After: {after}",
     "copilot.summary360LastVisit": "Last visit: {date}",
     "copilot.summary360LastVisitUnknown": "Last visit: unknown",
     "copilot.summary360StoppedProducts": "Stopped products",
@@ -3029,5 +3131,56 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360ExportingPdf": "Exporting…",
     "copilot.summary360ExportError": "Could not export the PDF",
     "copilot.summary360Close": "Close",
+    "nav.smartLoading": "Smart Loading",
+    "smartLoading.title": "Smart Loading",
+    "smartLoading.subtitle": "Prepare the vehicle before starting the route.",
+    "smartLoading.summaryTitle": "Loading Summary",
+    "smartLoading.summaryDescription": "A quick operational view before departure.",
+    "smartLoading.productsToLoad": "Products to Load",
+    "smartLoading.totalQuantity": "Total Quantity",
+    "smartLoading.priorityProducts": "Priority Products",
+    "smartLoading.lastCalculation": "Last Calculation",
+    "smartLoading.attentionTitle": "Today's Attention",
+    "smartLoading.attentionDescription": "Operational facts worth reviewing.",
+    "smartLoading.recommendationsTitle": "Loading Recommendations",
+    "smartLoading.recommendationsDescription": "Only additional suggested quantities are shown.",
+    "smartLoading.suggestedLoading": "Suggested Loading",
+    "smartLoading.showReason": "Show quantity reason",
+    "smartLoading.vehicleStock": "Vehicle Stock",
+    "smartLoading.weeklyAverage": "Weekly Average",
+    "smartLoading.confirmedOrders": "Confirmed Orders",
+    "smartLoading.confirmedOrdersHint": "This quantity is set by the representative or supervisor based on confirmed customer orders.",
+    "smartLoading.safetyStock": "Safety Stock",
+    "smartLoading.safetyStockHint": "Safety stock is set by the representative or supervisor according to product movement and route conditions.",
+    "smartLoading.empty": "There are no additional loading recommendations at this time.",
+    "smartLoading.error": "Unable to calculate loading recommendations.",
+    "smartLoading.retry": "Try again",
+    "smartLoading.vehicleStockUnavailable": "Vehicle stock is currently unavailable.",
+    "smartLoading.vehicleStockUnavailableHint": "Loading recommendations need the vehicle balance for the automatically scoped route.",
+    "smartLoading.checklistTitle": "Pre-Departure Checklist",
+    "smartLoading.checklistDescription": "An execution review that does not change the loading decision.",
+    "smartLoading.checklist.quantities": "Review loading quantities",
+    "smartLoading.checklist.priority": "Load priority products",
+    "smartLoading.checklist.cartons": "Check cartons",
+    "smartLoading.checklist.verified": "Verify quantities",
+    "smartLoading.checklist.organized": "Organize products in the vehicle",
+    "smartLoading.checklist.approved": "Approve loading",
+    "smartLoading.startRoute": "Start Route",
+    "smartLoading.refresh": "Refresh",
+    "smartLoading.noOtherAlerts": "There are no additional alerts.",
+    "smartLoading.staleProducts": "Stale Products",
+    "smartLoading.staleProductsPanelTitle": "Stale Products",
+    "smartLoading.priorityProductsPanelTitle": "Priority Products",
+    "smartLoading.close": "Close",
+    "smartLoading.uncategorized": "Uncategorized",
+    "smartLoading.restore": "Restore",
+    "smartLoading.manualOverrideNote": "Quantity manually adjusted (original: {value})",
+    "smartLoading.quantityUnit": "product",
+    "smartLoading.lastSale": "Last sale",
+    "smartLoading.staleDaysUnit": "days",
+    "smartLoading.exportExcel": "Excel",
+    "smartLoading.exportOds": "ODS",
+    "smartLoading.exportColumnProduct": "Product",
+    "smartLoading.exportColumnCategory": "Category",
   },
 };
