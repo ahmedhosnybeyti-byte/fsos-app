@@ -1074,7 +1074,9 @@ export type TranslationKey =
   | "smartLoading.noProductsFound"
   | "smartLoading.manualQuantity"
   | "smartLoading.removeProduct"
-  | "smartLoading.restoreOriginalList";
+  | "smartLoading.restoreOriginalList"
+  | "smartLoading.alertsTitle"
+  | "smartLoading.pdfExportedAt";
 
 export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
   ar: {
@@ -2148,6 +2150,8 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.manualQuantity": "كمية التحميل",
     "smartLoading.removeProduct": "إزالة الصنف",
     "smartLoading.restoreOriginalList": "استعادة القائمة الأصلية",
+    "smartLoading.alertsTitle": "تنبيهات اليوم",
+    "smartLoading.pdfExportedAt": "وقت التصدير",
   },
   en: {
     "nav.overview": "Overview",
@@ -3221,5 +3225,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.manualQuantity": "Loading quantity",
     "smartLoading.removeProduct": "Remove product",
     "smartLoading.restoreOriginalList": "Restore original list",
+    "smartLoading.alertsTitle": "Today's Alerts",
+    "smartLoading.pdfExportedAt": "Exported at",
   },
 };

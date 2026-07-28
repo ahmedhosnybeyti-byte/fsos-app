@@ -198,29 +198,140 @@ export function SmartLoadingScreen({
     }));
   }
 
-  async function exportSheet(bookType: "xlsx" | "ods") {
+  function exportTimestamp() {
+    return new Date()
+      .toLocaleString("en-GB", {
+        calendar: "gregory",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: false,
+      })
+      .replace(",", "")
+      .replaceAll("/", "-")
+      .replaceAll(":", "-")
+      .replace(/\s+/g, "-");
+  }
+
+  function exportRows() {
+    return rows.map((row) => ({
+      product: row.product.productName,
+      category: row.product.category ?? t("smartLoading.uncategorized"),
+      vehicleStock: row.product.currentVehicleStock,
+      weeklyAverage: row.product.weeklyAverageSales,
+      confirmedOrders: row.input.confirmedOrders,
+      safetyStock: row.input.safetyStock,
+      suggestedLoading: row.suggested,
+      source: row.manuallyAdded
+        ? label("smartLoading.addedManually", "Added manually")
+        : label("smartLoading.recommended", "Recommended"),
+    }));
+  }
+
+  async function exportExcel() {
     const XLSX = await import("xlsx");
-    const data = rows.map((row) => ({
-      [t("smartLoading.exportColumnProduct")]: row.product.productName,
-      [t("smartLoading.exportColumnCategory")]: row.product.category ?? "",
-      [t("smartLoading.vehicleStock")]: row.product.currentVehicleStock,
-      [t("smartLoading.weeklyAverage")]: row.product.weeklyAverageSales,
-      [t("smartLoading.confirmedOrders")]: row.input.confirmedOrders,
-      [t("smartLoading.safetyStock")]: row.input.safetyStock,
-      [t("smartLoading.suggestedLoading")]: row.suggested,
-      [label("smartLoading.exportColumnSource", "نوع الإضافة")]: row.manuallyAdded
-        ? label("smartLoading.addedManually", "مضاف يدويًا")
-        : label("smartLoading.recommended", "مقترح")
+    const data = exportRows().map((row) => ({
+      [t("smartLoading.exportColumnProduct")]: row.product,
+      [t("smartLoading.exportColumnCategory")]: row.category,
+      [t("smartLoading.vehicleStock")]: row.vehicleStock,
+      [t("smartLoading.weeklyAverage")]: row.weeklyAverage,
+      [t("smartLoading.confirmedOrders")]: row.confirmedOrders,
+      [t("smartLoading.safetyStock")]: row.safetyStock,
+      [t("smartLoading.suggestedLoading")]: row.suggestedLoading,
+      [label("smartLoading.exportColumnSource", "Addition type")]: row.source,
     }));
     const book = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(book, XLSX.utils.json_to_sheet(data), "Smart Loading");
-    const date = new Date()
-      .toLocaleDateString("en-CA", { calendar: "gregory", year: "numeric", month: "2-digit", day: "2-digit" })
-      .replaceAll("/", "-");
-    XLSX.writeFile(book, `smart-loading-${date}.${bookType}`, { bookType });
+    XLSX.writeFile(book, `smart-loading-${exportTimestamp()}.xlsx`, { bookType: "xlsx" });
     setExportOpen(false);
   }
 
+  async function exportPdf() {
+    const [{ jsPDF }, html2canvasModule] = await Promise.all([import("jspdf"), import("html2canvas")]);
+    const html2canvas = html2canvasModule.default;
+    const exportRowsSnapshot = exportRows();
+    const exportedAt = new Date().toLocaleString("en-GB", {
+      calendar: "gregory",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    });
+    const root = document.createElement("div");
+    root.dir = "rtl";
+    root.lang = "ar";
+    root.style.cssText = "position:fixed;left:-10000px;top:0;width:794px;background:#fff;color:#111827;padding:32px;font-family:Arial, Tahoma, sans-serif;direction:rtl;text-align:right;";
+
+    const heading = document.createElement("h1");
+    heading.textContent = t("smartLoading.title");
+    heading.style.cssText = "font-size:22px;margin:0 0 8px;";
+    root.appendChild(heading);
+
+    const meta = document.createElement("p");
+    meta.textContent = `${label("smartLoading.pdfExportedAt", "Exported at")}: ${exportedAt}`;
+    meta.style.cssText = "font-size:12px;color:#4b5563;margin:0 0 20px;";
+    root.appendChild(meta);
+
+    const table = document.createElement("table");
+    table.style.cssText = "width:100%;border-collapse:collapse;font-size:11px;";
+    const headers = [
+      t("smartLoading.exportColumnProduct"),
+      t("smartLoading.exportColumnCategory"),
+      t("smartLoading.vehicleStock"),
+      t("smartLoading.suggestedLoading"),
+      label("smartLoading.exportColumnSource", "Addition type"),
+    ];
+    const headRow = document.createElement("tr");
+    headers.forEach((header) => {
+      const cell = document.createElement("th");
+      cell.textContent = header;
+      cell.style.cssText = "background:#e5e7eb;border:1px solid #d1d5db;padding:8px;font-weight:700;text-align:right;";
+      headRow.appendChild(cell);
+    });
+    const thead = document.createElement("thead");
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    exportRowsSnapshot.forEach((row) => {
+      const tr = document.createElement("tr");
+      [row.product, row.category, formatQuantity(row.vehicleStock), formatQuantity(row.suggestedLoading), row.source].forEach((value) => {
+        const cell = document.createElement("td");
+        cell.textContent = value;
+        cell.style.cssText = "border:1px solid #d1d5db;padding:7px;vertical-align:top;text-align:right;";
+        tr.appendChild(cell);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    root.appendChild(table);
+    document.body.appendChild(root);
+
+    try {
+      const canvas = await html2canvas(root, { backgroundColor: "#ffffff", scale: 2, useCORS: true });
+      const pdf = new jsPDF({ orientation: "p", unit: "mm", format: "a4" });
+      const margin = 10;
+      const pageWidth = 210 - margin * 2;
+      const pageHeight = 297 - margin * 2;
+      const pageHeightPx = Math.floor((pageHeight / pageWidth) * canvas.width);
+      for (let sourceY = 0, page = 0; sourceY < canvas.height; sourceY += pageHeightPx, page += 1) {
+        const sliceHeight = Math.min(pageHeightPx, canvas.height - sourceY);
+        const pageCanvas = document.createElement("canvas");
+        pageCanvas.width = canvas.width;
+        pageCanvas.height = sliceHeight;
+        pageCanvas.getContext("2d")?.drawImage(canvas, 0, sourceY, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
+        if (page > 0) pdf.addPage();
+        pdf.addImage(pageCanvas.toDataURL("image/png"), "PNG", margin, margin, pageWidth, (sliceHeight / canvas.width) * pageWidth);
+      }
+      pdf.save(`smart-loading-${exportTimestamp()}.pdf`);
+      setExportOpen(false);
+    } finally {
+      root.remove();
+    }
+  }
   if (isLoading) {
     return (
       <div className="space-y-3">
@@ -278,8 +389,8 @@ export function SmartLoadingScreen({
             </Button>
             {exportOpen && (
               <div className="absolute left-0 z-20 mt-2 w-48 rounded-md border bg-popover p-1 shadow-lg">
-                <Button className="w-full justify-start" variant="ghost" onClick={() => exportSheet("xlsx")}>.xlsx</Button>
-                <Button className="w-full justify-start" variant="ghost" onClick={() => exportSheet("ods")}>.ods</Button>
+                <Button className="w-full justify-start" variant="ghost" onClick={exportExcel}>Excel</Button>
+                <Button className="w-full justify-start" variant="ghost" onClick={exportPdf}>PDF</Button>
               </div>
             )}
           </div>
@@ -341,7 +452,7 @@ export function SmartLoadingScreen({
           <CardContent className="p-4">
             <h2 className="mb-1 flex items-center gap-2 font-semibold">
               <AlertTriangle className="h-4 w-4 text-amber-600" />
-              {t("smartLoading.attentionTitle")}
+              {label("smartLoading.alertsTitle", "Today alerts")}
             </h2>
             <p className="mb-2 text-xs text-muted-foreground">{t("smartLoading.attentionDescription")}</p>
             <div className="space-y-2">
