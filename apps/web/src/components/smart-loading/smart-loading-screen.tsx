@@ -74,7 +74,8 @@ export function SmartLoadingScreen({
   const [exportOpen, setExportOpen] = useState(false);
   const [openRows, setOpenRows] = useState<Set<string>>(new Set());
   const [attentionOpen, setAttentionOpen] = useState(false);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [openRecommendationGroups, setOpenRecommendationGroups] = useState<Set<string>>(new Set());
+  const [recommendationSearch, setRecommendationSearch] = useState("");
   const [panel, setPanel] = useState<"priority" | "stale" | null>(null);
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
   const [removedProductCodes, setRemovedProductCodes] = useState<Set<string>>(new Set());
@@ -111,13 +112,21 @@ export function SmartLoadingScreen({
     [allRows, removedProductCodes],
   );
 
+  const recommendationRows = useMemo(() => {
+    const query = recommendationSearch.trim().toLocaleLowerCase();
+    if (!query) return rows;
+    return rows.filter((row) =>
+      `${row.product.productName} ${row.product.productCode} ${row.product.category ?? ""}`.toLocaleLowerCase().includes(query),
+    );
+  }, [recommendationSearch, rows]);
+
   const groupedByCategory = useMemo(() => {
-    return rows.reduce<Record<string, Row[]>>((acc, row) => {
+    return recommendationRows.reduce<Record<string, Row[]>>((acc, row) => {
       const key = row.product.category ?? t("smartLoading.uncategorized");
       (acc[key] ??= []).push(row);
       return acc;
     }, {});
-  }, [rows, t]);
+  }, [recommendationRows, t]);
 
   const priorityRows = useMemo(() => rows.filter((row) => row.product.priority === "high"), [rows]);
 
@@ -506,18 +515,30 @@ export function SmartLoadingScreen({
 
       <Card className="glass-card">
         <CardHeader className="pb-3">
-          <CardTitle>{t("smartLoading.recommendationsTitle")}</CardTitle>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle>{t("smartLoading.recommendationsTitle")}</CardTitle>
+            <Input
+              className="h-9 w-full sm:w-64"
+              placeholder={t("smartLoading.searchProducts")}
+              value={recommendationSearch}
+              onChange={(event) => {
+                const value = event.target.value;
+                setRecommendationSearch(value);
+                if (!value.trim()) setOpenRecommendationGroups(new Set());
+              }}
+            />
+          </div>
           <CardDescription>{t("smartLoading.recommendationsDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
-          {rows.length === 0 && <p className="text-sm text-muted-foreground">{t("smartLoading.empty")}</p>}
+          {recommendationRows.length === 0 && <p className="text-sm text-muted-foreground">{t("smartLoading.empty")}</p>}
           {Object.entries(groupedByCategory).map(([category, items]) => {
-            const closed = collapsedGroups.has(category);
+            const open = openRecommendationGroups.has(category);
             return (
               <section key={category} className="rounded-lg border">
                 <button
                   onClick={() =>
-                    setCollapsedGroups((current) => {
+                    setOpenRecommendationGroups((current) => {
                       const next = new Set(current);
                       if (next.has(category)) next.delete(category);
                       else next.add(category);
@@ -529,9 +550,9 @@ export function SmartLoadingScreen({
                   <span>
                     {category} <span className="text-muted-foreground">({items.length})</span>
                   </span>
-                  <ChevronDown className={cn("h-4 w-4 transition-transform", closed && "-rotate-90")} />
+                  <ChevronDown className={cn("h-4 w-4 transition-transform", !open && "-rotate-90")} />
                 </button>
-                {!closed &&
+                {open &&
                   items.map((row) => (
                     <ProductRow
                       key={row.product.productCode}
@@ -555,7 +576,7 @@ export function SmartLoadingScreen({
           })}
 
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <Button variant="outline" onClick={() => setAddProductOpen(true)}>
+            <Button onClick={() => setAddProductOpen(true)}>
               <Plus className="h-4 w-4" />
               {label("smartLoading.addProduct", "Add product")}
             </Button>
@@ -839,7 +860,7 @@ function AddProductDialog({
 
 function CategoryProductGroups({ rows, stale }: { rows: Row[]; stale: boolean }) {
   const { t } = useTranslation();
-  const [closedCategories, setClosedCategories] = useState<Set<string>>(new Set());
+  const [openCategories, setOpenCategories] = useState<Set<string>>(new Set());
   const groups = useMemo(() => {
     return rows.reduce<Record<string, Row[]>>((current, row) => {
       const category = row.product.category ?? t("smartLoading.uncategorized");
@@ -851,12 +872,12 @@ function CategoryProductGroups({ rows, stale }: { rows: Row[]; stale: boolean })
   return (
     <div className="space-y-2">
       {Object.entries(groups).map(([category, items]) => {
-        const closed = closedCategories.has(category);
+        const open = openCategories.has(category);
         return (
           <section key={category} className="rounded border">
             <button
               className="flex w-full items-center justify-between px-2 py-1.5 text-right text-xs font-semibold"
-              onClick={() => setClosedCategories((current) => {
+              onClick={() => setOpenCategories((current) => {
                 const next = new Set(current);
                 if (next.has(category)) next.delete(category); else next.add(category);
                 return next;
@@ -864,9 +885,9 @@ function CategoryProductGroups({ rows, stale }: { rows: Row[]; stale: boolean })
               type="button"
             >
               <span>{category} ({formatQuantity(items.length)})</span>
-              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", closed && "-rotate-90")} />
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !open && "-rotate-90")} />
             </button>
-            {!closed && (
+            {open && (
               <div className="max-h-56 overflow-y-auto border-t px-2">
                 {items.map((row) => (
                   <div key={row.product.productCode} className="grid grid-cols-[1fr_auto] gap-2 border-b py-1.5 text-xs last:border-0">
