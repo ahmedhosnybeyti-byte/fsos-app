@@ -40,15 +40,42 @@ export async function exportDaily360SummaryPdf(
   const captureTarget = scrollBody ?? root;
   console.info("[daily-360-summary] PDF export: captureTarget=", captureTarget === root ? "root (fallback)" : "scrollBody", "scrollHeight=", captureTarget.scrollHeight);
 
-  const canvas = await html2canvas(captureTarget, {
-    useCORS: true,
-    backgroundColor: "#ffffff",
-    scale: 2,
-    // Capture the full scrollable content, not just the visible clipped
-    // viewport — html2canvas otherwise only rasterizes what's on screen.
-    height: captureTarget.scrollHeight,
-    windowHeight: captureTarget.scrollHeight,
-  });
+  // html2canvas (v1.4.1) parses every CSS rule itself rather than asking the
+  // browser to resolve it, and doesn't understand modern color syntax like
+  // `color-mix(...)` (used by .crystal-badge's box-shadow — see
+  // globals.css). Left alone this throws "Attempting to parse an
+  // unsupported color function 'color'" and aborts the whole capture before
+  // a single pixel is drawn (confirmed via Console during 2026-07-29
+  // debugging — every attempt failed at exactly this point, never a canvas
+  // size mismatch or a jsPDF issue). Fix is scoped to the export path only:
+  // temporarily swap each affected element's inline box-shadow to a
+  // plain rgba() equivalent (same visual ring, but a syntax html2canvas can
+  // parse), capture, then restore the original inline style so the live
+  // on-screen design is untouched.
+  const colorMixNodes = Array.from(captureTarget.querySelectorAll<HTMLElement>(".crystal-badge"));
+  const restoreBoxShadow: Array<() => void> = [];
+  for (const node of colorMixNodes) {
+    const prevInline = node.style.boxShadow;
+    node.style.boxShadow = "inset 0 0 0 1px rgba(255, 255, 255, 0.35)";
+    restoreBoxShadow.push(() => {
+      node.style.boxShadow = prevInline;
+    });
+  }
+
+  let canvas: HTMLCanvasElement;
+  try {
+    canvas = await html2canvas(captureTarget, {
+      useCORS: true,
+      backgroundColor: "#ffffff",
+      scale: 2,
+      // Capture the full scrollable content, not just the visible clipped
+      // viewport — html2canvas otherwise only rasterizes what's on screen.
+      height: captureTarget.scrollHeight,
+      windowHeight: captureTarget.scrollHeight,
+    });
+  } finally {
+    for (const restore of restoreBoxShadow) restore();
+  }
   console.info("[daily-360-summary] PDF export: canvas captured", canvas.width, "x", canvas.height);
 
   const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
