@@ -53,6 +53,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       colorKey: "geoEngine",
       group: t("group.aiInsights"),
     },
+    {
+      href: "/dashboard/fsos-360",
+      label: t("nav.fsos360"),
+      icon: BarChart3,
+      colorKey: "decisionAnalyticsStudio",
+      group: t("group.aiInsights"),
+    },
     { href: "/dashboard/new-customer", label: t("nav.newCustomer"), icon: UserPlus, colorKey: "newCustomer", group: t("group.customersTerritory") },
     {
       href: "/dashboard/customer-comparison",

@@ -28,3 +28,4 @@ export * from "./visit-copilot";
 export * from "./territory-intelligence";
 export * from "./decision-analytics-studio";
 export * from "./geo-engine";
+export * from "./fsos-360";

@@ -35,6 +35,7 @@ export type TranslationKey =
   | "nav.territoryIntelligence"
   | "nav.decisionAnalyticsStudio"
   | "nav.geoEngine"
+  | "nav.fsos360"
   | "nav.visitCopilot"
   | "nav.team"
   | "nav.employees"
@@ -1100,7 +1101,122 @@ export type TranslationKey =
   | "smartLoading.removeProduct"
   | "smartLoading.restoreOriginalList"
   | "smartLoading.alertsTitle"
-  | "smartLoading.pdfExportedAt";
+  | "smartLoading.pdfExportedAt"
+  | "fsos360.company"
+  | "fsos360.region"
+  | "fsos360.city"
+  | "fsos360.branch"
+  | "fsos360.manager"
+  | "fsos360.supervisor"
+  | "fsos360.route"
+  | "fsos360.salesRep"
+  | "fsos360.customer"
+  | "fsos360.brand"
+  | "fsos360.category"
+  | "fsos360.product"
+  | "fsos360.title"
+  | "fsos360.subtitle"
+  | "fsos360.refresh"
+  | "fsos360.filters"
+  | "fsos360.filtersDescription"
+  | "fsos360.currentPeriod"
+  | "fsos360.comparisonPeriod"
+  | "fsos360.analysisFocus"
+  | "fsos360.auto"
+  | "fsos360.removedSelections"
+  | "fsos360.loading"
+  | "fsos360.error"
+  | "fsos360.executiveInsight"
+  | "fsos360.noInsight"
+  | "fsos360.kpiSummary"
+  | "fsos360.comparedToPrevious"
+  | "fsos360.performanceComparison"
+  | "fsos360.indicator"
+  | "fsos360.current"
+  | "fsos360.previous"
+  | "fsos360.change"
+  | "fsos360.changePercent"
+  | "fsos360.timeline"
+  | "fsos360.target"
+  | "fsos360.targetValue"
+  | "fsos360.achievement"
+  | "fsos360.achievementPercent"
+  | "fsos360.remaining"
+  | "fsos360.visualization"
+  | "fsos360.visualizationDescription"
+  | "fsos360.totalRows"
+  | "fsos360.mappedRows"
+  | "fsos360.unmappedRows"
+  | "fsos360.routePointsOnly"
+  | "fsos360.empty"
+  | "fsos360.notAvailable"
+  | "fsos360.opportunities"
+  | "fsos360.recommendations"
+  | "fsos360.search"
+  | "fsos360.unavailable"
+  | "fsos360.noResults"
+  | "fsos360.clear"
+  | "fsos360.next"
+  | "fsos360.available"
+  | "fsos360.partial"
+  | "fsos360.not-applicable"
+  | "fsos360.pending-business-approval"
+  | "fsos360.focus.company"
+  | "fsos360.focus.region"
+  | "fsos360.focus.branch"
+  | "fsos360.focus.manager"
+  | "fsos360.focus.supervisor"
+  | "fsos360.focus.route"
+  | "fsos360.focus.sales-rep"
+  | "fsos360.focus.customer"
+  | "fsos360.focus.brand"
+  | "fsos360.focus.category"
+  | "fsos360.focus.product"
+  | "fsos360.kpi.sales"
+  | "fsos360.kpi.collections"
+  | "fsos360.kpi.returns"
+  | "fsos360.kpi.lost-sales"
+  | "fsos360.kpi.orders"
+  | "fsos360.kpi.coverage"
+  | "fsos360.kpi.strike-rate"
+  | "fsos360.kpi.productivity"
+  | "fsos360.kpi.sales.change"
+  | "fsos360.kpi.collections.change"
+  | "fsos360.kpi.returns.change"
+  | "fsos360.kpi.orders.change"
+  | "fsos360.kpi.coverage.change"
+  | "fsos360.kpi.strikeRate.change"
+  | "fsos360.kpi.productivity.change"
+  | "fsos360.reason.customers-dataset-unavailable"
+  | "fsos360.reason.products-dataset-unavailable"
+  | "fsos360.reason.pending-business-approval"
+  | "fsos360.reason.sgi-filter-scope-not-supported"
+  | "fsos360.reason.lost-sales-aggregation-and-deduplication-unapproved"
+  | "fsos360.reason.route-assignment-history-unavailable"
+  | "fsos360.reason.route-month-target-source"
+  | "fsos360.reason.targets-dataset-unavailable"
+  | "fsos360.reason.ambiguous-analysis-focus"
+  | "fsos360.reason.manager-supervisor-role-ambiguous"
+  | "fsos360.reason.invoices-dataset-unavailable"
+  | "fsos360.reason.filter-not-supported"
+  | "fsos360.reason.zero-denominator"
+  | "fsos360.reason.analysis-level-does-not-own-target"
+  | "fsos360.reason.partial-period"
+  | "fsos360.reason.incomplete-target-coverage"
+  | "fsos360.reason.analysis-unavailable"
+  | "fsos360.reason.product-filter-not-supported-for-collections"
+  | "fsos360.reason.product-filter-not-supported-for-returns"
+  | "fsos360.reason.product-filter-not-supported-for-visits"
+  | "fsos360.reason.products-or-invoices-dataset-unavailable"
+  | "fsos360.reason.missing-dataset"
+  | "fsos360.visualization.timeline"
+  | "fsos360.visualization.line"
+  | "fsos360.visualization.bar"
+  | "fsos360.visualization.treemap"
+  | "fsos360.visualization.heat-map"
+  | "fsos360.visualization.coverage-map"
+  | "fsos360.visualization.route-map"
+  | "fsos360.visualization.customer-density";
 
 export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
   ar: {
@@ -1120,6 +1236,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "nav.sgi": "مركز فرص النمو",
     "nav.territoryIntelligence": "ذكاء الأقاليم",
     "nav.decisionAnalyticsStudio": "استوديو تحليل القرارات",
+    "nav.fsos360": "FSOS 360",
     "nav.geoEngine": "محرك الخرائط الذكي",
     "nav.visitCopilot": "مساعد الزيارات",
     "nav.team": "الفريق",
@@ -2200,6 +2317,121 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.restoreOriginalList": "استعادة القائمة الأصلية",
     "smartLoading.alertsTitle": "تنبيهات اليوم",
     "smartLoading.pdfExportedAt": "وقت التصدير",
+    "fsos360.company": "الشركة",
+    "fsos360.region": "المنطقة",
+    "fsos360.city": "المدينة",
+    "fsos360.branch": "الفرع",
+    "fsos360.manager": "المدير",
+    "fsos360.supervisor": "المشرف",
+    "fsos360.route": "خط السير",
+    "fsos360.salesRep": "المندوب",
+    "fsos360.customer": "العميل",
+    "fsos360.brand": "العلامة التجارية",
+    "fsos360.category": "الفئة",
+    "fsos360.product": "المنتج",
+    "fsos360.title": "FSOS 360",
+    "fsos360.subtitle": "مساحة عمل تنفيذية موحّدة لفهم الأداء واتخاذ القرار.",
+    "fsos360.refresh": "تحديث",
+    "fsos360.filters": "الفلاتر",
+    "fsos360.filtersDescription": "حدد الفترة والنطاق لتحليل البيانات.",
+    "fsos360.currentPeriod": "الفترة الحالية",
+    "fsos360.comparisonPeriod": "فترة المقارنة",
+    "fsos360.analysisFocus": "مستوى التحليل",
+    "fsos360.auto": "تلقائي",
+    "fsos360.removedSelections": "تم حذف {count} من الاختيارات غير الصالحة بعد تغيير الفلاتر.",
+    "fsos360.loading": "جارٍ التحميل...",
+    "fsos360.error": "تعذر تحميل بيانات مساحة العمل.",
+    "fsos360.executiveInsight": "الرؤية التنفيذية",
+    "fsos360.noInsight": "لا توجد رؤية تنفيذية متاحة حاليًا.",
+    "fsos360.kpiSummary": "ملخص المؤشرات",
+    "fsos360.comparedToPrevious": "مقارنة بالفترة السابقة",
+    "fsos360.performanceComparison": "مقارنة الأداء",
+    "fsos360.indicator": "المؤشر",
+    "fsos360.current": "الحالي",
+    "fsos360.previous": "السابق",
+    "fsos360.change": "التغيّر",
+    "fsos360.changePercent": "نسبة التغيّر",
+    "fsos360.timeline": "المسار الزمني",
+    "fsos360.target": "الهدف",
+    "fsos360.targetValue": "قيمة الهدف",
+    "fsos360.achievement": "الإنجاز",
+    "fsos360.achievementPercent": "نسبة الإنجاز",
+    "fsos360.remaining": "المتبقي",
+    "fsos360.visualization": "التصور المرئي",
+    "fsos360.visualizationDescription": "يتغيّر نوع العرض تلقائيًا حسب سياق التحليل.",
+    "fsos360.totalRows": "إجمالي السجلات: {count}",
+    "fsos360.mappedRows": "المعروض على الخريطة: {count}",
+    "fsos360.unmappedRows": "بدون إحداثيات: {count}",
+    "fsos360.routePointsOnly": "نقاط الزيارات فقط — بيانات مسار الخط غير متاحة.",
+    "fsos360.empty": "لا توجد بيانات كافية لعرض هذا التحليل.",
+    "fsos360.notAvailable": "غير متاح حاليًا.",
+    "fsos360.opportunities": "الفرص",
+    "fsos360.recommendations": "التوصيات",
+    "fsos360.search": "بحث",
+    "fsos360.unavailable": "غير متاح",
+    "fsos360.noResults": "لا توجد نتائج",
+    "fsos360.clear": "مسح",
+    "fsos360.next": "التالي",
+    "fsos360.available": "متاح",
+    "fsos360.partial": "متاح جزئيًا",
+    "fsos360.not-applicable": "لا ينطبق",
+    "fsos360.pending-business-approval": "بانتظار اعتماد قاعدة العمل",
+    "fsos360.focus.company": "الشركة",
+    "fsos360.focus.region": "المنطقة",
+    "fsos360.focus.branch": "الفرع",
+    "fsos360.focus.manager": "المدير",
+    "fsos360.focus.supervisor": "المشرف",
+    "fsos360.focus.route": "خط السير",
+    "fsos360.focus.sales-rep": "المندوب",
+    "fsos360.focus.customer": "العميل",
+    "fsos360.focus.brand": "العلامة التجارية",
+    "fsos360.focus.category": "الفئة",
+    "fsos360.focus.product": "المنتج",
+    "fsos360.kpi.sales": "المبيعات",
+    "fsos360.kpi.collections": "التحصيل",
+    "fsos360.kpi.returns": "المرتجعات",
+    "fsos360.kpi.lost-sales": "المبيعات الضائعة",
+    "fsos360.kpi.orders": "الطلبات",
+    "fsos360.kpi.coverage": "التغطية",
+    "fsos360.kpi.strike-rate": "نسبة الفاعلية",
+    "fsos360.kpi.productivity": "الإنتاجية",
+    "fsos360.kpi.sales.change": "تغيّر في المبيعات مقارنة بالفترة المرجعية.",
+    "fsos360.kpi.collections.change": "تغيّر في التحصيل مقارنة بالفترة المرجعية.",
+    "fsos360.kpi.returns.change": "تغيّر في المرتجعات مقارنة بالفترة المرجعية.",
+    "fsos360.kpi.orders.change": "تغيّر في عدد الطلبات مقارنة بالفترة المرجعية.",
+    "fsos360.kpi.coverage.change": "تغيّر في نسبة التغطية مقارنة بالفترة المرجعية.",
+    "fsos360.kpi.strikeRate.change": "تغيّر في نسبة فاعلية الزيارات مقارنة بالفترة المرجعية.",
+    "fsos360.kpi.productivity.change": "تغيّر في الإنتاجية مقارنة بالفترة المرجعية.",
+    "fsos360.reason.customers-dataset-unavailable": "بيانات العملاء غير متاحة.",
+    "fsos360.reason.products-dataset-unavailable": "بيانات المنتجات غير متاحة.",
+    "fsos360.reason.pending-business-approval": "بانتظار اعتماد قاعدة العمل قبل العرض.",
+    "fsos360.reason.sgi-filter-scope-not-supported": "محرك نمو المبيعات لا يدعم حاليًا نطاق هذه الفلاتر.",
+    "fsos360.reason.lost-sales-aggregation-and-deduplication-unapproved": "منطق تجميع المبيعات الضائعة لم يُعتمد بعد.",
+    "fsos360.reason.route-assignment-history-unavailable": "سجل تكليف خطوط السير التاريخي غير متاح لهذا التحليل.",
+    "fsos360.reason.route-month-target-source": "الهدف مبني من بيانات الأهداف على مستوى خط السير والشهر.",
+    "fsos360.reason.targets-dataset-unavailable": "بيانات الأهداف غير متاحة.",
+    "fsos360.reason.ambiguous-analysis-focus": "مستوى التحليل غير محدد بوضوح بسبب تعدد الفلاتر النشطة.",
+    "fsos360.reason.manager-supervisor-role-ambiguous": "لا يمكن حاليًا التمييز الموثوق بين المدير والمشرف.",
+    "fsos360.reason.invoices-dataset-unavailable": "بيانات الفواتير غير متاحة.",
+    "fsos360.reason.filter-not-supported": "هذا الفلتر غير مدعوم لهذا المؤشر.",
+    "fsos360.reason.zero-denominator": "لا يمكن الحساب بسبب عدم وجود زيارات مثمرة.",
+    "fsos360.reason.analysis-level-does-not-own-target": "هذا المستوى التحليلي لا يملك هدفًا مباشرًا.",
+    "fsos360.reason.partial-period": "الفترة المحددة لا تغطي شهرًا كاملاً.",
+    "fsos360.reason.incomplete-target-coverage": "تغطية بيانات الهدف غير مكتملة لهذا النطاق.",
+    "fsos360.reason.analysis-unavailable": "التحليل غير متاح حاليًا.",
+    "fsos360.reason.product-filter-not-supported-for-collections": "فلاتر المنتج غير مدعومة لمؤشر التحصيل.",
+    "fsos360.reason.product-filter-not-supported-for-returns": "فلاتر المنتج غير مدعومة لمؤشر المرتجعات.",
+    "fsos360.reason.product-filter-not-supported-for-visits": "فلاتر المنتج غير مدعومة لمؤشرات الزيارات.",
+    "fsos360.reason.products-or-invoices-dataset-unavailable": "بيانات المنتجات أو الفواتير غير متاحة.",
+    "fsos360.reason.missing-dataset": "البيانات المطلوبة غير متاحة.",
+    "fsos360.visualization.timeline": "المسار الزمني",
+    "fsos360.visualization.line": "خط بياني",
+    "fsos360.visualization.bar": "أعمدة بيانية",
+    "fsos360.visualization.treemap": "خريطة شجرية",
+    "fsos360.visualization.heat-map": "خريطة حرارية",
+    "fsos360.visualization.coverage-map": "خريطة التغطية",
+    "fsos360.visualization.route-map": "خريطة خط السير",
+    "fsos360.visualization.customer-density": "كثافة العملاء",
   },
   en: {
     "nav.overview": "Overview",
@@ -2218,6 +2450,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "nav.sgi": "Growth Opportunity Center",
     "nav.territoryIntelligence": "Territory Intelligence",
     "nav.decisionAnalyticsStudio": "Decision Analytics Studio",
+    "nav.fsos360": "FSOS 360",
     "nav.geoEngine": "Geo Intelligence Engine",
     "nav.visitCopilot": "Visit Copilot",
     "nav.team": "Team",
@@ -3299,5 +3532,120 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.restoreOriginalList": "Restore original list",
     "smartLoading.alertsTitle": "Today's Alerts",
     "smartLoading.pdfExportedAt": "Exported at",
+    "fsos360.company": "Company",
+    "fsos360.region": "Region",
+    "fsos360.city": "City",
+    "fsos360.branch": "Branch",
+    "fsos360.manager": "Manager",
+    "fsos360.supervisor": "Supervisor",
+    "fsos360.route": "Route",
+    "fsos360.salesRep": "Sales Representative",
+    "fsos360.customer": "Customer",
+    "fsos360.brand": "Brand",
+    "fsos360.category": "Category",
+    "fsos360.product": "Product",
+    "fsos360.title": "FSOS 360",
+    "fsos360.subtitle": "A unified executive workspace to understand performance and decide what's next.",
+    "fsos360.refresh": "Refresh",
+    "fsos360.filters": "Filters",
+    "fsos360.filtersDescription": "Choose the period and scope to analyze.",
+    "fsos360.currentPeriod": "Current Period",
+    "fsos360.comparisonPeriod": "Comparison Period",
+    "fsos360.analysisFocus": "Analysis Level",
+    "fsos360.auto": "Auto",
+    "fsos360.removedSelections": "{count} selection(s) were removed after they became invalid for the new filters.",
+    "fsos360.loading": "Loading...",
+    "fsos360.error": "Unable to load the workspace data.",
+    "fsos360.executiveInsight": "Executive Insight",
+    "fsos360.noInsight": "No executive insight is available right now.",
+    "fsos360.kpiSummary": "KPI Summary",
+    "fsos360.comparedToPrevious": "Compared to the previous period",
+    "fsos360.performanceComparison": "Performance Comparison",
+    "fsos360.indicator": "Indicator",
+    "fsos360.current": "Current",
+    "fsos360.previous": "Previous",
+    "fsos360.change": "Change",
+    "fsos360.changePercent": "Change %",
+    "fsos360.timeline": "Timeline",
+    "fsos360.target": "Target",
+    "fsos360.targetValue": "Target Value",
+    "fsos360.achievement": "Achievement",
+    "fsos360.achievementPercent": "Achievement %",
+    "fsos360.remaining": "Remaining",
+    "fsos360.visualization": "Visualization",
+    "fsos360.visualizationDescription": "The visualization type changes automatically based on the analysis context.",
+    "fsos360.totalRows": "Total records: {count}",
+    "fsos360.mappedRows": "Shown on map: {count}",
+    "fsos360.unmappedRows": "Without coordinates: {count}",
+    "fsos360.routePointsOnly": "Visit points only — route geometry is not available.",
+    "fsos360.empty": "There isn't enough data to show this analysis.",
+    "fsos360.notAvailable": "Not available right now.",
+    "fsos360.opportunities": "Opportunities",
+    "fsos360.recommendations": "Recommendations",
+    "fsos360.search": "Search",
+    "fsos360.unavailable": "Unavailable",
+    "fsos360.noResults": "No results",
+    "fsos360.clear": "Clear",
+    "fsos360.next": "Next",
+    "fsos360.available": "Available",
+    "fsos360.partial": "Partially available",
+    "fsos360.not-applicable": "Not applicable",
+    "fsos360.pending-business-approval": "Pending business rule approval",
+    "fsos360.focus.company": "Company",
+    "fsos360.focus.region": "Region",
+    "fsos360.focus.branch": "Branch",
+    "fsos360.focus.manager": "Manager",
+    "fsos360.focus.supervisor": "Supervisor",
+    "fsos360.focus.route": "Route",
+    "fsos360.focus.sales-rep": "Sales Representative",
+    "fsos360.focus.customer": "Customer",
+    "fsos360.focus.brand": "Brand",
+    "fsos360.focus.category": "Category",
+    "fsos360.focus.product": "Product",
+    "fsos360.kpi.sales": "Sales",
+    "fsos360.kpi.collections": "Collections",
+    "fsos360.kpi.returns": "Returns",
+    "fsos360.kpi.lost-sales": "Lost Sales",
+    "fsos360.kpi.orders": "Orders",
+    "fsos360.kpi.coverage": "Coverage",
+    "fsos360.kpi.strike-rate": "Strike Rate",
+    "fsos360.kpi.productivity": "Productivity",
+    "fsos360.kpi.sales.change": "Change in sales compared to the reference period.",
+    "fsos360.kpi.collections.change": "Change in collections compared to the reference period.",
+    "fsos360.kpi.returns.change": "Change in returns compared to the reference period.",
+    "fsos360.kpi.orders.change": "Change in order count compared to the reference period.",
+    "fsos360.kpi.coverage.change": "Change in coverage compared to the reference period.",
+    "fsos360.kpi.strikeRate.change": "Change in visit strike rate compared to the reference period.",
+    "fsos360.kpi.productivity.change": "Change in productivity compared to the reference period.",
+    "fsos360.reason.customers-dataset-unavailable": "Customer data is not available.",
+    "fsos360.reason.products-dataset-unavailable": "Product data is not available.",
+    "fsos360.reason.pending-business-approval": "Pending business rule approval before this can be shown.",
+    "fsos360.reason.sgi-filter-scope-not-supported": "The Sales Growth engine does not yet support this filter scope.",
+    "fsos360.reason.lost-sales-aggregation-and-deduplication-unapproved": "The Lost Sales aggregation logic has not been approved yet.",
+    "fsos360.reason.route-assignment-history-unavailable": "Historical route assignment records are not available for this analysis.",
+    "fsos360.reason.route-month-target-source": "The target is built from route/month target data.",
+    "fsos360.reason.targets-dataset-unavailable": "Target data is not available.",
+    "fsos360.reason.ambiguous-analysis-focus": "The analysis level is ambiguous because multiple filters are active at once.",
+    "fsos360.reason.manager-supervisor-role-ambiguous": "Manager and supervisor cannot be reliably distinguished right now.",
+    "fsos360.reason.invoices-dataset-unavailable": "Invoice data is not available.",
+    "fsos360.reason.filter-not-supported": "This filter is not supported for this metric.",
+    "fsos360.reason.zero-denominator": "This cannot be calculated because there are no productive visits.",
+    "fsos360.reason.analysis-level-does-not-own-target": "This analysis level does not own a direct target.",
+    "fsos360.reason.partial-period": "The selected period does not cover a complete month.",
+    "fsos360.reason.incomplete-target-coverage": "Target data coverage is incomplete for this scope.",
+    "fsos360.reason.analysis-unavailable": "This analysis is not available right now.",
+    "fsos360.reason.product-filter-not-supported-for-collections": "Product filters are not supported for the collections metric.",
+    "fsos360.reason.product-filter-not-supported-for-returns": "Product filters are not supported for the returns metric.",
+    "fsos360.reason.product-filter-not-supported-for-visits": "Product filters are not supported for visit-based metrics.",
+    "fsos360.reason.products-or-invoices-dataset-unavailable": "Product or invoice data is not available.",
+    "fsos360.reason.missing-dataset": "The required data is not available.",
+    "fsos360.visualization.timeline": "Timeline",
+    "fsos360.visualization.line": "Line Chart",
+    "fsos360.visualization.bar": "Bar Chart",
+    "fsos360.visualization.treemap": "Treemap",
+    "fsos360.visualization.heat-map": "Heat Map",
+    "fsos360.visualization.coverage-map": "Coverage Map",
+    "fsos360.visualization.route-map": "Route Map",
+    "fsos360.visualization.customer-density": "Customer Density",
   },
 };
