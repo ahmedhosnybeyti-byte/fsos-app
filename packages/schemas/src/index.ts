@@ -30,3 +30,19 @@ export * from "./visit-copilot.schemas";
 export * from "./territory-intelligence.schemas";
 export * from "./decision-analytics-studio.schemas";
 export * from "./geo-engine.schemas";
+export {
+  smartLoadingPrioritySchema,
+  smartLoadingProductSchema,
+  smartLoadingAttentionSchema,
+  smartLoadingReadySessionSchema,
+  smartLoadingVehicleStockUnavailableSessionSchema,
+  smartLoadingSessionSchema,
+} from "./smart-loading.schemas";
+export type {
+  SmartLoadingPriority,
+  SmartLoadingProduct,
+  SmartLoadingAttention,
+  SmartLoadingReadySession,
+  SmartLoadingVehicleStockUnavailableSession,
+  SmartLoadingSession,
+} from "./smart-loading.schemas";
