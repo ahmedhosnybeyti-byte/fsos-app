@@ -26,13 +26,18 @@ export const fsos360FiltersSchema = z.object({
 });
 export type Fsos360Filters = z.infer<typeof fsos360FiltersSchema>;
 
+export const fsos360VisualizationTypeSchema = z.enum(["timeline", "line", "bar", "treemap", "heat-map", "coverage-map", "route-map", "customer-density"]);
+export type Fsos360VisualizationType = z.infer<typeof fsos360VisualizationTypeSchema>;
+
 export const fsos360QuerySchema = z.object({
   currentPeriod: dateRangeSchema,
   comparisonPeriod: dateRangeSchema,
   filters: fsos360FiltersSchema.default({}),
   analysisFocus: fsos360AnalysisFocusSchema.optional(),
   visualization: z.object({
-    preferredType: z.enum(["auto", "heat-map", "coverage-map", "timeline", "line", "bar", "treemap", "route-map", "customer-density"]).optional(),
+    preferredType: z.enum(["auto", ...fsos360VisualizationTypeSchema.options]).optional(),
+    metric: z.enum(["sales", "collections", "returns"]).optional(),
+    groupBy: z.enum(["product", "brand"]).optional(),
   }).optional(),
 });
 export type Fsos360Query = z.infer<typeof fsos360QuerySchema>;
@@ -79,6 +84,77 @@ export const fsos360KpiSchema = z.object({
 });
 export type Fsos360Kpi = z.infer<typeof fsos360KpiSchema>;
 
+const fsos360VisualizationSeriesDataSchema = z.object({
+  kind: z.literal("series"),
+  series: z.array(z.object({
+    key: z.string(),
+    label: z.string(),
+    current: z.number().nullable(),
+    comparison: z.number().nullable(),
+  })),
+});
+
+const fsos360VisualizationCategoriesDataSchema = z.object({
+  kind: z.literal("categories"),
+  items: z.array(z.object({
+    key: z.string(),
+    label: z.string(),
+    current: z.number(),
+    previous: z.number(),
+    change: z.number(),
+  })),
+});
+
+const fsos360VisualizationTreemapDataSchema = z.object({
+  kind: z.literal("treemap"),
+  groupBy: z.enum(["product", "brand"]),
+  items: z.array(z.object({
+    key: z.string(),
+    label: z.string(),
+    value: z.number(),
+    isOther: z.boolean(),
+  })),
+});
+
+const fsos360VisualizationGeoPointsDataSchema = z.object({
+  kind: z.literal("geo-points"),
+  metric: z.enum(["sales", "collections", "returns", "density", "coverage"]),
+  points: z.array(z.object({
+    customerCode: z.string(),
+    customerName: z.string(),
+    routeId: z.string().nullable(),
+    latitude: z.number(),
+    longitude: z.number(),
+    value: z.number(),
+  })),
+});
+
+export const fsos360VisualizationDataSchema = z.discriminatedUnion("kind", [
+  fsos360VisualizationSeriesDataSchema,
+  fsos360VisualizationCategoriesDataSchema,
+  fsos360VisualizationTreemapDataSchema,
+  fsos360VisualizationGeoPointsDataSchema,
+]);
+export type Fsos360VisualizationData = z.infer<typeof fsos360VisualizationDataSchema>;
+
+export const fsos360VisualizationSchema = z.object({
+  selectedType: fsos360VisualizationTypeSchema,
+  availableTypes: z.array(z.object({
+    type: fsos360VisualizationTypeSchema,
+    availability: z.enum(["available", "unavailable", "not-applicable"]),
+    reason: z.string().nullable().optional(),
+  })),
+  data: fsos360VisualizationDataSchema.nullable(),
+  meta: z.object({
+    totalRows: z.number().int().nonnegative(),
+    mappedRows: z.number().int().nonnegative().optional(),
+    unmappedRows: z.number().int().nonnegative().optional(),
+    routeGeometryAvailable: z.boolean().optional(),
+    generatedAt: z.string(),
+  }),
+});
+export type Fsos360Visualization = z.infer<typeof fsos360VisualizationSchema>;
+
 export const fsos360QueryResponseSchema = z.object({
   analysisContext: z.object({
     currentPeriod: dateRangeSchema,
@@ -98,7 +174,7 @@ export const fsos360QueryResponseSchema = z.object({
     buckets: z.array(z.object({ position: z.number().int(), current: z.number().nullable(), comparison: z.number().nullable() })),
   }),
   target: fsos360AvailabilityResultSchema,
-  visualization: fsos360AvailabilityResultSchema,
+  visualization: fsos360VisualizationSchema,
   opportunities: z.object({ availability: fsos360AvailabilitySchema, reason: z.string().nullable(), items: z.array(z.unknown()) }),
   recommendations: z.object({ availability: fsos360AvailabilitySchema, reason: z.string().nullable(), items: z.array(z.unknown()) }),
   capabilities: z.record(z.unknown()),

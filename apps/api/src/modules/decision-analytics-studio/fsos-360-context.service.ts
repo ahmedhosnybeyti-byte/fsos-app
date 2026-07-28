@@ -15,6 +15,8 @@ export interface Fsos360Customer {
   city: string;
   branchId: string;
   routeId: string;
+  latitude: number | null;
+  longitude: number | null;
 }
 
 export interface Fsos360Product {
@@ -23,21 +25,18 @@ export interface Fsos360Product {
   brand: string;
   category: string;
 }
-
 export interface Fsos360Route {
   id: string;
   name: string;
   branchId: string;
   salesRepId: string;
 }
-
 export interface Fsos360Employee {
   id: string;
   name: string;
   managerId: string | null;
   branchId: string;
 }
-
 export interface Fsos360RouteAssignment {
   routeId: string;
   employeeId: string;
@@ -67,6 +66,15 @@ export interface Fsos360ResolvedContext {
   datasets: Fsos360Datasets;
   smallFilterOptions: Record<string, Fsos360Option[]>;
   capabilities: Record<string, Capability>;
+}
+
+function numberOf(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
 }
 
 function timeOf(value: unknown): number | null {
@@ -148,7 +156,15 @@ export class Fsos360ContextService {
     const customers = new Map<string, Fsos360Customer>();
     for (const row of datasets.Customers.available ? datasets.Customers.records : []) {
       const code = String(row.CustomerCode ?? "").trim();
-      if (code) customers.set(code, { code, name: String(row.CustomerName ?? code), city: String(row.City ?? "").trim(), branchId: String(row.BranchID ?? "").trim(), routeId: String(row.RouteID ?? "").trim() });
+      if (code) customers.set(code, {
+        code,
+        name: String(row.CustomerName ?? code),
+        city: String(row.City ?? "").trim(),
+        branchId: String(row.BranchID ?? "").trim(),
+        routeId: String(row.RouteID ?? "").trim(),
+        latitude: numberOf(row.Latitude),
+        longitude: numberOf(row.Longitude),
+      });
     }
     const products = new Map<string, Fsos360Product>();
     for (const row of datasets.Products.available ? datasets.Products.records : []) {

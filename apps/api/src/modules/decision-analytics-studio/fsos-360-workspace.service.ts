@@ -6,6 +6,12 @@ import { assignmentMatchesAt, Fsos360ContextService, type Fsos360ResolvedContext
 interface SalesRow { invoiceNo: string; customerCode: string; productCode: string; routeId: string; time: number | null; amount: number }
 interface OperationRow { customerCode: string; routeId: string; time: number | null; amount: number }
 interface Window { from: number; to: number }
+type VisualizationRequest = NonNullable<Fsos360Query["visualization"]>;
+type VisualizationAvailability = "available" | "unavailable" | "not-applicable";
+
+const MAX_CATEGORY_ITEMS = 40;
+const MAX_TREEMAP_ITEMS = 20;
+const MAX_GEO_POINTS = 750;
 
 function numberOf(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -68,7 +74,7 @@ export class Fsos360WorkspaceService {
     const kpis = this.kpis(context, currentRows, previousRows, windows, analysisAvailability);
     const target = this.target(context, currentRows, input.currentPeriod);
     const timeline = this.timeline(currentRows, previousRows, input.currentPeriod, input.comparisonPeriod);
-    const visualization = this.visualization(context, currentRows, input.visualization?.preferredType);
+    const visualization = this.visualization(context, currentRows, previousRows, windows, input.visualization, analysisAvailability);
     const salesRepHistory = context.capabilities.routeAssignments!;
 
     return {
@@ -390,10 +396,257 @@ export class Fsos360WorkspaceService {
     return { availability: "available", reason: null, targetValue, achievementValue, achievementPercentage: targetValue ? (achievementValue / targetValue) * 100 : null, remainingValue: Math.max(targetValue - achievementValue, 0), targetRouteCount: covered.size, scopedRouteCount: expected };
   }
 
-  private visualization(context: Fsos360ResolvedContext, rows: SalesRow[], preferred?: string) {
-    const type = preferred && preferred !== "auto" ? preferred : context.activeAnalysisLevel === "route" ? "route-map" : context.activeAnalysisLevel === "product" || context.activeAnalysisLevel === "brand" || context.activeAnalysisLevel === "category" ? "bar" : "customer-density";
-    return { availability: context.datasets.Invoices.available ? "available" : "unavailable", reason: context.datasets.Invoices.available ? null : "invoices-dataset-unavailable", type, totalRows: rows.length };
+  private visualization(
+    context: Fsos360ResolvedContext,
+    currentRows: SalesRow[],
+    previousRows: SalesRow[],
+    windows: { current: Window; comparison: Window },
+    request: VisualizationRequest | undefined,
+    analysis: { availability: Fsos360Availability; reason: string | null },
+  ) {
+    const generatedAt = new Date().toISOString();
+    const selectedType = this.defaultVisualizationType(context, request?.preferredType);
+    const unavailable = () => ({
+      selectedType,
+      availableTypes: this.availableVisualizationTypes(context, analysis, request?.metric),
+      data: null,
+      meta: { totalRows: 0, generatedAt },
+    });
+
+    if (analysis.availability !== "available") return unavailable();
+
+    const availableTypes = this.availableVisualizationTypes(context, analysis, request?.metric);
+    const selectedCapability = availableTypes.find((item) => item.type === selectedType);
+    if (!selectedCapability || selectedCapability.availability !== "available") return unavailable();
+
+    if (selectedType === "timeline" || selectedType === "line") {
+      const timeline = this.timeline(currentRows, previousRows, {
+        from: new Date(windows.current.from).toISOString().slice(0, 10),
+        to: new Date(windows.current.to).toISOString().slice(0, 10),
+      }, {
+        from: new Date(windows.comparison.from).toISOString().slice(0, 10),
+        to: new Date(windows.comparison.to).toISOString().slice(0, 10),
+      });
+      return {
+        selectedType,
+        availableTypes,
+        data: {
+          kind: "series" as const,
+          series: timeline.buckets.map((bucket) => ({
+            key: String(bucket.position),
+            label: String(bucket.position + 1),
+            current: bucket.current,
+            comparison: bucket.comparison,
+          })),
+        },
+        meta: { totalRows: currentRows.length + previousRows.length, generatedAt },
+      };
+    }
+
+    if (selectedType === "bar") {
+      const categories = this.categoryItems(currentRows, previousRows, context);
+      return {
+        selectedType,
+        availableTypes,
+        data: { kind: "categories" as const, items: categories },
+        meta: { totalRows: currentRows.length + previousRows.length, generatedAt },
+      };
+    }
+
+    if (selectedType === "treemap") {
+      const items = this.treemapItems(currentRows, context, request?.groupBy ?? "product");
+      return {
+        selectedType,
+        availableTypes,
+        data: { kind: "treemap" as const, groupBy: request?.groupBy ?? "product", items },
+        meta: { totalRows: currentRows.length, generatedAt },
+      };
+    }
+
+    if (selectedType === "customer-density") {
+      const productFiltered = Boolean(context.filters.productCodes?.length || context.filters.brandValues?.length || context.filters.categoryValues?.length);
+      const customerCodes = productFiltered ? new Set(currentRows.map((row) => row.customerCode)) : null;
+      const scopedCustomers = Array.from(context.customers.values()).filter((customer) => (!customerCodes || customerCodes.has(customer.code)) && this.customerInScope(customer.code, context, windows.current.from));
+      const geo = this.geoPoints(
+        scopedCustomers.map((customer) => ({ customerCode: customer.code, value: 1, routeId: customer.routeId })),
+        context,
+        "density",
+      );
+      return {
+        selectedType,
+        availableTypes,
+        data: { kind: "geo-points" as const, metric: "density" as const, points: geo.points },
+        meta: { totalRows: scopedCustomers.length, mappedRows: geo.mappedRows, unmappedRows: geo.unmappedRows, generatedAt },
+      };
+    }
+
+    if (selectedType === "coverage-map" || selectedType === "route-map") {
+      const visits = this.operationRows(context, "Visits", "VisitDate", "0")
+        .filter((row) => this.inWindow(row.time, windows.current) && this.operationMatches(row, context));
+      const geo = this.geoPoints(
+        visits.map((row) => ({ customerCode: row.customerCode, value: 1, routeId: row.routeId })),
+        context,
+        "coverage",
+      );
+      return {
+        selectedType,
+        availableTypes,
+        data: { kind: "geo-points" as const, metric: "coverage" as const, points: geo.points },
+        meta: {
+          totalRows: visits.length,
+          mappedRows: geo.mappedRows,
+          unmappedRows: geo.unmappedRows,
+          routeGeometryAvailable: false,
+          generatedAt,
+        },
+      };
+    }
+
+    const metric = request?.metric ?? "sales";
+    const sourceRows = metric === "sales"
+      ? currentRows.map((row) => ({ customerCode: row.customerCode, value: row.amount, routeId: row.routeId }))
+      : this.operationRows(context, metric === "collections" ? "Collections" : "Returns", metric === "collections" ? "CollectionDate" : "ReturnDate", metric === "collections" ? "Amount" : "TotalAmount")
+        .filter((row) => this.inWindow(row.time, windows.current) && this.operationMatches(row, context))
+        .map((row) => ({ customerCode: row.customerCode, value: row.amount, routeId: row.routeId }));
+    const geo = this.geoPoints(sourceRows, context, metric);
+    return {
+      selectedType,
+      availableTypes,
+      data: { kind: "geo-points" as const, metric, points: geo.points },
+      meta: { totalRows: sourceRows.length, mappedRows: geo.mappedRows, unmappedRows: geo.unmappedRows, generatedAt },
+    };
   }
+
+  private defaultVisualizationType(context: Fsos360ResolvedContext, preferred?: string) {
+    if (preferred && preferred !== "auto") return preferred;
+    if (context.activeAnalysisLevel === "route") return "route-map";
+    if (context.activeAnalysisLevel === "category") return "bar";
+    if (context.activeAnalysisLevel === "brand" || context.activeAnalysisLevel === "product") return "treemap";
+    if (context.activeAnalysisLevel === "customer") return "customer-density";
+    return "line";
+  }
+
+  private availableVisualizationTypes(
+    context: Fsos360ResolvedContext,
+    analysis: { availability: Fsos360Availability; reason: string | null },
+    requestedMetric?: "sales" | "collections" | "returns",
+  ): { type: string; availability: VisualizationAvailability; reason?: string | null }[] {
+    const analysisReason = analysis.reason ?? "analysis-unavailable";
+    const productFiltered = Boolean(context.filters.productCodes?.length || context.filters.brandValues?.length || context.filters.categoryValues?.length);
+    const salesAvailable = analysis.availability === "available" && context.datasets.Invoices.available && context.datasets["Invoice Items"].available;
+    const productsAvailable = salesAvailable && context.datasets.Products.available;
+    const customersAvailable = context.datasets.Customers.available;
+    const visitsAvailability: VisualizationAvailability = productFiltered ? "not-applicable" : analysis.availability === "available" && customersAvailable && context.datasets.Visits.available ? "available" : "unavailable";
+    const collectionAvailability: VisualizationAvailability = productFiltered ? "not-applicable" : analysis.availability === "available" && customersAvailable && context.datasets.Collections.available ? "available" : "unavailable";
+    const returnsAvailability: VisualizationAvailability = productFiltered ? "not-applicable" : analysis.availability === "available" && customersAvailable && context.datasets.Returns.available ? "available" : "unavailable";
+    const heatAvailability = requestedMetric === "collections" ? collectionAvailability : requestedMetric === "returns" ? returnsAvailability : salesAvailable ? "available" : "unavailable";
+    const heatReason = requestedMetric === "collections"
+      ? productFiltered ? "product-filter-not-supported-for-collections" : "collections-dataset-unavailable"
+      : requestedMetric === "returns"
+        ? productFiltered ? "product-filter-not-supported-for-returns" : "returns-dataset-unavailable"
+        : "invoices-dataset-unavailable";
+    const visitsReason = productFiltered ? "product-filter-not-supported-for-visits" : "visits-or-customers-dataset-unavailable";
+    return [
+      { type: "timeline", availability: salesAvailable ? "available" : "unavailable", reason: salesAvailable ? null : analysisReason },
+      { type: "line", availability: salesAvailable ? "available" : "unavailable", reason: salesAvailable ? null : analysisReason },
+      { type: "bar", availability: productsAvailable ? "available" : "unavailable", reason: productsAvailable ? null : "products-or-invoices-dataset-unavailable" },
+      { type: "treemap", availability: productsAvailable ? "available" : "unavailable", reason: productsAvailable ? null : "products-or-invoices-dataset-unavailable" },
+      { type: "heat-map", availability: heatAvailability, reason: heatAvailability === "available" ? null : analysis.availability === "available" ? heatReason : analysisReason },
+      { type: "coverage-map", availability: visitsAvailability, reason: visitsAvailability === "available" ? null : analysis.availability === "available" ? visitsReason : analysisReason },
+      { type: "route-map", availability: visitsAvailability, reason: visitsAvailability === "available" ? null : analysis.availability === "available" ? visitsReason : analysisReason },
+      { type: "customer-density", availability: customersAvailable ? "available" : "unavailable", reason: customersAvailable ? null : "customers-dataset-unavailable" },
+    ];
+  }
+
+
+  private categoryItems(currentRows: SalesRow[], previousRows: SalesRow[], context: Fsos360ResolvedContext) {
+    const aggregate = (rows: SalesRow[]) => {
+      const totals = new Map<string, { label: string; value: number }>();
+      for (const row of rows) {
+        const product = context.products.get(row.productCode);
+        const key = product?.category || "unclassified";
+        const entry = totals.get(key) ?? { label: product?.category || "Unclassified", value: 0 };
+        entry.value += row.amount;
+        totals.set(key, entry);
+      }
+      return totals;
+    };
+    const current = aggregate(currentRows);
+    const previous = aggregate(previousRows);
+    return Array.from(new Set([...current.keys(), ...previous.keys()]))
+      .map((key) => ({
+        key,
+        label: current.get(key)?.label ?? previous.get(key)?.label ?? key,
+        current: current.get(key)?.value ?? 0,
+        previous: previous.get(key)?.value ?? 0,
+        change: (current.get(key)?.value ?? 0) - (previous.get(key)?.value ?? 0),
+      }))
+      .sort((a, b) => Math.abs(b.current) - Math.abs(a.current))
+      .slice(0, MAX_CATEGORY_ITEMS);
+  }
+
+  private treemapItems(rows: SalesRow[], context: Fsos360ResolvedContext, groupBy: "product" | "brand") {
+    const totals = new Map<string, { label: string; value: number }>();
+    for (const row of rows) {
+      const product = context.products.get(row.productCode);
+      const key = groupBy === "brand" ? product?.brand || "unclassified" : row.productCode || "unclassified";
+      const label = groupBy === "brand" ? product?.brand || "Unclassified" : product?.name || row.productCode || "Unclassified";
+      const entry = totals.get(key) ?? { label, value: 0 };
+      entry.value += row.amount;
+      totals.set(key, entry);
+    }
+    const sorted = Array.from(totals.entries())
+      .map(([key, entry]) => ({ key, label: entry.label, value: entry.value, isOther: false }))
+      .sort((a, b) => b.value - a.value);
+    if (sorted.length <= MAX_TREEMAP_ITEMS) return sorted;
+    const top = sorted.slice(0, MAX_TREEMAP_ITEMS - 1);
+    const otherValue = sorted.slice(MAX_TREEMAP_ITEMS - 1).reduce((sum, item) => sum + item.value, 0);
+    return [...top, { key: "__other__", label: "__other__", value: otherValue, isOther: true }];
+  }
+
+  private customerInScope(customerCode: string, context: Fsos360ResolvedContext, at: number) {
+    const customer = context.customers.get(customerCode);
+    if (!customer || !this.customerMatches(customerCode, context)) return false;
+    const selected = context.filters.salesRepIds?.length ? new Set(context.filters.salesRepIds) : null;
+    if (!selected && context.activeAnalysisLevel !== "sales-rep") return true;
+    return context.routeAssignments.some((assignment) => assignmentMatchesAt(assignment, customer.routeId, at, selected));
+  }
+
+  private geoPoints(
+    rows: { customerCode: string; value: number; routeId: string }[],
+    context: Fsos360ResolvedContext,
+    metric: "sales" | "collections" | "returns" | "density" | "coverage",
+  ) {
+    const totals = new Map<string, { value: number; routeId: string }>();
+    for (const row of rows) {
+      const entry = totals.get(row.customerCode) ?? { value: 0, routeId: row.routeId };
+      entry.value += row.value;
+      if (!entry.routeId && row.routeId) entry.routeId = row.routeId;
+      totals.set(row.customerCode, entry);
+    }
+    let unmappedRows = 0;
+    const points = [];
+    for (const [customerCode, entry] of totals) {
+      const customer = context.customers.get(customerCode);
+      const valid = customer && customer.latitude !== null && customer.longitude !== null
+        && customer.latitude >= -90 && customer.latitude <= 90 && customer.longitude >= -180 && customer.longitude <= 180;
+      if (!valid) {
+        unmappedRows++;
+        continue;
+      }
+      points.push({
+        customerCode,
+        customerName: customer.name,
+        routeId: entry.routeId || customer.routeId || null,
+        latitude: customer.latitude,
+        longitude: customer.longitude,
+        value: entry.value,
+      });
+    }
+    const limited = points.sort((a, b) => b.value - a.value).slice(0, MAX_GEO_POINTS);
+    return { points: limited, mappedRows: limited.length, unmappedRows, metric };
+  }
+
 
   private executiveInsight(kpis: Fsos360Kpi[], analysis: { availability: Fsos360Availability; reason: string | null }) {
     if (analysis.availability !== "available") return { availability: analysis.availability, reason: analysis.reason, items: [] };

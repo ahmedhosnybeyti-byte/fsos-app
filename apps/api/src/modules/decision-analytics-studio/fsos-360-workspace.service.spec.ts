@@ -116,3 +116,106 @@ test("FSOS 360 response schemas accept live workspace response shapes", async ()
   fsos360FilterOptionsResponseSchema.parse(await service.filterOptions({} as any, { field: "sales-rep", query: "", page: 1, pageSize: 10, context: periods }));
   fsos360CapabilitiesResponseSchema.parse(await service.capabilities({} as any));
 });
+
+
+test("category bar aggregates current, previous, and change from filtered sales", async () => {
+  const resolved = context({
+    activeAnalysisLevel: "category",
+    filters: { companyId: "company-1" },
+    products: new Map([
+      ["product-1", { code: "product-1", name: "P1", brand: "Brand A", category: "Drinks" }],
+      ["product-2", { code: "product-2", name: "P2", brand: "Brand B", category: "Snacks" }],
+    ]),
+    datasets: {
+      ...context().datasets,
+      Invoices: available([
+        { InvoiceNo: "now-1", CustomerCode: "customer-1", RouteID: "route-a", InvoiceDate: "2026-01-15" },
+        { InvoiceNo: "prior-1", CustomerCode: "customer-1", RouteID: "route-a", InvoiceDate: "2026-02-15" },
+      ]),
+      "Invoice Items": available([
+        { InvoiceNo: "now-1", ProductCode: "product-1", LineTotal: 120 },
+        { InvoiceNo: "now-1", ProductCode: "product-2", LineTotal: 80 },
+        { InvoiceNo: "prior-1", ProductCode: "product-1", LineTotal: 100 },
+      ]),
+    },
+  });
+  const response = await workspace(resolved).query({} as any, { ...periods, filters: {}, analysisFocus: "category", visualization: { preferredType: "bar" } });
+  assert.equal(response.visualization.data?.kind, "categories");
+  const drinks = response.visualization.data?.kind === "categories" ? response.visualization.data.items.find((item: any) => item.key === "Drinks") : null;
+  assert.deepEqual(drinks, { key: "Drinks", label: "Drinks", current: 120, previous: 100, change: 20 });
+});
+
+test("treemap aggregates product and brand values with no synthetic data", async () => {
+  const resolved = context({
+    activeAnalysisLevel: "brand",
+    filters: { companyId: "company-1" },
+    products: new Map([
+      ["product-1", { code: "product-1", name: "P1", brand: "Brand A", category: "Drinks" }],
+      ["product-2", { code: "product-2", name: "P2", brand: "Brand A", category: "Drinks" }],
+    ]),
+    datasets: {
+      ...context().datasets,
+      Invoices: available([{ InvoiceNo: "now-1", CustomerCode: "customer-1", RouteID: "route-a", InvoiceDate: "2026-01-15" }]),
+      "Invoice Items": available([
+        { InvoiceNo: "now-1", ProductCode: "product-1", LineTotal: 70 },
+        { InvoiceNo: "now-1", ProductCode: "product-2", LineTotal: 30 },
+      ]),
+    },
+  });
+  const response = await workspace(resolved).query({} as any, { ...periods, filters: {}, analysisFocus: "brand", visualization: { preferredType: "treemap", groupBy: "brand" } });
+  assert.deepEqual(response.visualization.data, {
+    kind: "treemap",
+    groupBy: "brand",
+    items: [{ key: "Brand A", label: "Brand A", value: 100, isOther: false }],
+  });
+});
+
+test("geo points respect resolved customer scope and count unmapped customers", async () => {
+  const resolved = context({
+    activeAnalysisLevel: "company",
+    filters: { companyId: "company-1", customerCodes: ["customer-1", "customer-2"] },
+    customers: new Map([
+      ["customer-1", { code: "customer-1", name: "Mapped", city: "City", branchId: "branch-1", routeId: "route-a", latitude: 21.5, longitude: 39.2 }],
+      ["customer-2", { code: "customer-2", name: "Unmapped", city: "City", branchId: "branch-1", routeId: "route-a", latitude: null, longitude: null }],
+      ["customer-3", { code: "customer-3", name: "Outside", city: "Other", branchId: "branch-1", routeId: "route-a", latitude: 22, longitude: 40 }],
+    ]),
+    datasets: {
+      ...context().datasets,
+      Invoices: available([
+        { InvoiceNo: "in-1", CustomerCode: "customer-1", RouteID: "route-a", InvoiceDate: "2026-01-15" },
+        { InvoiceNo: "in-2", CustomerCode: "customer-2", RouteID: "route-a", InvoiceDate: "2026-01-16" },
+        { InvoiceNo: "in-3", CustomerCode: "customer-3", RouteID: "route-a", InvoiceDate: "2026-01-17" },
+      ]),
+      "Invoice Items": available([
+        { InvoiceNo: "in-1", ProductCode: "product-1", LineTotal: 50 },
+        { InvoiceNo: "in-2", ProductCode: "product-1", LineTotal: 30 },
+        { InvoiceNo: "in-3", ProductCode: "product-1", LineTotal: 99 },
+      ]),
+    },
+  });
+  const response = await workspace(resolved).query({} as any, { ...periods, filters: { customerCodes: ["customer-1", "customer-2"] }, visualization: { preferredType: "heat-map", metric: "sales" } });
+  assert.equal(response.visualization.data?.kind, "geo-points");
+  assert.deepEqual(response.visualization.data?.kind === "geo-points" ? response.visualization.data.points.map((point: any) => point.customerCode) : [], ["customer-1"]);
+  assert.equal("unmappedRows" in response.visualization.meta ? response.visualization.meta.unmappedRows : 0, 1);
+});
+
+test("collection, returns, and visits availability is explicit when their datasets are absent", async () => {
+  const resolved = context({
+    datasets: {
+      ...context().datasets,
+      Collections: unavailable(),
+      Returns: unavailable(),
+      Visits: unavailable(),
+    },
+  });
+  const service = workspace(resolved);
+  const collections = await service.query({} as any, { ...periods, visualization: { preferredType: "heat-map", metric: "collections" } });
+  assert.equal(collections.visualization.data, null);
+  assert.equal(collections.visualization.availableTypes.find((item: any) => item.type === "heat-map")?.reason, "collections-dataset-unavailable");
+  const returns = await service.query({} as any, { ...periods, visualization: { preferredType: "heat-map", metric: "returns" } });
+  assert.equal(returns.visualization.data, null);
+  assert.equal(returns.visualization.availableTypes.find((item: any) => item.type === "heat-map")?.reason, "returns-dataset-unavailable");
+  const coverage = await service.query({} as any, { ...periods, visualization: { preferredType: "coverage-map" } });
+  assert.equal(coverage.visualization.data, null);
+  assert.equal(coverage.visualization.availableTypes.find((item: any) => item.type === "coverage-map")?.availability, "unavailable");
+});
