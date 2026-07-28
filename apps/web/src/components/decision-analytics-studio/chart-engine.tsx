@@ -61,9 +61,16 @@ function CrystalGradientDefs() {
     <defs>
       {(Object.keys(SEMANTIC_COLORS) as (keyof typeof SEMANTIC_COLORS)[]).map((status) => (
         <linearGradient key={status} id={CRYSTAL_GRADIENT_IDS[status]} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#ffffff" stopOpacity={0.95} />
-          <stop offset="18%" stopColor="#ffffff" stopOpacity={0.55} />
-          <stop offset="45%" stopColor={SEMANTIC_COLORS[status]} stopOpacity={0.95} />
+          {/* The bar's own semantic color stays the dominant fill top-to-
+              bottom (unlike the previous version, which faded into white
+              near the top and washed the color out) — a narrow, bright
+              white streak sits ON TOP of that color as a highlight/reflection
+              band, the way light catches one facet of a cut crystal, rather
+              than replacing the color underneath it. */}
+          <stop offset="0%" stopColor={SEMANTIC_COLORS[status]} stopOpacity={1} />
+          <stop offset="8%" stopColor="#ffffff" stopOpacity={0.9} />
+          <stop offset="16%" stopColor={SEMANTIC_COLORS[status]} stopOpacity={1} />
+          <stop offset="55%" stopColor={SEMANTIC_COLORS[status]} stopOpacity={0.92} />
           <stop offset="100%" stopColor={SEMANTIC_COLORS[status]} stopOpacity={1} />
         </linearGradient>
       ))}
@@ -294,7 +301,7 @@ export function ChartEngine({
               <BarChart data={sorted} margin={{ bottom: 16 }} onClick={(e) => e?.activePayload?.[0] && handleBarClick(e.activePayload[0].payload)}>
                 <CrystalGradientDefs />
                 <CartesianGrid strokeDasharray="3 3" className="opacity-20" />
-                <XAxis dataKey="label" tick={AXIS_TICK_STYLE} interval={0} angle={-20} textAnchor="end" height={70} />
+                <XAxis dataKey="label" tick={AXIS_TICK_STYLE} interval={0} angle={-20} textAnchor="end" height={80} tickMargin={12} />
                 <YAxis tickFormatter={formatAmount} tick={AXIS_TICK_STYLE} />
                 <Tooltip content={renderGroupTooltip} />
                 <Bar dataKey="sales" radius={[4, 4, 0, 0]}>
@@ -331,7 +338,7 @@ export function ChartEngine({
             ) : chartType === "line" ? (
               <LineChart data={sorted} margin={{ bottom: 16 }} onClick={(e) => e?.activePayload?.[0] && handleBarClick(e.activePayload[0].payload)}>
                 <CartesianGrid strokeDasharray="3 3" className="opacity-20" />
-                <XAxis dataKey="label" tick={AXIS_TICK_STYLE} interval={0} angle={-20} textAnchor="end" height={70} />
+                <XAxis dataKey="label" tick={AXIS_TICK_STYLE} interval={0} angle={-20} textAnchor="end" height={80} tickMargin={12} />
                 <YAxis tickFormatter={formatAmount} tick={AXIS_TICK_STYLE} />
                 <Tooltip formatter={(v: number) => formatAmount(v)} />
                 <Line type="monotone" dataKey="sales" stroke="#2563eb" strokeWidth={2} dot={{ r: 3, cursor: "pointer" }} />
@@ -339,7 +346,7 @@ export function ChartEngine({
             ) : chartType === "area" ? (
               <AreaChart data={sorted} margin={{ bottom: 16 }} onClick={(e) => e?.activePayload?.[0] && handleBarClick(e.activePayload[0].payload)}>
                 <CartesianGrid strokeDasharray="3 3" className="opacity-20" />
-                <XAxis dataKey="label" tick={AXIS_TICK_STYLE} interval={0} angle={-20} textAnchor="end" height={70} />
+                <XAxis dataKey="label" tick={AXIS_TICK_STYLE} interval={0} angle={-20} textAnchor="end" height={80} tickMargin={12} />
                 <YAxis tickFormatter={formatAmount} tick={AXIS_TICK_STYLE} />
                 <Tooltip formatter={(v: number) => formatAmount(v)} />
                 <Area type="monotone" dataKey="sales" stroke="#2563eb" fill="#2563eb" fillOpacity={0.25} />
@@ -445,7 +452,7 @@ export function ChartEngine({
               <ComposedChart data={paretoData} margin={{ bottom: 16 }} onClick={(e) => e?.activePayload?.[0] && handleBarClick(e.activePayload[0].payload)}>
                 <CrystalGradientDefs />
                 <CartesianGrid strokeDasharray="3 3" className="opacity-20" />
-                <XAxis dataKey="label" tick={AXIS_TICK_STYLE} interval={0} angle={-20} textAnchor="end" height={70} />
+                <XAxis dataKey="label" tick={AXIS_TICK_STYLE} interval={0} angle={-20} textAnchor="end" height={80} tickMargin={12} />
                 <YAxis yAxisId="left" tickFormatter={formatAmount} tick={AXIS_TICK_STYLE} />
                 <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} tick={AXIS_TICK_STYLE} />
                 <Tooltip formatter={(v: number, name: string) => (name === "cumulativePct" ? `${v.toFixed(1)}%` : formatAmount(v))} />
