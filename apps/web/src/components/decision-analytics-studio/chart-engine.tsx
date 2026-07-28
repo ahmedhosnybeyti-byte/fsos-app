@@ -30,6 +30,60 @@ import type { TranslationKey } from "@/lib/i18n/dictionaries";
 import { cn } from "@/lib/utils";
 import { colorHexChartSeries, SEMANTIC_COLORS, type ChartColorPoint } from "@/components/charts/chart-color-scale";
 
+// Recharts' default axis-tick fill is a hardcoded mid-gray (#666) with no
+// connection to this app's theme tokens, so it reads faint/washed-out
+// against the dark theme's near-black card background (--card in
+// globals.css). Every <XAxis>/<YAxis> tick below is pinned to this
+// CSS-variable-driven color instead so it tracks light/dark mode correctly.
+const AXIS_TICK_STYLE = { fontSize: 11, fill: "hsl(var(--foreground))" };
+
+// "Crystal" bar fill — a strong glassy highlight (near-white, high opacity)
+// fading into the semantic base color, plus a bright top rim stroke, so
+// each bar reads as a lit, faceted 3D block rather than a flat rectangle.
+// One <linearGradient> per semantic color (fixed id, defined once in <defs>
+// and reused by every <Cell fill={crystalFill(status)}>), not one per bar,
+// since the color palette is fixed regardless of how many bars render.
+const CRYSTAL_GRADIENT_IDS: Record<keyof typeof SEMANTIC_COLORS, string> = {
+  excellent: "crystal-excellent",
+  stable: "crystal-stable",
+  warning: "crystal-warning",
+  critical: "crystal-critical",
+  neutral: "crystal-neutral",
+  noData: "crystal-noData",
+};
+
+function crystalFill(status: keyof typeof SEMANTIC_COLORS): string {
+  return `url(#${CRYSTAL_GRADIENT_IDS[status]})`;
+}
+
+function CrystalGradientDefs() {
+  return (
+    <defs>
+      {(Object.keys(SEMANTIC_COLORS) as (keyof typeof SEMANTIC_COLORS)[]).map((status) => (
+        <linearGradient key={status} id={CRYSTAL_GRADIENT_IDS[status]} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#ffffff" stopOpacity={0.95} />
+          <stop offset="18%" stopColor="#ffffff" stopOpacity={0.55} />
+          <stop offset="45%" stopColor={SEMANTIC_COLORS[status]} stopOpacity={0.95} />
+          <stop offset="100%" stopColor={SEMANTIC_COLORS[status]} stopOpacity={1} />
+        </linearGradient>
+      ))}
+    </defs>
+  );
+}
+
+// Reverse-lookup: colorHexChartSeries() already returns the resolved hex per
+// bar (e.g. "#16a34a"); map each hex back to its SemanticStatus key so the
+// gradient defs (keyed by status, not by hex) can be looked up per bar
+// without re-running the color-strategy logic a second time.
+const HEX_TO_STATUS = new Map<string, keyof typeof SEMANTIC_COLORS>(
+  (Object.keys(SEMANTIC_COLORS) as (keyof typeof SEMANTIC_COLORS)[]).map((status) => [SEMANTIC_COLORS[status], status]),
+);
+
+function crystalFillForHex(hex: string): string {
+  const status = HEX_TO_STATUS.get(hex);
+  return status ? crystalFill(status) : hex;
+}
+
 // The switchable main chart — spec's chart-type row (Column, Bar, Line,
 // Area, Stacked, Pie, Treemap, Scatter Plot, Pareto, Data Table). All 10
 // types render the SAME `groups` prop (one DecisionQueryResult.chart array,
@@ -230,54 +284,56 @@ export function ChartEngine({
         <div className="h-[360px] w-full">
           <ResponsiveContainer width="100%" height="100%">
             {chartType === "column" ? (
-              <BarChart data={sorted} onClick={(e) => e?.activePayload?.[0] && handleBarClick(e.activePayload[0].payload)}>
+              <BarChart data={sorted} margin={{ bottom: 16 }} onClick={(e) => e?.activePayload?.[0] && handleBarClick(e.activePayload[0].payload)}>
+                <CrystalGradientDefs />
                 <CartesianGrid strokeDasharray="3 3" className="opacity-20" />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
-                <YAxis tickFormatter={formatAmount} tick={{ fontSize: 11 }} />
+                <XAxis dataKey="label" tick={AXIS_TICK_STYLE} interval={0} angle={-20} textAnchor="end" height={70} />
+                <YAxis tickFormatter={formatAmount} tick={AXIS_TICK_STYLE} />
                 <Tooltip content={renderGroupTooltip} />
                 <Bar dataKey="sales" radius={[4, 4, 0, 0]}>
                   {sorted.map((g, i) => (
                     <Cell
                       key={g.key}
                       cursor="pointer"
-                      fill={barColors[i]}
-                      stroke={g.key === highlightedKey ? SEMANTIC_COLORS.neutral : "none"}
-                      strokeWidth={g.key === highlightedKey ? 2 : 0}
+                      fill={crystalFillForHex(barColors[i])}
+                      stroke={g.key === highlightedKey ? SEMANTIC_COLORS.neutral : "rgba(255,255,255,0.35)"}
+                      strokeWidth={g.key === highlightedKey ? 2 : 1}
                     />
                   ))}
                 </Bar>
               </BarChart>
             ) : chartType === "bar" ? (
               <BarChart data={sorted} layout="vertical" onClick={(e) => e?.activePayload?.[0] && handleBarClick(e.activePayload[0].payload)}>
+                <CrystalGradientDefs />
                 <CartesianGrid strokeDasharray="3 3" className="opacity-20" />
-                <XAxis type="number" tickFormatter={formatAmount} tick={{ fontSize: 11 }} />
-                <YAxis type="category" dataKey="label" width={110} tick={{ fontSize: 11 }} />
+                <XAxis type="number" tickFormatter={formatAmount} tick={AXIS_TICK_STYLE} />
+                <YAxis type="category" dataKey="label" width={110} tick={AXIS_TICK_STYLE} />
                 <Tooltip content={renderGroupTooltip} />
                 <Bar dataKey="sales" radius={[0, 4, 4, 0]}>
                   {sorted.map((g, i) => (
                     <Cell
                       key={g.key}
                       cursor="pointer"
-                      fill={barColors[i]}
-                      stroke={g.key === highlightedKey ? SEMANTIC_COLORS.neutral : "none"}
-                      strokeWidth={g.key === highlightedKey ? 2 : 0}
+                      fill={crystalFillForHex(barColors[i])}
+                      stroke={g.key === highlightedKey ? SEMANTIC_COLORS.neutral : "rgba(255,255,255,0.35)"}
+                      strokeWidth={g.key === highlightedKey ? 2 : 1}
                     />
                   ))}
                 </Bar>
               </BarChart>
             ) : chartType === "line" ? (
-              <LineChart data={sorted} onClick={(e) => e?.activePayload?.[0] && handleBarClick(e.activePayload[0].payload)}>
+              <LineChart data={sorted} margin={{ bottom: 16 }} onClick={(e) => e?.activePayload?.[0] && handleBarClick(e.activePayload[0].payload)}>
                 <CartesianGrid strokeDasharray="3 3" className="opacity-20" />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
-                <YAxis tickFormatter={formatAmount} tick={{ fontSize: 11 }} />
+                <XAxis dataKey="label" tick={AXIS_TICK_STYLE} interval={0} angle={-20} textAnchor="end" height={70} />
+                <YAxis tickFormatter={formatAmount} tick={AXIS_TICK_STYLE} />
                 <Tooltip formatter={(v: number) => formatAmount(v)} />
                 <Line type="monotone" dataKey="sales" stroke="#2563eb" strokeWidth={2} dot={{ r: 3, cursor: "pointer" }} />
               </LineChart>
             ) : chartType === "area" ? (
-              <AreaChart data={sorted} onClick={(e) => e?.activePayload?.[0] && handleBarClick(e.activePayload[0].payload)}>
+              <AreaChart data={sorted} margin={{ bottom: 16 }} onClick={(e) => e?.activePayload?.[0] && handleBarClick(e.activePayload[0].payload)}>
                 <CartesianGrid strokeDasharray="3 3" className="opacity-20" />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
-                <YAxis tickFormatter={formatAmount} tick={{ fontSize: 11 }} />
+                <XAxis dataKey="label" tick={AXIS_TICK_STYLE} interval={0} angle={-20} textAnchor="end" height={70} />
+                <YAxis tickFormatter={formatAmount} tick={AXIS_TICK_STYLE} />
                 <Tooltip formatter={(v: number) => formatAmount(v)} />
                 <Area type="monotone" dataKey="sales" stroke="#2563eb" fill="#2563eb" fillOpacity={0.25} />
               </AreaChart>
@@ -289,12 +345,23 @@ export function ChartEngine({
                 data={[Object.fromEntries([["name", t("decisionAnalyticsStudio.chartStacked")], ...sorted.map((g) => [g.key, g.sales])])]}
                 layout="vertical"
               >
-                <XAxis type="number" tickFormatter={formatAmount} tick={{ fontSize: 11 }} />
+                <CrystalGradientDefs />
+                <XAxis type="number" tickFormatter={formatAmount} tick={AXIS_TICK_STYLE} />
                 <YAxis type="category" dataKey="name" width={0} tick={false} />
                 <Tooltip formatter={(v: number) => formatAmount(v)} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Legend wrapperStyle={{ fontSize: 11, color: "hsl(var(--foreground))" }} />
                 {sorted.map((g, i) => (
-                  <Bar key={g.key} dataKey={g.key} name={g.label} stackId="a" fill={barColors[i]} onClick={() => onGroupClick(g)} cursor="pointer" />
+                  <Bar
+                    key={g.key}
+                    dataKey={g.key}
+                    name={g.label}
+                    stackId="a"
+                    fill={crystalFillForHex(barColors[i])}
+                    stroke="rgba(255,255,255,0.35)"
+                    strokeWidth={1}
+                    onClick={() => onGroupClick(g)}
+                    cursor="pointer"
+                  />
                 ))}
               </BarChart>
             ) : chartType === "pie" ? (
@@ -306,7 +373,17 @@ export function ChartEngine({
                   cx="50%"
                   cy="50%"
                   outerRadius={130}
-                  label={(entry: { label?: string }) => entry.label ?? ""}
+                  // recharts' default pie label text fill is the SVG default
+                  // ("currentColor", effectively black), invisible against
+                  // the dark theme's card background — the label renderer
+                  // must set its own <text fill> explicitly, `fill` on <Pie>
+                  // itself only affects slice color (overridden by <Cell>
+                  // below anyway).
+                  label={(entry: { label?: string; x: number; y: number; textAnchor: string }) => (
+                    <text x={entry.x} y={entry.y} textAnchor={entry.textAnchor} fill="hsl(var(--foreground))" fontSize={11} dominantBaseline="central">
+                      {entry.label ?? ""}
+                    </text>
+                  )}
                   onClick={(entry: { key?: string }) => {
                     if (!entry?.key || entry.key === "__other__") return;
                     const g = groups.find((x) => x.key === entry.key);
@@ -345,26 +422,28 @@ export function ChartEngine({
               // Bivariate: Sales (x) vs Orders (y) per group — two genuinely
               // distinct, already-computed metrics, not a fabricated axis.
               <ScatterChart onClick={(e) => e?.activePayload?.[0] && handleBarClick(e.activePayload[0].payload)}>
+                <CrystalGradientDefs />
                 <CartesianGrid strokeDasharray="3 3" className="opacity-20" />
-                <XAxis type="number" dataKey="sales" name={t("decisionAnalyticsStudio.kpiSales")} tickFormatter={formatAmount} tick={{ fontSize: 11 }} />
-                <YAxis type="number" dataKey="ordersCount" name={t("decisionAnalyticsStudio.kpiOrders")} tick={{ fontSize: 11 }} />
+                <XAxis type="number" dataKey="sales" name={t("decisionAnalyticsStudio.kpiSales")} tickFormatter={formatAmount} tick={AXIS_TICK_STYLE} />
+                <YAxis type="number" dataKey="ordersCount" name={t("decisionAnalyticsStudio.kpiOrders")} tick={AXIS_TICK_STYLE} />
                 <Tooltip formatter={(v: number) => formatAmount(v)} cursor={{ strokeDasharray: "3 3" }} />
                 <Scatter data={sorted} cursor="pointer">
                   {sorted.map((g, i) => (
-                    <Cell key={g.key} fill={barColors[i]} />
+                    <Cell key={g.key} fill={crystalFillForHex(barColors[i])} stroke="rgba(255,255,255,0.35)" strokeWidth={1} />
                   ))}
                 </Scatter>
               </ScatterChart>
             ) : chartType === "pareto" ? (
-              <ComposedChart data={paretoData} onClick={(e) => e?.activePayload?.[0] && handleBarClick(e.activePayload[0].payload)}>
+              <ComposedChart data={paretoData} margin={{ bottom: 16 }} onClick={(e) => e?.activePayload?.[0] && handleBarClick(e.activePayload[0].payload)}>
+                <CrystalGradientDefs />
                 <CartesianGrid strokeDasharray="3 3" className="opacity-20" />
-                <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} />
-                <YAxis yAxisId="left" tickFormatter={formatAmount} tick={{ fontSize: 11 }} />
-                <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} tick={{ fontSize: 11 }} />
+                <XAxis dataKey="label" tick={AXIS_TICK_STYLE} interval={0} angle={-20} textAnchor="end" height={70} />
+                <YAxis yAxisId="left" tickFormatter={formatAmount} tick={AXIS_TICK_STYLE} />
+                <YAxis yAxisId="right" orientation="right" domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} tick={AXIS_TICK_STYLE} />
                 <Tooltip formatter={(v: number, name: string) => (name === "cumulativePct" ? `${v.toFixed(1)}%` : formatAmount(v))} />
                 <Bar yAxisId="left" dataKey="sales" cursor="pointer">
                   {paretoData.map((g, i) => (
-                    <Cell key={g.key} fill={barColors[i]} />
+                    <Cell key={g.key} fill={crystalFillForHex(barColors[i])} stroke="rgba(255,255,255,0.35)" strokeWidth={1} />
                   ))}
                 </Bar>
                 {/* Cumulative line stays fixed Blue per the Chart Color
