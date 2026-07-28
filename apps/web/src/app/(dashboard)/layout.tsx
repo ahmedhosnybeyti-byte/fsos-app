@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, FileSpreadsheet, FileText, Sparkles, Users, Settings, Map, Flame, UserPlus, GitCompare, Bot, TrendingUp, Users2, Footprints, Target, LocateFixed, IdCard, Compass, MapPinned, BarChart3, Globe2 } from "lucide-react";
+import { LayoutDashboard, FileSpreadsheet, FileText, Sparkles, Users, Settings, Map, Flame, UserPlus, GitCompare, Bot, TrendingUp, Users2, Footprints, Target, LocateFixed, IdCard, Compass, MapPinned, BarChart3, Globe2, PackagePlus } from "lucide-react";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { AppShell, type NavItem } from "@/components/shell/app-shell";
 import { useTranslation } from "@/components/translation-provider";
@@ -28,6 +28,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     { href: "/dashboard/files", label: t("nav.files"), icon: FileSpreadsheet, colorKey: "files", group: t("group.data") },
     { href: "/dashboard/assistant", label: t("nav.assistant"), icon: Bot, colorKey: "assistant", group: t("group.aiInsights") },
     { href: "/dashboard/visit-copilot", label: t("nav.visitCopilot"), icon: Compass, colorKey: "visitCopilot", group: t("group.aiInsights") },
+    { href: "/dashboard/smart-loading", label: t("nav.smartLoading"), icon: PackagePlus, colorKey: "smartLoading", group: t("group.aiInsights") },
     { href: "/dashboard/analysis-studio", label: t("nav.analysisStudio"), icon: Sparkles, colorKey: "analysisStudio", group: t("group.aiInsights") },
     { href: "/dashboard/heatmap", label: t("nav.heatmap"), icon: Flame, colorKey: "heatmap", group: t("group.aiInsights") },
     { href: "/dashboard/sales-growth", label: t("nav.sgi"), icon: Target, colorKey: "sgi", group: t("group.aiInsights") },

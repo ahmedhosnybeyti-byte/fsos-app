@@ -43,6 +43,7 @@ import { VisitCopilotModule } from "./modules/visit-copilot/visit-copilot.module
 import { TerritoryIntelligenceModule } from "./modules/territory-intelligence/territory-intelligence.module";
 import { DecisionAnalyticsStudioModule } from "./modules/decision-analytics-studio/decision-analytics-studio.module";
 import { GeoEngineModule } from "./modules/geo-engine/geo-engine.module";
+import { SmartLoadingModule } from "./modules/smart-loading/smart-loading.module";
 
 @Module({
   imports: [
@@ -90,6 +91,7 @@ import { GeoEngineModule } from "./modules/geo-engine/geo-engine.module";
     TerritoryIntelligenceModule,
     DecisionAnalyticsStudioModule,
     GeoEngineModule,
+    SmartLoadingModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
