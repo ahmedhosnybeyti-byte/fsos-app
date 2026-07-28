@@ -367,8 +367,6 @@ export function SmartLoadingScreen({
     );
   }
 
-  const otherAttention = session.attention.filter((item) => !/لم يباع|راكدة/i.test(item.message));
-
   return (
     <div dir="rtl" className="space-y-5 pb-4" onClick={() => panel && setPanel(null)}>
       <header className="flex flex-wrap items-start justify-between gap-3">
@@ -456,12 +454,6 @@ export function SmartLoadingScreen({
             </h2>
             <p className="mb-2 text-xs text-muted-foreground">{t("smartLoading.attentionDescription")}</p>
             <div className="space-y-2">
-              {otherAttention.map((item) => (
-                <p key={item.id} className="rounded bg-amber-500/10 px-2 py-1.5 text-sm">
-                  {item.message}
-                </p>
-              ))}
-
               {staleRows.length > 0 && (
                 <div className="rounded border border-amber-500/20">
                   <button
@@ -481,7 +473,7 @@ export function SmartLoadingScreen({
                 </div>
               )}
 
-              {otherAttention.length === 0 && staleRows.length === 0 && (
+              {staleRows.length === 0 && (
                 <p className="text-sm text-muted-foreground">{t("smartLoading.noOtherAlerts")}</p>
               )}
             </div>
