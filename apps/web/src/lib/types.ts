@@ -1049,9 +1049,15 @@ export interface DecisionChartGroup {
   target: number | null;
 }
 
+// 2026-07-28: one point PER CUSTOMER now (previously one averaged point per
+// City) — see decision-analytics-studio.schemas.ts's decisionHeatmapTerritorySchema
+// comment. `id`/`name` are the customer; `cityId`/`cityName` still carry the
+// City so the existing click-to-filter-by-city interaction keeps working.
 export interface DecisionHeatmapTerritory {
   id: string;
   name: string;
+  cityId: string;
+  cityName: string;
   lat: number;
   lon: number;
   sales: number;
@@ -1602,3 +1608,12 @@ export interface VisitCopilot360Summary {
   closingPhrase: string;
   warnings: string[];
 }
+
+// Smart Loading — a read-only loading-preparation session scoped by the signed-in account.
+export type SmartLoadingSessionState = "ready" | "vehicle-stock-unavailable";
+export type SmartLoadingPriority = "high" | "normal";
+export interface SmartLoadingProduct { productCode: string; productName: string; currentVehicleStock: number; weeklyAverageSales: number; priority: SmartLoadingPriority; }
+export interface SmartLoadingAttention { id: string; message: string; }
+export interface SmartLoadingReadySession { state: "ready"; products: SmartLoadingProduct[]; attention: SmartLoadingAttention[]; calculatedAt: string; }
+export interface SmartLoadingVehicleStockUnavailableSession { state: "vehicle-stock-unavailable"; }
+export type SmartLoadingSession = SmartLoadingReadySession | SmartLoadingVehicleStockUnavailableSession;

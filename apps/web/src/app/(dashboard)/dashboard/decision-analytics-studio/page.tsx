@@ -156,10 +156,13 @@ function DecisionAnalyticsStudioWorkspace() {
     }));
   }
 
-  // Mini Heat Map is always City-grouped, so it only ever writes to
-  // cityValues regardless of the active analyzeBy — toggled (add/remove),
-  // not replaced, since a viewer might reasonably want more than one City
-  // active on the map at once even while charting a different dimension.
+  // Mini Heat Map plots one dot per customer (2026-07-28), but a click still
+  // resolves to and toggles that customer's CITY into cityValues — the map
+  // component passes cityId/cityName here, not the customer id, so this
+  // filter stays City-level regardless of the active analyzeBy. Toggled
+  // (add/remove), not replaced, since a viewer might reasonably want more
+  // than one City active on the map at once even while charting a different
+  // dimension.
   function handleToggleCity(id: string, _name: string) {
     setFilters((prev) => {
       const current = prev.cityValues ?? [];

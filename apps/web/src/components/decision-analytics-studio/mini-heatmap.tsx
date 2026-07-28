@@ -8,14 +8,19 @@ import { useTranslation } from "@/components/translation-provider";
 import { heatGradientObject, radiusForZoom, colorForRatio } from "@/components/geo-engine/color-scale";
 import { cn } from "@/lib/utils";
 
-// Mini Heat Map — always City-grouped (see decision-analytics-studio.
-// schemas.ts's decisionHeatmapTerritorySchema comment), geographic context
-// bound bidirectionally into the shared Global Analysis State: clicking a
-// dot toggles that City into/out of the active `cityValues` filter (which
-// re-runs the query and re-renders the charts/KPIs), and any City already
-// active in the filter is drawn highlighted here even if the click that put
-// it there came from a chart bar instead of this map — satisfying the
-// client's explicit "charts must be linked to the heat map" requirement.
+// Mini Heat Map — one dot PER CUSTOMER (2026-07-28 change; previously always
+// City-grouped into one averaged dot per city — see decision-analytics-
+// studio.schemas.ts's decisionHeatmapTerritorySchema comment and
+// PROJECT_LOG.md 2026-07-28 for the before/after). The City click-to-filter
+// interaction is preserved unchanged: each point still carries its `cityId`/
+// `cityName`, and clicking any customer dot toggles that customer's CITY
+// into/out of the active `cityValues` filter (which re-runs the query and
+// re-renders the charts/KPIs) — a click does not filter to a single
+// customer, it resolves to the city the customer belongs to, same semantics
+// as before. Any City already active in the filter is drawn highlighted
+// here (on every dot belonging to that city) even if the click that put it
+// there came from a chart bar instead of this map — satisfying the client's
+// explicit "charts must be linked to the heat map" requirement.
 //
 // 2026-07-22: client explicitly asked this map to offer the same Heat /
 // Bubble / Cluster switch as the Geo Intelligence Engine ("زي الشاشة اللي
@@ -149,13 +154,13 @@ export function MiniHeatmap({
         // — the heat layer itself is one canvas with no per-point DOM.
         for (const p of points) {
           const target = L.circleMarker([p.lat, p.lon], { radius: 12, opacity: 0, fillOpacity: 0, interactive: true });
-          target.on("click", () => onToggleCity(p.id, p.name));
+          target.on("click", () => onToggleCity(p.cityId, p.cityName));
           target.addTo(map);
           markersRef.current.set(p.id, target);
         }
       } else if (mode === "bubble") {
         for (const p of points) {
-          const isSelected = selectedCityIds.includes(p.id);
+          const isSelected = selectedCityIds.includes(p.cityId);
           const ratio = p.sales / safeMax;
           const radius = MIN_RADIUS + ratio * (MAX_RADIUS - MIN_RADIUS);
           const marker = L.circleMarker([p.lat, p.lon], {
@@ -166,7 +171,7 @@ export function MiniHeatmap({
             fillOpacity: isSelected ? 0.9 : 0.75,
           });
           marker.bindTooltip(`${p.name} — ${Math.round(p.sales).toLocaleString("en-US")}`);
-          marker.on("click", () => onToggleCity(p.id, p.name));
+          marker.on("click", () => onToggleCity(p.cityId, p.cityName));
           marker.addTo(map);
           markersRef.current.set(p.id, marker);
         }
@@ -177,7 +182,7 @@ export function MiniHeatmap({
         const maxCount = buckets.reduce((m, b) => Math.max(m, b.count), 0);
         for (const b of buckets) {
           const isCluster = b.count > 1;
-          const isSelected = !isCluster && b.point ? selectedCityIds.includes(b.point.id) : false;
+          const isSelected = !isCluster && b.point ? selectedCityIds.includes(b.point.cityId) : false;
           const sizeRatio = isCluster ? b.count / Math.max(maxCount, 1) : 0.3;
           const radius = MIN_RADIUS + Math.sqrt(sizeRatio) * (MAX_RADIUS - MIN_RADIUS);
           const ratio = b.totalSales / safeMax;
@@ -197,7 +202,7 @@ export function MiniHeatmap({
             clusterLayersRef.current.push(marker);
           } else if (b.point) {
             const point = b.point;
-            marker.on("click", () => onToggleCity(point.id, point.name));
+            marker.on("click", () => onToggleCity(point.cityId, point.cityName));
             markersRef.current.set(point.id, marker);
           }
           marker.addTo(map);
@@ -224,18 +229,22 @@ export function MiniHeatmap({
   }, [mapReady, points]);
 
   // Cheap restyle on selection change, no rebuild — only reaches markers
-  // that exist for a single city (bubble mode always, cluster mode's
+  // that exist for a single point (bubble mode always, cluster mode's
   // count===1 buckets, heat mode's invisible click targets which have no
-  // visible style to restyle anyway).
+  // visible style to restyle anyway). markersRef is keyed by customer id
+  // (p.id), but selection is tracked by cityId, so resolve each marker's
+  // owning city via cityByCustomerId before checking selectedCityIds.
   useEffect(() => {
+    const cityByCustomerId = new Map(points.map((p) => [p.id, p.cityId]));
     for (const [id, marker] of markersRef.current.entries()) {
       if (mode === "heat") continue; // invisible targets — nothing to restyle
-      const isSelected = selectedCityIds.includes(id);
+      const cityId = cityByCustomerId.get(id);
+      const isSelected = cityId !== undefined && selectedCityIds.includes(cityId);
       marker.setStyle({ color: isSelected ? SELECTED_COLOR : "#ffffff", weight: isSelected ? 3 : 1 });
       if (isSelected) marker.bringToFront();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCityIds]);
+  }, [selectedCityIds, points]);
 
   return (
     <div className="flex flex-col gap-2">

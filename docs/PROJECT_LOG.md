@@ -4228,3 +4228,22 @@ if (!sessionToken) throw new UnauthorizedException("Missing sessionToken");
 **التحقق**: توازن أقواس/أنواع بسكريبت Python واعٍ بالتعليقات والـstrings (بديل عن `tsc` غير المتاح في بيئة الـsandbox بسبب قيود FUSE على `node_modules`) على كل الملفات المعدَّلة/الجديدة — صفر مشاكل. تحقق تعداد مفاتيح القاموس (`TranslationKey` union مقابل قيم عربي+إنجليزي) — كل الـ40 مفتاح جديد موجودين بالضبط مرتين (عربي+إنجليزي)، الـ6 مفاتيح غير المتطابقة الموجودة كانت موجودة مسبقًا وغير مرتبطة بهذه المهمة. تأكدت من عدم وجود دائرة استيراد بين `SgiModule`/`VisitCopilotModule`، ومن تسجيل كلا الموديولين في `app.module.ts` بالفعل (بدون حاجة لتعديل).
 
 **غير منفّذ / يحتاج تحقق بشري**: تشغيل `pnpm --filter api typecheck` و`pnpm --filter web typecheck` فعليًا محليًا (غير متاح في بيئة الجلسة) — مطلوب من العميل قبل الدمج. اختبار الأدوار الأربعة (مندوب/مشرف/مدير/مدير شركة) وحالات فارغ/خطأ/بطء/تغيير الفترة على بيانات حقيقية على بيئة حية. لم يُنفَّذ أي commit بعد — بانتظار توجيه العميل بخصوص انضباط Git (commit واحد مركّز، بدون `git add .`).
+
+## إصلاح: خريطة Decision Analytics Studio الحرارية المصغّرة تعرض نقطة واحدة بدل كل العملاء (2026-07-28)
+
+**المشكلة (بلاغ العميل)**: العميل رفع صورتين للمقارنة — خريطة Decision Analytics Studio الحرارية المصغّرة كانت تعرض نقطة حمراء واحدة فقط، بينما نفس المنطقة في Geo Engine تعرض مئات النقاط الواقعية الموزّعة على كل عملاء جدة. طلب العميل صراحة: "فيه تعديل لازم انت اللي تعمله... مش بتظهر كافة النقاط زي الصورة الاخرى".
+
+**التشخيص**: مش خطأ عرض (rendering bug) — الفارق كان قرار تصميم متعمّد من جلسة سابقة، موثّق في تعليقات الكود نفسه (`decisionHeatmapTerritorySchema`, `buildHeatmap()`, أعلى `mini-heatmap.tsx`): خريطة Decision Analytics Studio كانت *دائمًا* تجمّع كل عملاء المدينة في نقطة واحدة بمتوسط إحداثياتها، بينما Geo Engine يرسم نقطة مستقلة لكل عميل بشكل افتراضي (ويجمّع حسب المدينة فقط لو طُلب `groupBy=city` صراحة). كلاهما يقرأان نفس المصدر الخام (`Customers.Latitude`/`Longitude` عبر RIE).
+
+عُرض الخياران على العميل (إبقاء التجميع كما هو / تغييره ليطابق Geo Engine) — اختار العميل صراحة: **"غيّر الخريطة لترسم كل عميل لوحده (مطابقة geo-engine)"**.
+
+**التنفيذ** (تعديل على شاشة موجودة — ضمن نطاق Claude، ليس Codex):
+- **`packages/schemas/src/decision-analytics-studio.schemas.ts`**: `decisionHeatmapTerritorySchema` تغيّر شكله من `{id (= slug المدينة), name, lat, lon, sales}` إلى `{id (= كود العميل, فريد لكل نقطة), name (اسم العميل), cityId, cityName, lat, lon, sales}`. حقلا `cityId`/`cityName` أُضيفا خصيصًا للحفاظ على تفاعل "الضغط على نقطة يُفعّل فلتر المدينة" الموجود مسبقًا دون تغييره.
+- **`apps/api/src/modules/decision-analytics-studio/decision-analytics-studio.service.ts`**: أُعيدت كتابة `buildHeatmap()` بالكامل — بدل تجميع كل عملاء كل مدينة في `CityAcc` واحد بمتوسط lat/lon، بقت تبني نقطة مستقلة لكل عميل (بنفس نمط `customerPoints` في `geo-engine.service.ts`)، مع استبعاد أي عميل بدون إحداثيات سليمة (`isSaneCoordinate`) بدل رسمه في نقطة وهمية (0,0).
+- **`apps/web/src/components/decision-analytics-studio/mini-heatmap.tsx`**: كل أوضاع الرسم الثلاثة (Heat/Bubble/Cluster) بقت تستخدم `p.cityId`/`p.cityName` عند استدعاء `onToggleCity` (بدل `p.id`/`p.name`)، وتأثير إعادة التلوين عند تغيّر التحديد (`selectedCityIds`) بقى يبني خريطة بحث `customer id → cityId` قبل ما يقارن، لأن `markersRef` بقى مفتاحه كود العميل مش المدينة.
+- **`apps/web/src/lib/types.ts`**: تحديث `DecisionHeatmapTerritory` interface (المرآة اليدوية لباكيدج الـschemas) ليطابق الشكل الجديد.
+- **`apps/web/src/app/(dashboard)/dashboard/decision-analytics-studio/page.tsx`**: `handleToggleCity()` لم يتغيّر فعليًا (لسه بيستقبل `id`/`name` عامّين ويكتبهم في `cityValues`) — فقط تحديث التعليق التوضيحي ليعكس إن الخريطة بقت ترسم عميل عميل لكن الفلتر لسه على مستوى المدينة.
+
+**التحقق**: توازن الأقواس `{}` على كل الملفات الخمسة المعدَّلة (سكريبت عد يدوي — صفر مشاكل). فحص شامل (subagent منفصل) لكل الريبو للتأكد من عدم وجود مستهلك آخر لـ`DecisionHeatmapTerritory`/`decisionHeatmapTerritorySchema` يفترض الشكل القديم (لا يوجد — لا PDF/PPTX export، لا اختبارات، لا مكوّن فرونت إند تاني يستورد `MiniHeatmap` غير `page.tsx`). `git status --short` قبل البدء أكّد عدم وجود تعارض مع ملفات Smart Loading الخاصة بـCodex (غير ذات صلة بالملفات المعدَّلة هنا).
+
+**غير منفّذ / يحتاج تحقق بشري**: `pnpm --filter api typecheck` و`pnpm --filter web typecheck` فعليًا (غير متاح في بيئة الجلسة). اختبار بصري حي للخريطة (Heat/Bubble/Cluster) للتأكد من ظهور كل النقاط والحفاظ على تفاعل الفلتر بالضغط.

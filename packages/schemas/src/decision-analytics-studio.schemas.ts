@@ -106,14 +106,19 @@ export const decisionChartGroupSchema = z.object({
 });
 export type DecisionChartGroup = z.infer<typeof decisionChartGroupSchema>;
 
-// Mini Heat Map data — always grouped by City regardless of the active
-// analyzeBy dimension (the map is geographic context, not the primary
-// analysis axis). Shape deliberately mirrors territory-intelligence's
-// TerritoryMapNode (id/name/lat/lon/metricValue) so the frontend can reuse
-// the existing polygon map component directly.
+// Mini Heat Map data — one point PER CUSTOMER (2026-07-28 change; previously
+// always City-aggregated into a single averaged dot per city, which hid the
+// real point density compared to Geo Engine's per-customer view — see
+// PROJECT_LOG.md 2026-07-28 for the before/after). `id` is now the customer
+// code (unique per point); `cityId` carries the slugified City name so the
+// frontend's existing click-to-filter-by-city interaction keeps working
+// unchanged — clicking any customer dot still toggles that customer's city
+// in the City filter, same as before.
 export const decisionHeatmapTerritorySchema = z.object({
-  id: z.string(), // slug of the City name, same convention as territory-intelligence.schemas.ts
-  name: z.string(),
+  id: z.string(), // customer code, unique per point
+  name: z.string(), // customer name
+  cityId: z.string(), // slug of the City name (or customer-name fallback), same convention as territory-intelligence.schemas.ts
+  cityName: z.string(),
   lat: z.number(),
   lon: z.number(),
   sales: z.number(),

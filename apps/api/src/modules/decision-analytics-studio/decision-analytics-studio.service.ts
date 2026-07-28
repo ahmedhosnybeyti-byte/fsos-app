@@ -652,54 +652,43 @@ export class DecisionAnalyticsStudioService {
   // valid coordinate pair (see geo-engine.service.ts's `isSaneCoordinate`
   // check), it never requires `City` to be non-empty — a customer with no
   // City text still gets plotted there under `city: meta.city` (empty
-  // string) with no gate on it. This function now matches that: any
-  // customer with a sane coordinate pair is included, using `c.city ||
-  // c.name` as the fallback grouping key/label when City is blank (the
-  // customer's own name becomes its own "city" bucket, same fallback
-  // Geo Engine's `groupByCity` already uses) — so sales are never silently
-  // dropped from this map just because the City column wasn't filled in.
+  // 2026-07-28: changed from one averaged dot per City to one dot per
+  // individual customer, matching Geo Engine's `customerPoints` pattern
+  // (geo-engine.service.ts) — the mini-map was hiding real point density by
+  // collapsing every customer in a city into a single dot. `cityId`/`cityName`
+  // are still carried on each point (via `c.city || c.name` fallback, same
+  // convention Geo Engine's `groupByCity` uses) purely so the existing
+  // click-to-filter-by-city interaction in the frontend keeps working
+  // unchanged. A customer with no sane coordinate pair is dropped from the
+  // map rather than plotted at a fabricated (0,0) — that used to silently
+  // create a phantom point off the coast of Africa (Null Island) and could
+  // drag the mini-map's fitBounds out to an absurd zoom level. A customer
+  // with real sales but no coordinates is still fully counted in the
+  // top-level KPI totals, just not shown on this map.
   private buildHeatmap(currentRows: SalesRow[], customerMeta: Map<string, CustomerMeta>): DecisionHeatmapTerritory[] {
-    interface CityAcc {
-      name: string;
-      sales: number;
-      latSum: number;
-      lonSum: number;
-      coordCount: number;
-    }
-    const cities = new Map<string, CityAcc>();
+    const salesByCustomer = new Map<string, number>();
     for (const row of currentRows) {
-      const c = customerMeta.get(row.customerCode);
-      if (!c) continue;
-      const label = c.city || c.name;
-      const id = slugify(label);
-      let acc = cities.get(id);
-      if (!acc) {
-        acc = { name: label, sales: 0, latSum: 0, lonSum: 0, coordCount: 0 };
-        cities.set(id, acc);
-      }
-      acc.sales += row.amount;
-      if (c.lat !== null && c.lon !== null && isSaneCoordinate(c.lat, c.lon)) {
-        acc.latSum += c.lat;
-        acc.lonSum += c.lon;
-        acc.coordCount += 1;
-      }
+      if (!customerMeta.has(row.customerCode)) continue;
+      salesByCustomer.set(row.customerCode, (salesByCustomer.get(row.customerCode) ?? 0) + row.amount);
     }
-    // Cities where NONE of their in-scope customers have a valid Latitude/
-    // Longitude are dropped here rather than emitted at a fabricated (0,0) —
-    // that used to silently plot a phantom point off the coast of Africa
-    // (Null Island) and, worse, could drag the mini-map's fitBounds out to
-    // an absurd zoom level trying to include it alongside the real points.
-    // A city with real sales but no coordinates simply isn't mappable; it's
-    // still fully counted in the top-level KPI totals, just not on this map.
-    return Array.from(cities.entries())
-      .filter(([, acc]) => acc.coordCount > 0)
-      .map(([id, acc]) => ({
-        id,
-        name: acc.name,
-        lat: acc.latSum / acc.coordCount,
-        lon: acc.lonSum / acc.coordCount,
-        sales: acc.sales,
-      }));
+
+    const points: DecisionHeatmapTerritory[] = [];
+    for (const [code, sales] of salesByCustomer.entries()) {
+      const c = customerMeta.get(code);
+      if (!c) continue;
+      if (c.lat === null || c.lon === null || !isSaneCoordinate(c.lat, c.lon)) continue;
+      const cityLabel = c.city || c.name;
+      points.push({
+        id: code,
+        name: c.name,
+        cityId: slugify(cityLabel),
+        cityName: cityLabel,
+        lat: c.lat,
+        lon: c.lon,
+        sales,
+      });
+    }
+    return points;
   }
 
   async filterOptions(user: AuthenticatedUser, field: DecisionFilterField): Promise<DecisionFilterOptionsResult> {
