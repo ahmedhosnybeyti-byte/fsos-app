@@ -79,7 +79,14 @@ const HEX_TO_STATUS = new Map<string, keyof typeof SEMANTIC_COLORS>(
   (Object.keys(SEMANTIC_COLORS) as (keyof typeof SEMANTIC_COLORS)[]).map((status) => [SEMANTIC_COLORS[status], status]),
 );
 
-function crystalFillForHex(hex: string): string {
+// `barColors[i]`-style array-index reads are typed `string | undefined`
+// under strict TypeScript (the index could be out of bounds), even though
+// callers here always pass an in-bounds index — accepting `undefined` and
+// falling back to the neutral semantic color keeps this a non-throwing,
+// always-valid SVG fill rather than requiring a non-null assertion at every
+// call site.
+function crystalFillForHex(hex: string | undefined): string {
+  if (!hex) return crystalFill("neutral");
   const status = HEX_TO_STATUS.get(hex);
   return status ? crystalFill(status) : hex;
 }
