@@ -386,7 +386,8 @@ export function ChartEngine({
                   // must set its own <text fill> explicitly, `fill` on <Pie>
                   // itself only affects slice color (overridden by <Cell>
                   // below anyway).
-                  label={(entry: { label?: string; x: number; y: number; textAnchor: string }) => (
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- recharts' PieLabelRenderProps ships a strict textAnchor union ("middle"|"inherit"|"end"|"start") that doesn't line up with the plain SVG `text-anchor` type; same untyped-third-party-shape workaround used elsewhere in this file for Treemap's node props.
+                  label={(entry: any) => (
                     <text x={entry.x} y={entry.y} textAnchor={entry.textAnchor} fill="hsl(var(--foreground))" fontSize={11} dominantBaseline="central">
                       {entry.label ?? ""}
                     </text>
