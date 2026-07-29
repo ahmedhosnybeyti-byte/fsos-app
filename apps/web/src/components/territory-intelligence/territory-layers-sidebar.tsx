@@ -1,25 +1,53 @@
 "use client";
 
-// Analysis Layers sidebar — client mockup: numbered layer cards, an icon +
-// label per layer, an "Active" badge on whichever layer is currently driving
-// the map's fill color, instant one-click switching, and a persistent
-// health-score color legend pinned at the bottom. Purely a restyle/selector
-// UI over TerritoryMapMetric — no new data, no new i18n keys (translation
-// keys for all 7 layers already existed pre-redesign as
-// territoryIntelligence.metric*).
+// Analysis Layers sidebar — two independent controls stacked in one panel:
+//
+// 1. Map Type (2026-07-29 addition): which of the 3 requested rendering
+//    modes — حرارية/Heat, عنقودية/Cluster, فقاعة/Bubble — the map uses to
+//    DRAW the current nodes. This replaced the old assumption that "layer"
+//    meant a map-type picker; it never was one (see below), so this is a
+//    genuinely new control, not a relabeling of the existing 7 buttons.
+//    Choropleth (the original filled-polygon rendering) is still what the
+//    map defaults to and is not exposed as a 4th button here — it stays the
+//    baseline "no special mode selected" behavior website-wide, consistent
+//    with every other screen's map defaulting to its most information-dense
+//    view.
+//
+// 2. Metric (original "طبقات التحليل" content, kept and renamed only in
+//    section heading): numbered layer cards, an icon + label per layer, an
+//    "Active" badge on whichever metric is currently driving color/size in
+//    ANY display mode (choropleth's tier fill, or heat/cluster/bubble's
+//    intensity), instant one-click switching. This is unchanged in meaning
+//    from the pre-2026-07-29 sidebar — it answers "which KPI is the map
+//    about," not "how does the map look." Kept because Territory
+//    Intelligence's Executive Insight / ranking / decision panel all still
+//    read off this same activeMetric; removing it would silently break
+//    those, which the user did not ask for.
+//
+// A persistent health-score color legend stays pinned at the bottom for both
+// controls (same 5-tier color family colors both the choropleth fill and the
+// heat/cluster/bubble intensity gradient's high end).
 
-import { HeartPulse, TrendingUp, TrendingDown, Footprints, Wallet, Sparkles, ShieldAlert, type LucideIcon } from "lucide-react";
+import { HeartPulse, TrendingUp, TrendingDown, Footprints, Wallet, Sparkles, ShieldAlert, Flame, CircleDot, Layers, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useTranslation } from "@/components/translation-provider";
 import { cn } from "@/lib/utils";
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
-import { TERRITORY_TIER_COLOR, type TerritoryMapMetric } from "./territory-map";
+import { TERRITORY_TIER_COLOR, type TerritoryMapDisplayMode, type TerritoryMapMetric } from "./territory-map";
 
 export interface TerritoryLayersSidebarProps {
   activeMetric: TerritoryMapMetric;
   onSelectMetric: (metric: TerritoryMapMetric) => void;
+  displayMode: TerritoryMapDisplayMode;
+  onSelectDisplayMode: (mode: TerritoryMapDisplayMode) => void;
 }
+
+const DISPLAY_MODE_ITEMS: { mode: TerritoryMapDisplayMode; labelKey: TranslationKey; icon: LucideIcon }[] = [
+  { mode: "heat", labelKey: "territoryIntelligence.displayModeHeat", icon: Flame },
+  { mode: "cluster", labelKey: "territoryIntelligence.displayModeCluster", icon: Layers },
+  { mode: "bubble", labelKey: "territoryIntelligence.displayModeBubble", icon: CircleDot },
+];
 
 // Small local helper/constant, deliberately duplicated per-module rather
 // than imported from the old page.tsx's non-exported METRIC_LABEL_KEY — same
@@ -47,7 +75,7 @@ const TIER_LEGEND: { tier: string; labelKey: TranslationKey }[] = [
   { tier: "veryWeak", labelKey: "territoryIntelligence.tierVeryWeak" },
 ];
 
-export function TerritoryLayersSidebar({ activeMetric, onSelectMetric }: TerritoryLayersSidebarProps) {
+export function TerritoryLayersSidebar({ activeMetric, onSelectMetric, displayMode, onSelectDisplayMode }: TerritoryLayersSidebarProps) {
   const { t } = useTranslation();
 
   return (
@@ -56,6 +84,31 @@ export function TerritoryLayersSidebar({ activeMetric, onSelectMetric }: Territo
         <CardTitle>{t("territoryIntelligence.layersPanelTitle")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-1.5">
+        <p className="text-xs font-medium text-muted-foreground">{t("territoryIntelligence.displayModeSectionTitle")}</p>
+        <div className="grid grid-cols-3 gap-1.5">
+          {DISPLAY_MODE_ITEMS.map((item) => {
+            const isActive = item.mode === displayMode;
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.mode}
+                type="button"
+                onClick={() => onSelectDisplayMode(isActive ? "choropleth" : item.mode)}
+                aria-pressed={isActive}
+                title={t(item.labelKey)}
+                className={cn(
+                  "flex flex-col items-center gap-1 rounded-md border px-2 py-2 text-[11px] font-medium transition-colors",
+                  isActive ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-secondary/30",
+                )}
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                <span className="truncate">{t(item.labelKey)}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <p className="pt-2 text-xs font-medium text-muted-foreground">{t("territoryIntelligence.metricSectionTitle")}</p>
         {LAYER_ITEMS.map((item, index) => {
           const isActive = item.metric === activeMetric;
           const Icon = item.icon;

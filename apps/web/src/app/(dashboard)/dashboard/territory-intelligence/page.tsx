@@ -17,7 +17,7 @@ import type { TerritoryExecutiveItem, TerritoryIntelligenceExecutiveResponse, Te
 import { buildDecisionStudioReturnLink } from "@/lib/decision-analytics-state";
 import { loadBoundaryIndex, normalizeTerritoryName, resolveBoundaryAssetUrl, type BoundaryFeatureIndex } from "@/components/territory-intelligence/boundary-registry";
 import { buildTerritoryHierarchyLevels, useTerritoryHierarchy, type DrillPathEntry } from "@/components/territory-intelligence/hierarchy-engine";
-import { TERRITORY_TIER_COLOR, TerritoryMap, type TerritoryMapMetric } from "@/components/territory-intelligence/territory-map";
+import { TERRITORY_TIER_COLOR, TerritoryMap, type TerritoryMapDisplayMode, type TerritoryMapMetric } from "@/components/territory-intelligence/territory-map";
 import { TerritoryLayersSidebar } from "@/components/territory-intelligence/territory-layers-sidebar";
 import { TerritoryDecisionPanel } from "@/components/territory-intelligence/territory-decision-panel";
 import { TerritoryCustomerList } from "@/components/territory-intelligence/territory-customer-list";
@@ -101,6 +101,7 @@ function TerritoryIntelligenceWorkspace() {
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [activeMetric, setActiveMetric] = useState<TerritoryMapMetric>("healthScore");
+  const [displayMode, setDisplayMode] = useState<TerritoryMapDisplayMode>("choropleth");
   const [executiveMode, setExecutiveMode] = useState(false);
   const [dasCityConsumed, setDasCityConsumed] = useState(false);
 
@@ -218,6 +219,8 @@ function TerritoryIntelligenceWorkspace() {
           boundaryIndex={boundaryIndexQuery.data ?? null}
           activeMetric={activeMetric}
           onSelectMetric={setActiveMetric}
+          displayMode={displayMode}
+          onSelectDisplayMode={setDisplayMode}
           selectedNodeId={selectedNodeId}
           onSelectNode={handleSelectNode}
           onClearSelection={() => setSelectedNodeId(null)}
@@ -459,6 +462,8 @@ function NormalView({
   boundaryIndex,
   activeMetric,
   onSelectMetric,
+  displayMode,
+  onSelectDisplayMode,
   selectedNodeId,
   onSelectNode,
   onClearSelection,
@@ -468,6 +473,8 @@ function NormalView({
   boundaryIndex: BoundaryFeatureIndex | null;
   activeMetric: TerritoryMapMetric;
   onSelectMetric: (metric: TerritoryMapMetric) => void;
+  displayMode: TerritoryMapDisplayMode;
+  onSelectDisplayMode: (mode: TerritoryMapDisplayMode) => void;
   selectedNodeId: string | null;
   onSelectNode: (id: string, name: string) => void;
   onClearSelection: () => void;
@@ -505,13 +512,19 @@ function NormalView({
       <TerritoryBreadcrumb drillPath={hierarchy.drillPath} onGoToLevel={handleGoToLevel} />
 
       <div className={cn("grid gap-4", isCityLevel ? "lg:grid-cols-[220px_minmax(0,1fr)_360px]" : "lg:grid-cols-[220px_minmax(0,1fr)]")}>
-        <TerritoryLayersSidebar activeMetric={activeMetric} onSelectMetric={onSelectMetric} />
+        <TerritoryLayersSidebar
+          activeMetric={activeMetric}
+          onSelectMetric={onSelectMetric}
+          displayMode={displayMode}
+          onSelectDisplayMode={onSelectDisplayMode}
+        />
 
         <Card className="glass-card rise-in overflow-hidden p-0">
           <TerritoryMap
             nodes={hierarchy.nodes}
             isPolygonLevel={hierarchy.currentLevel.isPolygonLevel}
             activeMetric={activeMetric}
+            displayMode={displayMode}
             selectedNodeId={selectedNodeId}
             onSelectNode={onSelectNode}
             boundaryIndex={boundaryIndex}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Layer, Map as LeafletMap, PathOptions } from "leaflet";
+import type { HeatLayer, Layer, Map as LeafletMap, PathOptions } from "leaflet";
 // Stylesheet import is safe statically (no `window` access at module load).
 // The Leaflet JS itself is only ever imported inside useEffect — same
 // SSR-safety pattern as heatmap-map.tsx.
@@ -9,6 +9,7 @@ import "leaflet/dist/leaflet.css";
 import type { TerritorySummaryItem } from "@/lib/types";
 import { useTranslation } from "@/components/translation-provider";
 import { normalizeTerritoryName, type BoundaryFeatureIndex } from "./boundary-registry";
+import { colorForRatio, heatGradientObject, radiusForZoom } from "@/components/geo-engine/color-scale";
 
 // riskLevel is a client-computed 7th layer (100 - healthScore, banded with
 // the inverse of the healthScore tier coloring) — see colorForNode below.
@@ -20,6 +21,21 @@ export type TerritoryMapMetric =
   | "collectionHealthPct"
   | "opportunityValueSar"
   | "riskLevel";
+
+// Display mode — HOW the map draws the current nodes, independent of WHICH
+// metric (TerritoryMapMetric, above) is driving the color/size. "choropleth"
+// is the original/default behavior (filled polygons or plain circle markers,
+// colored per-tier by the active metric) and stays untouched below. The 3
+// new modes ("heat" | "cluster" | "bubble") are the ones requested to
+// replace the old 7-layer picker's role as the map's visual language — they
+// render every current-level node (city centroid when polygon-level, or the
+// raw point when leaf-level) as a point, sized/colored by activeMetric's
+// numeric value via the SAME blue->red intensity scale already used by the
+// Geo Intelligence Engine (color-scale.ts, imported not duplicated) so all
+// map-heavy screens in the app read as one visual family. Choosing a
+// TerritoryMapMetric still fully drives WHAT the map is showing in every
+// mode; displayMode only changes the rendering technique.
+export type TerritoryMapDisplayMode = "choropleth" | "heat" | "cluster" | "bubble";
 
 // Generic node shape shared with hierarchy-engine.ts's HierarchyLevelNode —
 // duplicated here (not imported) so this map component has no compile-time
@@ -51,6 +67,10 @@ export interface TerritoryMapProps {
   // own page.tsx doesn't pass it, so its behavior is byte-for-byte
   // unchanged.
   colorForValue?: (node: TerritoryMapNode) => string;
+  // Defaults to "choropleth" (the original behavior above) when omitted —
+  // every existing caller that doesn't pass this prop is therefore
+  // byte-for-byte unchanged.
+  displayMode?: TerritoryMapDisplayMode;
 }
 
 // 5-tier health-score palette — same red -> amber -> green family as this
@@ -148,6 +168,41 @@ function colorForNode(node: TerritoryMapNode, activeMetric: TerritoryMapMetric, 
   }
 }
 
+// Numeric value for a node under the active metric — used by the 3 new
+// point-based display modes (heat/cluster/bubble) to size/color a node the
+// same way colorForNode picks a tier color for choropleth mode. Falls back
+// to metricValue for leaf/point-level nodes (no `raw` TerritorySummaryItem —
+// e.g. Customer level), since those only ever carry one generic value.
+// Always returns a non-negative finite number (0 when the metric is
+// unavailable for that node) — heat/bubble/cluster rendering has no concept
+// of "no data" the way a gray choropleth tile does, so absence is treated as
+// zero weight rather than skipping the node.
+function numericValueForMetric(node: TerritoryMapNode, activeMetric: TerritoryMapMetric): number {
+  const raw = node.raw as TerritorySummaryItem | undefined;
+  if (!raw) return Math.max(0, node.metricValue);
+
+  switch (activeMetric) {
+    case "healthScore":
+      return Math.max(0, node.healthScore ?? 0);
+    case "salesGrowthPct": {
+      const v = raw.metrics.salesGrowthPct;
+      return v === null ? 0 : Math.max(0, v);
+    }
+    case "lostSalesCount":
+      return Math.max(0, raw.metrics.lostSalesCount);
+    case "visitCoveragePct":
+      return Math.max(0, raw.metrics.visitCoveragePct ?? 0);
+    case "collectionHealthPct":
+      return Math.max(0, raw.metrics.collectionHealthPct ?? 0);
+    case "opportunityValueSar":
+      return Math.max(0, raw.opportunityValueSar);
+    case "riskLevel":
+      return Math.max(0, 100 - raw.healthScore);
+    default:
+      return 0;
+  }
+}
+
 // Shared style object for BOTH the real-boundary GeoJSON path and the
 // generated-fallback L.polygon — the client mandated the two look visually
 // identical (color from the active metric layer, thicker highlighted stroke
@@ -215,11 +270,27 @@ function formatTooltipValue(value: number): string {
   return Math.round(value).toLocaleString("en-US");
 }
 
-export function TerritoryMap({ nodes, isPolygonLevel, activeMetric, selectedNodeId, onSelectNode, boundaryIndex, colorForValue }: TerritoryMapProps) {
+export function TerritoryMap({
+  nodes,
+  isPolygonLevel,
+  activeMetric,
+  selectedNodeId,
+  onSelectNode,
+  boundaryIndex,
+  colorForValue,
+  displayMode = "choropleth",
+}: TerritoryMapProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const layersRef = useRef<Map<string, StyleableLayer>>(new Map());
+  // Layers owned by the heat/cluster/bubble point-based modes — kept in a
+  // separate ref from `layersRef` (choropleth's polygon/marker-per-node map)
+  // since heat mode's single HeatLayer isn't keyed per-node and cluster
+  // mode's bucket markers don't map 1:1 to node ids either.
+  const pointLayersRef = useRef<Layer[]>([]);
+  const heatLayerRef = useRef<HeatLayer | null>(null);
+  const [zoomTick, setZoomTick] = useState(0);
   // Map init is async (dynamic import), so a build effect that fires before
   // it finishes must bail out and re-run once ready — same fix heatmap-map.tsx
   // applies for its heat-layer effect.
@@ -259,12 +330,27 @@ export function TerritoryMap({ nodes, isPolygonLevel, activeMetric, selectedNode
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // zoomend listener for the two zoom-responsive point modes (heat's
+  // radius/blur, cluster's grid cell size) — same pattern as Geo Intelligence
+  // Engine's heat-map-mode.tsx / cluster-map-mode.tsx. Harmless no-op while
+  // displayMode is "choropleth" or "bubble" (those don't read zoomTick).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || (displayMode !== "heat" && displayMode !== "cluster")) return;
+    const onZoom = () => setZoomTick((n) => n + 1);
+    map.on("zoomend", onZoom);
+    return () => {
+      map.off("zoomend", onZoom);
+    };
+  }, [mapReady, displayMode]);
+
   // Rebuild every polygon/point layer when the node list, level kind, active
   // metric, or boundary index changes. Territory/customer counts here are a
   // handful to a few dozen, so a full rebuild is simpler than an incremental
-  // diff approach.
+  // diff approach. Choropleth-only — the 3 point-based display modes are
+  // built by the separate effect below.
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapRef.current || displayMode !== "choropleth") return;
     let cancelled = false;
 
     (async () => {
@@ -341,9 +427,12 @@ export function TerritoryMap({ nodes, isPolygonLevel, activeMetric, selectedNode
     // rebuild triggered by other deps changing keeps the current selection's
     // stroke correct.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, nodes, isPolygonLevel, activeMetric, boundaryIndex, colorForValue]);
+  }, [mapReady, nodes, isPolygonLevel, activeMetric, boundaryIndex, colorForValue, displayMode]);
 
-  // Cheap restyle on selection change — no rebuild, no re-fit.
+  // Cheap restyle on selection change — choropleth only (heat/cluster/bubble
+  // don't currently support a "selected" visual state; clicking still fires
+  // onSelectNode via the click targets built below, opening the decision
+  // panel exactly as before).
   useEffect(() => {
     for (const [id, layer] of layersRef.current.entries()) {
       const selected = id === selectedNodeId;
@@ -351,6 +440,159 @@ export function TerritoryMap({ nodes, isPolygonLevel, activeMetric, selectedNode
       if (selected) layer.bringToFront?.();
     }
   }, [selectedNodeId]);
+
+  // Builds the 3 new point-based display modes (heat/cluster/bubble) — every
+  // current-level node rendered as a single point (its own lat/lon centroid,
+  // whether it's a polygon-level territory or a leaf-level customer point),
+  // sized/colored by numericValueForMetric(activeMetric). Mirrors the Geo
+  // Intelligence Engine's heat-map-mode.tsx / bubble-map-mode.tsx /
+  // cluster-map-mode.tsx logic (imported color-scale.ts helpers, same
+  // gradient) rather than duplicating a second color language. No-op while
+  // displayMode is "choropleth".
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || displayMode === "choropleth") return;
+    let cancelled = false;
+
+    (async () => {
+      const L = (await import("leaflet")).default;
+      if (cancelled || !mapRef.current) return;
+
+      heatLayerRef.current?.remove();
+      heatLayerRef.current = null;
+      for (const l of pointLayersRef.current) l.remove();
+      pointLayersRef.current = [];
+
+      if (nodes.length === 0) return;
+      const bounds: [number, number][] = nodes.map((n) => [n.lat, n.lon]);
+      const maxValue = nodes.reduce((m, n) => Math.max(m, numericValueForMetric(n, activeMetric)), 0);
+      const safeMax = maxValue > 0 ? maxValue : 1;
+
+      if (displayMode === "heat") {
+        // @ts-expect-error -- no types ship for leaflet.heat, same ambient-
+        // declaration friction as heatmap-map.tsx / geo-engine's heat mode.
+        await import("leaflet.heat");
+        if (cancelled || !mapRef.current) return;
+        const latlngs: [number, number, number][] = nodes.map((n) => [n.lat, n.lon, numericValueForMetric(n, activeMetric) / safeMax]);
+        const radius = radiusForZoom(map.getZoom());
+        const layer = L.heatLayer(latlngs, {
+          radius,
+          blur: radius * 0.85,
+          maxZoom: 17,
+          max: 1,
+          minOpacity: 0.35,
+          gradient: heatGradientObject(),
+        });
+        layer.addTo(map);
+        heatLayerRef.current = layer;
+
+        // leaflet.heat renders one canvas overlay with no per-point DOM
+        // nodes, so a transparent click-target CircleMarker per node is laid
+        // down here too — same technique as geo-engine's heat-map-mode.tsx —
+        // to keep "click a territory to open its decision panel" working in
+        // this mode.
+        for (const n of nodes) {
+          const target = L.circleMarker([n.lat, n.lon], { radius: 14, opacity: 0, fillOpacity: 0, interactive: true });
+          target.on("click", () => onSelectNode(n.id, n.name));
+          target.addTo(map);
+          pointLayersRef.current.push(target);
+        }
+      } else if (displayMode === "bubble") {
+        const MIN_R = 6;
+        const MAX_R = 34;
+        for (const n of nodes) {
+          const ratio = numericValueForMetric(n, activeMetric) / safeMax;
+          const isSelected = n.id === selectedNodeId;
+          const radius = MIN_R + Math.sqrt(ratio) * (MAX_R - MIN_R);
+          const marker = L.circleMarker([n.lat, n.lon], {
+            radius,
+            color: isSelected ? SELECTED_STROKE : DEFAULT_STROKE,
+            weight: isSelected ? 3 : 1.5,
+            fillColor: colorForRatio(ratio),
+            fillOpacity: 0.78,
+          });
+          marker.bindTooltip(`${n.name} — ${formatTooltipValue(numericValueForMetric(n, activeMetric))}`);
+          marker.on("click", () => onSelectNode(n.id, n.name));
+          marker.addTo(map);
+          pointLayersRef.current.push(marker);
+        }
+      } else {
+        // cluster — hand-rolled zoom-aware grid bucketing, same cell-size
+        // formula and merge/split behavior as geo-engine's cluster-map-mode.tsx.
+        const cellSize = 8 / Math.pow(2, map.getZoom());
+        interface Bucket {
+          latSum: number;
+          lonSum: number;
+          count: number;
+          totalValue: number;
+          single: TerritoryMapNode | null;
+        }
+        const buckets = new Map<string, Bucket>();
+        for (const n of nodes) {
+          const key = `${Math.floor(n.lat / cellSize)}_${Math.floor(n.lon / cellSize)}`;
+          const v = numericValueForMetric(n, activeMetric);
+          const b = buckets.get(key);
+          if (b) {
+            b.latSum += n.lat;
+            b.lonSum += n.lon;
+            b.count += 1;
+            b.totalValue += v;
+            b.single = null;
+          } else {
+            buckets.set(key, { latSum: n.lat, lonSum: n.lon, count: 1, totalValue: v, single: n });
+          }
+        }
+        const resolved = Array.from(buckets.values()).map((b) => ({ lat: b.latSum / b.count, lon: b.lonSum / b.count, count: b.count, totalValue: b.totalValue, single: b.single }));
+        const maxCount = resolved.reduce((m, b) => Math.max(m, b.count), 0);
+        const maxBucketValue = resolved.reduce((m, b) => Math.max(m, b.totalValue), 1) || 1;
+        const MIN_R = 8;
+        const MAX_R = 32;
+
+        for (const b of resolved) {
+          const isCluster = b.count > 1;
+          const sizeRatio = isCluster ? b.count / Math.max(maxCount, 1) : 0.3;
+          const radius = MIN_R + Math.sqrt(sizeRatio) * (MAX_R - MIN_R);
+          const colorRatio = b.totalValue / maxBucketValue;
+
+          const marker = L.circleMarker([b.lat, b.lon], {
+            radius,
+            color: "#ffffff",
+            weight: isCluster ? 2 : 1.5,
+            fillColor: colorForRatio(colorRatio),
+            fillOpacity: isCluster ? 0.85 : 0.72,
+          });
+          const label = isCluster ? `${b.count.toLocaleString("en-US")} — ${formatTooltipValue(b.totalValue)}` : `${b.single?.name ?? ""} — ${formatTooltipValue(b.totalValue)}`;
+          marker.bindTooltip(label);
+
+          if (isCluster) {
+            marker.on("click", () => map.setView([b.lat, b.lon], Math.min(map.getZoom() + 3, 16)));
+          } else if (b.single) {
+            const single = b.single;
+            marker.on("click", () => onSelectNode(single.id, single.name));
+          }
+          marker.addTo(map);
+          pointLayersRef.current.push(marker);
+        }
+      }
+
+      if (bounds.length > 0) map.fitBounds(bounds, { padding: [24, 24] });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapReady, nodes, activeMetric, displayMode, zoomTick]);
+
+  useEffect(
+    () => () => {
+      heatLayerRef.current?.remove();
+      heatLayerRef.current = null;
+      for (const l of pointLayersRef.current) l.remove();
+      pointLayersRef.current = [];
+    },
+    [],
+  );
 
   return (
     <div className="relative h-[560px] min-w-0">
