@@ -62,6 +62,103 @@ export async function exportDaily360SummaryPdf(
     });
   }
 
+  // 2026-07-29 (explicit feedback after the first successful export): the
+  // live "Crystal AI" glass surfaces (.glass-card, secondary Badge pills,
+  // bg-background/60 sub-boxes) are theme-aware — translucent dark glass
+  // with light text in the app's dark theme. html2canvas captures against
+  // a forced white page background, which flattens that translucency into
+  // solid dark-gray boxes while the text stays light, so large parts of
+  // the PDF became illegible ("النص غاطس"). Product decision: not a color
+  // bug to patch defensively — the PDF gets its own deliberate palette, a
+  // warm-orange / cool-blue high-contrast identity distinct from the live
+  // in-app theme ("ألوان مبهرة وذات وقار … البرتقالي مع الأزرق الثلجي").
+  //
+  // Applied by walking the DOM and setting inline styles directly (same
+  // restore-after pattern as the crystal-badge fix above) rather than a
+  // class-selector stylesheet — Tailwind's generated class order/escaping
+  // isn't a stable target to select against, and html2canvas resolves
+  // computed style per element anyway, so inline styles are both simpler
+  // and more reliable here. Every group below is reverted in `finally`.
+  const pdfColorRestores: Array<() => void> = [];
+  function paintForExport(el: HTMLElement, styles: Partial<CSSStyleDeclaration>) {
+    const prev: Partial<CSSStyleDeclaration> = {};
+    for (const key of Object.keys(styles) as Array<keyof CSSStyleDeclaration>) {
+      (prev as Record<string, string>)[key as string] = el.style[key] as string;
+      (el.style as unknown as Record<string, string>)[key as string] = styles[key] as string;
+    }
+    pdfColorRestores.push(() => {
+      for (const key of Object.keys(prev) as Array<keyof CSSStyleDeclaration>) {
+        (el.style as unknown as Record<string, string>)[key as string] = prev[key] as string;
+      }
+    });
+  }
+
+  const PDF_INK = "#14304d"; // primary text — deep navy, strong contrast on white
+  const PDF_MUTED_INK = "#3d6690"; // secondary/meta text — cool blue, still easily readable
+  const PDF_CARD_BG = "#eef4fb"; // section cards — pale ice-blue instead of translucent dark glass
+  const PDF_CARD_BORDER = "#bcd4ec";
+  const PDF_SUBBOX_BORDER = "#dbe6f2";
+  const PDF_BADGE_BG = "#fff1e6"; // pill badges — warm pale orange
+  const PDF_BADGE_BORDER = "#f3b988";
+  const PDF_BADGE_INK = "#9a4a12";
+
+  // Header hero — the one deliberately bold moment: a warm-orange to
+  // cool-blue diagonal gradient with white text, "مبهر وذو وقار" instead
+  // of a flat single color.
+  const heroEl = captureTarget.querySelector<HTMLElement>(".glass-hero");
+  if (heroEl) {
+    paintForExport(heroEl, {
+      background: "linear-gradient(135deg, #ffb066, #2f7fd6)",
+      border: "none",
+      boxShadow: "none",
+    });
+    const heroAurora = heroEl.querySelector<HTMLElement>(".hero-aurora");
+    if (heroAurora) paintForExport(heroAurora, { display: "none" });
+    for (const node of Array.from(heroEl.querySelectorAll<HTMLElement>("*"))) {
+      paintForExport(node, { color: "#ffffff" });
+    }
+    paintForExport(heroEl, { color: "#ffffff" });
+  }
+
+  // Section cards + the "top issue" glow box — pale ice-blue card, no
+  // translucency/blur (meaningless once flattened onto a white capture).
+  for (const node of Array.from(captureTarget.querySelectorAll<HTMLElement>(".glass-card, .glow-ai"))) {
+    paintForExport(node, {
+      background: PDF_CARD_BG,
+      border: `1px solid ${PDF_CARD_BORDER}`,
+      boxShadow: "none",
+      backdropFilter: "none",
+    });
+  }
+
+  // Nested sub-boxes (diagnosis/decision text blocks) — plain white with a
+  // faint border so they read as a distinct inset, not another dark panel.
+  for (const node of Array.from(captureTarget.querySelectorAll<HTMLElement>(".bg-background\\/60"))) {
+    paintForExport(node, { background: "#ffffff", border: `1px solid ${PDF_SUBBOX_BORDER}` });
+  }
+
+  // Every text node color — deep navy by default, cool-blue for the
+  // existing "muted" meta text, both far above WCAG contrast on white
+  // (unlike the flattened dark-glass-plus-light-text combination the bug
+  // report was about).
+  for (const node of Array.from(captureTarget.querySelectorAll<HTMLElement>("h3, p, span, li, td, th"))) {
+    paintForExport(node, { color: PDF_INK });
+  }
+  for (const node of Array.from(captureTarget.querySelectorAll<HTMLElement>(".text-muted-foreground"))) {
+    paintForExport(node, { color: PDF_MUTED_INK });
+  }
+
+  // Badge pills (declined-value / stopped-product / priority-debtor tags)
+  // — warm pale-orange, matching the "برتقالي" half of the requested
+  // palette, legible regardless of which Badge `variant` was used live.
+  for (const node of Array.from(captureTarget.querySelectorAll<HTMLElement>(".rounded-full.border"))) {
+    paintForExport(node, {
+      background: PDF_BADGE_BG,
+      border: `1px solid ${PDF_BADGE_BORDER}`,
+      color: PDF_BADGE_INK,
+    });
+  }
+
   let canvas: HTMLCanvasElement;
   try {
     canvas = await html2canvas(captureTarget, {
@@ -75,6 +172,7 @@ export async function exportDaily360SummaryPdf(
     });
   } finally {
     for (const restore of restoreBoxShadow) restore();
+    for (const restore of pdfColorRestores) restore();
   }
   console.info("[daily-360-summary] PDF export: canvas captured", canvas.width, "x", canvas.height);
 

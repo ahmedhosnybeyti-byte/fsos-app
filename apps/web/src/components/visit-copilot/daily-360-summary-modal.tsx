@@ -90,7 +90,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
           "sm:!left-1/2 sm:!top-1/2 sm:!h-[90vh] sm:!w-[min(900px,92vw)] sm:!-translate-x-1/2 sm:!-translate-y-1/2 sm:!rounded-2xl sm:!border sm:border-border",
         )}
       >
-        <div id="daily-360-summary-print-root" className="grid h-full min-h-0 grid-rows-[auto_1fr]">
+        <div id="daily-360-summary-print-root" className="grid h-full min-h-0 grid-rows-[auto_1fr] font-report">
           {/* ——— Header: title + export only — scope moves into its own
               "نطاق التقرير" bulleted section in the body, matching the
               reference report's structure exactly instead of one merged
@@ -298,6 +298,28 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
                         ))}
                       </div>
                     </div>
+                  )}
+                </section>
+
+                {/* Returns — real Returns entity totals, scoped to today's
+                    route customers + comparison period (2026-07-29, was
+                    previously computed as a hardcoded zero and not even
+                    rendered here at all). */}
+                <section className="glass-card space-y-3 p-4">
+                  <h3 className="flex items-center gap-2 text-sm font-semibold">
+                    <span aria-hidden>↩️</span>
+                    {t("copilot.summary360Returns")}
+                  </h3>
+                  {summary.returns.total > 0 ? (
+                    <div className="grid grid-cols-2 gap-3">
+                      <Stat label={t("copilot.summary360ReturnsTotal")} value={summary.returns.total.toLocaleString()} />
+                      <Stat
+                        label={t("copilot.summary360ReturnsRate")}
+                        value={summary.returns.rate !== null ? `${summary.returns.rate}%` : "—"}
+                      />
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">{t("copilot.summary360NoReturns")}</p>
                   )}
                 </section>
 

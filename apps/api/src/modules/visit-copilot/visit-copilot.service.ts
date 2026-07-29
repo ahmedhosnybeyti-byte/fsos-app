@@ -1062,6 +1062,7 @@ export class VisitCopilotService {
 
     const range = resolveVisitCopilotPeriod(query);
     const situations: SgiSituation[] = sgi?.situations ?? [];
+    const ctx = this.rieContext(user);
 
     const scopeLabelByRole: Record<AuthenticatedUser["roleCode"], string> = {
       SUPER_ADMIN: "المنصة بالكامل",
@@ -1116,19 +1117,56 @@ export class VisitCopilotService {
       };
     });
 
-    // ---- Collections + priority debtors (COLLECTION_RISK situations).
+    // ---- Collections + priority debtors (COLLECTION_RISK situations for
+    // the "who to chase" list; real collected/pending/bounced totals below,
+    // computed directly from the Collections entity — was hardcoded to 0
+    // before 2026-07-29, this closed that gap).
     const collectionSituations = situations.filter((s) => s.type === "COLLECTION_RISK");
     const priorityDebtors = [...collectionSituations]
       .sort((a, b) => b.metricValue - a.metricValue)
       .slice(0, 5)
       .map((s) => ({ customerName: s.entityLabel, amount: s.metricValue, dueDate: null as string | null }));
 
-    // ---- Returns + recurring risks — SGI has no dedicated RETURNS type;
-    // surfaced from GROWTH_OPPORTUNITY-adjacent detail text isn't
-    // appropriate here, so this stays a numeric-only section (no per-item
-    // Excel re-read) until a RETURNS_RISK situation type exists. Honest
-    // empty state rather than an invented number.
-    const returns = { total: 0, rate: null as number | null, recurringRisks: [] as string[] };
+    // Collections/Returns read directly here (not via buildDailyBrief,
+    // which never touches either entity) — same RIE hierarchy scoping as
+    // everywhere else in this method, further bounded to today's route
+    // customers (todayCustomerCodes) and the report's comparison window
+    // (range.from/range.to), matching lostOpportunities' scoping rule
+    // above: no cross-hierarchy totals, only what's relevant to today's
+    // plan.
+    const todayCustomerCodes = new Set(brief.customers.map((c) => c.customerCode));
+    const [collectionsRecords, returnsRecords] = await Promise.all([
+      this.tryEntity(ctx, "Collections", "التحصيلات", warnings),
+      this.tryEntity(ctx, "Returns", "المرتجعات", warnings),
+    ]);
+
+    let collectedTotal = 0;
+    let bouncedTotal = 0;
+    for (const row of collectionsRecords) {
+      const customerCode = String(row.CustomerCode ?? "").trim();
+      if (!todayCustomerCodes.has(customerCode)) continue;
+      const dateIso = isoDayOf(row.CollectionDate);
+      if (!dateIso || dateIso < range.from || dateIso > range.to) continue;
+      const amount = toFiniteNumber(row.Amount) ?? 0;
+      const status = String(row.Status ?? "").trim().toLowerCase();
+      if (status === "collected") collectedTotal += amount;
+      else if (status === "bounced") bouncedTotal += amount;
+    }
+
+    // ---- Returns — real total + rate (vs. today's route sales total),
+    // scoped the same way. "Recurring risks" stays empty until SGI grows a
+    // dedicated RETURNS_RISK situation type that names *which* customers
+    // return repeatedly — an honest empty list rather than a guessed one.
+    let returnsTotal = 0;
+    for (const row of returnsRecords) {
+      const customerCode = String(row.CustomerCode ?? "").trim();
+      if (!todayCustomerCodes.has(customerCode)) continue;
+      const dateIso = isoDayOf(row.ReturnDate);
+      if (!dateIso || dateIso < range.from || dateIso > range.to) continue;
+      returnsTotal += toFiniteNumber(row.TotalAmount) ?? 0;
+    }
+    const returnsRate = brief.expectedSalesTotal > 0 ? round2((returnsTotal / brief.expectedSalesTotal) * 100) : null;
+    const returns = { total: round2(returnsTotal), rate: returnsRate, recurringRisks: [] as string[] };
 
     // ---- Customers/teams needing intervention — top severity-ranked
     // situations across all types, capped at 6.
@@ -1155,7 +1193,12 @@ export class VisitCopilotService {
       goal,
       sales: { total: brief.expectedSalesTotal, invoiceCount: lostOpportunities.length, visitCount: brief.visitCount },
       lostOpportunities,
-      collections: { collected: 0, pending: priorityDebtors.reduce((sum, d) => sum + d.amount, 0), bounced: 0, priorityDebtors },
+      collections: {
+        collected: round2(collectedTotal),
+        pending: priorityDebtors.reduce((sum, d) => sum + d.amount, 0),
+        bounced: round2(bouncedTotal),
+        priorityDebtors,
+      },
       returns,
       interventionNeeded,
       warnings: [...warnings, ...(sgi?.warnings ?? [])],

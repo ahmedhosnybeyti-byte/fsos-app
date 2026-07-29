@@ -66,6 +66,10 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["var(--font-sans)", "system-ui", "sans-serif"],
+        // "ملخص اليوم 360°" only (2026-07-29) — see app/layout.tsx's
+        // ibmPlexSansArabic. Not mapped onto `sans` so every other screen
+        // keeps Cairo untouched.
+        report: ["var(--font-report)", "system-ui", "sans-serif"],
       },
     },
   },
