@@ -446,9 +446,21 @@ function SituationCard({ situation, onDiscuss }: { situation: SgiSituation; onDi
         <span className={cn("flex h-8 w-8 shrink-0 items-center justify-center rounded-full", iconStyle)}>
           <Icon className="h-4 w-4" />
         </span>
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 space-y-1">
           <p className="truncate font-medium">{situation.title}</p>
-          <p className="truncate text-xs text-muted-foreground">{TYPE_LABEL[situation.type]}</p>
+          {/* Category tag (2026-07-29, explicit feedback): the opportunity
+              type must read at a glance while standing at this one
+              customer's card, not just as a top filter chip — a rep
+              scanning cards needs to see "فرصة تحصيل" etc. as a visual tag
+              attached to the card itself. */}
+          <span
+            className={cn(
+              "inline-flex w-fit items-center rounded-full border px-2 py-0.5 text-[11px] font-medium",
+              situation.type === "GROWTH_OPPORTUNITY" ? "border-primary/30 bg-primary/10 text-primary" : "border-border bg-secondary/40 text-muted-foreground",
+            )}
+          >
+            {TYPE_LABEL[situation.type]}
+          </span>
         </div>
         <ChevronRight className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-90")} />
       </button>
