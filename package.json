@@ -19,7 +19,7 @@
     "docker:down": "docker compose down"
   },
   "devDependencies": {
-    "turbo": "^2.3.3",
+    "turbo": "^2.10.4",
     "typescript": "^5.7.2"
   }
 }
