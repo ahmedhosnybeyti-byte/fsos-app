@@ -27,6 +27,13 @@ import {
 } from "../files/dataset-query.util";
 import { CORE_DNA_SYSTEM_PROMPT } from "./data/dna-core-prompt";
 import { formatScenarios, retrieveScenarios } from "./data/scenario-retrieval.util";
+import { resolveMentionedCustomer } from "../local-decision/dictionary-engine";
+import { resolveEntity, type ChatTurn, type EntityResolver } from "../local-decision/entity-resolution";
+import { buildEmployeeResolver, type EmployeeResolverAuth } from "../local-decision/resolvers/employee.resolver";
+import { buildBranchResolver, buildRegionResolver, type OrgUnitLike, type OrgUnitResolverAuth } from "../local-decision/resolvers/org-unit.resolver";
+import { OrgUnitsService } from "../companies/org-units.service";
+import { dispatchIntent } from "../local-decision/intent-dispatcher";
+import { PrismaService } from "../../common/prisma";
 
 // Native, in-app replacement for the external ChatGPT Custom GPT screen.
 // Same job the GPT Actions (verify-access / dataset / render, see
@@ -204,7 +211,30 @@ const TOOLS = [
       additionalProperties: false,
     },
   },
+  {
+    // Structured Response Contract (client architecture decision,
+    // 2026-07-26) — the model MUST finish every turn by calling this tool
+    // instead of replying with free text. This is what makes analysis /
+    // advice / decision a server-enforced contract instead of a prompt
+    // instruction the model might drift from: the server only ever reads
+    // the reply from this tool's validated input, never from raw prose.
+    name: "submit_structured_reply",
+    description:
+      'أنهِ ردك دائمًا بنداء هذه الأداة بدل كتابة نص حر. "analysis" إلزامي دائمًا (نتيجة السؤال بالأرقام/الحقائق). "advice" و"decision" اختياريان — أرجعهما null صراحة إذا كان السؤال مباشرًا ولا يستدعي نصيحة أو قرارًا فعليًا؛ لا تملأهما بحشو غير مفيد فقط لإكمال الحقول.',
+    input_schema: {
+      type: "object",
+      properties: {
+        analysis: { type: "string", description: "التحليل أو الإجابة الأساسية على السؤال — إلزامي دائمًا." },
+        advice: { type: ["string", "null"], description: "نصيحة عملية إذا كانت ذات قيمة حقيقية، وإلا null." },
+        decision: { type: ["string", "null"], description: "قرار أو توصية محددة إذا كانت ذات قيمة حقيقية، وإلا null." },
+      },
+      required: ["analysis", "advice", "decision"],
+      additionalProperties: false,
+    },
+  },
 ] as const;
+
+const STRUCTURED_REPLY_TOOL_NAME = "submit_structured_reply";
 
 @Injectable()
 export class AssistantService {
@@ -212,6 +242,8 @@ export class AssistantService {
     private readonly rieFacade: RieFacade,
     private readonly appConfig: AppConfigService,
     private readonly sgiService: SgiService,
+    private readonly orgUnitsService: OrgUnitsService,
+    private readonly prisma: PrismaService,
   ) {}
 
   // Every RIE read in this service must pass requestingUser — see the
@@ -230,7 +262,80 @@ export class AssistantService {
 
     const today = new Date().toISOString().slice(0, 10);
     const scenarioBlock = formatScenarios(retrieveScenarios(input.message));
-    const systemPrompt = `${CORE_DNA_SYSTEM_PROMPT}\n\nتاريخ اليوم: ${today}.${scenarioBlock}`;
+
+    // FDA Local Decision Layer — Dictionary Engine, tried before the Claude
+    // loop starts. This is NOT a final zero-AI answer (Smart Assistant has
+    // no fixed-field briefing object to answer from the way Visit Copilot
+    // does) — it only resolves a customer the user named by code/name in
+    // free text against the same hierarchy-scoped Customers rows Permission
+    // Check would already narrow, and injects that resolution as context so
+    // the model doesn't have to spend a query_dataset round-trip figuring
+    // out which customer "he"/"this client" refers to. Failure to resolve
+    // (or an RIE read error) must never block the chat — falls back to
+    // silence, exactly as if this step didn't run.
+    let mentionedCustomerLine = "";
+    try {
+      // getEntityRecords returns an EntityQueryResult wrapper (available +
+      // records + fields), not a bare array — same shape VisitCopilotService
+      // reads via its own requireCustomers() helper. `available: false` (no
+      // Customers dataset uploaded yet) is treated the same as any other
+      // resolution failure here: silently skip, never block the chat.
+      const result = await this.rieFacade.getEntityRecords("Customers", this.rieContext(user));
+      if (result.available) {
+        const mentioned = resolveMentionedCustomer(input.message, result.records);
+        if (mentioned) {
+          mentionedCustomerLine = `\n\nملاحظة سياق (تم تحديدها محليًا بدون AI): رسالة المستخدم تذكر العميل "${mentioned.customerName}" (الكود: ${mentioned.customerCode}). إذا كان سؤال المستخدم عن عميل، استخدم هذا الكود مباشرة بدل تخمين الاسم أو البحث عنه.`;
+        }
+      }
+    } catch {
+      // Best-effort only — Dictionary Engine resolution is an optimization,
+      // never a hard dependency of the chat loop.
+    }
+
+    // FDA Local Decision Layer — Entity Resolution (client architecture
+    // decision, 2026-07-26): a question that NEEDS an entity (salesperson,
+    // branch, region) but doesn't name one must be resolved deterministically
+    // — explicit mention, then most recent mention in conversation history,
+    // then self-context/unique-scope — or refused with a local clarification.
+    // It must NEVER be handed to AI to guess or ask its own follow-up; that
+    // is this layer's job, not the model's. Unlike the Customer block above
+    // (a silent optimization), an ambiguous result HERE genuinely stops the
+    // turn before any Claude call — see the early return below.
+    //
+    // Scope: only entities with a real, non-invented data path are wired in
+    // (Employee/Salesperson via the Employees Canonical Entity; Branch/
+    // Region via OrgUnitsService — Customer is handled by the Dictionary
+    // Engine step above and needs no self-context). Triggered only when the
+    // message contains an exact keyword for one of these entity *types*
+    // without also containing something the corresponding resolver's
+    // findMention already recognizes as a specific mention — consistent
+    // with Rule Engine's "exact keyword/pattern matching only" philosophy,
+    // not a general intent classifier.
+    const entityResolutionResult = await this.tryResolveNeededEntity(user, input);
+    if (entityResolutionResult) {
+      return { analysis: entityResolutionResult, advice: null, decision: null, blocks: [] };
+    }
+
+    // FDA Local Decision Layer — Intent Dispatcher (Task Station, 2026-07-26,
+    // wired into chat() per the follow-up Task Brief). Runs after the
+    // Customer Dictionary Engine and Entity Resolution blocks above — those
+    // two either enrich context silently or must stop the turn on ambiguity;
+    // this step answers a small, fixed set of fully-local business questions
+    // outright before any Claude call, and only for intents already vetted
+    // as canAnswerLocally:"yes" in assistant-intent-registry.data.ts. A
+    // "not_matched" result (the overwhelming majority of messages, since only
+    // 3 of the Registry's 41 intents are wired so far) falls through to the
+    // Claude loop exactly as if this step didn't exist — same fail-open
+    // discipline as every other Local Decision Layer step in this method.
+    const intentResult = await dispatchIntent(this.rieFacade, this.prisma, user, input.message);
+    if (intentResult.status === "answered") {
+      return { analysis: intentResult.text, advice: null, decision: null, blocks: [] };
+    }
+    if (intentResult.status === "needs_time_context") {
+      return { analysis: intentResult.clarificationMessage, advice: null, decision: null, blocks: [] };
+    }
+
+    const systemPrompt = `${CORE_DNA_SYSTEM_PROMPT}\n\nتاريخ اليوم: ${today}.${scenarioBlock}${mentionedCustomerLine}`;
 
     const messages: ClaudeMessage[] = [
       ...input.history.slice(-ASSISTANT_LIMITS.maxHistoryMessages).map((m): ClaudeMessage => ({ role: m.role, content: m.content })),
@@ -238,8 +343,21 @@ export class AssistantService {
     ];
 
     const blocks: AnalysisBlock[] = [];
+    // Structured Response Contract — the ONLY source of the returned
+    // analysis/advice/decision is a validated submit_structured_reply tool
+    // call, never raw prose. finalText is kept only as material for the
+    // fallback path (model never called the tool at all, e.g. it errored
+    // out or the loop was exhausted without one) — it is never returned to
+    // the client as-is.
     let finalText = "";
+    let structuredReply: { analysis: string; advice: string | null; decision: string | null } | null = null;
 
+    // Phase 1 — tool gathering. Unforced: the model is free to call any
+    // data tool (or submit_structured_reply directly if it already has
+    // enough to answer) on every iteration, including the last one. Forcing
+    // the structured-reply tool DURING this phase would risk cutting the
+    // model off mid data-gathering on its final allowed turn — kept as a
+    // fully separate phase 2 below instead, per explicit correction.
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       const response = await this.callClaude(apiKey, systemPrompt, messages);
       const toolUseBlocks = response.content.filter((b): b is Extract<ClaudeContentBlock, { type: "tool_use" }> => b.type === "tool_use");
@@ -249,6 +367,17 @@ export class AssistantService {
         .join("\n")
         .trim();
       if (text) finalText = text;
+
+      const structuredCall = toolUseBlocks.find((b) => b.name === STRUCTURED_REPLY_TOOL_NAME);
+      if (structuredCall) {
+        const parsed = this.parseStructuredReply(structuredCall.input);
+        if (parsed) structuredReply = parsed;
+        // Turn is over regardless of whether parsing succeeded — the model
+        // considers itself done once it calls this tool. A parse failure
+        // (malformed input) falls through to the fallback below, exactly
+        // like the tool never being called at all.
+        break;
+      }
 
       if (toolUseBlocks.length === 0 || response.stop_reason !== "tool_use") break;
 
@@ -265,10 +394,127 @@ export class AssistantService {
       this.compactStaleToolResults(messages);
     }
 
-    return { reply: finalText || "معرفتش أوصل لإجابة واضحة، جرب تصيغ سؤالك بشكل مختلف.", blocks };
+    // Phase 2 — forced structured reply. Only reached if phase 1 ended
+    // (tool iterations exhausted, or the model stopped without ever
+    // calling submit_structured_reply) without a valid structured result.
+    // This is a genuinely separate, independent call — not a flag checked
+    // inside the gathering loop — specifically so it never competes with
+    // or cuts off a data tool call on the gathering loop's own last turn.
+    if (!structuredReply) {
+      const finalResponse = await this.callClaude(apiKey, systemPrompt, messages, true);
+      const finalToolUse = finalResponse.content.find((b): b is Extract<ClaudeContentBlock, { type: "tool_use" }> => b.type === "tool_use" && b.name === STRUCTURED_REPLY_TOOL_NAME);
+      const finalTextBlocks = finalResponse.content.filter((b): b is Extract<ClaudeContentBlock, { type: "text" }> => b.type === "text");
+      const finalTextJoined = finalTextBlocks
+        .map((b) => b.text)
+        .join("\n")
+        .trim();
+      if (finalTextJoined) finalText = finalTextJoined;
+      if (finalToolUse) {
+        const parsed = this.parseStructuredReply(finalToolUse.input);
+        if (parsed) structuredReply = parsed;
+      }
+    }
+
+    if (structuredReply) {
+      return { ...structuredReply, blocks };
+    }
+    // Fallback: the model never produced a valid structured reply even
+    // when forced (parse failure, or — tool_choice permitting — it still
+    // didn't call the tool). Per the contract, a failure here surfaces only
+    // through `analysis` — advice/decision stay null, never guessed.
+    return {
+      analysis: finalText || "معرفتش أوصل لإجابة واضحة، جرب تصيغ سؤالك بشكل مختلف.",
+      advice: null,
+      decision: null,
+      blocks,
+    };
   }
 
-  private async callClaude(apiKey: string, systemPrompt: string, messages: ClaudeMessage[]): Promise<ClaudeResponse> {
+  // FDA Local Decision Layer — Entity Resolution trigger + dispatch.
+  // Exact-keyword gate only (no intent classifier): if the message doesn't
+  // contain one of these literal terms for a given entity type, that
+  // type's resolver never runs and this returns null immediately — the
+  // normal Claude loop proceeds untouched, same as if this method didn't
+  // exist. Only Employee/Salesperson, Branch, and Region are wired here —
+  // Customer is handled separately by the Dictionary Engine block above
+  // (it has no self-context concept, so it doesn't need this 4-step flow
+  // in the same way, and was already working before this feature).
+  //
+  // Keyword lists are drawn directly from the client's own business-
+  // question catalogue (2026-07-26) — not invented. Kept intentionally
+  // narrow: better to miss a trigger (falls through to the normal AI loop,
+  // no regression) than to over-trigger and block a question that didn't
+  // actually need an entity.
+  private readonly employeeTriggerTerms = ["المندوب", "مندوب", "الموظف", "موظف", "المشرف", "مشرف"];
+  private readonly branchTriggerTerms = ["الفرع", "فرع"];
+  private readonly regionTriggerTerms = ["المنطقة", "منطقة"];
+
+  private async tryResolveNeededEntity(user: AuthenticatedUser, input: AssistantChatRequest): Promise<string | null> {
+    const messageLower = input.message.toLowerCase();
+    const history: ChatTurn[] = input.history.map((m) => ({ role: m.role, content: m.content }));
+
+    const needsEmployee = this.employeeTriggerTerms.some((t) => messageLower.includes(t));
+    const needsBranch = this.branchTriggerTerms.some((t) => messageLower.includes(t));
+    const needsRegion = this.regionTriggerTerms.some((t) => messageLower.includes(t));
+
+    if (!needsEmployee && !needsBranch && !needsRegion) return null;
+
+    try {
+      if (needsEmployee) {
+        const result = await this.rieFacade.getEntityRecords("Employees", this.rieContext(user));
+        if (result.available) {
+          const resolver = buildEmployeeResolver(result.records);
+          const auth: EmployeeResolverAuth = { email: user.email };
+          const outcome = await resolveEntity(resolver, input.message, history, auth);
+          if (outcome.status === "ambiguous") return outcome.clarificationMessage;
+        }
+      }
+
+      if (needsBranch) {
+        const units = await this.orgUnitsService.list(user.companyId!, { type: "BRANCH" });
+        const resolver = buildBranchResolver(units as unknown as OrgUnitLike[]);
+        const auth: OrgUnitResolverAuth = { orgUnitId: user.orgUnitId ?? null };
+        const outcome = await resolveEntity(resolver, input.message, history, auth);
+        if (outcome.status === "ambiguous") return outcome.clarificationMessage;
+      }
+
+      if (needsRegion) {
+        const units = await this.orgUnitsService.list(user.companyId!, { type: "REGION" });
+        const resolver = buildRegionResolver(units as unknown as OrgUnitLike[]);
+        const auth: OrgUnitResolverAuth = { orgUnitId: user.orgUnitId ?? null };
+        const outcome = await resolveEntity(resolver, input.message, history, auth);
+        if (outcome.status === "ambiguous") return outcome.clarificationMessage;
+      }
+    } catch {
+      // Best-effort only, same as the Dictionary Engine block above — a
+      // failed lookup (RIE unavailable, DB error) must never block the
+      // chat; falls through to the normal AI loop instead of refusing.
+      return null;
+    }
+
+    // Resolved (or not applicable) for every triggered entity type — no
+    // system-prompt injection is added here. Unlike the Customer block,
+    // there is no established "mentioned entity" hint format for
+    // Employee/Branch/Region yet, and inventing one wasn't part of this
+    // pass's scope; the resolved entity's own name/code is already present
+    // in the user's message text for the model to read directly. The value
+    // delivered by this step is entirely the ambiguous-case refusal above.
+    return null;
+  }
+
+  // Validates a submit_structured_reply tool call's raw input against the
+  // contract shape. Returns null (never throws) on anything malformed so
+  // the caller can fall back to the analysis-only path unconditionally.
+  private parseStructuredReply(input: unknown): { analysis: string; advice: string | null; decision: string | null } | null {
+    if (typeof input !== "object" || input === null) return null;
+    const obj = input as Record<string, unknown>;
+    if (typeof obj.analysis !== "string" || obj.analysis.trim() === "") return null;
+    const advice = typeof obj.advice === "string" && obj.advice.trim() !== "" ? obj.advice : null;
+    const decision = typeof obj.decision === "string" && obj.decision.trim() !== "" ? obj.decision : null;
+    return { analysis: obj.analysis, advice, decision };
+  }
+
+  private async callClaude(apiKey: string, systemPrompt: string, messages: ClaudeMessage[], forceStructuredReply = false): Promise<ClaudeResponse> {
     let response: globalThis.Response;
     try {
       response = await fetch("https://api.anthropic.com/v1/messages", {
@@ -283,6 +529,12 @@ export class AssistantService {
           max_tokens: MAX_TOKENS,
           system: [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }],
           tools: TOOLS,
+          // On the final allowed iteration, force the model to call
+          // submit_structured_reply instead of possibly running out of
+          // iterations mid tool-use with only prose or nothing at all —
+          // this is what makes the structured contract genuinely
+          // server-enforced rather than best-effort.
+          ...(forceStructuredReply ? { tool_choice: { type: "tool", name: STRUCTURED_REPLY_TOOL_NAME } } : {}),
           messages,
         }),
       });

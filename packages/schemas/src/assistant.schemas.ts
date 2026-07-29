@@ -26,8 +26,18 @@ export const assistantChatRequestSchema = z.object({
 });
 export type AssistantChatRequest = z.infer<typeof assistantChatRequestSchema>;
 
+// Structured Response Contract — enforced server-side, not left to the
+// model's own prose formatting (explicit client architecture decision,
+// 2026-07-26). `analysis` is always present (it's what a plain factual
+// question resolves to). `advice`/`decision` are semantically optional:
+// null when the question is direct/simple and doesn't call for a
+// recommendation or a decision — never filled with artificial padding just
+// to complete the three sections. Frontend renders analysis always, then
+// advice/decision only when non-null, in that fixed order.
 export const assistantChatResponseSchema = z.object({
-  reply: z.string(),
+  analysis: z.string(),
+  advice: z.string().nullable(),
+  decision: z.string().nullable(),
   blocks: z.array(analysisBlockSchema).default([]),
 });
 export type AssistantChatResponse = z.infer<typeof assistantChatResponseSchema>;
