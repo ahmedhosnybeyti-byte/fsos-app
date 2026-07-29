@@ -76,25 +76,28 @@ async function bootstrap() {
   SwaggerModule.setup("docs", app, document);
 
   // Minimal OpenAPI document scoped to ONLY the endpoints a Custom GPT
-  // Action should ever see (verify-access, datasets list, dataset fetch,
-  // render) — this is what gets pasted into the GPT Builder's Action
-  // schema, not the full /docs above. See docs/GPT_SETUP.md.
-  const gptActionPaths = [
-    `/api/${API_VERSION_PREFIX}/gpt/verify-access`,
-    `/api/${API_VERSION_PREFIX}/gpt/datasets`,
-    `/api/${API_VERSION_PREFIX}/gpt/dataset`,
-    `/api/${API_VERSION_PREFIX}/gpt/render`,
-    `/api/${API_VERSION_PREFIX}/gpt/execute-report`,
-  ];
+  // Action should ever see — this is what gets pasted into the GPT
+  // Builder's Action schema, not the full /docs above. See docs/GPT_SETUP.md.
+  //
+  // Architecture pivot (2026-07-27): the GPT's ONLY job now is proving the
+  // user is a subscribed, authorized Field Sales OS user — verify-access is
+  // the sole path exposed here. Operational data comes exclusively from
+  // files the user uploads directly in the ChatGPT conversation, never from
+  // this API. datasets/dataset/render/execute-report still exist as real
+  // endpoints (used by the web dashboard's own Analysis Studio flows where
+  // applicable) — they're just no longer imported into the GPT Action, so
+  // the model never sees them as callable tools and can't reach for app
+  // data instead of the uploaded file. See PROJECT_LOG.md for the decision.
+  const gptActionPaths = [`/api/${API_VERSION_PREFIX}/gpt/verify-access`];
   const { cookie: _cookie, ...gptActionSecuritySchemes } = document.components?.securitySchemes ?? {};
   // The GPT Builder Action importer requires a genuine OpenAPI 3.1.x
   // document. @nestjs/swagger itself always generates 3.0-shaped output
   // (`document.openapi` is "3.0.0"), so this override is only safe because
-  // every schema on these 4 paths is hand-authored in GptController using
+  // this path's schema is hand-authored in GptController using
   // JSON-Schema-2020-12 syntax (`type` arrays for nullability, not
   // `nullable: true`) specifically for 3.1 compatibility — see
   // jsonSchema31() there. Do not add auto-inferred/undecorated schemas to
-  // these paths without converting them the same way, or this label will
+  // this path without converting them the same way, or this label will
   // lie again.
   const gptActionsDocument = {
     ...document,
