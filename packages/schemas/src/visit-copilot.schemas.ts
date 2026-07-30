@@ -229,6 +229,16 @@ export const visitCopilot360LostOpportunitySchema = z.object({
   stoppedProducts: z.array(visitCopilot360StoppedProductSchema),
   diagnosis: z.string(),
   visitDecision: z.string(),
+  // Added 2026-07-29 (Recommendation Builder) — additive/optional so any
+  // older cached client keeps working: `likelyReason` is null whenever the
+  // builder has no data-backed signal to point at (never a guessed cause
+  // presented as fact); `visitGoal` is the one measurable outcome for this
+  // visit, kept separate from `visitDecision`'s action step per the
+  // diagnosis/reason/action/goal shape. `extraProductCount` lets the UI
+  // show only the top products plus a "+N more" note instead of every chip.
+  likelyReason: z.string().nullable().optional(),
+  visitGoal: z.string().optional(),
+  extraProductCount: z.number().optional(),
 });
 export type VisitCopilot360LostOpportunity = z.infer<typeof visitCopilot360LostOpportunitySchema>;
 

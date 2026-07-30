@@ -31,6 +31,7 @@ import { resolveMentionedCustomer } from "../local-decision/dictionary-engine";
 import { LocalDecisionEngine } from "../local-decision/rule-engine";
 import { VisitCopilotRuleRegistry } from "./visit-copilot.rules";
 import { SgiService } from "../sgi/sgi.service";
+import { buildLostOpportunityCoaching } from "./daily-360-recommendation-builder";
 
 // AI Visit Copilot — Phase 1. Decision-support screen for the field rep:
 // today's visit plan + a per-customer pre-visit briefing that must be
@@ -1135,15 +1136,24 @@ export class VisitCopilotService {
     const lostOpportunities = topDeclines.map((s) => {
       const before = s.metricValuePrior ?? 0;
       const after = s.metricValue;
+      const coaching = buildLostOpportunityCoaching({
+        customerName: s.entityLabel,
+        valueBefore: before,
+        valueAfter: after,
+        stoppedProducts: s.stoppedProducts ?? [],
+      });
       return {
         customerName: s.entityLabel,
         declineValue: Math.max(0, before - after),
         valueBefore: before,
         valueAfter: after,
         lastVisitDate: lastVisitByCustomerName.get(s.entityLabel) ?? null,
-        stoppedProducts: s.stoppedProducts ?? [],
-        diagnosis: s.detail,
-        visitDecision: s.recommendation,
+        stoppedProducts: coaching.topProducts,
+        diagnosis: coaching.diagnosis,
+        visitDecision: coaching.visitAction,
+        likelyReason: coaching.likelyReason,
+        visitGoal: coaching.visitGoal,
+        extraProductCount: coaching.extraProductCount,
       };
     });
 

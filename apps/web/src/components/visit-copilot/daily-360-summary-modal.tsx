@@ -252,23 +252,43 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
                               </p>
                               <div className="flex flex-wrap gap-1.5">
                                 {op.stoppedProducts.map((p, pi) => (
-                                  <Badge key={pi} variant="secondary" className="font-normal">
+                                  <span
+                                    key={pi}
+                                    className="rounded-full border border-orange-400/30 bg-orange-500/10 px-2.5 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-300"
+                                  >
                                     {p.productName} · {p.quantity.toLocaleString()} {p.unit} · {p.value.toLocaleString()}
-                                  </Badge>
+                                  </span>
                                 ))}
+                                {Boolean(op.extraProductCount) && (
+                                  <span className="rounded-full border border-border bg-card px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                                    {t("copilot.summary360MoreProducts", { count: op.extraProductCount! })}
+                                  </span>
+                                )}
                               </div>
                             </div>
                           )}
 
-                          <div className="space-y-1 rounded-md bg-background/60 p-2.5">
-                            <p className="text-xs">
+                          <div className="space-y-1.5 rounded-md border border-border bg-card p-2.5">
+                            <p className="text-xs text-foreground">
                               <span className="font-medium text-muted-foreground">{t("copilot.summary360Diagnosis")}: </span>
                               {op.diagnosis}
                             </p>
-                            <p className="text-xs">
+                            {op.likelyReason && (
+                              <p className="text-xs text-foreground">
+                                <span className="font-medium text-muted-foreground">{t("copilot.summary360LikelyReason")}: </span>
+                                {op.likelyReason}
+                              </p>
+                            )}
+                            <p className="text-xs text-foreground">
                               <span className="font-medium text-muted-foreground">{t("copilot.summary360VisitDecision")}: </span>
                               {op.visitDecision}
                             </p>
+                            {op.visitGoal && (
+                              <p className="text-xs text-foreground">
+                                <span className="font-medium text-muted-foreground">{t("copilot.summary360VisitGoal")}: </span>
+                                {op.visitGoal}
+                              </p>
+                            )}
                           </div>
                         </div>
                       ))}
