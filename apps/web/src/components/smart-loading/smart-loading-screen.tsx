@@ -25,7 +25,24 @@ import type { SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type Inputs = { confirmedOrders: number; safetyStock: number; manual?: number };
-type Row = { product: SmartLoadingProduct; original: number; suggested: number; input: Inputs; manuallyAdded: boolean };
+type LostOpportunityAddition = {
+  source: "lost-opportunity";
+  opportunityIds: string[];
+  customerIds: string[];
+  productId: string;
+  addedQuantity: number;
+  customers: { id: string; name: string; baselineNetQuantity: number }[];
+};
+type LostOpportunityGroup = {
+  productId: string;
+  productName: string;
+  opportunityIds: string[];
+  customerIds: string[];
+  customers: { id: string; name: string; baselineNetQuantity: number }[];
+  baselineNetQuantity: number;
+  addedQuantity: number;
+};
+type Row = { product: SmartLoadingProduct; original: number; baseSuggested: number; suggested: number; input: Inputs; manuallyAdded: boolean; lostOpportunity?: LostOpportunityAddition; stockAvailable: boolean };
 
 const HIGH_PRIORITY_DAYS_STALE = 4;
 
@@ -84,6 +101,9 @@ export function SmartLoadingScreen({
   const [productSearch, setProductSearch] = useState("");
   const [selectedProductCode, setSelectedProductCode] = useState<string | null>(null);
   const [addedQuantity, setAddedQuantity] = useState(1);
+  const [lostOpportunitiesOpen, setLostOpportunitiesOpen] = useState(false);
+  const [lostOpportunityAdditions, setLostOpportunityAdditions] = useState<Record<string, LostOpportunityAddition>>({});
+  const [lostOpportunityWarning, setLostOpportunityWarning] = useState<string | null>(null);
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -98,14 +118,52 @@ export function SmartLoadingScreen({
   // stock), before filtering out zero/negative suggestions. Kept separate
   // from `rows` below because stale-item detection needs the FULL set, not
   // just the ones that ended up with a positive loading recommendation.
+  const lostOpportunityGroups = useMemo<LostOpportunityGroup[]>(() => {
+    if (session?.state !== "ready") return [];
+    const groups = new Map<string, LostOpportunityGroup>();
+    for (const opportunity of session.lostOpportunities) {
+      const productId = opportunity.productCode;
+      const customerId = opportunity.customerCode;
+      const opportunityId = `${customerId}:${productId}`;
+      const group = groups.get(productId) ?? {
+        productId,
+        productName: opportunity.productName,
+        opportunityIds: [],
+        customerIds: [],
+        customers: [],
+        baselineNetQuantity: 0,
+        addedQuantity: 0,
+      };
+      group.opportunityIds.push(opportunityId);
+      group.customerIds.push(customerId);
+      group.customers.push({ id: customerId, name: opportunity.customerName, baselineNetQuantity: opportunity.baselineNetQuantity });
+      group.baselineNetQuantity += opportunity.baselineNetQuantity;
+      group.addedQuantity += opportunity.suggestedQuantity;
+      groups.set(productId, group);
+    }
+    return Array.from(groups.values()).sort((a, b) => a.productName.localeCompare(b.productName, "ar"));
+  }, [session]);
+
   const allRows = useMemo<Row[]>(() => {
     if (session?.state !== "ready") return [];
-    return session.products.map((product) => {
+    const productsByCode = new Map(session.products.map((product) => [product.productCode, product]));
+    const rowsByProduct = new Map<string, Row>();
+    for (const product of session.products) {
       const input = inputs[product.productCode] ?? { confirmedOrders: 0, safetyStock: 0 };
       const original = product.weeklyAverageSales + input.confirmedOrders + input.safetyStock - product.currentVehicleStock;
-      return { product, input, original, suggested: input.manual ?? original, manuallyAdded: manuallyAddedProductCodes.has(product.productCode) };
-    });
-  }, [inputs, manuallyAddedProductCodes, session]);
+      const addition = lostOpportunityAdditions[product.productCode];
+      const baseSuggested = Math.max(0, original);
+      rowsByProduct.set(product.productCode, { product, input, original, baseSuggested, suggested: input.manual ?? baseSuggested + (addition?.addedQuantity ?? 0), manuallyAdded: manuallyAddedProductCodes.has(product.productCode), lostOpportunity: addition, stockAvailable: true });
+    }
+    for (const addition of Object.values(lostOpportunityAdditions)) {
+      if (rowsByProduct.has(addition.productId)) continue;
+      const group = lostOpportunityGroups.find((item) => item.productId === addition.productId);
+      const product = productsByCode.get(addition.productId) ?? { productCode: addition.productId, productName: group?.productName ?? addition.productId, currentVehicleStock: 0, weeklyAverageSales: 0, priority: "normal" as const, category: null, lastSaleDate: null };
+      const input = inputs[addition.productId] ?? { confirmedOrders: 0, safetyStock: 0 };
+      rowsByProduct.set(addition.productId, { product, input, original: 0, baseSuggested: 0, suggested: input.manual ?? addition.addedQuantity, manuallyAdded: manuallyAddedProductCodes.has(addition.productId), lostOpportunity: addition, stockAvailable: false });
+    }
+    return Array.from(rowsByProduct.values());
+  }, [inputs, lostOpportunityAdditions, lostOpportunityGroups, manuallyAddedProductCodes, session]);
 
   const rows = useMemo(
     () => allRows.filter((row) => !removedProductCodes.has(row.product.productCode) && (row.suggested > 0 || row.manuallyAdded)),
@@ -154,6 +212,8 @@ export function SmartLoadingScreen({
       setInputs({});
       setRemovedProductCodes(new Set());
       setManuallyAddedProductCodes(new Set());
+      setLostOpportunityAdditions({});
+      setLostOpportunityWarning(null);
       setOpenRows(new Set());
     } catch {
       setRefreshError(label("smartLoading.refreshFailed", "Unable to refresh loading data. Try again."));
@@ -183,14 +243,37 @@ export function SmartLoadingScreen({
     setAddProductOpen(false);
   }
 
+  function addLostOpportunity(group: LostOpportunityGroup) {
+    const stockProduct = session?.state === "ready" ? session.products.find((product) => product.productCode === group.productId) : undefined;
+    setLostOpportunityAdditions((current) => ({
+      ...current,
+      [group.productId]: { source: "lost-opportunity", opportunityIds: group.opportunityIds, customerIds: group.customerIds, productId: group.productId, addedQuantity: group.addedQuantity, customers: group.customers },
+    }));
+    setRemovedProductCodes((current) => {
+      const next = new Set(current);
+      next.delete(group.productId);
+      return next;
+    });
+    setLostOpportunityWarning(stockProduct
+      ? `\u0645\u062e\u0632\u0648\u0646 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u0627\u0644\u062d\u0627\u0644\u064a \u0644\u0644\u0635\u0646\u0641: ${formatQuantity(stockProduct.currentVehicleStock)}. \u0644\u0627 \u062a\u062a\u0648\u0641\u0631 \u0633\u0639\u0629 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u0641\u064a \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u062c\u0644\u0633\u0629\u061b \u0631\u0627\u062c\u0639 \u0627\u0644\u0633\u0639\u0629 \u0642\u0628\u0644 \u0627\u0639\u062a\u0645\u0627\u062f \u0627\u0644\u062a\u062d\u0645\u064a\u0644.`
+      : "\u0644\u0627 \u064a\u062a\u0648\u0641\u0631 \u0645\u062e\u0632\u0648\u0646 \u0633\u064a\u0627\u0631\u0629 \u0644\u0647\u0630\u0627 \u0627\u0644\u0635\u0646\u0641\u060c \u0648\u0644\u0627 \u062a\u062a\u0648\u0641\u0631 \u0633\u0639\u0629 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u0641\u064a \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u062c\u0644\u0633\u0629\u061b \u0631\u0627\u062c\u0639 \u0627\u0644\u0645\u062e\u0632\u0648\u0646 \u0648\u0627\u0644\u0633\u0639\u0629 \u0642\u0628\u0644 \u0627\u0639\u062a\u0645\u0627\u062f \u0627\u0644\u062a\u062d\u0645\u064a\u0644.");
+  }
+
   function removeProduct(productCode: string) {
     setRemovedProductCodes((current) => new Set(current).add(productCode));
+    setLostOpportunityAdditions((current) => {
+      const next = { ...current };
+      delete next[productCode];
+      return next;
+    });
   }
 
   function restoreOriginalList() {
     setInputs({});
     setRemovedProductCodes(new Set());
     setManuallyAddedProductCodes(new Set());
+    setLostOpportunityAdditions({});
+    setLostOpportunityWarning(null);
   }
 
   function setInput(productCode: string, key: keyof Inputs, value: string) {
@@ -389,6 +472,10 @@ export function SmartLoadingScreen({
           <p className="mt-1 text-sm text-muted-foreground">{t("smartLoading.subtitle")}</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => { setLostOpportunitiesOpen(true); setLostOpportunityWarning(null); }}>
+            <AlertTriangle className="h-4 w-4 text-amber-600" />
+            {"\u0627\u0644\u0641\u0631\u0635 \u0627\u0644\u0636\u0627\u0626\u0639\u0629"} ({formatQuantity(lostOpportunityGroups.reduce((sum, group) => sum + group.opportunityIds.length, 0))})
+          </Button>
           <div className="relative">
             <Button variant="outline" onClick={() => setExportOpen((open) => !open)}>
               <Download className="h-4 w-4" />
@@ -489,6 +576,19 @@ export function SmartLoadingScreen({
           </CardContent>
         </Card>
       </section>
+
+      {lostOpportunitiesOpen && (
+        <LostOpportunitiesDialog
+          groups={lostOpportunityGroups}
+          additions={lostOpportunityAdditions}
+          products={session.products}
+          isLoading={isLoading}
+          isError={isError}
+          warning={lostOpportunityWarning}
+          onClose={() => setLostOpportunitiesOpen(false)}
+          onAdd={addLostOpportunity}
+        />
+      )}
 
       {addProductOpen && (
         <AddProductDialog
@@ -627,6 +727,62 @@ export function SmartLoadingScreen({
   );
 }
 
+function LostOpportunitiesDialog({
+  groups,
+  additions,
+  products,
+  isLoading,
+  isError,
+  warning,
+  onClose,
+  onAdd,
+}: {
+  groups: LostOpportunityGroup[];
+  additions: Record<string, LostOpportunityAddition>;
+  products: SmartLoadingProduct[];
+  isLoading: boolean;
+  isError: boolean;
+  warning: string | null;
+  onClose: () => void;
+  onAdd: (group: LostOpportunityGroup) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end bg-black/50 p-4 sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label={"\u0627\u0644\u0641\u0631\u0635 \u0627\u0644\u0636\u0627\u0626\u0639\u0629"}>
+      <Card className="max-h-[85vh] w-full max-w-3xl overflow-y-auto shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <CardHeader className="flex-row items-start justify-between gap-3">
+          <div>
+            <CardTitle>{"\u0627\u0644\u0641\u0631\u0635 \u0627\u0644\u0636\u0627\u0626\u0639\u0629"}</CardTitle>
+            <CardDescription>{"\u0623\u0635\u0646\u0627\u0641 \u0639\u0645\u0644\u0627\u0621 \u062e\u0637 \u0633\u064a\u0631 \u0627\u0644\u063a\u062f. \u0644\u0646 \u062a\u064f\u0636\u0627\u0641 \u0625\u0644\u0649 \u0627\u0644\u062a\u062d\u0645\u064a\u0644 \u0625\u0644\u0627 \u0628\u0639\u062f \u0627\u062e\u062a\u064a\u0627\u0631\u0643."}</CardDescription>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}>{"\u0625\u063a\u0644\u0627\u0642"}</Button>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {isLoading && <div className="space-y-2"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>}
+          {isError && <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{"\u062a\u0639\u0630\u0631 \u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0641\u0631\u0635 \u0627\u0644\u0636\u0627\u0626\u0639\u0629. \u062d\u0627\u0648\u0644 \u062a\u062d\u062f\u064a\u062b \u0627\u0644\u0634\u0627\u0634\u0629."}</p>}
+          {!isLoading && !isError && groups.length === 0 && <p className="rounded-md border p-4 text-center text-sm text-muted-foreground">{"\u0644\u0627 \u062a\u0648\u062c\u062f \u0641\u0631\u0635 \u0636\u0627\u0626\u0639\u0629 \u0644\u0639\u0645\u0644\u0627\u0621 \u062e\u0637 \u0633\u064a\u0631 \u0627\u0644\u063a\u062f"}</p>}
+          {!isLoading && !isError && groups.map((group) => {
+            const added = additions[group.productId];
+            const stockProduct = products.find((product) => product.productCode === group.productId);
+            return <article key={group.productId} className="rounded-lg border p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div><p className="font-semibold">{group.productName}</p><p className="text-xs text-muted-foreground">{"\u0643\u0648\u062f \u0627\u0644\u0635\u0646\u0641:"} {group.productId}</p></div>
+                <Button disabled={Boolean(added)} onClick={() => onAdd(group)}>{added ? "\u062a\u0645\u062a \u0627\u0644\u0625\u0636\u0627\u0641\u0629" : "\u0625\u0636\u0627\u0641\u0629 \u0625\u0644\u0649 \u0627\u0644\u062a\u062d\u0645\u064a\u0644"}</Button>
+              </div>
+              <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3"><Info label={"\u0627\u0644\u0643\u0645\u064a\u0629 \u0641\u064a \u0627\u0644\u0641\u062a\u0631\u0629 \u0627\u0644\u0645\u0631\u062c\u0639\u064a\u0629"} value={formatQuantity(group.baselineNetQuantity)} /><Info label={"\u0622\u062e\u0631 30 \u064a\u0648\u0645\u064b\u0627"} value="0" /><Info label={"\u0627\u0644\u0643\u0645\u064a\u0629 \u0627\u0644\u0645\u0642\u062a\u0631\u062d\u0629 \u0644\u0644\u0645\u0646\u062f\u0648\u0628"} value={formatQuantity(group.addedQuantity)} /></div>
+              <p className="mt-2 text-xs text-muted-foreground">{group.customers.length === 1 ? `\u0627\u0644\u0639\u0645\u064a\u0644: ${group.customers[0]!.name}` : `${group.customers.length} \u0639\u0645\u0644\u0627\u0621 \u0645\u0631\u062a\u0628\u0637\u0648\u0646 \u0628\u0627\u0644\u0641\u0631\u0635\u0629`}</p>
+              {group.customers.length > 1 && <details className="mt-1 text-xs text-muted-foreground"><summary className="cursor-pointer">{"\u0639\u0631\u0636 \u062a\u0641\u0627\u0635\u064a\u0644 \u0627\u0644\u0639\u0645\u0644\u0627\u0621"}</summary><ul className="mt-1 list-disc space-y-1 pr-4">{group.customers.map((customer) => <li key={customer.id}>{customer.name}: {formatQuantity(customer.baselineNetQuantity)}</li>)}</ul></details>}
+                            <p className="mt-2 text-xs text-muted-foreground">{stockProduct ? `\u0645\u062e\u0632\u0648\u0646 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u0627\u0644\u062d\u0627\u0644\u064a: ${formatQuantity(stockProduct.currentVehicleStock)}` : "\u0645\u062e\u0632\u0648\u0646 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u063a\u064a\u0631 \u0645\u062a\u0627\u062d \u0644\u0647\u0630\u0627 \u0627\u0644\u0635\u0646\u0641."}</p>
+
+              <p className="mt-2 rounded bg-amber-500/10 px-2 py-1 text-xs text-amber-800">{"\u062a\u064f\u0631\u0627\u062c\u0639 \u062d\u0627\u0644\u0629 \u0627\u0644\u0645\u062e\u0632\u0648\u0646 \u0648\u0627\u0644\u0633\u0639\u0629 \u0639\u0646\u062f \u0627\u0644\u0625\u0636\u0627\u0641\u0629\u061b \u0644\u0627 \u064a\u062a\u0645 \u0627\u0639\u062a\u0645\u0627\u062f \u0623\u0648 \u062a\u0646\u0641\u064a\u0630 \u0627\u0644\u062a\u062d\u0645\u064a\u0644 \u062a\u0644\u0642\u0627\u0626\u064a\u064b\u0627."}</p>
+            </article>;
+          })}
+          {warning && <p role="alert" className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800">{warning}</p>}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function ProductRow({
   row,
   open,
@@ -702,6 +858,14 @@ function ProductRow({
         <p className="mt-1 text-[11px] text-amber-700">
           {t("smartLoading.manualOverrideNote", { value: formatQuantity(row.original) })}
         </p>
+      )}
+
+      {row.lostOpportunity && (
+        <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs">
+          <p className="font-semibold text-amber-800">{"\u0641\u0631\u0635\u0629 \u0636\u0627\u0626\u0639\u0629"} · {row.lostOpportunity.customers.length === 1 ? row.lostOpportunity.customers[0]!.name : `${row.lostOpportunity.customers.length} \u0639\u0645\u0644\u0627\u0621`}</p>
+          <div className="mt-1 grid gap-1 sm:grid-cols-3"><span>{"\u0627\u0644\u0643\u0645\u064a\u0629 \u0627\u0644\u0623\u0633\u0627\u0633\u064a\u0629:"} {formatQuantity(row.baseSuggested)}</span><span>{"\u0641\u0631\u0635\u0629 \u0636\u0627\u0626\u0639\u0629:"} {formatQuantity(row.lostOpportunity.addedQuantity)}</span><span className="font-semibold">{"\u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0645\u0642\u062a\u0631\u062d:"} {formatQuantity(row.suggested)}</span></div>
+          <p className="mt-1 text-amber-800">{row.stockAvailable ? `\u0645\u062e\u0632\u0648\u0646 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u0627\u0644\u062d\u0627\u0644\u064a: ${formatQuantity(row.product.currentVehicleStock)}. \u0631\u0627\u062c\u0639 \u0627\u0644\u0633\u0639\u0629 \u0642\u0628\u0644 \u0627\u0644\u0627\u0639\u062a\u0645\u0627\u062f.` : "\u0645\u062e\u0632\u0648\u0646 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u063a\u064a\u0631 \u0645\u062a\u0627\u062d \u0644\u0647\u0630\u0627 \u0627\u0644\u0635\u0646\u0641. \u0631\u0627\u062c\u0639 \u0627\u0644\u0645\u062e\u0632\u0648\u0646 \u0648\u0627\u0644\u0633\u0639\u0629 \u0642\u0628\u0644 \u0627\u0644\u0627\u0639\u062a\u0645\u0627\u062f."}</p>
+        </div>
       )}
 
       {open && (
