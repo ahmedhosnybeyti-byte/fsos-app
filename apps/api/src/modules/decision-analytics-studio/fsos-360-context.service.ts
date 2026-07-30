@@ -9,6 +9,11 @@ export interface Fsos360Option {
   label: string;
 }
 
+export interface Fsos360RegionCityOption extends Fsos360Option {
+  level: "region" | "city";
+  parentRegionId?: string;
+}
+
 export interface Fsos360Customer {
   code: string;
   name: string;
@@ -106,6 +111,19 @@ function optionsFrom(entries: Iterable<[string, string]>): Fsos360Option[] {
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+function regionCityOptions(regions: Map<string, string>, customers: Map<string, Fsos360Customer>, branches: Map<string, { name: string; regionId: string }>, regionSet: Set<string> | null): Fsos360RegionCityOption[] {
+  const options: Fsos360RegionCityOption[] = Array.from(regions, ([value, label]) => ({ value, label: label || value, level: "region" }));
+  const seenCities = new Set<string>();
+  for (const customer of customers.values()) {
+    const parentRegionId = branches.get(customer.branchId)?.regionId;
+    if (!customer.city || !parentRegionId || (regionSet && !regionSet.has(parentRegionId))) continue;
+    const key = `${parentRegionId}\u0000${customer.city}`;
+    if (seenCities.has(key)) continue;
+    seenCities.add(key);
+    options.push({ value: customer.city, label: customer.city, level: "city", parentRegionId });
+  }
+  return options.sort((a, b) => a.label.localeCompare(b.label));
+}
 export function assignmentMatchesAt(assignment: Fsos360RouteAssignment, routeId: string, at: number, employeeIds?: Set<string> | null): boolean {
   if (assignment.role !== "SalesRep" || assignment.routeId !== routeId || assignment.startAt === null) return false;
   if (employeeIds && !employeeIds.has(assignment.employeeId)) return false;
@@ -233,8 +251,7 @@ export class Fsos360ContextService {
       const route = routes.get(routeId);
       if (route) routeOptions.set(route.id, route.name);
     }
-    const cityOptions = new Map<string, string>();
-    for (const city of cityAllowed) if (city) cityOptions.set(city, city);
+
     const managerSupervisorReason = datasets.Employees.available ? "manager-supervisor-role-ambiguous" : "employees-dataset-unavailable";
     const routeAssignmentAvailable = datasets["Route Assignments"].available && routeAssignments.some((assignment) => assignment.role === "SalesRep" && assignment.startAt !== null);
 
@@ -252,7 +269,7 @@ export class Fsos360ContextService {
       datasets,
       smallFilterOptions: {
         company: [{ value: user.companyId!, label: "Company" }],
-        regionCity: optionsFrom([...regions.entries(), ...cityOptions.entries()]),
+        regionCity: regionCityOptions(regions, customers, branches, regionSet),
         branch: optionsFrom(Array.from(branchAllowed, (id) => [id, branches.get(id)?.name ?? id])),
         manager: [],
         supervisor: [],

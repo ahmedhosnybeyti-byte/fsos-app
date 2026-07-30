@@ -65,6 +65,16 @@ const fsos360OptionSchema = z.object({
   meta: z.record(z.string()).optional(),
 });
 
+export const fsos360RegionCityOptionSchema = fsos360OptionSchema.extend({
+  level: z.enum(["region", "city"]),
+  parentRegionId: z.string().optional(),
+});
+export type Fsos360RegionCityOption = z.infer<typeof fsos360RegionCityOptionSchema>;
+
+const fsos360SmallFilterOptionsSchema = z.object({
+  regionCity: z.array(fsos360RegionCityOptionSchema),
+}).catchall(z.array(fsos360OptionSchema));
+
 const fsos360BusinessMeaningSchema = z.object({
   code: z.string(),
   params: z.record(z.union([z.string(), z.number()])),
@@ -164,7 +174,7 @@ export const fsos360QueryResponseSchema = z.object({
   resolvedFilters: fsos360FiltersSchema,
   removedSelections: z.record(z.array(z.string())),
   activeAnalysisLevel: z.union([fsos360AnalysisFocusSchema, z.literal("mixed")]),
-  smallFilterOptions: z.record(z.array(fsos360OptionSchema)),
+  smallFilterOptions: fsos360SmallFilterOptionsSchema,
   smartSlicerCapabilities: z.record(fsos360AvailabilityResultSchema),
   executiveInsight: z.object({ availability: fsos360AvailabilitySchema, reason: z.string().nullable(), items: z.array(fsos360BusinessMeaningSchema) }),
   kpis: z.array(fsos360KpiSchema),
