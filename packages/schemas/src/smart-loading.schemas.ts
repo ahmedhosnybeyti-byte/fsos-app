@@ -37,10 +37,26 @@ export const smartLoadingAttentionSchema = z.object({
 });
 export type SmartLoadingAttention = z.infer<typeof smartLoadingAttentionSchema>;
 
+// A single customer/product opportunity for the next day's route. Quantities
+// are net of confirmed returns and the suggested quantity uses the same
+// whole-unit rounding convention as the Smart Loading screen.
+export const smartLoadingLostOpportunitySchema = z.object({
+  customerCode: z.string(),
+  customerName: z.string(),
+  productCode: z.string(),
+  productName: z.string(),
+  baselineNetQuantity: z.number(),
+  recentNetQuantity: z.number(),
+  suggestedQuantity: z.number(),
+});
+export type SmartLoadingLostOpportunity = z.infer<typeof smartLoadingLostOpportunitySchema>;
+
 export const smartLoadingReadySessionSchema = z.object({
   state: z.literal("ready"),
   products: z.array(smartLoadingProductSchema),
   attention: z.array(smartLoadingAttentionSchema),
+  asOfDate: z.string(),
+  lostOpportunities: z.array(smartLoadingLostOpportunitySchema),
   calculatedAt: z.string(),
 });
 export type SmartLoadingReadySession = z.infer<typeof smartLoadingReadySessionSchema>;

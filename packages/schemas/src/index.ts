@@ -36,6 +36,7 @@ export {
   smartLoadingProductSchema,
   smartLoadingAttentionSchema,
   smartLoadingReadySessionSchema,
+  smartLoadingLostOpportunitySchema,
   smartLoadingVehicleStockUnavailableSessionSchema,
   smartLoadingSessionSchema,
 } from "./smart-loading.schemas";
@@ -44,6 +45,7 @@ export type {
   SmartLoadingProduct,
   SmartLoadingAttention,
   SmartLoadingReadySession,
+  SmartLoadingLostOpportunity,
   SmartLoadingVehicleStockUnavailableSession,
   SmartLoadingSession,
 } from "./smart-loading.schemas";

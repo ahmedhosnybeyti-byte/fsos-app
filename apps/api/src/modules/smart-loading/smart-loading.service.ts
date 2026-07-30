@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable } from "@nestjs/common";
 import type { SmartLoadingProduct, SmartLoadingSession } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
@@ -79,6 +79,33 @@ function isoDay(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+function parseAsOfDate(value: string | undefined): Date {
+  if (!value) {
+    const now = new Date();
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    throw new BadRequestException("asOfDate must use YYYY-MM-DD.");
+  }
+  const date = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || isoDay(date.getTime()) !== value) {
+    throw new BadRequestException("asOfDate must be a valid calendar date.");
+  }
+  return date;
+}
+
+function weekdayForDate(date: Date): string {
+  return new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(date).toLowerCase();
+}
+
+function addUtcDays(date: Date, days: number): Date {
+  return new Date(date.getTime() + days * MS_PER_DAY);
+}
+
+function isDateInWindow(date: string, from: string, to: string): boolean {
+  return date >= from && date <= to;
+}
+
 @Injectable()
 export class SmartLoadingService {
   constructor(private readonly rieFacade: RieFacade) {}
@@ -96,14 +123,19 @@ export class SmartLoadingService {
     }
   }
 
-  async getSession(user: AuthenticatedUser): Promise<SmartLoadingSession> {
+  async getSession(user: AuthenticatedUser, requestedAsOfDate?: string): Promise<SmartLoadingSession> {
     if (!user.companyId) throw new ForbiddenException();
     const ctx = this.rieContext(user);
+    const asOfDate = parseAsOfDate(requestedAsOfDate);
+    const asOfDateIso = isoDay(asOfDate.getTime());
 
-    const [productsResult, invoicesRecords, invoiceItemsRecords, vanInventoryRecords] = await Promise.all([
+    const [productsResult, customersRecords, invoicesRecords, invoiceItemsRecords, returnsRecords, returnItemsRecords, vanInventoryRecords] = await Promise.all([
       this.rieFacade.getEntityRecords("Products", ctx),
+      this.tryEntity(ctx, "Customers"),
       this.tryEntity(ctx, "Invoices"),
       this.tryEntity(ctx, "Invoice Items"),
+      this.tryEntity(ctx, "Returns"),
+      this.tryEntity(ctx, "Return Items"),
       this.rieFacade.getEntityRecords("Van Inventory", ctx),
     ]);
 
@@ -151,6 +183,73 @@ export class SmartLoadingService {
       }
     }
 
+    // ---- Lost Opportunity: next-day route customers, customer/product grain.
+    const nextRouteWeekday = weekdayForDate(addUtcDays(asOfDate, 1));
+    const nextRouteCustomers = new Map<string, string>();
+    for (const customer of customersRecords) {
+      if (String(customer.VisitDay ?? "").trim().toLowerCase() !== nextRouteWeekday) continue;
+      const customerCode = String(customer.CustomerCode ?? "").trim();
+      if (customerCode) nextRouteCustomers.set(customerCode, String(customer.CustomerName ?? customerCode).trim() || customerCode);
+    }
+
+    const baselineFrom = isoDay(addUtcDays(asOfDate, -119).getTime());
+    const baselineTo = isoDay(addUtcDays(asOfDate, -30).getTime());
+    const recentFrom = isoDay(addUtcDays(asOfDate, -29).getTime());
+    const netQuantity = new Map<string, { customerCode: string; productCode: string; baseline: number; recent: number }>();
+    const addNetQuantity = (customerCode: string, productCode: string, quantity: number, date: string) => {
+      const key = `${customerCode}\u0000${productCode}`;
+      const value = netQuantity.get(key) ?? { customerCode, productCode, baseline: 0, recent: 0 };
+      if (isDateInWindow(date, baselineFrom, baselineTo)) value.baseline += quantity;
+      if (isDateInWindow(date, recentFrom, asOfDateIso)) value.recent += quantity;
+      netQuantity.set(key, value);
+    };
+
+    // Sales count only completed invoices; cancelled invoices never enter the net quantity.
+    const completedInvoices = new Map<string, { customerCode: string; date: string }>();
+    for (const invoice of invoicesRecords) {
+      if (String(invoice.InvoiceStatus ?? "").trim().toLowerCase() !== "confirmed") continue;
+      const invoiceNo = String(invoice.InvoiceNo ?? "").trim();
+      const customerCode = String(invoice.CustomerCode ?? "").trim();
+      const time = toEpochMs(invoice.InvoiceDate);
+      if (!invoiceNo || !nextRouteCustomers.has(customerCode) || time === null) continue;
+      completedInvoices.set(invoiceNo, { customerCode, date: isoDay(time) });
+    }
+    for (const item of invoiceItemsRecords) {
+      const invoice = completedInvoices.get(String(item.InvoiceNo ?? "").trim());
+      const productCode = String(item.ProductCode ?? "").trim();
+      if (!invoice || !productCode) continue;
+      addNetQuantity(invoice.customerCode, productCode, toFiniteNumber(item.Quantity) ?? 0, invoice.date);
+    }
+
+    // Confirmed return items subtract from the same customer/product window.
+    const confirmedReturns = new Map<string, { customerCode: string; date: string }>();
+    for (const returned of returnsRecords) {
+      if (String(returned.Status ?? "").trim().toLowerCase() !== "confirmed") continue;
+      const returnNo = String(returned.ReturnNo ?? "").trim();
+      const customerCode = String(returned.CustomerCode ?? "").trim();
+      const time = toEpochMs(returned.ReturnDate);
+      if (!returnNo || !nextRouteCustomers.has(customerCode) || time === null) continue;
+      confirmedReturns.set(returnNo, { customerCode, date: isoDay(time) });
+    }
+    for (const item of returnItemsRecords) {
+      const returned = confirmedReturns.get(String(item.ReturnNo ?? "").trim());
+      const productCode = String(item.ProductCode ?? "").trim();
+      if (!returned || !productCode) continue;
+      addNetQuantity(returned.customerCode, productCode, -(toFiniteNumber(item.Quantity) ?? 0), returned.date);
+    }
+
+    const lostOpportunities = Array.from(netQuantity.values())
+      .filter(({ baseline, recent }) => baseline > 0 && recent === 0)
+      .map(({ customerCode, productCode, baseline, recent }) => ({
+        customerCode,
+        customerName: nextRouteCustomers.get(customerCode) ?? customerCode,
+        productCode,
+        productName: productMeta.get(productCode)?.name ?? productCode,
+        baselineNetQuantity: baseline,
+        recentNetQuantity: recent,
+        suggestedQuantity: Math.round(baseline / 3),
+      }))
+      .sort((a, b) => a.customerName.localeCompare(b.customerName, "ar") || a.productName.localeCompare(b.productName, "ar"));
     // ---- Invoices -> per-InvoiceNo customer/date lookup (same join shape
     // as sgi.service.ts / team-performance.service.ts).
     const invoiceDateByNo = new Map<string, number>();
@@ -238,6 +337,8 @@ export class SmartLoadingService {
       products,
       attention: attentionList,
       calculatedAt: new Date(nowMs).toISOString(),
+      asOfDate: asOfDateIso,
+      lostOpportunities,
     };
   }
 }

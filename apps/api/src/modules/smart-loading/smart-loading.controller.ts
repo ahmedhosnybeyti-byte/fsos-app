@@ -1,4 +1,4 @@
-import { Controller, ForbiddenException, Get } from "@nestjs/common";
+import { Controller, ForbiddenException, Get, Query } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { Auth } from "../../common/decorators/auth.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
@@ -16,8 +16,8 @@ export class SmartLoadingController {
 
   @Get("session")
   @Auth()
-  getSession(@CurrentUser() user: AuthenticatedUser) {
+  getSession(@CurrentUser() user: AuthenticatedUser, @Query("asOfDate") asOfDate?: string) {
     if (!user.companyId) throw new ForbiddenException();
-    return this.smartLoadingService.getSession(user);
+    return this.smartLoadingService.getSession(user, asOfDate);
   }
 }
