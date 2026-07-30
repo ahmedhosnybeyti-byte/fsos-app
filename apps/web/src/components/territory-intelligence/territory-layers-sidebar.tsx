@@ -113,6 +113,7 @@ export function TerritoryLayersSidebar({ activeMetric, onSelectMetric, displayMo
             );
           })}
         </div>
+        <p className="text-[11px] leading-snug text-muted-foreground/80">{t("territoryIntelligence.mapMetricCaveat")}</p>
 
         <p className="pt-2 text-xs font-medium text-muted-foreground">{t("territoryIntelligence.metricSectionTitle")}</p>
         {LAYER_ITEMS.map((item, index) => {

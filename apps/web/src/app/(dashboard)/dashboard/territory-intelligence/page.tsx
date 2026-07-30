@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, MapPinned, Undo2 } from "lucide-react";
-import { territoryIntelligenceApi } from "@/lib/api";
+import { heatmapApi, territoryIntelligenceApi } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,7 +18,7 @@ import { buildDecisionStudioReturnLink } from "@/lib/decision-analytics-state";
 import { normalizeTerritoryName } from "@/components/territory-intelligence/boundary-registry";
 import { buildTerritoryHierarchyLevels, useTerritoryHierarchy, type DrillPathEntry } from "@/components/territory-intelligence/hierarchy-engine";
 import { TERRITORY_TIER_COLOR, type TerritoryMapMetric } from "@/components/territory-intelligence/territory-map";
-import { TerritoryPointMap, type TerritoryPointMapMode } from "@/components/territory-intelligence/territory-point-map";
+import { TerritoryPointMap, type TerritoryPointMapMode, type TerritoryPointMapNode } from "@/components/territory-intelligence/territory-point-map";
 import { TerritoryLayersSidebar } from "@/components/territory-intelligence/territory-layers-sidebar";
 import { TerritoryDecisionPanel } from "@/components/territory-intelligence/territory-decision-panel";
 import { TerritoryCustomerList } from "@/components/territory-intelligence/territory-customer-list";
@@ -476,6 +476,44 @@ function NormalView({
   const hierarchyLevels = useMemo(() => buildTerritoryHierarchyLevels(territories), [territories]);
   const hierarchy = useTerritoryHierarchy(hierarchyLevels);
 
+  // The map itself (points/cluster/heat) must always show real customer
+  // locations, never a single city-level centroid — a city-level node
+  // collapsing an entire city into one dot was reported as a bug (a
+  // territory summary point is not "where customers are"). Fetched
+  // company-wide (no scopeField/scopeValues), independent of hierarchy's
+  // own drill state, so switching City -> Customer via a card click still
+  // works exactly as before for the breadcrumb/decision-panel/ranking list
+  // below — only the map's own data source changed.
+  //
+  // heatmapApi already excludes bad coordinates server-side
+  // (excludedBadCoordinates) — no separate invalid-coordinate handling
+  // needed here beyond what TerritoryPointMap itself does defensively.
+  //
+  // Metric caveat (explicit product decision, 2026-07-30): the 7
+  // TerritoryMapMetric values (healthScore, salesGrowthPct, ...) are
+  // city-level aggregates computed server-side in TerritorySummaryItem —
+  // there is no per-customer version of them. Rather than inventing fake
+  // per-customer metrics or hiding the metric picker, every customer point
+  // always uses real "sales" value/color regardless of which
+  // TerritoryMapMetric is selected; a short notice next to the picker
+  // makes this explicit instead of silently misleading the metric switch.
+  const customerPointsQuery = useQuery({
+    queryKey: ["territory-intelligence", "customer-points"],
+    queryFn: () => heatmapApi.query({ metric: "sales" }),
+  });
+
+  const mapNodes: TerritoryPointMapNode[] = useMemo(
+    () =>
+      (customerPointsQuery.data?.points ?? []).map((p) => ({
+        id: p.id,
+        name: p.label,
+        lat: p.lat,
+        lon: p.lon,
+        value: p.value,
+      })),
+    [customerPointsQuery.data],
+  );
+
   function handleDrillInto(nodeId: string, nodeName: string) {
     hierarchy.drillInto(nodeId, nodeName);
     onClearSelection();
@@ -503,8 +541,10 @@ function NormalView({
 
         <Card className="glass-card rise-in overflow-hidden p-0">
           <TerritoryPointMap
-            nodes={hierarchy.nodes}
-            activeMetric={activeMetric}
+            nodes={mapNodes}
+            isLoading={customerPointsQuery.isLoading}
+            isError={customerPointsQuery.isError}
+            excludedBadCoordinates={customerPointsQuery.data?.excludedBadCoordinates ?? 0}
             mode={displayMode}
             selectedNodeId={selectedNodeId}
             onSelectNode={onSelectNode}

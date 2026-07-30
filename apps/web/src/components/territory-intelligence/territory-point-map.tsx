@@ -3,10 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CircleMarker, HeatLayer, Layer, Map as LeafletMap } from "leaflet";
 import "leaflet/dist/leaflet.css";
-import type { TerritorySummaryItem } from "@/lib/types";
+import { Spinner } from "@/components/ui/spinner";
 import { useTranslation } from "@/components/translation-provider";
 import { colorForRatio, heatGradientObject, radiusForZoom } from "@/components/geo-engine/color-scale";
-import { type TerritoryMapMetric, type TerritoryMapNode } from "./territory-map";
 
 // Territory Intelligence's point-based map (2026-07-30 rewrite, explicit
 // product request). Deliberately a NEW, separate component from
@@ -29,15 +28,30 @@ import { type TerritoryMapMetric, type TerritoryMapNode } from "./territory-map"
 // reimplemented) so the heat layer here is visually identical to Decision
 // Analytics Studio's.
 //
-// Exactly 3 modes, per explicit product decision — no choropleth, no
-// bubble:
-//   - "points": one independent CircleMarker per node with valid
-//     coordinates. No polygons, no clustering, no heat.
-//   - "cluster": zoom-aware grid bucketing (same cellSizeForZoom/bucket
-//     technique as mini-heatmap.tsx), split apart on zoom-in or click.
-//   - "heat": leaflet.heat, weighted by the active metric's normalized
-//     value.
+// 2026-07-30 follow-up fix: this map's nodes must always be real customer
+// locations, never a single per-city summary point. The caller
+// (territory-intelligence/page.tsx) now always fetches company-wide
+// customer points via heatmapApi.query({ metric: "sales" }) — independent
+// of the City -> Customer drill-down hierarchy used elsewhere on the page
+// (breadcrumb / decision panel / ranking list) — and passes those in here.
+// Reported bug this fixes: selecting a city-level node collapsed an entire
+// city into one dot; that was the hierarchy engine's own city-level
+// centroid, correctly represented, just not what belongs on this map.
+//
+// Metric caveat: the 7 TerritoryMapMetric values (healthScore,
+// salesGrowthPct, ...) used elsewhere on this page are city-level
+// aggregates with no per-customer equivalent, so this map's `value` field
+// is always the customer's real sales figure — see the notice rendered by
+// the caller next to the metric picker.
 export type TerritoryPointMapMode = "points" | "cluster" | "heat";
+
+export interface TerritoryPointMapNode {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  value: number;
+}
 
 const MIN_RADIUS = 7;
 const MAX_RADIUS = 30;
@@ -46,54 +60,29 @@ const DEFAULT_STROKE = "#ffffff";
 const POINT_FILL = "#2563eb";
 
 export interface TerritoryPointMapProps {
-  nodes: TerritoryMapNode[];
-  activeMetric: TerritoryMapMetric;
+  nodes: TerritoryPointMapNode[];
   mode: TerritoryPointMapMode;
   selectedNodeId: string | null;
   onSelectNode: (id: string, name: string) => void;
-  // Count of nodes filtered out for having invalid lat/lon — rendered as a
-  // small on-map disclosure when > 0, per explicit "show their count"
-  // requirement. Computed by the caller? No — computed HERE from `nodes`
-  // (see validNodes/invalidCount below) so there is exactly one place that
-  // decides what "valid coordinate" means, and the caller never has to
-  // duplicate that check to get the count right.
+  isLoading?: boolean;
+  isError?: boolean;
+  excludedBadCoordinates?: number;
 }
 
 // A location is only ever real data or excluded — never a fabricated
 // fallback coordinate. Same bounds as the rest of the app's coordinate
 // validation (visit-copilot.service.ts's isSaneCoordinate): finite,
 // within real lat/lon ranges, and not the (0,0) null-island sentinel a
-// blank spreadsheet cell often decodes to.
+// blank spreadsheet cell often decodes to. Note: heatmapApi already
+// excludes bad coordinates server-side (excludedBadCoordinates field on
+// the response) — this is a defensive second layer, not the primary
+// filter, matching how mini-heatmap.tsx treats its own already-filtered
+// points prop.
 function isValidCoordinate(lat: number, lon: number): boolean {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
   if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return false;
   if (lat === 0 && lon === 0) return false;
   return true;
-}
-
-function numericValueForMetric(node: TerritoryMapNode, activeMetric: TerritoryMapMetric): number {
-  const raw = node.raw as TerritorySummaryItem | undefined;
-  if (!raw) return Math.max(0, node.metricValue);
-  switch (activeMetric) {
-    case "healthScore":
-      return Math.max(0, node.healthScore ?? 0);
-    case "salesGrowthPct": {
-      const v = raw.metrics.salesGrowthPct;
-      return v === null ? 0 : Math.max(0, v);
-    }
-    case "lostSalesCount":
-      return Math.max(0, raw.metrics.lostSalesCount);
-    case "visitCoveragePct":
-      return Math.max(0, raw.metrics.visitCoveragePct ?? 0);
-    case "collectionHealthPct":
-      return Math.max(0, raw.metrics.collectionHealthPct ?? 0);
-    case "opportunityValueSar":
-      return Math.max(0, raw.opportunityValueSar);
-    case "riskLevel":
-      return Math.max(0, 100 - raw.healthScore);
-    default:
-      return 0;
-  }
 }
 
 function formatValue(value: number): string {
@@ -112,29 +101,28 @@ interface Bucket {
   lon: number;
   count: number;
   totalValue: number;
-  single: TerritoryMapNode | null;
+  single: TerritoryPointMapNode | null;
 }
 
-function buildBuckets(nodes: TerritoryMapNode[], activeMetric: TerritoryMapMetric, cellSize: number): Bucket[] {
+function buildBuckets(nodes: TerritoryPointMapNode[], cellSize: number): Bucket[] {
   const buckets = new Map<string, Bucket & { latSum: number; lonSum: number }>();
   for (const n of nodes) {
     const key = `${Math.floor(n.lat / cellSize)}_${Math.floor(n.lon / cellSize)}`;
-    const v = numericValueForMetric(n, activeMetric);
     const b = buckets.get(key);
     if (b) {
       b.count += 1;
-      b.totalValue += v;
+      b.totalValue += n.value;
       b.latSum += n.lat;
       b.lonSum += n.lon;
       b.single = null;
     } else {
-      buckets.set(key, { lat: n.lat, lon: n.lon, count: 1, totalValue: v, single: n, latSum: n.lat, lonSum: n.lon });
+      buckets.set(key, { lat: n.lat, lon: n.lon, count: 1, totalValue: n.value, single: n, latSum: n.lat, lonSum: n.lon });
     }
   }
   return Array.from(buckets.values()).map((b) => ({ lat: b.latSum / b.count, lon: b.lonSum / b.count, count: b.count, totalValue: b.totalValue, single: b.single }));
 }
 
-export function TerritoryPointMap({ nodes, activeMetric, mode, selectedNodeId, onSelectNode }: TerritoryPointMapProps) {
+export function TerritoryPointMap({ nodes, mode, selectedNodeId, onSelectNode, isLoading, isError, excludedBadCoordinates = 0 }: TerritoryPointMapProps) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -208,14 +196,14 @@ export function TerritoryPointMap({ nodes, activeMetric, mode, selectedNodeId, o
 
       if (validNodes.length === 0) return;
 
-      const maxValue = validNodes.reduce((m, n) => Math.max(m, numericValueForMetric(n, activeMetric)), 0);
+      const maxValue = validNodes.reduce((m, n) => Math.max(m, n.value), 0);
       const safeMax = maxValue > 0 ? maxValue : 1;
 
       if (mode === "points") {
         // Independent marker per node — no polygons, no merging, no heat.
         for (const n of validNodes) {
           const isSelected = n.id === selectedNodeId;
-          const ratio = numericValueForMetric(n, activeMetric) / safeMax;
+          const ratio = n.value / safeMax;
           const marker = L.circleMarker([n.lat, n.lon], {
             radius: 8,
             color: isSelected ? SELECTED_STROKE : DEFAULT_STROKE,
@@ -223,7 +211,7 @@ export function TerritoryPointMap({ nodes, activeMetric, mode, selectedNodeId, o
             fillColor: colorForRatio(ratio),
             fillOpacity: 0.85,
           });
-          marker.bindTooltip(`${n.name} — ${formatValue(numericValueForMetric(n, activeMetric))}`);
+          marker.bindTooltip(`${n.name} — ${formatValue(n.value)}`);
           marker.on("click", () => onSelectNode(n.id, n.name));
           marker.addTo(map);
           pointMarkersRef.current.set(n.id, marker);
@@ -235,7 +223,7 @@ export function TerritoryPointMap({ nodes, activeMetric, mode, selectedNodeId, o
         await import("leaflet.heat");
         if (cancelled || mapRef.current !== map) return;
         const radius = radiusForZoom(map.getZoom());
-        const latlngs: [number, number, number][] = validNodes.map((n) => [n.lat, n.lon, numericValueForMetric(n, activeMetric) / safeMax]);
+        const latlngs: [number, number, number][] = validNodes.map((n) => [n.lat, n.lon, n.value / safeMax]);
         const layer = L.heatLayer(latlngs, {
           radius,
           blur: radius * 0.85,
@@ -258,7 +246,7 @@ export function TerritoryPointMap({ nodes, activeMetric, mode, selectedNodeId, o
       } else {
         // cluster
         const cellSize = cellSizeForZoom(map.getZoom());
-        const buckets = buildBuckets(validNodes, activeMetric, cellSize);
+        const buckets = buildBuckets(validNodes, cellSize);
         const maxCount = buckets.reduce((m, b) => Math.max(m, b.count), 0);
         const maxBucketValue = buckets.reduce((m, b) => Math.max(m, b.totalValue), 1) || 1;
 
@@ -299,7 +287,7 @@ export function TerritoryPointMap({ nodes, activeMetric, mode, selectedNodeId, o
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, validNodes, activeMetric, mode, zoomTick]);
+  }, [mapReady, validNodes, mode, zoomTick]);
 
   // Fit bounds on data changes only — deliberately excludes `mode`/
   // `zoomTick` so switching modes or zooming keeps the current view instead
@@ -338,15 +326,28 @@ export function TerritoryPointMap({ nodes, activeMetric, mode, selectedNodeId, o
     [],
   );
 
+  const excludedCoordinateCount = Math.max(invalidCount, excludedBadCoordinates);
+
   return (
     <div className="relative h-[560px] min-w-0">
       <div ref={containerRef} className="h-full min-w-0 rounded-lg border border-border" />
-      {invalidCount > 0 && (
-        <div className="absolute bottom-1 start-1 z-[1000] rounded bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground">
-          {t("territoryIntelligence.invalidCoordinatesNotice", { count: invalidCount })}
+      {isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center gap-2 rounded-lg bg-background/70 text-sm text-muted-foreground">
+          <Spinner className="h-4 w-4" />
+          {t("territoryIntelligence.loading")}
         </div>
       )}
-      {validNodes.length === 0 && invalidCount === 0 && (
+      {!isLoading && isError && (
+        <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-background/70 text-sm text-destructive">
+          {t("territoryIntelligence.errorLoad")}
+        </div>
+      )}
+      {!isLoading && !isError && excludedCoordinateCount > 0 && (
+        <div className="absolute bottom-1 start-1 z-[1000] rounded bg-background/80 px-2 py-0.5 text-[10px] text-muted-foreground">
+          {t("territoryIntelligence.invalidCoordinatesNotice", { count: excludedCoordinateCount })}
+        </div>
+      )}
+      {!isLoading && !isError && validNodes.length === 0 && excludedCoordinateCount === 0 && (
         <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-background/70 text-sm text-muted-foreground">
           {t("territoryIntelligence.emptyState")}
         </div>

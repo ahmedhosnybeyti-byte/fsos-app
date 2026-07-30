@@ -120,6 +120,7 @@ export type TranslationKey =
   | "territoryIntelligence.displayModePoints"
   | "territoryIntelligence.displayModeSectionTitle"
   | "territoryIntelligence.invalidCoordinatesNotice"
+  | "territoryIntelligence.mapMetricCaveat"
   | "territoryIntelligence.metricSectionTitle"
   | "territoryIntelligence.returnToDecisionStudio"
   | "decisionAnalyticsStudio.title"
@@ -1330,6 +1331,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "territoryIntelligence.displayModePoints": "نقطية",
     "territoryIntelligence.displayModeSectionTitle": "نوع الخريطة",
     "territoryIntelligence.invalidCoordinatesNotice": "{count} موقع بإحداثيات غير صالحة تم استبعاده",
+    "territoryIntelligence.mapMetricCaveat": "نقاط العملاء على الخريطة معروضة دايمًا حسب المبيعات — المؤشرات السبعة أدناه بتتحسب على مستوى المدينة وبتُستخدم في القائمة الجانبية ولوحة القرار.",
     "territoryIntelligence.metricSectionTitle": "المؤشر",
     "territoryIntelligence.returnToDecisionStudio": "الرجوع لاستوديو تحليل القرارات",
     "decisionAnalyticsStudio.title": "استوديو تحليل القرارات",
@@ -2552,6 +2554,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "territoryIntelligence.displayModePoints": "Points",
     "territoryIntelligence.displayModeSectionTitle": "Map Type",
     "territoryIntelligence.invalidCoordinatesNotice": "{count} locations with invalid coordinates excluded",
+    "territoryIntelligence.mapMetricCaveat": "Customer points on the map always show sales value — the 7 metrics below are city-level and drive the sidebar and decision panel.",
     "territoryIntelligence.metricSectionTitle": "Metric",
     "territoryIntelligence.returnToDecisionStudio": "Return to Decision Analytics Studio",
     "decisionAnalyticsStudio.title": "Decision Analytics Studio",
