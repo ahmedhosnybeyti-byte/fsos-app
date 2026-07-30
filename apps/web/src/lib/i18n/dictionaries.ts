@@ -117,8 +117,9 @@ export type TranslationKey =
   | "territoryIntelligence.layerActiveBadge"
   | "territoryIntelligence.displayModeHeat"
   | "territoryIntelligence.displayModeCluster"
-  | "territoryIntelligence.displayModeBubble"
+  | "territoryIntelligence.displayModePoints"
   | "territoryIntelligence.displayModeSectionTitle"
+  | "territoryIntelligence.invalidCoordinatesNotice"
   | "territoryIntelligence.metricSectionTitle"
   | "territoryIntelligence.returnToDecisionStudio"
   | "decisionAnalyticsStudio.title"
@@ -1319,8 +1320,9 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "territoryIntelligence.layerActiveBadge": "نشطة",
     "territoryIntelligence.displayModeHeat": "حرارية",
     "territoryIntelligence.displayModeCluster": "عنقودية",
-    "territoryIntelligence.displayModeBubble": "فقاعة",
+    "territoryIntelligence.displayModePoints": "نقطية",
     "territoryIntelligence.displayModeSectionTitle": "نوع الخريطة",
+    "territoryIntelligence.invalidCoordinatesNotice": "{count} موقع بإحداثيات غير صالحة تم استبعاده",
     "territoryIntelligence.metricSectionTitle": "المؤشر",
     "territoryIntelligence.returnToDecisionStudio": "الرجوع لاستوديو تحليل القرارات",
     "decisionAnalyticsStudio.title": "استوديو تحليل القرارات",
@@ -2533,8 +2535,9 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "territoryIntelligence.layerActiveBadge": "Active",
     "territoryIntelligence.displayModeHeat": "Heat",
     "territoryIntelligence.displayModeCluster": "Cluster",
-    "territoryIntelligence.displayModeBubble": "Bubble",
+    "territoryIntelligence.displayModePoints": "Points",
     "territoryIntelligence.displayModeSectionTitle": "Map Type",
+    "territoryIntelligence.invalidCoordinatesNotice": "{count} locations with invalid coordinates excluded",
     "territoryIntelligence.metricSectionTitle": "Metric",
     "territoryIntelligence.returnToDecisionStudio": "Return to Decision Analytics Studio",
     "decisionAnalyticsStudio.title": "Decision Analytics Studio",

@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, MapPinned, Undo2 } from "lucide-react";
-import { companiesApi, territoryIntelligenceApi } from "@/lib/api";
+import { territoryIntelligenceApi } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,9 +15,10 @@ import { cn } from "@/lib/utils";
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
 import type { TerritoryExecutiveItem, TerritoryIntelligenceExecutiveResponse, TerritorySummaryItem } from "@/lib/types";
 import { buildDecisionStudioReturnLink } from "@/lib/decision-analytics-state";
-import { loadBoundaryIndex, normalizeTerritoryName, resolveBoundaryAssetUrl, type BoundaryFeatureIndex } from "@/components/territory-intelligence/boundary-registry";
+import { normalizeTerritoryName } from "@/components/territory-intelligence/boundary-registry";
 import { buildTerritoryHierarchyLevels, useTerritoryHierarchy, type DrillPathEntry } from "@/components/territory-intelligence/hierarchy-engine";
-import { TERRITORY_TIER_COLOR, TerritoryMap, type TerritoryMapDisplayMode, type TerritoryMapMetric } from "@/components/territory-intelligence/territory-map";
+import { TERRITORY_TIER_COLOR, type TerritoryMapMetric } from "@/components/territory-intelligence/territory-map";
+import { TerritoryPointMap, type TerritoryPointMapMode } from "@/components/territory-intelligence/territory-point-map";
 import { TerritoryLayersSidebar } from "@/components/territory-intelligence/territory-layers-sidebar";
 import { TerritoryDecisionPanel } from "@/components/territory-intelligence/territory-decision-panel";
 import { TerritoryCustomerList } from "@/components/territory-intelligence/territory-customer-list";
@@ -101,7 +102,7 @@ function TerritoryIntelligenceWorkspace() {
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [activeMetric, setActiveMetric] = useState<TerritoryMapMetric>("healthScore");
-  const [displayMode, setDisplayMode] = useState<TerritoryMapDisplayMode>("choropleth");
+  const [displayMode, setDisplayMode] = useState<TerritoryPointMapMode>("points");
   const [executiveMode, setExecutiveMode] = useState(false);
   const [dasCityConsumed, setDasCityConsumed] = useState(false);
 
@@ -117,22 +118,6 @@ function TerritoryIntelligenceWorkspace() {
     queryKey: ["territory-intelligence", "executive"],
     queryFn: territoryIntelligenceApi.executive,
     enabled: executiveMode,
-  });
-
-  // Country-agnostic boundary-asset resolution: no backend involvement, the
-  // company's own (already-existing, unmodified) profile endpoint is the
-  // only thing that determines which /public GeoJSON file loads.
-  const companyProfileQuery = useQuery({
-    queryKey: ["companies", "profile"],
-    queryFn: companiesApi.getProfile,
-  });
-
-  const boundaryAssetUrl = resolveBoundaryAssetUrl(companyProfileQuery.data?.country);
-
-  const boundaryIndexQuery = useQuery({
-    queryKey: ["territory-boundary-index", boundaryAssetUrl],
-    queryFn: () => (boundaryAssetUrl ? loadBoundaryIndex(boundaryAssetUrl) : Promise.resolve<BoundaryFeatureIndex>({ byName: new Map() })),
-    enabled: companyProfileQuery.isSuccess,
   });
 
   const territories = summaryQuery.data?.territories ?? EMPTY_TERRITORIES;
@@ -216,7 +201,6 @@ function TerritoryIntelligenceWorkspace() {
         <NormalView
           territories={territories}
           generatedAt={summaryQuery.data?.generatedAt ?? new Date().toISOString()}
-          boundaryIndex={boundaryIndexQuery.data ?? null}
           activeMetric={activeMetric}
           onSelectMetric={setActiveMetric}
           displayMode={displayMode}
@@ -459,7 +443,6 @@ function CityRankingList({
 function NormalView({
   territories,
   generatedAt,
-  boundaryIndex,
   activeMetric,
   onSelectMetric,
   displayMode,
@@ -470,11 +453,10 @@ function NormalView({
 }: {
   territories: TerritorySummaryItem[];
   generatedAt: string;
-  boundaryIndex: BoundaryFeatureIndex | null;
   activeMetric: TerritoryMapMetric;
   onSelectMetric: (metric: TerritoryMapMetric) => void;
-  displayMode: TerritoryMapDisplayMode;
-  onSelectDisplayMode: (mode: TerritoryMapDisplayMode) => void;
+  displayMode: TerritoryPointMapMode;
+  onSelectDisplayMode: (mode: TerritoryPointMapMode) => void;
   selectedNodeId: string | null;
   onSelectNode: (id: string, name: string) => void;
   onClearSelection: () => void;
@@ -520,14 +502,12 @@ function NormalView({
         />
 
         <Card className="glass-card rise-in overflow-hidden p-0">
-          <TerritoryMap
+          <TerritoryPointMap
             nodes={hierarchy.nodes}
-            isPolygonLevel={hierarchy.currentLevel.isPolygonLevel}
             activeMetric={activeMetric}
-            displayMode={displayMode}
+            mode={displayMode}
             selectedNodeId={selectedNodeId}
             onSelectNode={onSelectNode}
-            boundaryIndex={boundaryIndex}
           />
         </Card>
 

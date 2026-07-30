@@ -28,25 +28,31 @@
 // controls (same 5-tier color family colors both the choropleth fill and the
 // heat/cluster/bubble intensity gradient's high end).
 
-import { HeartPulse, TrendingUp, TrendingDown, Footprints, Wallet, Sparkles, ShieldAlert, Flame, CircleDot, Layers, type LucideIcon } from "lucide-react";
+import { HeartPulse, TrendingUp, TrendingDown, Footprints, Wallet, Sparkles, ShieldAlert, Flame, MapPin, Layers, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useTranslation } from "@/components/translation-provider";
 import { cn } from "@/lib/utils";
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
-import { TERRITORY_TIER_COLOR, type TerritoryMapDisplayMode, type TerritoryMapMetric } from "./territory-map";
+import { TERRITORY_TIER_COLOR, type TerritoryMapMetric } from "./territory-map";
+import type { TerritoryPointMapMode } from "./territory-point-map";
 
 export interface TerritoryLayersSidebarProps {
   activeMetric: TerritoryMapMetric;
   onSelectMetric: (metric: TerritoryMapMetric) => void;
-  displayMode: TerritoryMapDisplayMode;
-  onSelectDisplayMode: (mode: TerritoryMapDisplayMode) => void;
+  displayMode: TerritoryPointMapMode;
+  onSelectDisplayMode: (mode: TerritoryPointMapMode) => void;
 }
 
-const DISPLAY_MODE_ITEMS: { mode: TerritoryMapDisplayMode; labelKey: TranslationKey; icon: LucideIcon }[] = [
-  { mode: "heat", labelKey: "territoryIntelligence.displayModeHeat", icon: Flame },
+// Exactly 3 modes (2026-07-30 rewrite, explicit product decision — no
+// choropleth, no bubble). Unlike the old bubble/heat/cluster picker, one
+// mode is always active here; clicking the active button is a no-op
+// (there's no "off" state to fall back to since choropleth isn't part of
+// this screen's map anymore).
+const DISPLAY_MODE_ITEMS: { mode: TerritoryPointMapMode; labelKey: TranslationKey; icon: LucideIcon }[] = [
+  { mode: "points", labelKey: "territoryIntelligence.displayModePoints", icon: MapPin },
   { mode: "cluster", labelKey: "territoryIntelligence.displayModeCluster", icon: Layers },
-  { mode: "bubble", labelKey: "territoryIntelligence.displayModeBubble", icon: CircleDot },
+  { mode: "heat", labelKey: "territoryIntelligence.displayModeHeat", icon: Flame },
 ];
 
 // Small local helper/constant, deliberately duplicated per-module rather
@@ -93,7 +99,7 @@ export function TerritoryLayersSidebar({ activeMetric, onSelectMetric, displayMo
               <button
                 key={item.mode}
                 type="button"
-                onClick={() => onSelectDisplayMode(isActive ? "choropleth" : item.mode)}
+                onClick={() => onSelectDisplayMode(item.mode)}
                 aria-pressed={isActive}
                 title={t(item.labelKey)}
                 className={cn(
