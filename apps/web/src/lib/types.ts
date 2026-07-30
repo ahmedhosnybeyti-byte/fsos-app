@@ -1403,6 +1403,10 @@ export interface VisitCopilotPlanRequest {
   period: VisitCopilotPeriod;
   from?: string;
   to?: string;
+  // Flexible plan date (2026-07-30) — which day's visit plan this is.
+  // Omitted = today. Independent of period/from/to (the historical
+  // Analysis Scope for sales numbers).
+  date?: string;
 }
 
 export interface VisitCopilotPlanResult {
@@ -1614,7 +1618,8 @@ export type SmartLoadingSessionState = "ready" | "vehicle-stock-unavailable";
 export type SmartLoadingPriority = "high" | "normal";
 export interface SmartLoadingProduct { productCode: string; productName: string; currentVehicleStock: number; weeklyAverageSales: number; priority: SmartLoadingPriority; category: string | null; lastSaleDate: string | null; }
 export interface SmartLoadingAttention { id: string; message: string; }
-export interface SmartLoadingReadySession { state: "ready"; products: SmartLoadingProduct[]; attention: SmartLoadingAttention[]; calculatedAt: string; }
+export interface SmartLoadingReadySession { state: "ready"; products: SmartLoadingProduct[]; attention: SmartLoadingAttention[]; asOfDate: string; lostOpportunities: SmartLoadingLostOpportunity[]; calculatedAt: string; }
+export interface SmartLoadingLostOpportunity { customerCode: string; customerName: string; productCode: string; productName: string; baselineNetQuantity: number; recentNetQuantity: number; suggestedQuantity: number; }
 export interface SmartLoadingVehicleStockUnavailableSession { state: "vehicle-stock-unavailable"; }
 export type SmartLoadingSession = SmartLoadingReadySession | SmartLoadingVehicleStockUnavailableSession;
 

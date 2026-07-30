@@ -928,6 +928,13 @@ export type TranslationKey =
   | "copilot.period6m"
   | "copilot.period12m"
   | "copilot.periodCustom"
+  | "copilot.planDateLabel"
+  | "copilot.planDateToday"
+  | "copilot.planningModeBadge"
+  | "copilot.planningModeNotice"
+  | "copilot.executionModeBadge"
+  | "copilot.startVisitBlockedFuture"
+  | "copilot.noCustomersForDate"
   | "copilot.fromLabel"
   | "copilot.toLabel"
   | "copilot.customPeriodHint"
@@ -2144,6 +2151,13 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.period6m": "آخر 6 أشهر",
     "copilot.period12m": "آخر 12 شهر",
     "copilot.periodCustom": "فترة مخصصة",
+    "copilot.planDateLabel": "تاريخ الخطة",
+    "copilot.planDateToday": "اليوم",
+    "copilot.planningModeBadge": "وضع تخطيط مسبق",
+    "copilot.planningModeNotice": "بتتصفح خطة يوم لسه ماجاش — الأرقام والعملاء دول متوقعون بناءً على نمط الزيارة الأسبوعي، ومش هتقدر تبدأ أو تسجّل زيارة فعلية لحد ما ييجي اليوم ده.",
+    "copilot.executionModeBadge": "وضع تنفيذ اليوم",
+    "copilot.startVisitBlockedFuture": "التاريخ ده لسه ماجاش — التحضير والتحليل متاحين، لكن مينفعش تبدأ أو تسجّل زيارة فعلية.",
+    "copilot.noCustomersForDate": "مفيش عملاء بيتزاروا عادةً يوم {weekday} حسب نمط الزيارة الأسبوعي.",
     "copilot.fromLabel": "من تاريخ",
     "copilot.toLabel": "إلى تاريخ",
     "copilot.customPeriodHint": "اختار تاريخ البداية والنهاية الأول.",
@@ -3360,6 +3374,13 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.period6m": "Last 6 months",
     "copilot.period12m": "Last 12 months",
     "copilot.periodCustom": "Custom period",
+    "copilot.planDateLabel": "Plan date",
+    "copilot.planDateToday": "Today",
+    "copilot.planningModeBadge": "Pre-Planning Mode",
+    "copilot.planningModeNotice": "You're browsing a plan for a day that hasn't happened yet — customers and numbers are a projection from the recurring weekly visit pattern, and you can't start or log an actual visit until that day arrives.",
+    "copilot.executionModeBadge": "Today Execution Mode",
+    "copilot.startVisitBlockedFuture": "This date hasn't happened yet — preparation and analysis are available, but you can't start or log an actual visit.",
+    "copilot.noCustomersForDate": "No customers are normally visited on {weekday} per the weekly visit pattern.",
     "copilot.fromLabel": "From date",
     "copilot.toLabel": "To date",
     "copilot.customPeriodHint": "Pick a start and end date first.",

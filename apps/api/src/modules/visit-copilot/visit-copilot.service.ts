@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import {
   resolveVisitCopilotPeriod,
+  resolveVisitCopilotPlanDate,
   VISIT_COPILOT_LIMITS,
   type SgiSituation,
   type VisitCopilot360Summary,
@@ -99,6 +100,11 @@ interface PeriodInput {
   period: VisitCopilotPeriod;
   from?: string;
   to?: string;
+  // Flexible plan date (2026-07-30) — which day's visit plan this is.
+  // Optional/omitted means today, resolved via resolveVisitCopilotPlanDate
+  // in buildDailyBrief. Independent of period/from/to (the historical
+  // Analysis Scope for sales numbers) — see the schema's own comment.
+  date?: string;
 }
 
 export interface DailyBriefCustomer {
@@ -415,17 +421,39 @@ export class VisitCopilotService {
       this.tryEntity(ctx, "Visits", "الزيارات", warnings),
     ]);
 
-    const now = new Date();
-    const todayIso = isoDay(now);
-    const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(now);
+    // Flexible plan date (2026-07-30): `periodInput.date` picks which day's
+    // plan this is (defaults to today via resolveVisitCopilotPlanDate).
+    // Every "todayIso"/"weekday"/target-month below is now relative to
+    // THIS selected date, not necessarily the real calendar today — a rep
+    // pre-planning next Tuesday sees next Tuesday's weekday-matched
+    // customers and that month's target, exactly as if they opened the
+    // screen on that date.
+    const todayIso = resolveVisitCopilotPlanDate(periodInput);
+    // Parsed at UTC noon (not midnight) so DST/timezone rounding in the
+    // Intl formatter can never push the computed weekday to the adjacent
+    // calendar day — isoDay()/isoDayOf() elsewhere in this file already
+    // treat "day" as a UTC calendar day, so this stays consistent with them.
+    const planDateAtNoonUtc = new Date(`${todayIso}T12:00:00Z`);
+    const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(planDateAtNoonUtc);
 
     // Working day check from Sales Calendar (if present) — a non-working
-    // day still returns the list, just flagged.
+    // day still returns the list, just flagged. Checked against the
+    // SELECTED plan date's calendar row, not necessarily today's.
     let isWorkingDay = true;
     const todayCalendarRow = calendar.find((row) => isoDayOf(row.CalendarDate) === todayIso);
     if (todayCalendarRow) isWorkingDay = isTruthyFlag(todayCalendarRow.WorkingDay);
 
-    // Today's plan basis: customers whose VisitDay is today's weekday.
+    // Plan basis: customers whose VisitDay matches the selected date's
+    // weekday. Customers.VisitDay is a recurring weekday pattern, not a
+    // dated ledger (no per-calendar-date Route Assignment data exists in
+    // this system — "Route Assignments" is a registered Canonical Entity
+    // with no dataset mapping anywhere, confirmed against
+    // visit-efficiency.service.ts's own disclosed comment), so a future
+    // date shows "whoever is normally visited on that weekday" — an
+    // honest projection from the recurring plan, not a fabricated
+    // date-specific assignment. Never falls back to "today's weekday"
+    // regardless of which date was requested — that would silently ignore
+    // the user's date selection.
     const weekdayLower = weekday.toLowerCase();
     const todayCustomers = customers.filter((row) => String(row.VisitDay ?? "").trim().toLowerCase() === weekdayLower);
 
@@ -553,11 +581,13 @@ export class VisitCopilotService {
     const estimatedDistanceKm = round2(distanceKm);
     const estimatedDurationMin = round2((distanceKm / AVERAGE_SPEED_KMH) * 60 + MINUTES_PER_VISIT * entries.length);
 
-    // Per-day sales target: current-month Targets over visible routes,
-    // spread across the month's working days (Sales Calendar if present,
-    // else 26).
-    const month = now.getUTCMonth() + 1;
-    const year = now.getUTCFullYear();
+    // Per-day sales target: Targets for the SELECTED plan date's month over
+    // visible routes, spread across that month's working days (Sales
+    // Calendar if present, else 26). Uses the plan date's month/year, not
+    // necessarily the real current month — a rep pre-planning a date next
+    // month should see next month's daily target, not this month's.
+    const month = planDateAtNoonUtc.getUTCMonth() + 1;
+    const year = planDateAtNoonUtc.getUTCFullYear();
     let targetSum = 0;
     let hasTargetRows = false;
     for (const t of targets) {

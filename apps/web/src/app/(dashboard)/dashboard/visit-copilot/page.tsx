@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import dynamic from "next/dynamic";
+import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Bot,
+  CalendarClock,
   CheckCircle2,
   CheckSquare,
   Compass,
@@ -43,6 +45,17 @@ import type {
   VisitCopilotPlanResult,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+// Flexible plan date (2026-07-30, explicit product request) — helpers kept
+// local to this page since nothing else needs "today in YYYY-MM-DD" or
+// "is this date in the future" outside Visit Copilot's own plan/list view.
+function todayIsoDate(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+function isFuturePlanDate(dateIso: string): boolean {
+  return dateIso > todayIsoDate();
+}
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 // AI Visit Copilot — Phases 1 + 2 (frontend only, 2026-07-19).
 // Decision-support screen for the rep in the field, NOT a report screen:
@@ -92,8 +105,35 @@ function priorityBadgeClass(score: number): string {
   return "bg-muted text-muted-foreground";
 }
 
+// useSearchParams() requires a Suspense boundary above it in the App
+// Router (same pattern as dashboard/assistant/page.tsx's ?context= deep
+// link) — this wrapper is that boundary. The actual page lives in
+// VisitCopilotScreen below.
 export default function VisitCopilotPage() {
+  return (
+    <Suspense fallback={null}>
+      <VisitCopilotScreen />
+    </Suspense>
+  );
+}
+
+function VisitCopilotScreen() {
   const { t, locale } = useTranslation();
+  const searchParams = useSearchParams();
+
+  // Flexible plan date (2026-07-30, explicit product request): defaults to
+  // today on every fresh entry, but if the screen was opened from a link
+  // or context carrying an explicit ?date=YYYY-MM-DD, that date wins over
+  // today — read once at mount via useState's lazy initializer, same as
+  // any other "seed from URL" pattern; the date picker below is still the
+  // single source of truth for changes after that.
+  const [planDate, setPlanDate] = useState<string>(() => {
+    const fromUrl = searchParams.get("date");
+    return fromUrl && ISO_DATE_RE.test(fromUrl) ? fromUrl : todayIsoDate();
+  });
+  // Pre-Planning Mode vs. Today Execution Mode — the one flag every
+  // execution-blocking check in this screen reads.
+  const isPlanningMode = isFuturePlanDate(planDate);
 
   // Global controls — period + van-stock apply to the brief, the briefing
   // and the chat alike, so they live at page level.
@@ -133,9 +173,14 @@ export default function VisitCopilotPage() {
     to: period === "custom" && to ? to : undefined,
   };
 
+  // planDate is part of the query key (React Query keys off it), so
+  // changing the date automatically supersedes any in-flight daily-brief
+  // request for the old date — React Query never applies a stale response
+  // to the current key once the key has moved on, which is what satisfies
+  // "cancel/ignore any previous request when the date changes."
   const briefQuery = useQuery({
-    queryKey: ["visit-copilot", "daily-brief", period, from, to, vanStock],
-    queryFn: () => visitCopilotApi.dailyBrief(periodParams),
+    queryKey: ["visit-copilot", "daily-brief", period, from, to, vanStock, planDate],
+    queryFn: () => visitCopilotApi.dailyBrief({ ...periodParams, date: planDate }),
     enabled: customPeriodReady,
   });
 
@@ -233,6 +278,19 @@ export default function VisitCopilotPage() {
     setTo(next);
     setPlan(null);
   }
+  // Changing the plan date is a full context switch — the old plan
+  // ordering, any open Visit Mode target, and the in-progress chat all
+  // belonged to the previous date and would be misleading if left showing
+  // under the new one. briefQuery/discoveryQuery/routeOppQuery all key off
+  // planDate already, so React Query drops the stale in-flight request for
+  // the old date on its own once the key changes.
+  function changePlanDate(next: string) {
+    setPlanDate(next);
+    setPlan(null);
+    setSelectedCode(null);
+    setSelectedProspectId(null);
+    setChatMessages([]);
+  }
 
   function openVisit(customerCode: string) {
     setSelectedCode(customerCode);
@@ -258,7 +316,7 @@ export default function VisitCopilotPage() {
 
   function buildPlan(mode: VisitCopilotPlanMode) {
     if (!customPeriodReady || planMutation.isPending) return;
-    planMutation.mutate({ mode, ...periodParams });
+    planMutation.mutate({ mode, ...periodParams, date: planDate });
   }
 
   // "Search around me": GPS first; if geolocation is missing/denied, fall
@@ -336,11 +394,25 @@ export default function VisitCopilotPage() {
 
       <div className="rise-in flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+          <h1 className="flex flex-wrap items-center gap-2 text-2xl font-semibold tracking-tight">
             <span className="crystal-badge h-11 w-11 bg-ai/15 text-ai drop-shadow-[0_0_20px_hsl(var(--ai)/0.4)]">
               <Compass className="h-5 w-5" />
             </span>
             {t("copilot.title")}
+            {/* Today Execution Mode vs. Pre-Planning Mode — the one visible,
+                unambiguous marker required whenever the selected plan date
+                isn't today (see planDate/isPlanningMode above). */}
+            {isPlanningMode ? (
+              <Badge className="gap-1 bg-amber-500/15 text-amber-600 hover:bg-amber-500/15 dark:bg-amber-400/15 dark:text-amber-300">
+                <CalendarClock className="h-3.5 w-3.5" />
+                {t("copilot.planningModeBadge")}
+              </Badge>
+            ) : (
+              <Badge variant="secondary" className="gap-1">
+                <CalendarClock className="h-3.5 w-3.5" />
+                {t("copilot.executionModeBadge")}
+              </Badge>
+            )}
           </h1>
           <p className="text-muted-foreground">{t("copilot.subtitle")}</p>
         </div>
@@ -378,6 +450,22 @@ export default function VisitCopilotPage() {
 
       {/* Global controls — small, always visible (they also drive Visit Mode). */}
       <div className="glass-card rise-in rise-d1 flex flex-wrap items-end gap-4 p-4">
+        <div className="grid gap-1.5">
+          <Label className="text-xs">{t("copilot.planDateLabel")}</Label>
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="date"
+              value={planDate}
+              onChange={(e) => e.target.value && changePlanDate(e.target.value)}
+              className="h-11 w-40"
+            />
+            {planDate !== todayIsoDate() && (
+              <Button type="button" variant="ghost" size="sm" className="h-11" onClick={() => changePlanDate(todayIsoDate())}>
+                {t("copilot.planDateToday")}
+              </Button>
+            )}
+          </div>
+        </div>
         <div className="grid gap-1.5">
           <Label className="text-xs">{t("copilot.periodLabel")}</Label>
           <Select value={period} onValueChange={(v) => changePeriod(v as VisitCopilotPeriod)}>
@@ -483,6 +571,18 @@ export default function VisitCopilotPage() {
                   </div>
                   {!brief.isWorkingDay && <p className="text-xs text-muted-foreground">{t("copilot.notWorkingDay")}</p>}
 
+                  {/* Pre-Planning Mode notice — required whenever the
+                      selected date is in the future: honest framing that
+                      this list is a projection from the recurring weekly
+                      visit pattern (Customers.VisitDay), not a dated
+                      assignment, and that no real visit can be logged yet. */}
+                  {isPlanningMode && (
+                    <p className="flex items-start gap-1.5 rounded-lg bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                      <CalendarClock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      {t("copilot.planningModeNotice")}
+                    </p>
+                  )}
+
                   <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
                     <BriefStat label={t("copilot.visitsLabel")} value={brief.visitCount.toLocaleString()} />
                     <BriefStat
@@ -574,7 +674,9 @@ export default function VisitCopilotPage() {
               <div className="glass-card rise-in rise-d1 p-4">
                 <h2 className="mb-3 text-sm font-semibold">{t("copilot.customersTitle")}</h2>
                 {customers.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">{t("copilot.noCustomers")}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {isPlanningMode ? t("copilot.noCustomersForDate", { weekday: brief?.weekday ?? "" }) : t("copilot.noCustomers")}
+                  </p>
                 ) : (
                   <ul className="divide-y divide-border/60">
                     {customers.map((c) => (
@@ -729,17 +831,28 @@ export default function VisitCopilotPage() {
                 </div>
               )}
 
-              {/* Prospect Mode extra: mark this prospect as visited. */}
+              {/* Prospect Mode extra: mark this prospect as visited — the
+                  one "log an actual visit" action in this screen, so it's
+                  the one gated by Pre-Planning Mode (requirement: view/
+                  analyze/prepare stay available, but no real visit can be
+                  started or logged for a date that hasn't happened yet). */}
               {briefing.isProspect && selectedProspectId && (
-                <Button
-                  variant="secondary"
-                  className="h-11 gap-2"
-                  onClick={() => statusMutation.mutate({ id: selectedProspectId, status: "VISITED" })}
-                  disabled={statusMutation.isPending}
-                >
-                  {statusMutation.isPending ? <Spinner className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
-                  {t("copilot.markVisited")}
-                </Button>
+                isPlanningMode ? (
+                  <p className="flex items-start gap-1.5 rounded-lg bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                    <CalendarClock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    {t("copilot.startVisitBlockedFuture")}
+                  </p>
+                ) : (
+                  <Button
+                    variant="secondary"
+                    className="h-11 gap-2"
+                    onClick={() => statusMutation.mutate({ id: selectedProspectId, status: "VISITED" })}
+                    disabled={statusMutation.isPending}
+                  >
+                    {statusMutation.isPending ? <Spinner className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
+                    {t("copilot.markVisited")}
+                  </Button>
+                )
               )}
             </div>
           ) : null}

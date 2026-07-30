@@ -42,13 +42,25 @@ const customPeriodRefinement = {
 // controllers can pass @Query() straight through the ZodValidationPipe.
 const queryBooleanSchema = z.preprocess((v) => v === true || v === "true" || v === "1", z.boolean());
 
+// Flexible plan date (2026-07-30, explicit product request): which day's
+// visit plan the rep is looking at. Defaults to today when omitted — every
+// existing caller (that never sent this field) keeps behaving exactly as
+// before. Future dates are allowed (pre-planning a day ahead); no lower
+// bound is enforced here since the plan basis is a recurring weekday
+// pattern (Customers.VisitDay — see the service), not a per-date ledger
+// that could go "out of range." Only THIS field controls which day's plan
+// is shown — it is completely separate from `period`/`from`/`to`, which
+// remain the historical Analysis Scope used for sales/priority numbers.
+const planDateField = { date: isoDateSchema.optional() };
+
 // GET /visit-copilot/daily-brief
 export const visitCopilotDailyBriefQuerySchema = z
-  .object({ ...periodFields })
+  .object({ ...periodFields, ...planDateField })
   .refine(customPeriodRefinement.check, customPeriodRefinement.options);
 export type VisitCopilotDailyBriefQuery = z.infer<typeof visitCopilotDailyBriefQuerySchema>;
 
-// POST /visit-copilot/plan — reorder today's visit list.
+// POST /visit-copilot/plan — reorder the selected day's visit list (see
+// `date` above; defaults to today).
 export const visitCopilotPlanModeSchema = z.enum(["route", "priority"]);
 export type VisitCopilotPlanMode = z.infer<typeof visitCopilotPlanModeSchema>;
 
@@ -56,6 +68,7 @@ export const visitCopilotPlanRequestSchema = z
   .object({
     mode: visitCopilotPlanModeSchema,
     ...periodFields,
+    ...planDateField,
   })
   .refine(customPeriodRefinement.check, customPeriodRefinement.options);
 export type VisitCopilotPlanRequest = z.infer<typeof visitCopilotPlanRequestSchema>;
@@ -153,6 +166,22 @@ export function resolveVisitCopilotPeriod(input: PeriodFieldsShape, today: Date 
   const fromDate = new Date(today.getTime());
   fromDate.setUTCMonth(fromDate.getUTCMonth() - months);
   return { from: fromDate.toISOString().slice(0, 10), to };
+}
+
+// Resolves the plan date to use: the explicit `date` if provided (already
+// validated as YYYY-MM-DD by isoDateSchema), otherwise today (server time).
+// Single source of truth so the API and the frontend agree on "what does
+// an omitted date mean."
+export function resolveVisitCopilotPlanDate(input: { date?: string }, today: Date = new Date()): string {
+  return input.date ?? today.toISOString().slice(0, 10);
+}
+
+// True when `dateIso` is strictly after today's own date (server time, UTC
+// day boundary — same convention as isoDay in visit-copilot.service.ts) —
+// i.e. this is a future date, so the screen must render Pre-Planning Mode
+// rather than Today Execution Mode.
+export function isFutureVisitCopilotPlanDate(dateIso: string, today: Date = new Date()): boolean {
+  return dateIso > today.toISOString().slice(0, 10);
 }
 
 // ------------------------------------------------------------------

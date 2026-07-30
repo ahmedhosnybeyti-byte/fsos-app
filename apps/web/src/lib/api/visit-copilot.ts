@@ -25,10 +25,16 @@ interface PeriodParams {
   to?: string;
 }
 
+// Flexible plan date (2026-07-30) — separate from PeriodParams (the
+// historical Analysis Scope). Omitted = today, resolved server-side.
+interface PlanDateParams {
+  date?: string;
+}
+
 export const visitCopilotApi = {
-  dailyBrief: (params: PeriodParams) =>
+  dailyBrief: (params: PeriodParams & PlanDateParams) =>
     apiFetch<VisitCopilotDailyBrief>("/visit-copilot/daily-brief", {
-      query: { period: params.period, from: params.from, to: params.to },
+      query: { period: params.period, from: params.from, to: params.to, date: params.date },
     }),
 
   plan: (body: VisitCopilotPlanRequest) => apiFetch<VisitCopilotPlanResult>("/visit-copilot/plan", { method: "POST", body }),
