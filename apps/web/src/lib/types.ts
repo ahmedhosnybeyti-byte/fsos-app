@@ -993,6 +993,41 @@ export interface TerritoryIntelligenceExecutiveResponse {
   generatedAt: string;
 }
 
+// Mirrors packages/schemas/src/territory-intelligence.schemas.ts's
+// territoryCustomerMetricSchema/territoryCustomerPointSchema/
+// territoryCustomerPointsResultSchema field-for-field — same
+// hand-maintained parallel-types convention as every other module in this
+// file. Same 7-metric union as TerritoryMapMetric (territory-map.tsx),
+// deliberately kept as a separate type here since this file has no
+// dependency on that component.
+export type TerritoryCustomerMetric =
+  | "healthScore"
+  | "salesGrowthPct"
+  | "lostSalesCount"
+  | "visitCoveragePct"
+  | "collectionHealthPct"
+  | "opportunityValueSar"
+  | "riskLevel";
+
+export interface TerritoryCustomerPoint {
+  customerId: string;
+  customerName: string;
+  latitude: number;
+  longitude: number;
+  metric: TerritoryCustomerMetric;
+  rawValue: number | null;
+  normalizedValue: number;
+  status: TerritoryTier;
+}
+
+export interface TerritoryCustomerPointsResult {
+  metric: TerritoryCustomerMetric;
+  city: string | null;
+  totalCustomers: number;
+  excludedBadCoordinates: number;
+  points: TerritoryCustomerPoint[];
+}
+
 // Decision Analytics Studio — mirrors packages/schemas/src/decision-analytics-studio.schemas.ts
 // field-for-field (this app hand-maintains a parallel `lib/types.ts` for
 // every backend schema rather than importing the zod types directly into
@@ -1569,6 +1604,9 @@ export interface VisitCopilot360LostOpportunity {
   stoppedProducts: VisitCopilot360StoppedProduct[];
   diagnosis: string;
   visitDecision: string;
+  likelyReason?: string | null;
+  visitGoal?: string;
+  extraProductCount?: number;
 }
 
 export type VisitCopilot360Priority = "عالية" | "متوسطة" | "منخفضة";

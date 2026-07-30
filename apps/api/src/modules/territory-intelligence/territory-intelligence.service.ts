@@ -1,5 +1,8 @@
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import type {
+  TerritoryCustomerMetric,
+  TerritoryCustomerPoint,
+  TerritoryCustomerPointsResult,
   TerritoryExecutiveItem,
   TerritoryHealthTier,
   TerritoryIntelligenceExecutiveResponse,
@@ -355,6 +358,245 @@ export class TerritoryIntelligenceService {
       territories: items,
       generatedAt: new Date().toISOString(),
       groupedBy: "City",
+    };
+  }
+
+  // 2026-07-30 — per-customer version of the same 7 metrics getSummary()
+  // computes per City, for Territory Intelligence's points/cluster/heat
+  // map (territory-point-map.tsx). Explicit product requirement: reuse the
+  // SAME formulas/thresholds already written above, not different logic —
+  // so this method mirrors getSummary()'s current/prior-month window,
+  // DEFAULT_HEALTH_SCORE_WEIGHTS, and clamp() calls exactly, just
+  // accumulated per CustomerCode instead of per City.
+  //
+  // Per-customer reinterpretation of each metric (documented since a
+  // straight copy of the City-level ratio doesn't make sense for one
+  // customer — see the design note in territory-customer-points research):
+  //   - salesGrowthPct: same formula, current vs prior spend for THIS
+  //     customer (was already effectively per-customer before city-level
+  //     summing).
+  //   - activeCustomerRatePct's per-customer analogue: 100 if this
+  //     customer bought anything in the current window, else 0 — same
+  //     "active this period" concept getSummary() sums into a %.
+  //   - lostSalesCount: 1 if this customer has a LOST_SALES situation
+  //     (current === 0 && prior > 0), else 0 — getSummary() counts exactly
+  //     these situations per territory; here there's at most one per
+  //     customer.
+  //   - visitCoveragePct: 100 if this customer was visited in the current
+  //     window, else 0 — same Visits join getSummary() already does,
+  //     collapsed to one customer instead of a city ratio.
+  //   - collectionHealthPct: collectionCurrent/current*100 for THIS
+  //     customer, same ratio SGI's own COLLECTION_RISK situation builder
+  //     computes (sgi.service.ts) — not the city-level
+  //     clamp(100 - riskCount/customerCount*100) reduction, which has no
+  //     single-customer meaning.
+  //   - opportunityValueSar: this customer's own GROWTH_OPPORTUNITY +
+  //     LOST_SALES situation values summed — identical to how getSummary()
+  //     sums them per territory, just not re-summed across customers.
+  //   - riskLevel: 100 - healthScore, unchanged arithmetic.
+  //   - healthScore: identical weighted-average/clamp formula, fed these
+  //     single-customer 0-100 components.
+  async getCustomerPoints(user: AuthenticatedUser, metric: TerritoryCustomerMetric, city?: string): Promise<TerritoryCustomerPointsResult> {
+    const ctx = this.rieContext(user);
+
+    const now = new Date();
+    const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const prevMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+    const prevMonthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+    const fromTime = monthStart.getTime();
+    const toTime = now.getTime();
+    const priorFromTime = prevMonthStart.getTime();
+    const priorToTime = prevMonthEnd.getTime();
+
+    const [customersResult, invoicesResult, visitsResult, collectionsResult, sgiData] = await Promise.all([
+      this.rieFacade.getEntityRecords("Customers", ctx),
+      this.rieFacade.getEntityRecords("Invoices", ctx),
+      this.rieFacade.getEntityRecords("Visits", ctx),
+      this.rieFacade.getEntityRecords("Collections", ctx),
+      this.sgiService.getLatest(user),
+    ]);
+    this.assertEntityAvailable(customersResult, "العملاء");
+
+    const invoicesAvailable = invoicesResult.available;
+    const visitsAvailable = visitsResult.available;
+    const collectionsAvailable = collectionsResult.available;
+
+    let customerRecords = customersResult.records;
+    if (city && city.trim()) {
+      const target = city.trim();
+      customerRecords = customerRecords.filter((row) => String(row.City ?? "").trim() === target);
+      if (customerRecords.length === 0) {
+        throw new BadRequestException(`لا يوجد عملاء في المدينة "${target}"`);
+      }
+    }
+
+    interface CustomerPointAcc {
+      name: string;
+      lat: number | null;
+      lon: number | null;
+      current: number;
+      prior: number;
+      collectionCurrent: number;
+    }
+    const byCustomer = new Map<string, CustomerPointAcc>();
+    for (const c of customerRecords) {
+      const code = String(c.CustomerCode ?? "").trim();
+      if (!code) continue;
+      const lat = toFiniteNumber(c.Latitude);
+      const lon = toFiniteNumber(c.Longitude);
+      byCustomer.set(code, { name: String(c.CustomerName ?? code), lat, lon, current: 0, prior: 0, collectionCurrent: 0 });
+    }
+
+    if (invoicesAvailable) {
+      for (const inv of invoicesResult.records) {
+        if (String(inv.InvoiceStatus ?? "").trim() !== "Confirmed") continue;
+        const code = String(inv.CustomerCode ?? "").trim();
+        const acc = byCustomer.get(code);
+        if (!acc) continue;
+        const t = toEpochMs(inv.InvoiceDate);
+        if (t === null) continue;
+        const amount = toFiniteNumber(inv.TotalAfterVAT) ?? 0;
+        if (t >= fromTime && t <= toTime) acc.current += amount;
+        if (t >= priorFromTime && t <= priorToTime) acc.prior += amount;
+      }
+    }
+
+    if (collectionsAvailable) {
+      for (const row of collectionsResult.records) {
+        const code = String(row.CustomerCode ?? "").trim();
+        const acc = byCustomer.get(code);
+        if (!acc) continue;
+        const t = toEpochMs(row.CollectionDate);
+        if (t === null || t < fromTime || t > toTime) continue;
+        acc.collectionCurrent += toFiniteNumber(row.Amount) ?? 0;
+      }
+    }
+
+    const visitedThisWindow = new Set<string>();
+    if (visitsAvailable) {
+      for (const v of visitsResult.records) {
+        const code = String(v.CustomerCode ?? "").trim();
+        if (!byCustomer.has(code)) continue;
+        const t = toEpochMs(v.VisitDate);
+        if (t === null || t < fromTime || t > toTime) continue;
+        visitedThisWindow.add(code);
+      }
+    }
+
+    // Same situations-by-customer narrowing getSummary() does by territory
+    // — here keyed directly by CustomerCode (entityKey), one level less of
+    // indirection since there's no city grouping step.
+    const situationsByCustomer = new Map<string, SgiSituation[]>();
+    if (sgiData) {
+      for (const s of sgiData.situations) {
+        if (s.type === "TARGET_BEHIND" || s.entityType !== "customer") continue;
+        const code = s.entityKey.trim();
+        if (!byCustomer.has(code)) continue;
+        const arr = situationsByCustomer.get(code) ?? [];
+        arr.push(s);
+        situationsByCustomer.set(code, arr);
+      }
+    }
+
+    let excludedBadCoordinates = 0;
+    const points: TerritoryCustomerPoint[] = [];
+    let maxAbsValue = 0;
+    const rawByCustomer = new Map<string, number | null>();
+
+    for (const [code, acc] of byCustomer) {
+      if (acc.lat === null || acc.lon === null) {
+        excludedBadCoordinates++;
+        continue;
+      }
+
+      const customerSituations = situationsByCustomer.get(code) ?? [];
+      const salesGrowthPct = invoicesAvailable ? (acc.prior > 0 ? ((acc.current - acc.prior) / acc.prior) * 100 : null) : null;
+      const isActive = invoicesAvailable ? acc.current > 0 : false;
+      const isLost = customerSituations.some((s) => s.type === "LOST_SALES");
+      const visitCoveragePct = visitsAvailable ? (visitedThisWindow.has(code) ? 100 : 0) : null;
+      const collectionHealthPct =
+        !collectionsAvailable || !invoicesAvailable || acc.current <= 0 ? null : clamp((acc.collectionCurrent / acc.current) * 100, 0, 100);
+
+      let opportunityValueSar = 0;
+      for (const s of customerSituations) {
+        if (s.type === "GROWTH_OPPORTUNITY") opportunityValueSar += s.metricValue;
+        else if (s.type === "LOST_SALES") opportunityValueSar += s.metricValuePrior ?? 0;
+      }
+
+      // Same weighted-average Health Score as getSummary(), fed these
+      // single-customer 0-100 components instead of city-aggregated ones.
+      const components: Array<{ score: number; weight: number }> = [];
+      if (salesGrowthPct !== null) {
+        components.push({ score: clamp(salesGrowthPct, -50, 50) + 50, weight: DEFAULT_HEALTH_SCORE_WEIGHTS.salesGrowth });
+      }
+      components.push({ score: isActive ? 100 : 0, weight: DEFAULT_HEALTH_SCORE_WEIGHTS.activeCustomerRate });
+      components.push({ score: isLost ? 0 : 100, weight: DEFAULT_HEALTH_SCORE_WEIGHTS.lostSales });
+      if (visitCoveragePct !== null) {
+        components.push({ score: visitCoveragePct, weight: DEFAULT_HEALTH_SCORE_WEIGHTS.visitCoverage });
+      }
+      if (collectionHealthPct !== null) {
+        components.push({ score: collectionHealthPct, weight: DEFAULT_HEALTH_SCORE_WEIGHTS.collectionHealth });
+      }
+      const weightSum = components.reduce((sum, c) => sum + c.weight, 0);
+      const healthScore = weightSum > 0 ? clamp(Math.round(components.reduce((sum, c) => sum + c.score * c.weight, 0) / weightSum), 0, 100) : 50;
+      const riskLevel = 100 - healthScore;
+
+      let rawValue: number | null;
+      switch (metric) {
+        case "healthScore":
+          rawValue = healthScore;
+          break;
+        case "salesGrowthPct":
+          rawValue = salesGrowthPct;
+          break;
+        case "lostSalesCount":
+          rawValue = isLost ? 1 : 0;
+          break;
+        case "visitCoveragePct":
+          rawValue = visitCoveragePct;
+          break;
+        case "collectionHealthPct":
+          rawValue = collectionHealthPct;
+          break;
+        case "opportunityValueSar":
+          rawValue = opportunityValueSar;
+          break;
+        case "riskLevel":
+          rawValue = riskLevel;
+          break;
+        default:
+          rawValue = null;
+      }
+
+      rawByCustomer.set(code, rawValue);
+      if (rawValue !== null) maxAbsValue = Math.max(maxAbsValue, Math.abs(rawValue));
+
+      const tier: TerritoryHealthTier =
+        healthScore >= 80 ? "excellent" : healthScore >= 60 ? "good" : healthScore >= 40 ? "average" : healthScore >= 20 ? "weak" : "veryWeak";
+
+      points.push({
+        customerId: code,
+        customerName: acc.name,
+        latitude: acc.lat,
+        longitude: acc.lon,
+        metric,
+        rawValue,
+        normalizedValue: 0, // filled in below once maxAbsValue is known across all points
+        status: tier,
+      });
+    }
+
+    const safeMax = maxAbsValue > 0 ? maxAbsValue : 1;
+    for (const p of points) {
+      p.normalizedValue = p.rawValue === null ? 0 : clamp(Math.abs(p.rawValue) / safeMax, 0, 1);
+    }
+
+    return {
+      metric,
+      city: city && city.trim() ? city.trim() : null,
+      totalCustomers: customerRecords.length,
+      excludedBadCoordinates,
+      points,
     };
   }
 

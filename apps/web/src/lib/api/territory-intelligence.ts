@@ -1,5 +1,10 @@
 import { apiFetch } from "../api-client";
-import type { TerritoryIntelligenceExecutiveResponse, TerritoryIntelligenceSummaryResponse } from "../types";
+import type {
+  TerritoryCustomerMetric,
+  TerritoryCustomerPointsResult,
+  TerritoryIntelligenceExecutiveResponse,
+  TerritoryIntelligenceSummaryResponse,
+} from "../types";
 
 // Territory Intelligence — territories are grouped by City (see
 // TerritoryIntelligenceSummaryResponse.groupedBy), pre-sorted worst-first
@@ -9,4 +14,11 @@ import type { TerritoryIntelligenceExecutiveResponse, TerritoryIntelligenceSumma
 export const territoryIntelligenceApi = {
   summary: () => apiFetch<TerritoryIntelligenceSummaryResponse>("/territory-intelligence/summary"),
   executive: () => apiFetch<TerritoryIntelligenceExecutiveResponse>("/territory-intelligence/executive"),
+  // Per-customer points for the points/cluster/heat map — reuses the same 7
+  // metrics as the City-level cards above, computed per customer (see
+  // getCustomerPoints()'s doc comment in territory-intelligence.service.ts
+  // for exactly how each metric is reinterpreted per-customer). `city`
+  // omitted = company-wide.
+  customerPoints: (metric: TerritoryCustomerMetric, city?: string) =>
+    apiFetch<TerritoryCustomerPointsResult>("/territory-intelligence/customer-points", { query: { metric, city } }),
 };

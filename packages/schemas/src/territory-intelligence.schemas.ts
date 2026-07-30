@@ -90,3 +90,59 @@ export const territoryIntelligenceExecutiveResponseSchema = z.object({
   generatedAt: z.string(),
 });
 export type TerritoryIntelligenceExecutiveResponse = z.infer<typeof territoryIntelligenceExecutiveResponseSchema>;
+
+// 2026-07-30 — Territory Intelligence's points/cluster/heat map (see
+// territory-point-map.tsx) needs one point per CUSTOMER, colored/weighted
+// by one of the same 7 metrics the City-level cards above already use —
+// not a single "sales" value regardless of which metric is selected (that
+// was the prior, incomplete version of this feature).
+//
+// Deliberately the SAME metric key union as the City-level
+// TerritoryMapMetric on the frontend (see territory-map.tsx) — this schema
+// exists purely to add "which metric" and "which scope" as query params to
+// a per-customer version of getSummary()'s own computation. No new
+// business logic: getCustomerPoints() in territory-intelligence.service.ts
+// reuses the exact same current/prior-month window, weights, and clamp()
+// calls getSummary() already uses, just accumulated per CustomerCode
+// instead of per City.
+export const territoryCustomerMetricSchema = z.enum([
+  "healthScore",
+  "salesGrowthPct",
+  "lostSalesCount",
+  "visitCoveragePct",
+  "collectionHealthPct",
+  "opportunityValueSar",
+  "riskLevel",
+]);
+export type TerritoryCustomerMetric = z.infer<typeof territoryCustomerMetricSchema>;
+
+// Same scope mechanism heatmap.schemas.ts's HeatmapScopeField already
+// uses for "narrow to one City" — reusing the field name (not the whole
+// heatmap module, which has an unrelated metric vocabulary) so the
+// frontend's existing "selected city name" state needs no new concept.
+export const territoryCustomerPointsQuerySchema = z.object({
+  metric: territoryCustomerMetricSchema.default("healthScore"),
+  city: z.string().min(1).max(200).optional(),
+});
+export type TerritoryCustomerPointsQuery = z.infer<typeof territoryCustomerPointsQuerySchema>;
+
+export const territoryCustomerPointSchema = z.object({
+  customerId: z.string(),
+  customerName: z.string(),
+  latitude: z.number(),
+  longitude: z.number(),
+  metric: territoryCustomerMetricSchema,
+  rawValue: z.number().nullable(), // null only when the metric's underlying Dataset isn't uploaded — same convention as territoryMetricsSchema above
+  normalizedValue: z.number(), // 0-1, for heat-layer weight / color-scale ratio — see color-scale.ts's colorForRatio
+  status: territoryHealthTierSchema, // same 5-tier banding as territory-map.tsx's TERRITORY_TIER_COLOR, applied per-customer
+});
+export type TerritoryCustomerPoint = z.infer<typeof territoryCustomerPointSchema>;
+
+export const territoryCustomerPointsResultSchema = z.object({
+  metric: territoryCustomerMetricSchema,
+  city: z.string().nullable(), // echoes the effective scope — null means company-wide
+  totalCustomers: z.number(), // customers matching the scope, before coordinate filtering
+  excludedBadCoordinates: z.number(),
+  points: z.array(territoryCustomerPointSchema),
+});
+export type TerritoryCustomerPointsResult = z.infer<typeof territoryCustomerPointsResultSchema>;

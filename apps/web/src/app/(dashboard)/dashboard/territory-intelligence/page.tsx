@@ -1,10 +1,10 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, MapPinned, Undo2 } from "lucide-react";
-import { heatmapApi, territoryIntelligenceApi } from "@/lib/api";
+import { territoryIntelligenceApi } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,13 @@ import { TerritoryPointMap, type TerritoryPointMapMode, type TerritoryPointMapNo
 import { TerritoryLayersSidebar } from "@/components/territory-intelligence/territory-layers-sidebar";
 import { TerritoryDecisionPanel } from "@/components/territory-intelligence/territory-decision-panel";
 import { TerritoryCustomerList } from "@/components/territory-intelligence/territory-customer-list";
+import {
+  exportTerritoryCustomerPointsCsv,
+  exportTerritoryCustomerPointsPptx,
+  exportTerritoryMapImage,
+  type TerritoryExportContext,
+} from "@/lib/export/territory-customer-points-export";
+import type { TerritoryCustomerPointsResult } from "@/lib/types";
 
 // Territory Intelligence — "Enterprise Territory Intelligence Workspace"
 // redesign (client-mandated: polygon choropleth, not marker map; multi-layer
@@ -46,6 +53,16 @@ const METRIC_LABEL_KEY: Record<TerritoryMapMetric, TranslationKey> = {
   collectionHealthPct: "territoryIntelligence.metricCollectionHealth",
   opportunityValueSar: "territoryIntelligence.metricOpportunityValue",
   riskLevel: "territoryIntelligence.metricRiskLevel",
+};
+
+// Mirrors territory-layers-sidebar.tsx's local DISPLAY_MODE_ITEMS labelKeys
+// (kept as a small duplicated map rather than importing a non-exported
+// constant — same isolation convention already used across this module set)
+// — needed here only to build the export context's human-readable mapTypeLabel.
+const DISPLAY_MODE_LABEL_KEY: Record<TerritoryPointMapMode, TranslationKey> = {
+  points: "territoryIntelligence.displayModePoints",
+  cluster: "territoryIntelligence.displayModeCluster",
+  heat: "territoryIntelligence.displayModeHeat",
 };
 
 function metricValueOf(territory: TerritorySummaryItem, metric: TerritoryMapMetric): number | null {
@@ -359,17 +376,88 @@ function TerritoryBreadcrumb({ drillPath, onGoToLevel }: { drillPath: DrillPathE
   );
 }
 
-function QuickTools() {
+// The 3 export buttons (2026-07-30). All 3 build strictly from the props
+// handed down by NormalView — the exact scope/metric/mapType/data currently
+// on screen — never a fresh company-wide fetch. Each button tracks its own
+// in-flight state so a click during an export is a no-op (button disabled +
+// spinner label) instead of firing a second overlapping export, and each
+// surfaces a transient success/error message inline next to the toolbar.
+type ExportKind = "pptx" | "image" | "csv";
+
+function QuickTools({
+  scopeLabel,
+  metric,
+  metricLabel,
+  mapType,
+  mapTypeLabel,
+  result,
+  mapContainerRef,
+}: {
+  scopeLabel: string;
+  metric: TerritoryMapMetric;
+  metricLabel: string;
+  mapType: TerritoryPointMapMode;
+  mapTypeLabel: string;
+  result: TerritoryCustomerPointsResult | undefined;
+  mapContainerRef: React.RefObject<HTMLDivElement | null>;
+}) {
   const { t } = useTranslation();
+  const [pending, setPending] = useState<ExportKind | null>(null);
+  const [status, setStatus] = useState<{ kind: ExportKind; ok: boolean } | null>(null);
+
+  const disabled = !result || result.points.length === 0;
+
+  async function runExport(kind: ExportKind) {
+    if (pending || disabled || !result) return;
+    setPending(kind);
+    setStatus(null);
+    try {
+      const ctx: TerritoryExportContext = {
+        scopeLabel,
+        metric,
+        metricLabel,
+        mapType,
+        mapTypeLabel,
+        result,
+        generatedAt: new Date(),
+      };
+      if (kind === "csv") {
+        exportTerritoryCustomerPointsCsv(ctx, t);
+      } else if (kind === "pptx") {
+        await exportTerritoryCustomerPointsPptx(ctx, t);
+      } else {
+        const container = mapContainerRef.current;
+        if (!container) throw new Error("map container not mounted");
+        await exportTerritoryMapImage(container, ctx);
+      }
+      setStatus({ kind, ok: true });
+    } catch {
+      setStatus({ kind, ok: false });
+    } finally {
+      setPending(null);
+    }
+  }
+
   return (
     <div className="glass-card rise-in flex flex-wrap items-center gap-3 rounded-lg border border-border p-3">
       <span className="text-sm font-medium text-muted-foreground">{t("territoryIntelligence.quickToolsTitle")}</span>
-      <Button type="button" variant="outline" size="sm" disabled title="Coming soon">
-        {t("territoryIntelligence.exportPpt")}
+      <Button type="button" variant="outline" size="sm" disabled={disabled || pending !== null} onClick={() => runExport("pptx")}>
+        {pending === "pptx" && <Spinner className="h-3.5 w-3.5" />}
+        {pending === "pptx" ? t("territoryIntelligence.exporting") : t("territoryIntelligence.exportPpt")}
       </Button>
-      <Button type="button" variant="outline" size="sm" disabled title="Coming soon">
-        {t("territoryIntelligence.exportImage")}
+      <Button type="button" variant="outline" size="sm" disabled={disabled || pending !== null} onClick={() => runExport("image")}>
+        {pending === "image" && <Spinner className="h-3.5 w-3.5" />}
+        {pending === "image" ? t("territoryIntelligence.exporting") : t("territoryIntelligence.exportImage")}
       </Button>
+      <Button type="button" variant="outline" size="sm" disabled={disabled || pending !== null} onClick={() => runExport("csv")}>
+        {pending === "csv" && <Spinner className="h-3.5 w-3.5" />}
+        {pending === "csv" ? t("territoryIntelligence.exporting") : t("territoryIntelligence.exportCsv")}
+      </Button>
+      {status && (
+        <span className={cn("text-xs", status.ok ? "text-emerald-600 dark:text-emerald-400" : "text-destructive")}>
+          {status.ok ? t("territoryIntelligence.exportSuccess") : t("territoryIntelligence.exportError")}
+        </span>
+      )}
     </div>
   );
 }
@@ -479,40 +567,63 @@ function NormalView({
   // The map itself (points/cluster/heat) must always show real customer
   // locations, never a single city-level centroid — a city-level node
   // collapsing an entire city into one dot was reported as a bug (a
-  // territory summary point is not "where customers are"). Fetched
-  // company-wide (no scopeField/scopeValues), independent of hierarchy's
-  // own drill state, so switching City -> Customer via a card click still
-  // works exactly as before for the breadcrumb/decision-panel/ranking list
-  // below — only the map's own data source changed.
+  // territory summary point is not "where customers are").
   //
-  // heatmapApi already excludes bad coordinates server-side
-  // (excludedBadCoordinates) — no separate invalid-coordinate handling
-  // needed here beyond what TerritoryPointMap itself does defensively.
+  // 2026-07-30, 2nd fix: scope the request to the selected territory's
+  // name whenever a city is selected — company-wide only when nothing is
+  // selected. queryKey includes the scope so switching selection always
+  // refetches instead of reusing a stale company-wide result.
   //
-  // Metric caveat (explicit product decision, 2026-07-30): the 7
-  // TerritoryMapMetric values (healthScore, salesGrowthPct, ...) are
-  // city-level aggregates computed server-side in TerritorySummaryItem —
-  // there is no per-customer version of them. Rather than inventing fake
-  // per-customer metrics or hiding the metric picker, every customer point
-  // always uses real "sales" value/color regardless of which
-  // TerritoryMapMetric is selected; a short notice next to the picker
-  // makes this explicit instead of silently misleading the metric switch.
+  // 2026-07-30, 3rd fix (this pass): switched from heatmapApi.query (fixed
+  // "sales" value regardless of which of the 7 TerritoryMapMetric buttons
+  // was pressed) to territoryIntelligenceApi.customerPoints(activeMetric,
+  // city) — a dedicated endpoint that computes the SAME 7 metrics per
+  // customer that getSummary() already computes per City (see
+  // getCustomerPoints()'s doc comment in territory-intelligence.service.ts
+  // for the exact per-metric reinterpretation). queryKey now includes
+  // activeMetric too, so pressing a different metric button triggers a
+  // real refetch with a different `metric` request param — verifiable in
+  // the Network tab.
+  const mapScopeCityName = territories.find((x) => x.id === selectedNodeId)?.name ?? null;
+
+  // DOM target for the "صورة" (image) export — captures exactly the
+  // rendered map card (current mode/metric/colors), never a regenerated
+  // report. See territory-customer-points-export.ts's exportTerritoryMapImage.
+  const mapCardRef = useRef<HTMLDivElement>(null);
+
   const customerPointsQuery = useQuery({
-    queryKey: ["territory-intelligence", "customer-points"],
-    queryFn: () => heatmapApi.query({ metric: "sales" }),
+    queryKey: ["territory-intelligence", "customer-points", activeMetric, mapScopeCityName],
+    queryFn: () => territoryIntelligenceApi.customerPoints(activeMetric, mapScopeCityName ?? undefined),
   });
 
   const mapNodes: TerritoryPointMapNode[] = useMemo(
     () =>
       (customerPointsQuery.data?.points ?? []).map((p) => ({
-        id: p.id,
-        name: p.label,
-        lat: p.lat,
-        lon: p.lon,
-        value: p.value,
+        id: p.customerId,
+        name: p.customerName,
+        lat: p.latitude,
+        lon: p.longitude,
+        metric: p.metric,
+        rawValue: p.rawValue,
+        normalizedValue: p.normalizedValue,
       })),
     [customerPointsQuery.data],
   );
+
+  // Temporary diagnostic notice (explicit request, remove once verified in
+  // production) — surfaces exactly what the map is working with: raw point
+  // count from the API, unique coordinate count (so a "1 point" symptom is
+  // visibly either "1 customer returned" or "N customers, same coordinate"
+  // instead of an unexplained blank), and excluded-bad-coordinate count.
+  const mapDiagnostics = useMemo(() => {
+    const points = customerPointsQuery.data?.points ?? [];
+    const uniqueCoords = new Set(points.map((p) => `${p.latitude.toFixed(5)},${p.longitude.toFixed(5)}`));
+    return {
+      customerCount: points.length,
+      uniqueLocationCount: uniqueCoords.size,
+      excludedBadCoordinates: customerPointsQuery.data?.excludedBadCoordinates ?? 0,
+    };
+  }, [customerPointsQuery.data]);
 
   function handleDrillInto(nodeId: string, nodeName: string) {
     hierarchy.drillInto(nodeId, nodeName);
@@ -539,17 +650,27 @@ function NormalView({
           onSelectDisplayMode={onSelectDisplayMode}
         />
 
-        <Card className="glass-card rise-in overflow-hidden p-0">
-          <TerritoryPointMap
-            nodes={mapNodes}
-            isLoading={customerPointsQuery.isLoading}
-            isError={customerPointsQuery.isError}
-            excludedBadCoordinates={customerPointsQuery.data?.excludedBadCoordinates ?? 0}
-            mode={displayMode}
-            selectedNodeId={selectedNodeId}
-            onSelectNode={onSelectNode}
-          />
-        </Card>
+        <div className="space-y-1.5">
+          <Card ref={mapCardRef} className="glass-card rise-in overflow-hidden p-0">
+            <TerritoryPointMap
+              nodes={mapNodes}
+              isLoading={customerPointsQuery.isLoading}
+              isError={customerPointsQuery.isError}
+              excludedBadCoordinates={customerPointsQuery.data?.excludedBadCoordinates ?? 0}
+              mode={displayMode}
+              selectedNodeId={selectedNodeId}
+              onSelectNode={onSelectNode}
+            />
+          </Card>
+          {/* Temporary diagnostic strip (explicit request, remove once verified
+              in production) — real numbers from the last customer-points
+              response, scoped to whatever city (if any) is currently
+              selected. */}
+          <p dir="ltr" className="rounded-md border border-dashed border-border/60 bg-secondary/20 px-2 py-1 text-[11px] text-muted-foreground">
+            [DIAG] scope={mapScopeCityName ?? "ALL"} · customers={mapDiagnostics.customerCount} · uniqueLocations=
+            {mapDiagnostics.uniqueLocationCount} · excludedBadCoordinates={mapDiagnostics.excludedBadCoordinates}
+          </p>
+        </div>
 
         {isCityLevel &&
           (selectedTerritory ? (
@@ -570,7 +691,15 @@ function NormalView({
           ))}
       </div>
 
-      <QuickTools />
+      <QuickTools
+        scopeLabel={mapScopeCityName ?? t("territoryIntelligence.exportScopeAll")}
+        metric={activeMetric}
+        metricLabel={t(METRIC_LABEL_KEY[activeMetric])}
+        mapType={displayMode}
+        mapTypeLabel={t(DISPLAY_MODE_LABEL_KEY[displayMode])}
+        result={customerPointsQuery.data}
+        mapContainerRef={mapCardRef}
+      />
 
       {isCityLevel ? (
         <CityRankingList territories={territories} activeMetric={activeMetric} selectedNodeId={selectedNodeId} onSelectNode={onSelectNode} />

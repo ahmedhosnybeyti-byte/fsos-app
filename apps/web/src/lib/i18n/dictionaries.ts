@@ -120,7 +120,21 @@ export type TranslationKey =
   | "territoryIntelligence.displayModePoints"
   | "territoryIntelligence.displayModeSectionTitle"
   | "territoryIntelligence.invalidCoordinatesNotice"
-  | "territoryIntelligence.mapMetricCaveat"
+  | "territoryIntelligence.coLocatedCustomers"
+  | "territoryIntelligence.metricNoData"
+  | "territoryIntelligence.customersCountSuffix"
+  | "territoryIntelligence.aggregationSum"
+  | "territoryIntelligence.aggregationAverage"
+  | "territoryIntelligence.legendLow"
+  | "territoryIntelligence.legendHigh"
+  | "territoryIntelligence.exportCsv"
+  | "territoryIntelligence.exportSuccess"
+  | "territoryIntelligence.exportError"
+  | "territoryIntelligence.exporting"
+  | "territoryIntelligence.exportTotalCustomers"
+  | "territoryIntelligence.exportUniqueLocations"
+  | "territoryIntelligence.exportExcludedCoordinates"
+  | "territoryIntelligence.exportScopeAll"
   | "territoryIntelligence.metricSectionTitle"
   | "territoryIntelligence.returnToDecisionStudio"
   | "decisionAnalyticsStudio.title"
@@ -1021,6 +1035,9 @@ export type TranslationKey =
   | "copilot.summary360StoppedProducts"
   | "copilot.summary360Diagnosis"
   | "copilot.summary360VisitDecision"
+  | "copilot.summary360LikelyReason"
+  | "copilot.summary360VisitGoal"
+  | "copilot.summary360MoreProducts"
   | "copilot.summary360Collections"
   | "copilot.summary360Collected"
   | "copilot.summary360Pending"
@@ -1331,7 +1348,21 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "territoryIntelligence.displayModePoints": "نقطية",
     "territoryIntelligence.displayModeSectionTitle": "نوع الخريطة",
     "territoryIntelligence.invalidCoordinatesNotice": "{count} موقع بإحداثيات غير صالحة تم استبعاده",
-    "territoryIntelligence.mapMetricCaveat": "نقاط العملاء على الخريطة معروضة دايمًا حسب المبيعات — المؤشرات السبعة أدناه بتتحسب على مستوى المدينة وبتُستخدم في القائمة الجانبية ولوحة القرار.",
+    "territoryIntelligence.coLocatedCustomers": "{count} عميل بنفس الموقع — اضغط للتفريق",
+    "territoryIntelligence.metricNoData": "لا توجد بيانات",
+    "territoryIntelligence.customersCountSuffix": "عميل",
+    "territoryIntelligence.aggregationSum": "إجمالي",
+    "territoryIntelligence.aggregationAverage": "متوسط",
+    "territoryIntelligence.legendLow": "منخفض",
+    "territoryIntelligence.legendHigh": "مرتفع",
+    "territoryIntelligence.exportCsv": "تصدير CSV",
+    "territoryIntelligence.exportSuccess": "تم التصدير بنجاح",
+    "territoryIntelligence.exportError": "تعذّر التصدير — حاول مرة أخرى",
+    "territoryIntelligence.exporting": "جارِ التصدير...",
+    "territoryIntelligence.exportTotalCustomers": "عدد العملاء",
+    "territoryIntelligence.exportUniqueLocations": "عدد المواقع الفريدة",
+    "territoryIntelligence.exportExcludedCoordinates": "إحداثيات مستبعدة",
+    "territoryIntelligence.exportScopeAll": "كل الأقاليم",
     "territoryIntelligence.metricSectionTitle": "المؤشر",
     "territoryIntelligence.returnToDecisionStudio": "الرجوع لاستوديو تحليل القرارات",
     "decisionAnalyticsStudio.title": "استوديو تحليل القرارات",
@@ -2244,7 +2275,10 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360LastVisitUnknown": "آخر زيارة: غير معروفة",
     "copilot.summary360StoppedProducts": "الأصناف المتوقفة",
     "copilot.summary360Diagnosis": "التشخيص",
-    "copilot.summary360VisitDecision": "قرار الزيارة",
+    "copilot.summary360VisitDecision": "إجراء الزيارة",
+    "copilot.summary360LikelyReason": "السبب المرجح",
+    "copilot.summary360VisitGoal": "هدف الزيارة",
+    "copilot.summary360MoreProducts": "+ {count} صنف آخر",
     "copilot.summary360Collections": "التحصيل",
     "copilot.summary360Collected": "تم تحصيله",
     "copilot.summary360Pending": "معلّق",
@@ -2554,7 +2588,21 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "territoryIntelligence.displayModePoints": "Points",
     "territoryIntelligence.displayModeSectionTitle": "Map Type",
     "territoryIntelligence.invalidCoordinatesNotice": "{count} locations with invalid coordinates excluded",
-    "territoryIntelligence.mapMetricCaveat": "Customer points on the map always show sales value — the 7 metrics below are city-level and drive the sidebar and decision panel.",
+    "territoryIntelligence.coLocatedCustomers": "{count} customers at this location — click to spread out",
+    "territoryIntelligence.metricNoData": "No data",
+    "territoryIntelligence.customersCountSuffix": "customers",
+    "territoryIntelligence.aggregationSum": "sum",
+    "territoryIntelligence.aggregationAverage": "avg",
+    "territoryIntelligence.legendLow": "Low",
+    "territoryIntelligence.legendHigh": "High",
+    "territoryIntelligence.exportCsv": "Export CSV",
+    "territoryIntelligence.exportSuccess": "Export complete",
+    "territoryIntelligence.exportError": "Export failed — try again",
+    "territoryIntelligence.exporting": "Exporting...",
+    "territoryIntelligence.exportTotalCustomers": "Customers",
+    "territoryIntelligence.exportUniqueLocations": "Unique locations",
+    "territoryIntelligence.exportExcludedCoordinates": "Excluded coordinates",
+    "territoryIntelligence.exportScopeAll": "All Territories",
     "territoryIntelligence.metricSectionTitle": "Metric",
     "territoryIntelligence.returnToDecisionStudio": "Return to Decision Analytics Studio",
     "decisionAnalyticsStudio.title": "Decision Analytics Studio",
@@ -3468,7 +3516,10 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360LastVisitUnknown": "Last visit: unknown",
     "copilot.summary360StoppedProducts": "Stopped products",
     "copilot.summary360Diagnosis": "Diagnosis",
-    "copilot.summary360VisitDecision": "Visit decision",
+    "copilot.summary360VisitDecision": "Visit action",
+    "copilot.summary360LikelyReason": "Likely reason",
+    "copilot.summary360VisitGoal": "Visit goal",
+    "copilot.summary360MoreProducts": "+{count} more product(s)",
     "copilot.summary360Collections": "Collections",
     "copilot.summary360Collected": "Collected",
     "copilot.summary360Pending": "Pending",
