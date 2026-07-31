@@ -45,6 +45,7 @@ export const smartLoadingLostOpportunitySchema = z.object({
   customerName: z.string(),
   productCode: z.string(),
   productName: z.string(),
+  category: z.string().nullable(),
   baselineNetQuantity: z.number(),
   recentNetQuantity: z.number(),
   suggestedQuantity: z.number(),

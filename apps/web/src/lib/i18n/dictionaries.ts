@@ -1133,6 +1133,19 @@ export type TranslationKey =
   | "smartLoading.removeProduct"
   | "smartLoading.restoreOriginalList"
   | "smartLoading.alertsTitle"
+  | "smartLoading.lostOpportunities"
+  | "smartLoading.lostOpportunitiesDescription"
+  | "smartLoading.searchLostOpportunities"
+  | "smartLoading.lostOpportunitiesError"
+  | "smartLoading.noLostOpportunities"
+  | "smartLoading.categoryTotal"
+  | "smartLoading.productSuggestedQuantity"
+  | "smartLoading.customerSuggestedQuantity"
+  | "smartLoading.addCategory"
+  | "smartLoading.addToLoading"
+  | "smartLoading.added"
+  | "smartLoading.vehicleStockQuantity"
+  | "smartLoading.reviewCapacity"
   | "smartLoading.pdfExportedAt"
   | "fsos360.company"
   | "fsos360.region"
@@ -2380,6 +2393,19 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.removeProduct": "إزالة الصنف",
     "smartLoading.restoreOriginalList": "استعادة القائمة الأصلية",
     "smartLoading.alertsTitle": "تنبيهات اليوم",
+    "smartLoading.lostOpportunities": "\u0627\u0644\u0641\u0631\u0635 \u0627\u0644\u0636\u0627\u0626\u0639\u0629",
+    "smartLoading.lostOpportunitiesDescription": "\u0641\u0631\u0635 \u0639\u0645\u0644\u0627\u0621 \u062e\u0637 \u0633\u064a\u0631 \u0627\u0644\u063a\u062f \u062d\u0633\u0628 \u0627\u0644\u0642\u0633\u0645 \u0648\u0627\u0644\u0645\u0646\u062a\u062c.",
+    "smartLoading.searchLostOpportunities": "\u0627\u0628\u062d\u062b \u0628\u0627\u0644\u0642\u0633\u0645 \u0623\u0648 \u0627\u0644\u0635\u0646\u0641 \u0623\u0648 \u0627\u0644\u0643\u0648\u062f \u0623\u0648 \u0627\u0644\u0639\u0645\u064a\u0644",
+    "smartLoading.lostOpportunitiesError": "\u062a\u0639\u0630\u0631 \u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0641\u0631\u0635 \u0627\u0644\u0636\u0627\u0626\u0639\u0629. \u062d\u0627\u0648\u0644 \u062a\u062d\u062f\u064a\u062b \u0627\u0644\u0634\u0627\u0634\u0629.",
+    "smartLoading.noLostOpportunities": "\u0644\u0627 \u062a\u0648\u062c\u062f \u0641\u0631\u0635 \u0636\u0627\u0626\u0639\u0629 \u0645\u0637\u0627\u0628\u0642\u0629.",
+    "smartLoading.categoryTotal": "\u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u0643\u0645\u064a\u0629: {value}",
+    "smartLoading.productSuggestedQuantity": "\u0627\u0644\u0643\u0645\u064a\u0629 \u0627\u0644\u0645\u0642\u062a\u0631\u062d\u0629: {value}",
+    "smartLoading.customerSuggestedQuantity": "\u0627\u0644\u0643\u0645\u064a\u0629 \u0627\u0644\u0645\u0642\u062a\u0631\u062d\u0629 \u0644\u0644\u0639\u0645\u064a\u0644 {customer}",
+    "smartLoading.addCategory": "\u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0642\u0633\u0645",
+    "smartLoading.addToLoading": "\u0625\u0636\u0627\u0641\u0629 \u0625\u0644\u0649 \u0627\u0644\u062a\u062d\u0645\u064a\u0644",
+    "smartLoading.added": "\u062a\u0645\u062a \u0627\u0644\u0625\u0636\u0627\u0641\u0629",
+    "smartLoading.vehicleStockQuantity": "\u0645\u062e\u0632\u0648\u0646 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u0627\u0644\u062d\u0627\u0644\u064a: {value}",
+    "smartLoading.reviewCapacity": "\u0631\u0627\u062c\u0639 \u0627\u0644\u0633\u0639\u0629 \u0642\u0628\u0644 \u0627\u0639\u062a\u0645\u0627\u062f \u0627\u0644\u062a\u062d\u0645\u064a\u0644.",
     "smartLoading.pdfExportedAt": "وقت التصدير",
     "fsos360.company": "الشركة",
     "fsos360.region": "المنطقة",
@@ -3627,6 +3653,19 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.removeProduct": "Remove product",
     "smartLoading.restoreOriginalList": "Restore original list",
     "smartLoading.alertsTitle": "Today's Alerts",
+    "smartLoading.lostOpportunities": "Lost Opportunities",
+    "smartLoading.lostOpportunitiesDescription": "Tomorrow route customer opportunities grouped by category and product.",
+    "smartLoading.searchLostOpportunities": "Search category, product, code, or customer",
+    "smartLoading.lostOpportunitiesError": "Unable to load lost opportunities. Try refreshing the screen.",
+    "smartLoading.noLostOpportunities": "No matching lost opportunities.",
+    "smartLoading.categoryTotal": "Total quantity: {value}",
+    "smartLoading.productSuggestedQuantity": "Suggested quantity: {value}",
+    "smartLoading.customerSuggestedQuantity": "Suggested quantity for {customer}",
+    "smartLoading.addCategory": "Add category",
+    "smartLoading.addToLoading": "Add to loading",
+    "smartLoading.added": "Added",
+    "smartLoading.vehicleStockQuantity": "Current vehicle stock: {value}",
+    "smartLoading.reviewCapacity": "Review capacity before approving loading.",
     "smartLoading.pdfExportedAt": "Exported at",
     "fsos360.company": "Company",
     "fsos360.region": "Region",

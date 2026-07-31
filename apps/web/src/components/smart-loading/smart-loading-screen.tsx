@@ -21,8 +21,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTranslation } from "@/components/translation-provider";
-import type { SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
-import { cn } from "@/lib/utils";
+import type { SmartLoadingLostOpportunity, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
+import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
+import { groupLostOpportunities, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
 
 type Inputs = { confirmedOrders: number; safetyStock: number; manual?: number };
 type LostOpportunityAddition = {
@@ -33,25 +34,12 @@ type LostOpportunityAddition = {
   addedQuantity: number;
   customers: { id: string; name: string; baselineNetQuantity: number }[];
 };
-type LostOpportunityGroup = {
-  productId: string;
-  productName: string;
-  opportunityIds: string[];
-  customerIds: string[];
-  customers: { id: string; name: string; baselineNetQuantity: number }[];
-  baselineNetQuantity: number;
-  addedQuantity: number;
-};
 type Row = { product: SmartLoadingProduct; original: number; baseSuggested: number; suggested: number; input: Inputs; manuallyAdded: boolean; lostOpportunity?: LostOpportunityAddition; stockAvailable: boolean };
 
 const HIGH_PRIORITY_DAYS_STALE = 4;
 
 function parsePositiveNumber(value: string): number {
   return Math.max(0, Number(value) || 0);
-}
-
-function formatQuantity(value: number): string {
-  return Math.round(value).toLocaleString("ar-SA");
 }
 
 function daysSinceLastSale(date: string | null): number | null {
@@ -80,7 +68,7 @@ export function SmartLoadingScreen({
   isError: boolean;
   onRetry: () => Promise<unknown> | void;
 }) {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const label = (key: string, fallback: string) => {
     const translated = t(key as never);
     return translated === key ? fallback : translated;
@@ -103,6 +91,7 @@ export function SmartLoadingScreen({
   const [addedQuantity, setAddedQuantity] = useState(1);
   const [lostOpportunitiesOpen, setLostOpportunitiesOpen] = useState(false);
   const [lostOpportunityAdditions, setLostOpportunityAdditions] = useState<Record<string, LostOpportunityAddition>>({});
+  const [lostOpportunityQuantityDrafts, setLostOpportunityQuantityDrafts] = useState<OpportunityQuantityDrafts>({});
   const [lostOpportunityWarning, setLostOpportunityWarning] = useState<string | null>(null);
 
   useEffect(() => {
@@ -118,31 +107,10 @@ export function SmartLoadingScreen({
   // stock), before filtering out zero/negative suggestions. Kept separate
   // from `rows` below because stale-item detection needs the FULL set, not
   // just the ones that ended up with a positive loading recommendation.
-  const lostOpportunityGroups = useMemo<LostOpportunityGroup[]>(() => {
+  const lostOpportunityGroups = useMemo<LostOpportunityCategoryGroup[]>(() => {
     if (session?.state !== "ready") return [];
-    const groups = new Map<string, LostOpportunityGroup>();
-    for (const opportunity of session.lostOpportunities) {
-      const productId = opportunity.productCode;
-      const customerId = opportunity.customerCode;
-      const opportunityId = `${customerId}:${productId}`;
-      const group = groups.get(productId) ?? {
-        productId,
-        productName: opportunity.productName,
-        opportunityIds: [],
-        customerIds: [],
-        customers: [],
-        baselineNetQuantity: 0,
-        addedQuantity: 0,
-      };
-      group.opportunityIds.push(opportunityId);
-      group.customerIds.push(customerId);
-      group.customers.push({ id: customerId, name: opportunity.customerName, baselineNetQuantity: opportunity.baselineNetQuantity });
-      group.baselineNetQuantity += opportunity.baselineNetQuantity;
-      group.addedQuantity += opportunity.suggestedQuantity;
-      groups.set(productId, group);
-    }
-    return Array.from(groups.values()).sort((a, b) => a.productName.localeCompare(b.productName, "ar"));
-  }, [session]);
+    return groupLostOpportunities(session.lostOpportunities, lostOpportunityQuantityDrafts, "", t("smartLoading.uncategorized"));
+  }, [lostOpportunityQuantityDrafts, session, t]);
 
   const allRows = useMemo<Row[]>(() => {
     if (session?.state !== "ready") return [];
@@ -151,16 +119,19 @@ export function SmartLoadingScreen({
     for (const product of session.products) {
       const input = inputs[product.productCode] ?? { confirmedOrders: 0, safetyStock: 0 };
       const original = product.weeklyAverageSales + input.confirmedOrders + input.safetyStock - product.currentVehicleStock;
-      const addition = lostOpportunityAdditions[product.productCode];
+      const savedAddition = lostOpportunityAdditions[product.productCode];
+      const opportunityProduct = lostOpportunityGroups.flatMap((category) => category.products).find((item) => item.productCode === product.productCode);
+      const addition = savedAddition && opportunityProduct ? { ...savedAddition, addedQuantity: opportunityProduct.totalQuantity } : savedAddition;
       const baseSuggested = Math.max(0, original);
       rowsByProduct.set(product.productCode, { product, input, original, baseSuggested, suggested: input.manual ?? baseSuggested + (addition?.addedQuantity ?? 0), manuallyAdded: manuallyAddedProductCodes.has(product.productCode), lostOpportunity: addition, stockAvailable: true });
     }
     for (const addition of Object.values(lostOpportunityAdditions)) {
       if (rowsByProduct.has(addition.productId)) continue;
-      const group = lostOpportunityGroups.find((item) => item.productId === addition.productId);
-      const product = productsByCode.get(addition.productId) ?? { productCode: addition.productId, productName: group?.productName ?? addition.productId, currentVehicleStock: 0, weeklyAverageSales: 0, priority: "normal" as const, category: null, lastSaleDate: null };
+      const lostOpportunityProduct = lostOpportunityGroups.flatMap((category) => category.products).find((item) => item.productCode === addition.productId);
+      const product = productsByCode.get(addition.productId) ?? { productCode: addition.productId, productName: lostOpportunityProduct?.productName ?? addition.productId, currentVehicleStock: 0, weeklyAverageSales: 0, priority: "normal" as const, category: null, lastSaleDate: null };
       const input = inputs[addition.productId] ?? { confirmedOrders: 0, safetyStock: 0 };
-      rowsByProduct.set(addition.productId, { product, input, original: 0, baseSuggested: 0, suggested: input.manual ?? addition.addedQuantity, manuallyAdded: manuallyAddedProductCodes.has(addition.productId), lostOpportunity: addition, stockAvailable: false });
+      const effectiveAddition = lostOpportunityProduct ? { ...addition, addedQuantity: lostOpportunityProduct.totalQuantity } : addition;
+      rowsByProduct.set(addition.productId, { product, input, original: 0, baseSuggested: 0, suggested: input.manual ?? effectiveAddition.addedQuantity, manuallyAdded: manuallyAddedProductCodes.has(addition.productId), lostOpportunity: effectiveAddition, stockAvailable: false });
     }
     return Array.from(rowsByProduct.values());
   }, [inputs, lostOpportunityAdditions, lostOpportunityGroups, manuallyAddedProductCodes, session]);
@@ -213,6 +184,7 @@ export function SmartLoadingScreen({
       setRemovedProductCodes(new Set());
       setManuallyAddedProductCodes(new Set());
       setLostOpportunityAdditions({});
+      setLostOpportunityQuantityDrafts({});
       setLostOpportunityWarning(null);
       setOpenRows(new Set());
     } catch {
@@ -243,20 +215,44 @@ export function SmartLoadingScreen({
     setAddProductOpen(false);
   }
 
-  function addLostOpportunity(group: LostOpportunityGroup) {
-    const stockProduct = session?.state === "ready" ? session.products.find((product) => product.productCode === group.productId) : undefined;
-    setLostOpportunityAdditions((current) => ({
-      ...current,
-      [group.productId]: { source: "lost-opportunity", opportunityIds: group.opportunityIds, customerIds: group.customerIds, productId: group.productId, addedQuantity: group.addedQuantity, customers: group.customers },
-    }));
-    setRemovedProductCodes((current) => {
-      const next = new Set(current);
-      next.delete(group.productId);
+  function addLostOpportunities(products: readonly LostOpportunityProductGroup[]) {
+    const positiveProducts = products.filter((product) => product.totalQuantity > 0);
+    if (positiveProducts.length === 0) return;
+    const stockProducts = new Map(session?.state === "ready" ? session.products.map((product) => [product.productCode, product]) : []);
+    setLostOpportunityAdditions((current) => {
+      const next = { ...current };
+      for (const product of positiveProducts) {
+        if (next[product.productCode]) continue;
+        next[product.productCode] = {
+          source: "lost-opportunity",
+          opportunityIds: product.customers.map((customer) => customer.id),
+          customerIds: product.customers.map((customer) => customer.customerCode),
+          productId: product.productCode,
+          addedQuantity: product.totalQuantity,
+          customers: product.customers.map((customer) => ({ id: customer.customerCode, name: customer.customerName, baselineNetQuantity: customer.baselineNetQuantity })),
+        };
+      }
       return next;
     });
-    setLostOpportunityWarning(stockProduct
-      ? `\u0645\u062e\u0632\u0648\u0646 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u0627\u0644\u062d\u0627\u0644\u064a \u0644\u0644\u0635\u0646\u0641: ${formatQuantity(stockProduct.currentVehicleStock)}. \u0644\u0627 \u062a\u062a\u0648\u0641\u0631 \u0633\u0639\u0629 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u0641\u064a \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u062c\u0644\u0633\u0629\u061b \u0631\u0627\u062c\u0639 \u0627\u0644\u0633\u0639\u0629 \u0642\u0628\u0644 \u0627\u0639\u062a\u0645\u0627\u062f \u0627\u0644\u062a\u062d\u0645\u064a\u0644.`
-      : "\u0644\u0627 \u064a\u062a\u0648\u0641\u0631 \u0645\u062e\u0632\u0648\u0646 \u0633\u064a\u0627\u0631\u0629 \u0644\u0647\u0630\u0627 \u0627\u0644\u0635\u0646\u0641\u060c \u0648\u0644\u0627 \u062a\u062a\u0648\u0641\u0631 \u0633\u0639\u0629 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u0641\u064a \u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u062c\u0644\u0633\u0629\u061b \u0631\u0627\u062c\u0639 \u0627\u0644\u0645\u062e\u0632\u0648\u0646 \u0648\u0627\u0644\u0633\u0639\u0629 \u0642\u0628\u0644 \u0627\u0639\u062a\u0645\u0627\u062f \u0627\u0644\u062a\u062d\u0645\u064a\u0644.");
+    setRemovedProductCodes((current) => {
+      const next = new Set(current);
+      positiveProducts.forEach((product) => next.delete(product.productCode));
+      return next;
+    });
+    const stockProduct = positiveProducts.length === 1 ? stockProducts.get(positiveProducts[0]!.productCode) : undefined;
+    setLostOpportunityWarning(stockProduct ? `${t("smartLoading.vehicleStockQuantity", { value: formatQuantity(stockProduct.currentVehicleStock, locale) })}. ${t("smartLoading.reviewCapacity")}` : null);
+  }
+
+  function setLostOpportunityQuantity(opportunityId: string, value: string) {
+    setLostOpportunityQuantityDrafts((current) => ({ ...current, [opportunityId]: parsePositiveNumber(value) }));
+  }
+
+  function restoreLostOpportunityQuantity(opportunityId: string) {
+    setLostOpportunityQuantityDrafts((current) => {
+      const next = { ...current };
+      delete next[opportunityId];
+      return next;
+    });
   }
 
   function removeProduct(productCode: string) {
@@ -273,6 +269,7 @@ export function SmartLoadingScreen({
     setRemovedProductCodes(new Set());
     setManuallyAddedProductCodes(new Set());
     setLostOpportunityAdditions({});
+    setLostOpportunityQuantityDrafts({});
     setLostOpportunityWarning(null);
   }
 
@@ -390,7 +387,7 @@ export function SmartLoadingScreen({
     const tbody = document.createElement("tbody");
     exportRowsSnapshot.forEach((row) => {
       const tr = document.createElement("tr");
-      [row.product, row.category, formatQuantity(row.vehicleStock), formatQuantity(row.suggestedLoading), row.source].forEach((value) => {
+      [row.product, row.category, formatQuantity(row.vehicleStock, locale), formatQuantity(row.suggestedLoading, locale), row.source].forEach((value) => {
         const cell = document.createElement("td");
         cell.textContent = value;
         cell.style.cssText = "border:1px solid #d1d5db;padding:7px;vertical-align:top;text-align:right;";
@@ -460,7 +457,7 @@ export function SmartLoadingScreen({
   }
 
   return (
-    <div dir="rtl" className="space-y-5 pb-4" onClick={() => panel && setPanel(null)}>
+    <div dir={locale === "ar" ? "rtl" : "ltr"} className="space-y-5 pb-4" onClick={() => panel && setPanel(null)}>
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold">
@@ -474,7 +471,7 @@ export function SmartLoadingScreen({
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => { setLostOpportunitiesOpen(true); setLostOpportunityWarning(null); }}>
             <AlertTriangle className="h-4 w-4 text-amber-600" />
-            {"\u0627\u0644\u0641\u0631\u0635 \u0627\u0644\u0636\u0627\u0626\u0639\u0629"} ({formatQuantity(lostOpportunityGroups.reduce((sum, group) => sum + group.opportunityIds.length, 0))})
+            {t("smartLoading.lostOpportunities")} ({formatQuantity(lostOpportunityGroups.reduce((sum, category) => sum + category.products.reduce((productSum, product) => productSum + product.customers.length, 0), 0), locale)})
           </Button>
           <div className="relative">
             <Button variant="outline" onClick={() => setExportOpen((open) => !open)}>
@@ -517,15 +514,15 @@ export function SmartLoadingScreen({
             </CardDescription>
           </CardHeader>
           <CardContent className="grid grid-cols-2 gap-2 p-4 sm:grid-cols-4">
-            <Metric label={t("smartLoading.productsToLoad")} value={formatQuantity(rows.length)} />
+            <Metric label={t("smartLoading.productsToLoad")} value={formatQuantity(rows.length, locale)} />
             <Metric
               label={t("smartLoading.totalQuantity")}
-              value={formatQuantity(rows.reduce((sum, row) => sum + row.suggested, 0))}
+              value={formatQuantity(rows.reduce((sum, row) => sum + row.suggested, 0), locale)}
               strong
             />
             <MetricButton
               label={t("smartLoading.priorityProducts")}
-              value={formatQuantity(priorityRows.length)}
+              value={formatQuantity(priorityRows.length, locale)}
               onClick={(event) => {
                 event.stopPropagation();
                 setPanel(panel === "priority" ? null : "priority");
@@ -533,7 +530,7 @@ export function SmartLoadingScreen({
             />
             <MetricButton
               label={t("smartLoading.staleProducts")}
-              value={formatQuantity(staleRows.length)}
+              value={formatQuantity(staleRows.length, locale)}
               onClick={(event) => {
                 event.stopPropagation();
                 setPanel(panel === "stale" ? null : "stale");
@@ -557,7 +554,7 @@ export function SmartLoadingScreen({
                     onClick={() => setAttentionOpen((value) => !value)}
                   >
                     <span>
-                      {t("smartLoading.staleProducts")} — {formatQuantity(staleRows.length)} {t("smartLoading.quantityUnit")}
+                      {t("smartLoading.staleProducts")} — {formatQuantity(staleRows.length, locale)} {t("smartLoading.quantityUnit")}
                     </span>
                     <ChevronDown className={cn("h-4 w-4 transition-transform", attentionOpen && "rotate-180")} />
                   </button>
@@ -579,14 +576,17 @@ export function SmartLoadingScreen({
 
       {lostOpportunitiesOpen && (
         <LostOpportunitiesDialog
-          groups={lostOpportunityGroups}
+          opportunities={session.lostOpportunities}
+          quantityDrafts={lostOpportunityQuantityDrafts}
           additions={lostOpportunityAdditions}
           products={session.products}
           isLoading={isLoading}
           isError={isError}
           warning={lostOpportunityWarning}
           onClose={() => setLostOpportunitiesOpen(false)}
-          onAdd={addLostOpportunity}
+          onAddProducts={addLostOpportunities}
+          onQuantityChange={setLostOpportunityQuantity}
+          onRestoreQuantity={restoreLostOpportunityQuantity}
         />
       )}
 
@@ -728,54 +728,98 @@ export function SmartLoadingScreen({
 }
 
 function LostOpportunitiesDialog({
-  groups,
+  opportunities,
+  quantityDrafts,
   additions,
   products,
   isLoading,
   isError,
   warning,
   onClose,
-  onAdd,
+  onAddProducts,
+  onQuantityChange,
+  onRestoreQuantity,
 }: {
-  groups: LostOpportunityGroup[];
+  opportunities: SmartLoadingLostOpportunity[];
+  quantityDrafts: OpportunityQuantityDrafts;
   additions: Record<string, LostOpportunityAddition>;
   products: SmartLoadingProduct[];
   isLoading: boolean;
   isError: boolean;
   warning: string | null;
   onClose: () => void;
-  onAdd: (group: LostOpportunityGroup) => void;
+  onAddProducts: (products: readonly LostOpportunityProductGroup[]) => void;
+  onQuantityChange: (opportunityId: string, value: string) => void;
+  onRestoreQuantity: (opportunityId: string) => void;
 }) {
+  const { locale, t } = useTranslation();
+  const [search, setSearch] = useState("");
+  const allGroups = useMemo(
+    () => groupLostOpportunities(opportunities, quantityDrafts, "", t("smartLoading.uncategorized")),
+    [opportunities, quantityDrafts, t],
+  );
+  const groups = useMemo(
+    () => search ? groupLostOpportunities(opportunities, quantityDrafts, search, t("smartLoading.uncategorized")) : allGroups,
+    [allGroups, opportunities, quantityDrafts, search, t],
+  );
+  const totalQuantity = allGroups.reduce((sum, category) => sum + category.totalQuantity, 0);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-end bg-black/50 p-4 sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label={"\u0627\u0644\u0641\u0631\u0635 \u0627\u0644\u0636\u0627\u0626\u0639\u0629"}>
+    <div className="fixed inset-0 z-50 flex items-end bg-black/50 p-4 sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label={t("smartLoading.lostOpportunities")}>
       <Card className="max-h-[85vh] w-full max-w-3xl overflow-y-auto shadow-xl" onClick={(event) => event.stopPropagation()}>
         <CardHeader className="flex-row items-start justify-between gap-3">
           <div>
-            <CardTitle>{"\u0627\u0644\u0641\u0631\u0635 \u0627\u0644\u0636\u0627\u0626\u0639\u0629"}</CardTitle>
-            <CardDescription>{"\u0623\u0635\u0646\u0627\u0641 \u0639\u0645\u0644\u0627\u0621 \u062e\u0637 \u0633\u064a\u0631 \u0627\u0644\u063a\u062f. \u0644\u0646 \u062a\u064f\u0636\u0627\u0641 \u0625\u0644\u0649 \u0627\u0644\u062a\u062d\u0645\u064a\u0644 \u0625\u0644\u0627 \u0628\u0639\u062f \u0627\u062e\u062a\u064a\u0627\u0631\u0643."}</CardDescription>
+            <CardTitle>{t("smartLoading.lostOpportunities")}</CardTitle>
+            <CardDescription>{t("smartLoading.lostOpportunitiesDescription")}</CardDescription>
           </div>
-          <Button variant="ghost" size="sm" onClick={onClose}>{"\u0625\u063a\u0644\u0627\u0642"}</Button>
+          <Button variant="ghost" size="sm" onClick={onClose}>{t("smartLoading.close")}</Button>
         </CardHeader>
         <CardContent className="space-y-3">
+          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("smartLoading.searchLostOpportunities")} />
+          <p className="rounded-md bg-secondary/60 px-3 py-2 text-sm font-semibold">
+            {t("smartLoading.totalQuantity")}: {formatQuantity(totalQuantity, locale)}
+          </p>
           {isLoading && <div className="space-y-2"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>}
-          {isError && <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{"\u062a\u0639\u0630\u0631 \u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0641\u0631\u0635 \u0627\u0644\u0636\u0627\u0626\u0639\u0629. \u062d\u0627\u0648\u0644 \u062a\u062d\u062f\u064a\u062b \u0627\u0644\u0634\u0627\u0634\u0629."}</p>}
-          {!isLoading && !isError && groups.length === 0 && <p className="rounded-md border p-4 text-center text-sm text-muted-foreground">{"\u0644\u0627 \u062a\u0648\u062c\u062f \u0641\u0631\u0635 \u0636\u0627\u0626\u0639\u0629 \u0644\u0639\u0645\u0644\u0627\u0621 \u062e\u0637 \u0633\u064a\u0631 \u0627\u0644\u063a\u062f"}</p>}
-          {!isLoading && !isError && groups.map((group) => {
-            const added = additions[group.productId];
-            const stockProduct = products.find((product) => product.productCode === group.productId);
-            return <article key={group.productId} className="rounded-lg border p-3">
+          {isError && <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{t("smartLoading.lostOpportunitiesError")}</p>}
+          {!isLoading && !isError && groups.length === 0 && <p className="rounded-md border p-4 text-center text-sm text-muted-foreground">{t("smartLoading.noLostOpportunities")}</p>}
+          {!isLoading && !isError && groups.map((category) => (
+            <section key={category.category} className="rounded-lg border p-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div><p className="font-semibold">{group.productName}</p><p className="text-xs text-muted-foreground">{"\u0643\u0648\u062f \u0627\u0644\u0635\u0646\u0641:"} {group.productId}</p></div>
-                <Button disabled={Boolean(added)} onClick={() => onAdd(group)}>{added ? "\u062a\u0645\u062a \u0627\u0644\u0625\u0636\u0627\u0641\u0629" : "\u0625\u0636\u0627\u0641\u0629 \u0625\u0644\u0649 \u0627\u0644\u062a\u062d\u0645\u064a\u0644"}</Button>
+                <div>
+                  <h3 className="font-semibold">{category.category}</h3>
+                  <p className="text-xs text-muted-foreground">{t("smartLoading.categoryTotal", { value: formatQuantity(category.totalQuantity, locale) })}</p>
+                </div>
+                <Button variant="outline" disabled={category.totalQuantity <= 0} onClick={() => onAddProducts(category.products)}>{t("smartLoading.addCategory")}</Button>
               </div>
-              <div className="mt-3 grid gap-2 text-sm sm:grid-cols-3"><Info label={"\u0627\u0644\u0643\u0645\u064a\u0629 \u0641\u064a \u0627\u0644\u0641\u062a\u0631\u0629 \u0627\u0644\u0645\u0631\u062c\u0639\u064a\u0629"} value={formatQuantity(group.baselineNetQuantity)} /><Info label={"\u0622\u062e\u0631 30 \u064a\u0648\u0645\u064b\u0627"} value="0" /><Info label={"\u0627\u0644\u0643\u0645\u064a\u0629 \u0627\u0644\u0645\u0642\u062a\u0631\u062d\u0629 \u0644\u0644\u0645\u0646\u062f\u0648\u0628"} value={formatQuantity(group.addedQuantity)} /></div>
-              <p className="mt-2 text-xs text-muted-foreground">{group.customers.length === 1 ? `\u0627\u0644\u0639\u0645\u064a\u0644: ${group.customers[0]!.name}` : `${group.customers.length} \u0639\u0645\u0644\u0627\u0621 \u0645\u0631\u062a\u0628\u0637\u0648\u0646 \u0628\u0627\u0644\u0641\u0631\u0635\u0629`}</p>
-              {group.customers.length > 1 && <details className="mt-1 text-xs text-muted-foreground"><summary className="cursor-pointer">{"\u0639\u0631\u0636 \u062a\u0641\u0627\u0635\u064a\u0644 \u0627\u0644\u0639\u0645\u0644\u0627\u0621"}</summary><ul className="mt-1 list-disc space-y-1 pr-4">{group.customers.map((customer) => <li key={customer.id}>{customer.name}: {formatQuantity(customer.baselineNetQuantity)}</li>)}</ul></details>}
-                            <p className="mt-2 text-xs text-muted-foreground">{stockProduct ? `\u0645\u062e\u0632\u0648\u0646 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u0627\u0644\u062d\u0627\u0644\u064a: ${formatQuantity(stockProduct.currentVehicleStock)}` : "\u0645\u062e\u0632\u0648\u0646 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u063a\u064a\u0631 \u0645\u062a\u0627\u062d \u0644\u0647\u0630\u0627 \u0627\u0644\u0635\u0646\u0641."}</p>
-
-              <p className="mt-2 rounded bg-amber-500/10 px-2 py-1 text-xs text-amber-800">{"\u062a\u064f\u0631\u0627\u062c\u0639 \u062d\u0627\u0644\u0629 \u0627\u0644\u0645\u062e\u0632\u0648\u0646 \u0648\u0627\u0644\u0633\u0639\u0629 \u0639\u0646\u062f \u0627\u0644\u0625\u0636\u0627\u0641\u0629\u061b \u0644\u0627 \u064a\u062a\u0645 \u0627\u0639\u062a\u0645\u0627\u062f \u0623\u0648 \u062a\u0646\u0641\u064a\u0630 \u0627\u0644\u062a\u062d\u0645\u064a\u0644 \u062a\u0644\u0642\u0627\u0626\u064a\u064b\u0627."}</p>
-            </article>;
-          })}
+              <div className="mt-3 space-y-3">
+                {category.products.map((product) => {
+                  const stockProduct = products.find((item) => item.productCode === product.productCode);
+                  const added = Boolean(additions[product.productCode]);
+                  return (
+                    <article key={product.productCode} className="rounded-md border bg-background/50 p-3">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="font-medium">{product.productName}</p>
+                          <p className="text-xs text-muted-foreground">{product.productCode} {"\u00b7"} {t("smartLoading.productSuggestedQuantity", { value: formatQuantity(product.totalQuantity, locale) })}</p>
+                        </div>
+                        <Button disabled={added || product.totalQuantity <= 0} onClick={() => onAddProducts([product])}>{added ? t("smartLoading.added") : t("smartLoading.addToLoading")}</Button>
+                      </div>
+                      <div className="mt-2 space-y-2 border-t pt-2">
+                        {product.customers.map((customer) => (
+                          <div key={customer.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 text-sm">
+                            <span className="min-w-0 truncate">{customer.customerName}</span>
+                            <Input className="h-8 w-24 text-center" type="number" min="0" step="0.1" value={formatQuantityInput(customer.currentQuantity)} onChange={(event) => onQuantityChange(customer.id, event.target.value)} aria-label={t("smartLoading.customerSuggestedQuantity", { customer: customer.customerName })} />
+                            <Button className="h-8" variant="ghost" size="sm" onClick={() => onRestoreQuantity(customer.id)}>{t("smartLoading.restore")}</Button>
+                          </div>
+                        ))}
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">{stockProduct ? t("smartLoading.vehicleStockQuantity", { value: formatQuantity(stockProduct.currentVehicleStock, locale) }) : t("smartLoading.vehicleStockUnavailable")}</p>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
           {warning && <p role="alert" className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800">{warning}</p>}
         </CardContent>
       </Card>
@@ -798,7 +842,7 @@ function ProductRow({
   resetManualOverride: (productCode: string) => void;
   removeProduct: (productCode: string) => void;
 }) {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const label = (key: string, fallback: string) => {
     const translated = t(key as never);
     return translated === key ? fallback : translated;
@@ -812,7 +856,7 @@ function ProductRow({
           <p className="truncate text-sm font-medium">{row.product.productName}</p>
           <p className="text-[11px] text-muted-foreground">
             {row.product.category ?? t("smartLoading.uncategorized")} · {t("smartLoading.vehicleStock")}{" "}
-            {formatQuantity(row.product.currentVehicleStock)}
+            {formatQuantity(row.product.currentVehicleStock, locale)}
           </p>
         </button>
         <div className="flex items-start gap-2 text-left">
@@ -822,7 +866,7 @@ function ProductRow({
             className="h-8 w-20 text-center font-bold text-teal-700"
             type="number"
             min={row.manuallyAdded ? "1" : "0"}
-            value={row.suggested}
+            value={formatQuantityInput(row.suggested)}
             onChange={(event) => {
               const nextValue = row.manuallyAdded ? Math.max(1, parsePositiveNumber(event.target.value)) : parsePositiveNumber(event.target.value);
               setInput(row.product.productCode, "manual", String(nextValue));
@@ -856,21 +900,31 @@ function ProductRow({
 
       {hasManualOverride && (
         <p className="mt-1 text-[11px] text-amber-700">
-          {t("smartLoading.manualOverrideNote", { value: formatQuantity(row.original) })}
+          {t("smartLoading.manualOverrideNote", { value: formatQuantity(row.original, locale) })}
         </p>
       )}
 
       {row.lostOpportunity && (
         <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs">
-          <p className="font-semibold text-amber-800">{"\u0641\u0631\u0635\u0629 \u0636\u0627\u0626\u0639\u0629"} · {row.lostOpportunity.customers.length === 1 ? row.lostOpportunity.customers[0]!.name : `${row.lostOpportunity.customers.length} \u0639\u0645\u0644\u0627\u0621`}</p>
-          <div className="mt-1 grid gap-1 sm:grid-cols-3"><span>{"\u0627\u0644\u0643\u0645\u064a\u0629 \u0627\u0644\u0623\u0633\u0627\u0633\u064a\u0629:"} {formatQuantity(row.baseSuggested)}</span><span>{"\u0641\u0631\u0635\u0629 \u0636\u0627\u0626\u0639\u0629:"} {formatQuantity(row.lostOpportunity.addedQuantity)}</span><span className="font-semibold">{"\u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0645\u0642\u062a\u0631\u062d:"} {formatQuantity(row.suggested)}</span></div>
-          <p className="mt-1 text-amber-800">{row.stockAvailable ? `\u0645\u062e\u0632\u0648\u0646 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u0627\u0644\u062d\u0627\u0644\u064a: ${formatQuantity(row.product.currentVehicleStock)}. \u0631\u0627\u062c\u0639 \u0627\u0644\u0633\u0639\u0629 \u0642\u0628\u0644 \u0627\u0644\u0627\u0639\u062a\u0645\u0627\u062f.` : "\u0645\u062e\u0632\u0648\u0646 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u063a\u064a\u0631 \u0645\u062a\u0627\u062d \u0644\u0647\u0630\u0627 \u0627\u0644\u0635\u0646\u0641. \u0631\u0627\u062c\u0639 \u0627\u0644\u0645\u062e\u0632\u0648\u0646 \u0648\u0627\u0644\u0633\u0639\u0629 \u0642\u0628\u0644 \u0627\u0644\u0627\u0639\u062a\u0645\u0627\u062f."}</p>
+          <p className="font-semibold text-amber-800">
+            {t("smartLoading.lostOpportunities")} {"\u00b7"} {row.lostOpportunity.customers.map((customer) => customer.name).join(", ")}
+          </p>
+          <div className="mt-1 grid gap-1 sm:grid-cols-3">
+            <span>{t("smartLoading.suggestedLoading")}: {formatQuantity(row.baseSuggested, locale)}</span>
+            <span>{t("smartLoading.lostOpportunities")}: {formatQuantity(row.lostOpportunity.addedQuantity, locale)}</span>
+            <span className="font-semibold">{t("smartLoading.totalQuantity")}: {formatQuantity(row.suggested, locale)}</span>
+          </div>
+          <p className="mt-1 text-amber-800">
+            {row.stockAvailable
+              ? `${t("smartLoading.vehicleStockQuantity", { value: formatQuantity(row.product.currentVehicleStock, locale) })}. ${t("smartLoading.reviewCapacity")}`
+              : `${t("smartLoading.vehicleStockUnavailable")} ${t("smartLoading.reviewCapacity")}`}
+          </p>
         </div>
       )}
 
       {open && (
         <div className="mt-2 grid gap-2 border-t pt-2 text-xs sm:grid-cols-4">
-          <Info label={t("smartLoading.weeklyAverage")} value={formatQuantity(row.product.weeklyAverageSales)} />
+          <Info label={t("smartLoading.weeklyAverage")} value={formatQuantity(row.product.weeklyAverageSales, locale)} />
           <Field
             label={t("smartLoading.confirmedOrders")}
             hint={t("smartLoading.confirmedOrdersHint")}
@@ -885,7 +939,7 @@ function ProductRow({
           />
           <Info
             label={t("smartLoading.showReason")}
-            value={`${formatQuantity(row.product.weeklyAverageSales)} + ${formatQuantity(row.input.confirmedOrders)} + ${formatQuantity(row.input.safetyStock)} − ${formatQuantity(row.product.currentVehicleStock)}`}
+            value={`${formatQuantity(row.product.weeklyAverageSales, locale)} + ${formatQuantity(row.input.confirmedOrders, locale)} + ${formatQuantity(row.input.safetyStock, locale)} − ${formatQuantity(row.product.currentVehicleStock, locale)}`}
           />
         </div>
       )}
@@ -936,7 +990,7 @@ function Field({
       <Label className="text-xs" title={hint}>
         {label}
       </Label>
-      <Input className="mt-1 h-8" type="number" min="0" value={value} onChange={(event) => onChange(event.target.value)} />
+      <Input className="mt-1 h-8" type="number" min="0" value={formatQuantityInput(value)} onChange={(event) => onChange(event.target.value)} />
     </div>
   );
 }
@@ -1004,7 +1058,7 @@ function AddProductDialog({
                 className="mt-1"
                 min="1"
                 type="number"
-                value={quantity}
+                value={formatQuantityInput(quantity)}
                 onChange={(event) => onQuantityChange(event.target.value)}
               />
             </div>
@@ -1023,7 +1077,7 @@ function AddProductDialog({
 }
 
 function CategoryProductGroups({ rows, stale }: { rows: Row[]; stale: boolean }) {
-  const { t } = useTranslation();
+  const { locale, t } = useTranslation();
   const [openCategories, setOpenCategories] = useState<Set<string>>(new Set());
   const groups = useMemo(() => {
     return rows.reduce<Record<string, Row[]>>((current, row) => {
@@ -1048,7 +1102,7 @@ function CategoryProductGroups({ rows, stale }: { rows: Row[]; stale: boolean })
               })}
               type="button"
             >
-              <span>{category} ({formatQuantity(items.length)})</span>
+              <span>{category} ({formatQuantity(items.length, locale)})</span>
               <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !open && "-rotate-90")} />
             </button>
             {open && (
@@ -1057,11 +1111,11 @@ function CategoryProductGroups({ rows, stale }: { rows: Row[]; stale: boolean })
                   <div key={row.product.productCode} className="grid grid-cols-[1fr_auto] gap-2 border-b py-1.5 text-xs last:border-0">
                     <span className="min-w-0 truncate font-medium">{row.product.productName}</span>
                     <span className="text-left text-muted-foreground">
-                      {t("smartLoading.vehicleStock")} {formatQuantity(row.product.currentVehicleStock)}
+                      {t("smartLoading.vehicleStock")} {formatQuantity(row.product.currentVehicleStock, locale)}
                       {stale && (
                         <> · {t("smartLoading.lastSale")} {formatGregorianDate(row.product.lastSaleDate) ?? "—"} · {daysSinceLastSale(row.product.lastSaleDate) ?? "—"} {t("smartLoading.staleDaysUnit")}</>
                       )}
-                      {!stale && <> · {t("smartLoading.suggestedLoading")} {formatQuantity(row.suggested)}</>}
+                      {!stale && <> · {t("smartLoading.suggestedLoading")} {formatQuantity(row.suggested, locale)}</>}
                     </span>
                   </div>
                 ))}

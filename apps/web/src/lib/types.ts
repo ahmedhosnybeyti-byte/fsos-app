@@ -1664,7 +1664,7 @@ export type SmartLoadingPriority = "high" | "normal";
 export interface SmartLoadingProduct { productCode: string; productName: string; currentVehicleStock: number; weeklyAverageSales: number; priority: SmartLoadingPriority; category: string | null; lastSaleDate: string | null; }
 export interface SmartLoadingAttention { id: string; message: string; }
 export interface SmartLoadingReadySession { state: "ready"; products: SmartLoadingProduct[]; attention: SmartLoadingAttention[]; asOfDate: string; lostOpportunities: SmartLoadingLostOpportunity[]; calculatedAt: string; }
-export interface SmartLoadingLostOpportunity { customerCode: string; customerName: string; productCode: string; productName: string; baselineNetQuantity: number; recentNetQuantity: number; suggestedQuantity: number; }
+export interface SmartLoadingLostOpportunity { customerCode: string; customerName: string; productCode: string; productName: string; category: string | null; baselineNetQuantity: number; recentNetQuantity: number; suggestedQuantity: number; }
 export interface SmartLoadingVehicleStockUnavailableSession { state: "vehicle-stock-unavailable"; }
 export type SmartLoadingSession = SmartLoadingReadySession | SmartLoadingVehicleStockUnavailableSession;
 

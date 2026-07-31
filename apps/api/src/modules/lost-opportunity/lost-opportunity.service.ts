@@ -9,6 +9,7 @@ export type LostOpportunity = {
   customerName: string;
   productCode: string;
   productName: string;
+  category: string | null;
   baselineNetQuantity: number;
   recentNetQuantity: number;
   suggestedQuantity: number;
@@ -64,10 +65,14 @@ export class LostOpportunityService {
       const returnItemProductCodeField = resolveField(returnItems.fields, "ProductCode");
       const returnItemQuantityField = resolveField(returnItems.fields, "Quantity");
 
-      const names = new Map<string, string>();
+      const productsByCode = new Map<string, { name: string; category: string | null }>();
       for (const product of products.records) {
         const code = key(product.ProductCode);
-        if (code) names.set(code, key(product.ProductName) || code);
+        if (!code) continue;
+        productsByCode.set(code, {
+          name: key(product.ProductName) || code,
+          category: key(product.Category) || null,
+        });
       }
 
       const baselineFrom = isoDay(addDays(selectedDate, -119));
@@ -126,7 +131,8 @@ export class LostOpportunityService {
           customerCode: pair.customerCode,
           customerName: input.customerNames?.get(pair.customerCode) ?? pair.customerCode,
           productCode: pair.productCode,
-          productName: names.get(pair.productCode) ?? pair.productCode,
+          productName: productsByCode.get(pair.productCode)?.name ?? pair.productCode,
+          category: productsByCode.get(pair.productCode)?.category ?? null,
           baselineNetQuantity: pair.baseline,
           recentNetQuantity: pair.recent,
           suggestedQuantity: Math.round(pair.baseline / 3),

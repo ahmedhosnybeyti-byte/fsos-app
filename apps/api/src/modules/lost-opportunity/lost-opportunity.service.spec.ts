@@ -12,8 +12,8 @@ const ok = (records: Row[]) => ({
 });
 
 const products = ok([
-  { ProductCode: "P1", ProductName: "Product 1" },
-  { ProductCode: "P2", ProductName: "Product 2" },
+  { ProductCode: "P1", ProductName: "Product 1", Category: "Drinks" },
+  { ProductCode: "P2", ProductName: "Product 2", Category: "Snacks" },
 ]);
 const confirmedHeader = { "Invoice No": "I1", "Customer Code": "C1", "Invoice Date": "2026-04-10", "Invoice Status": " Confirmed " };
 const base = (overrides: Record<string, ReturnType<typeof ok>> = {}) => ({
@@ -41,6 +41,33 @@ test("joins a confirmed invoice header to its item using canonical normalized fi
   assert.equal(result.opportunities.length, 1);
   assert.equal(result.opportunities[0]!.baselineNetQuantity, 9);
   assert.equal(result.opportunities[0]!.suggestedQuantity, 3);
+  assert.equal(result.opportunities[0]!.category, "Drinks");
+});
+
+test("maps each Products.Category to the matching opportunity by ProductCode", async () => {
+  const sets = base({
+    "Invoice Items": ok([
+      { "Invoice No": "I1", "Product Code": "P1", Quantity: 9 },
+      { "Invoice No": "I1", "Product Code": "P2", Quantity: 6 },
+    ]),
+  });
+  const result = await service(sets).detect(input);
+  assert.equal(result.opportunities.find((item) => item.productCode === "P1")!.category, "Drinks");
+  assert.equal(result.opportunities.find((item) => item.productCode === "P2")!.category, "Snacks");
+});
+
+test("returns null category when a matching product has no Category", async () => {
+  const sets = base({ Products: ok([{ ProductCode: "P1", ProductName: "Product 1" }]) });
+  const result = await service(sets).detect(input);
+  assert.equal(result.opportunities[0]!.category, null);
+});
+
+test("keeps detecting an opportunity when no matching Products row exists", async () => {
+  const sets = base({ Products: ok([{ ProductCode: "P2", ProductName: "Product 2", Category: "Snacks" }]) });
+  const result = await service(sets).detect(input);
+  assert.equal(result.status, "available");
+  assert.equal(result.opportunities[0]!.productName, "P1");
+  assert.equal(result.opportunities[0]!.category, null);
 });
 
 test("ignores an item whose invoice header is not confirmed", async () => {
