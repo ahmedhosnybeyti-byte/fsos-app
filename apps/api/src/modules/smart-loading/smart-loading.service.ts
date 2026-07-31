@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable } from "@nestjs/com
 import type { SmartLoadingProduct, SmartLoadingSession } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
-import type { EntityRecord } from "../rie/entity-provider.interface";
+import type { EntityQueryResult } from "../rie/entity-provider.interface";
 
 // Smart Loading — read-only, computed-on-request from RIE (no new table, no
 // migration, no persistence, no Excel reads beyond what RieFacade already
@@ -79,11 +79,19 @@ function isoDay(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-function parseAsOfDate(value: string | undefined): Date {
-  if (!value) {
-    const now = new Date();
-    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-  }
+function companyCalendarDate(now = new Date()): Date {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Riyadh",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value;
+  return new Date(Date.UTC(Number(part("year")), Number(part("month")) - 1, Number(part("day"))));
+}
+
+export function parseAsOfDate(value: string | undefined): Date {
+  if (!value) return companyCalendarDate();
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
     throw new BadRequestException("asOfDate must use YYYY-MM-DD.");
   }
@@ -94,12 +102,34 @@ function parseAsOfDate(value: string | undefined): Date {
   return date;
 }
 
-function weekdayForDate(date: Date): string {
-  return new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(date).toLowerCase();
+export function weekdayForDate(date: Date): VisitWeekday {
+  return new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(date).toLowerCase() as VisitWeekday;
 }
 
 function addUtcDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * MS_PER_DAY);
+}
+
+export type VisitWeekday = "saturday" | "sunday" | "monday" | "tuesday" | "wednesday" | "thursday" | "friday";
+
+export function nextRouteDate(asOfDate: Date): Date {
+  return addUtcDays(asOfDate, 1);
+}
+
+const VISIT_DAY_ALIASES: Record<VisitWeekday, readonly string[]> = {
+  saturday: ["saturday", "sat", "\u0627\u0644\u0633\u0628\u062a"],
+  sunday: ["sunday", "sun", "\u0627\u0644\u0623\u062d\u062f"],
+  monday: ["monday", "mon", "\u0627\u0644\u0627\u062b\u0646\u064a\u0646"],
+  tuesday: ["tuesday", "tue", "tues", "\u0627\u0644\u062b\u0644\u0627\u062b\u0627\u0621"],
+  wednesday: ["wednesday", "wed", "\u0627\u0644\u0623\u0631\u0628\u0639\u0627\u0621"],
+  thursday: ["thursday", "thu", "thur", "thurs", "\u0627\u0644\u062e\u0645\u064a\u0633"],
+  friday: ["friday", "fri", "\u0627\u0644\u062c\u0645\u0639\u0629"],
+};
+
+export function normalizeVisitDay(value: unknown): VisitWeekday | null {
+  const normalized = String(value ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  if (!normalized || /^\d+$/.test(normalized)) return null;
+  return (Object.keys(VISIT_DAY_ALIASES) as VisitWeekday[]).find((weekday) => VISIT_DAY_ALIASES[weekday].includes(normalized)) ?? null;
 }
 
 function isDateInWindow(date: string, from: string, to: string): boolean {
@@ -114,12 +144,14 @@ export class SmartLoadingService {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
   }
 
-  private async tryEntity(ctx: ReturnType<SmartLoadingService["rieContext"]>, entityName: string): Promise<readonly EntityRecord[]> {
+  private async tryEntity(ctx: ReturnType<SmartLoadingService["rieContext"]>, entityName: string): Promise<EntityQueryResult> {
     try {
-      const result = await this.rieFacade.getEntityRecords(entityName, ctx);
-      return result.available ? result.records : [];
+      return await this.rieFacade.getEntityRecords(entityName, ctx);
     } catch {
-      return [];
+      // Availability is part of the response contract: swallowing a provider
+      // failure as an empty list would incorrectly claim there are no
+      // opportunities.
+      return { entityName, available: false, records: [], fields: [], warnings: [] };
     }
   }
 
@@ -129,7 +161,7 @@ export class SmartLoadingService {
     const asOfDate = parseAsOfDate(requestedAsOfDate);
     const asOfDateIso = isoDay(asOfDate.getTime());
 
-    const [productsResult, customersRecords, invoicesRecords, invoiceItemsRecords, returnsRecords, returnItemsRecords, vanInventoryRecords] = await Promise.all([
+    const [productsResult, customersResult, invoicesResult, invoiceItemsResult, returnsResult, returnItemsResult, vanInventoryRecords] = await Promise.all([
       this.rieFacade.getEntityRecords("Products", ctx),
       this.tryEntity(ctx, "Customers"),
       this.tryEntity(ctx, "Invoices"),
@@ -138,12 +170,18 @@ export class SmartLoadingService {
       this.tryEntity(ctx, "Return Items"),
       this.rieFacade.getEntityRecords("Van Inventory", ctx),
     ]);
+    const customersRecords = customersResult.records;
+    const invoicesRecords = invoicesResult.records;
+    const invoiceItemsRecords = invoiceItemsResult.records;
+    const returnsRecords = returnsResult.records;
+    const returnItemsRecords = returnItemsResult.records;
+    const lostOpportunityDataUnavailable = !customersResult.available || !invoicesResult.available || !invoiceItemsResult.available;
 
     // Van Inventory unavailable for this company (no upload yet, or the
     // caller's scope has none) — honest degrade, same contract the
     // frontend stub already promised. Never fabricate a stock number.
     if (!vanInventoryRecords.available || vanInventoryRecords.records.length === 0) {
-      return { state: "vehicle-stock-unavailable" };
+      return { state: "vehicle-stock-unavailable", lostOpportunityReason: lostOpportunityDataUnavailable ? "data-unavailable" : undefined };
     }
 
     // ---- Van Inventory -> currentVehicleStock. Latest ReportDate only
@@ -184,62 +222,89 @@ export class SmartLoadingService {
     }
 
     // ---- Lost Opportunity: next-day route customers, customer/product grain.
-    const nextRouteWeekday = weekdayForDate(addUtcDays(asOfDate, 1));
+    // Route Assignments are not a mapped RIE dataset yet, so the documented
+    // current source is Customers.VisitDay. Values are normalised here rather
+    // than compared as raw display text.
+    const nextRouteDateValue = nextRouteDate(asOfDate);
+    const nextRouteWeekday = weekdayForDate(nextRouteDateValue);
+    const normalizeKey = (value: unknown) => String(value ?? "").trim();
     const nextRouteCustomers = new Map<string, string>();
+    let hasUnsupportedVisitDayFormat = false;
     for (const customer of customersRecords) {
-      if (String(customer.VisitDay ?? "").trim().toLowerCase() !== nextRouteWeekday) continue;
-      const customerCode = String(customer.CustomerCode ?? "").trim();
-      if (customerCode) nextRouteCustomers.set(customerCode, String(customer.CustomerName ?? customerCode).trim() || customerCode);
+      const rawVisitDay = normalizeKey(customer.VisitDay);
+      const visitDay = normalizeVisitDay(rawVisitDay);
+      if (!visitDay) {
+        if (rawVisitDay) hasUnsupportedVisitDayFormat = true;
+        continue;
+      }
+      if (visitDay !== nextRouteWeekday) continue;
+      const customerCode = normalizeKey(customer.CustomerCode);
+      if (customerCode) nextRouteCustomers.set(customerCode, normalizeKey(customer.CustomerName) || customerCode);
     }
 
     const baselineFrom = isoDay(addUtcDays(asOfDate, -119).getTime());
     const baselineTo = isoDay(addUtcDays(asOfDate, -30).getTime());
     const recentFrom = isoDay(addUtcDays(asOfDate, -29).getTime());
     const netQuantity = new Map<string, { customerCode: string; productCode: string; baseline: number; recent: number }>();
-    const addNetQuantity = (customerCode: string, productCode: string, quantity: number, date: string) => {
+    let baselineInvoiceLinesCount = 0;
+    let recentInvoiceLinesCount = 0;
+    const addNetQuantity = (customerCode: string, productCode: string, quantity: number, date: string, source: "sale" | "return") => {
       const key = `${customerCode}\u0000${productCode}`;
       const value = netQuantity.get(key) ?? { customerCode, productCode, baseline: 0, recent: 0 };
-      if (isDateInWindow(date, baselineFrom, baselineTo)) value.baseline += quantity;
-      if (isDateInWindow(date, recentFrom, asOfDateIso)) value.recent += quantity;
+      if (isDateInWindow(date, baselineFrom, baselineTo)) {
+        value.baseline += quantity;
+        if (source === "sale") {
+          value.baselineSales += quantity;
+          baselineInvoiceLinesCount += 1;
+        }
+      }
+      if (isDateInWindow(date, recentFrom, asOfDateIso)) {
+        value.recent += quantity;
+        if (source === "sale") recentInvoiceLinesCount += 1;
+      }
       netQuantity.set(key, value);
     };
 
-    // Sales count only completed invoices; cancelled invoices never enter the net quantity.
+    // Sales count only confirmed invoices; cancelled invoices never enter the net quantity.
     const completedInvoices = new Map<string, { customerCode: string; date: string }>();
     for (const invoice of invoicesRecords) {
-      if (String(invoice.InvoiceStatus ?? "").trim().toLowerCase() !== "confirmed") continue;
-      const invoiceNo = String(invoice.InvoiceNo ?? "").trim();
-      const customerCode = String(invoice.CustomerCode ?? "").trim();
+      if (normalizeKey(invoice.InvoiceStatus).toLowerCase() !== "confirmed") continue;
+      const invoiceNo = normalizeKey(invoice.InvoiceNo);
+      const customerCode = normalizeKey(invoice.CustomerCode);
       const time = toEpochMs(invoice.InvoiceDate);
       if (!invoiceNo || !nextRouteCustomers.has(customerCode) || time === null) continue;
       completedInvoices.set(invoiceNo, { customerCode, date: isoDay(time) });
     }
     for (const item of invoiceItemsRecords) {
-      const invoice = completedInvoices.get(String(item.InvoiceNo ?? "").trim());
-      const productCode = String(item.ProductCode ?? "").trim();
+      const invoice = completedInvoices.get(normalizeKey(item.InvoiceNo));
+      const productCode = normalizeKey(item.ProductCode);
       if (!invoice || !productCode) continue;
-      addNetQuantity(invoice.customerCode, productCode, toFiniteNumber(item.Quantity) ?? 0, invoice.date);
+      addNetQuantity(invoice.customerCode, productCode, toFiniteNumber(item.Quantity) ?? 0, invoice.date, "sale");
     }
 
     // Confirmed return items subtract from the same customer/product window.
     const confirmedReturns = new Map<string, { customerCode: string; date: string }>();
     for (const returned of returnsRecords) {
-      if (String(returned.Status ?? "").trim().toLowerCase() !== "confirmed") continue;
-      const returnNo = String(returned.ReturnNo ?? "").trim();
-      const customerCode = String(returned.CustomerCode ?? "").trim();
+      if (normalizeKey(returned.Status).toLowerCase() !== "confirmed") continue;
+      const returnNo = normalizeKey(returned.ReturnNo);
+      const customerCode = normalizeKey(returned.CustomerCode);
       const time = toEpochMs(returned.ReturnDate);
       if (!returnNo || !nextRouteCustomers.has(customerCode) || time === null) continue;
       confirmedReturns.set(returnNo, { customerCode, date: isoDay(time) });
     }
     for (const item of returnItemsRecords) {
-      const returned = confirmedReturns.get(String(item.ReturnNo ?? "").trim());
-      const productCode = String(item.ProductCode ?? "").trim();
+      const returned = confirmedReturns.get(normalizeKey(item.ReturnNo));
+      const productCode = normalizeKey(item.ProductCode);
       if (!returned || !productCode) continue;
-      addNetQuantity(returned.customerCode, productCode, -(toFiniteNumber(item.Quantity) ?? 0), returned.date);
+      addNetQuantity(returned.customerCode, productCode, -(toFiniteNumber(item.Quantity) ?? 0), returned.date, "return");
     }
 
-    const lostOpportunities = Array.from(netQuantity.values())
-      .filter(({ baseline, recent }) => baseline > 0 && recent === 0)
+    const quantityPairs = Array.from(netQuantity.values());
+    const pairsWithBaselineNetQuantityAboveZero = quantityPairs.filter(({ baseline }) => baseline > 0);
+    const pairsRemovedBecauseRecentQuantityAboveZero = pairsWithBaselineNetQuantityAboveZero.filter(({ recent }) => recent > 0).length;
+    const pairsRemovedBecauseReturnsMadeNetQuantityNonPositive = quantityPairs.filter(({ baselineSales, baseline }) => baselineSales > 0 && baseline <= 0).length;
+    const lostOpportunities = lostOpportunityDataUnavailable ? [] : pairsWithBaselineNetQuantityAboveZero
+      .filter(({ recent }) => recent === 0)
       .map(({ customerCode, productCode, baseline, recent }) => ({
         customerCode,
         customerName: nextRouteCustomers.get(customerCode) ?? customerCode,
@@ -250,6 +315,13 @@ export class SmartLoadingService {
         suggestedQuantity: Math.round(baseline / 3),
       }))
       .sort((a, b) => a.customerName.localeCompare(b.customerName, "ar") || a.productName.localeCompare(b.productName, "ar"));
+    const lostOpportunityReason = lostOpportunityDataUnavailable
+      ? "data-unavailable"
+      : nextRouteCustomers.size === 0
+        ? hasUnsupportedVisitDayFormat ? "unsupported-visit-day-format" : "no-tomorrow-route-customers"
+        : pairsWithBaselineNetQuantityAboveZero.length === 0
+          ? "no-baseline-sales"
+          : lostOpportunities.length === 0 ? "no-lost-opportunities" : "available";
     // ---- Invoices -> per-InvoiceNo customer/date lookup (same join shape
     // as sgi.service.ts / team-performance.service.ts).
     const invoiceDateByNo = new Map<string, number>();
@@ -339,6 +411,7 @@ export class SmartLoadingService {
       calculatedAt: new Date(nowMs).toISOString(),
       asOfDate: asOfDateIso,
       lostOpportunities,
+      lostOpportunityReason,
     };
   }
 }

@@ -51,18 +51,33 @@ export const smartLoadingLostOpportunitySchema = z.object({
 });
 export type SmartLoadingLostOpportunity = z.infer<typeof smartLoadingLostOpportunitySchema>;
 
+// Why the optional Lost Opportunities list is empty. This is deliberately
+// distinct from the loading-session state so vehicle-stock availability keeps
+// its existing contract.
+export const smartLoadingLostOpportunityReasonSchema = z.enum([
+  "available",
+  "no-tomorrow-route-customers",
+  "no-baseline-sales",
+  "no-lost-opportunities",
+  "data-unavailable",
+  "unsupported-visit-day-format",
+]);
+export type SmartLoadingLostOpportunityReason = z.infer<typeof smartLoadingLostOpportunityReasonSchema>;
+
 export const smartLoadingReadySessionSchema = z.object({
   state: z.literal("ready"),
   products: z.array(smartLoadingProductSchema),
   attention: z.array(smartLoadingAttentionSchema),
   asOfDate: z.string(),
   lostOpportunities: z.array(smartLoadingLostOpportunitySchema),
+  lostOpportunityReason: smartLoadingLostOpportunityReasonSchema,
   calculatedAt: z.string(),
 });
 export type SmartLoadingReadySession = z.infer<typeof smartLoadingReadySessionSchema>;
 
 export const smartLoadingVehicleStockUnavailableSessionSchema = z.object({
   state: z.literal("vehicle-stock-unavailable"),
+  lostOpportunityReason: smartLoadingLostOpportunityReasonSchema.optional(),
 });
 export type SmartLoadingVehicleStockUnavailableSession = z.infer<typeof smartLoadingVehicleStockUnavailableSessionSchema>;
 
