@@ -54,6 +54,14 @@ test("ignores an item whose invoice header is not confirmed", async () => {
   assert.deepEqual(result.opportunities, []);
 });
 
+test("accepts a posted invoice header", async () => {
+  const sets = base({ Invoices: ok([{ ...confirmedHeader, "Invoice Status": " posted " }]) });
+  const result = await service(sets).detect(input);
+  assert.equal(result.status, "available");
+  assert.equal(result.diagnostics.confirmedInvoiceRecords, 1);
+  assert.equal(result.opportunities[0]!.baselineNetQuantity, 9);
+});
+
 test("aggregates multiple items from the same invoice", async () => {
   const sets = base({
     "Invoice Items": ok([
@@ -84,6 +92,15 @@ test("joins return items to confirmed return headers and subtracts quantity", as
   assert.equal(result.opportunities[0]!.baselineNetQuantity, 5);
   assert.equal(result.opportunities[0]!.suggestedQuantity, 2);
   assert.deepEqual(result.diagnostics.normalizedReturnStatusCounts, { confirmed: 1 });
+});
+
+test("accepts approved returns and rejects pending returns", async () => {
+  const returns = (status: string) => base({
+    Returns: ok([{ "Return No": "R1", "Customer Code": "C1", "Return Date": "2026-04-11", Status: status }]),
+    "Return Items": ok([{ "Return No": "R1", "Product Code": "P1", Quantity: 4 }]),
+  });
+  assert.equal((await service(returns("Approved")).detect(input)).opportunities[0]!.baselineNetQuantity, 5);
+  assert.equal((await service(returns("Pending")).detect(input)).opportunities[0]!.baselineNetQuantity, 9);
 });
 
 test("produces the same shared-engine result for Smart Loading and Visit Copilot inputs", async () => {
