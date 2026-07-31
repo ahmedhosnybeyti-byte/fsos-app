@@ -1090,7 +1090,6 @@ export class VisitCopilotService {
 
   async daily360Summary(user: AuthenticatedUser, query: VisitCopilotDaily360SummaryQuery): Promise<VisitCopilot360Summary> {
     const warnings: string[] = [];
-    const todayIso = isoDay(new Date());
 
     const [sgi, brief, dbUser] = await Promise.all([
       this.sgiService.getLatest(user),
@@ -1202,7 +1201,7 @@ export class VisitCopilotService {
 
     const baseFacts = {
       generatedAt: new Date().toISOString(),
-      reportDate: todayIso,
+      reportDate: brief.date,
       period: range,
       scopeLabel,
       userName,

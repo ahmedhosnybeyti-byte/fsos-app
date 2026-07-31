@@ -75,8 +75,8 @@ export const visitCopilotApi = {
 
   // "ملخص اليوم 360°" (2026-07-28) — no scope param; role scoping is
   // entirely server-derived (see visit-copilot.controller.ts).
-  daily360Summary: (params: PeriodParams) =>
+  daily360Summary: (params: PeriodParams & PlanDateParams) =>
     apiFetch<VisitCopilot360Summary>("/visit-copilot/daily-360-summary", {
-      query: { period: params.period, from: params.from, to: params.to },
+      query: { period: params.period, from: params.from, to: params.to, date: params.date },
     }),
 };

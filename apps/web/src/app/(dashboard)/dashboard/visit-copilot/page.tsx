@@ -444,6 +444,7 @@ function VisitCopilotScreen() {
         open={show360Summary}
         onOpenChange={setShow360Summary}
         period={period}
+        selectedDate={planDate}
         from={period === "custom" && from ? from : undefined}
         to={period === "custom" && to ? to : undefined}
       />

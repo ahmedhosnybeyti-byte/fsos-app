@@ -16,6 +16,7 @@ import { Spinner } from "@/components/ui/spinner";
 import type { VisitCopilot360ExecutionStep, VisitCopilot360Priority, VisitCopilotPeriod } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { exportDaily360SummaryPdf } from "@/lib/export/daily-360-summary-pdf";
+import { daily360SummaryQuery } from "./daily-360-summary-query";
 
 // "ملخص اليوم 360°" (2026-07-28) — a full-screen (on mobile) / large modal
 // (desktop) report inside Visit Copilot. Visual/structural fidelity to the
@@ -30,6 +31,7 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   period: VisitCopilotPeriod;
+  selectedDate: string;
   from?: string;
   to?: string;
 }
@@ -40,13 +42,14 @@ function priorityBadgeClass(priority: VisitCopilot360Priority): string {
   return "bg-muted text-muted-foreground";
 }
 
-export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: Props) {
+export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate, from, to }: Props) {
   const { t } = useTranslation();
   const [exporting, setExporting] = useState(false);
 
+  const daily360Query = daily360SummaryQuery({ period, from, to, selectedDate });
   const query = useQuery({
-    queryKey: ["visit-copilot", "daily-360-summary", period, from, to],
-    queryFn: () => visitCopilotApi.daily360Summary({ period, from, to }),
+    queryKey: daily360Query.queryKey,
+    queryFn: () => visitCopilotApi.daily360Summary(daily360Query.request),
     enabled: open,
     // A rep might tap the button twice while the report is generating —
     // react-query already de-dupes concurrent identical requests, but keep
