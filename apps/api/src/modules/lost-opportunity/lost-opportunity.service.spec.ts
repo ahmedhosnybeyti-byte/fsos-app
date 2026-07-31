@@ -2,8 +2,6 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 import { LostOpportunityService } from "./lost-opportunity.service";
 
-process.env.LOST_OPPORTUNITY_DIAGNOSTICS = "true";
-
 type Row = Record<string, unknown>;
 const ok = (records: Row[]) => ({
   entityName: "test",
@@ -43,8 +41,6 @@ test("joins a confirmed invoice header to its item using canonical normalized fi
   assert.equal(result.opportunities.length, 1);
   assert.equal(result.opportunities[0]!.baselineNetQuantity, 9);
   assert.equal(result.opportunities[0]!.suggestedQuantity, 3);
-  assert.deepEqual(result.diagnostics.normalizedInvoiceStatusCounts, { confirmed: 1 });
-  assert.equal(result.diagnostics.blankInvoiceStatusCount, 0);
 });
 
 test("ignores an item whose invoice header is not confirmed", async () => {
@@ -58,7 +54,6 @@ test("accepts a posted invoice header", async () => {
   const sets = base({ Invoices: ok([{ ...confirmedHeader, "Invoice Status": " posted " }]) });
   const result = await service(sets).detect(input);
   assert.equal(result.status, "available");
-  assert.equal(result.diagnostics.confirmedInvoiceRecords, 1);
   assert.equal(result.opportunities[0]!.baselineNetQuantity, 9);
 });
 
@@ -91,7 +86,6 @@ test("joins return items to confirmed return headers and subtracts quantity", as
   const result = await service(sets).detect(input);
   assert.equal(result.opportunities[0]!.baselineNetQuantity, 5);
   assert.equal(result.opportunities[0]!.suggestedQuantity, 2);
-  assert.deepEqual(result.diagnostics.normalizedReturnStatusCounts, { confirmed: 1 });
 });
 
 test("accepts approved returns and rejects pending returns", async () => {

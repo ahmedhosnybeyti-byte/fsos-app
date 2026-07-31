@@ -1,9 +1,8 @@
-import { createHash } from "node:crypto";
 import { BadRequestException, ForbiddenException, Injectable, Logger } from "@nestjs/common";
 import type { SmartLoadingProduct, SmartLoadingSession } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
-import { LostOpportunityService, type LostOpportunityResult } from "../lost-opportunity/lost-opportunity.service";
+import { LostOpportunityService } from "../lost-opportunity/lost-opportunity.service";
 import type { EntityQueryResult } from "../rie/entity-provider.interface";
 
 // Smart Loading — read-only, computed-on-request from RIE (no new table, no
@@ -57,32 +56,6 @@ const MONTHS_LOOKBACK = 3;
 const WEEKS_DIVISOR = 12;
 const MS_PER_DAY = 86_400_000;
 const HIGH_PRIORITY_DAYS_STALE = 4;
-function logLostOpportunityDiagnostics(
-  logger: Logger,
-  targetDate: string,
-  customerCodes: readonly string[],
-  result: LostOpportunityResult,
-): void {
-  if (process.env.LOST_OPPORTUNITY_DIAGNOSTICS !== "true") return;
-
-  const normalizedCustomerCodes = [...new Set(customerCodes
-    .map((customerCode) => customerCode.trim().normalize("NFKC").toUpperCase())
-    .filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b));
-  const customerScopeHash = createHash("sha256").update(JSON.stringify(normalizedCustomerCodes), "utf8").digest("hex").slice(0, 12);
-
-  logger.log(JSON.stringify({
-    event: "lost_opportunity_diagnostics",
-    source: "smart-loading",
-    targetDate,
-    status: result.status,
-    customerCodesCount: normalizedCustomerCodes.length,
-    customerScopeHash,
-    diagnostics: result.diagnostics,
-    opportunitiesCount: result.opportunities.length,
-  }));
-}
-
 function toFiniteNumber(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   if (typeof value === "string" && value.trim() !== "") {
@@ -277,7 +250,6 @@ export class SmartLoadingService {
       customerCodes: [...nextRouteCustomers.keys()],
       customerNames: nextRouteCustomers,
     });
-    logLostOpportunityDiagnostics(this.logger, asOfDateIso, [...nextRouteCustomers.keys()], lostOpportunityResult);
     const lostOpportunities = lostOpportunityResult.opportunities;
     const lostOpportunityReason = lostOpportunityDataUnavailable
       ? "data-unavailable"

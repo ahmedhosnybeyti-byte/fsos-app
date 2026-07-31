@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import {
   resolveVisitCopilotPeriod,
@@ -59,32 +58,6 @@ const MISSING_PRODUCTS_LIMIT = 5;
 // (or any other failure) buildDaily360Narrative falls back to the
 // deterministic template, per explicit product requirement.
 const DAILY_360_AI_TIMEOUT_MS = 12_000;
-function logLostOpportunityDiagnostics(
-  logger: Logger,
-  targetDate: string,
-  customerCodes: readonly string[],
-  result: LostOpportunityResult,
-): void {
-  if (process.env.LOST_OPPORTUNITY_DIAGNOSTICS !== "true") return;
-
-  const normalizedCustomerCodes = [...new Set(customerCodes
-    .map((customerCode) => customerCode.trim().normalize("NFKC").toUpperCase())
-    .filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b));
-  const customerScopeHash = createHash("sha256").update(JSON.stringify(normalizedCustomerCodes), "utf8").digest("hex").slice(0, 12);
-
-  logger.log(JSON.stringify({
-    event: "lost_opportunity_diagnostics",
-    source: "visit-copilot",
-    targetDate,
-    status: result.status,
-    customerCodesCount: normalizedCustomerCodes.length,
-    customerScopeHash,
-    diagnostics: result.diagnostics,
-    opportunitiesCount: result.opportunities.length,
-  }));
-}
-
 function fmtNum(n: number): string {
   return new Intl.NumberFormat("ar-EG").format(Math.round(n));
 }
@@ -642,7 +615,6 @@ export class VisitCopilotService {
       customerCodes: entries.map((entry) => entry.customerCode),
       customerNames: new Map(entries.map((entry) => [entry.customerCode, entry.customerName])),
     });
-    logLostOpportunityDiagnostics(this.logger, todayIso, entries.map((entry) => entry.customerCode), lostOpportunityResult);
 
     return {
       date: todayIso,
