@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable } from "@nestjs/com
 import type { SmartLoadingProduct, SmartLoadingSession } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
+import { LostOpportunityService } from "../lost-opportunity/lost-opportunity.service";
 import type { EntityQueryResult } from "../rie/entity-provider.interface";
 
 // Smart Loading — read-only, computed-on-request from RIE (no new table, no
@@ -138,7 +139,7 @@ function isDateInWindow(date: string, from: string, to: string): boolean {
 
 @Injectable()
 export class SmartLoadingService {
-  constructor(private readonly rieFacade: RieFacade) {}
+  constructor(private readonly rieFacade: RieFacade, private readonly lostOpportunityService: LostOpportunityService) {}
 
   private rieContext(user: AuthenticatedUser) {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
@@ -242,86 +243,18 @@ export class SmartLoadingService {
       if (customerCode) nextRouteCustomers.set(customerCode, normalizeKey(customer.CustomerName) || customerCode);
     }
 
-    const baselineFrom = isoDay(addUtcDays(asOfDate, -119).getTime());
-    const baselineTo = isoDay(addUtcDays(asOfDate, -30).getTime());
-    const recentFrom = isoDay(addUtcDays(asOfDate, -29).getTime());
-    const netQuantity = new Map<string, { customerCode: string; productCode: string; baseline: number; recent: number }>();
-    let baselineInvoiceLinesCount = 0;
-    let recentInvoiceLinesCount = 0;
-    const addNetQuantity = (customerCode: string, productCode: string, quantity: number, date: string, source: "sale" | "return") => {
-      const key = `${customerCode}\u0000${productCode}`;
-      const value = netQuantity.get(key) ?? { customerCode, productCode, baseline: 0, recent: 0 };
-      if (isDateInWindow(date, baselineFrom, baselineTo)) {
-        value.baseline += quantity;
-        if (source === "sale") {
-          value.baselineSales += quantity;
-          baselineInvoiceLinesCount += 1;
-        }
-      }
-      if (isDateInWindow(date, recentFrom, asOfDateIso)) {
-        value.recent += quantity;
-        if (source === "sale") recentInvoiceLinesCount += 1;
-      }
-      netQuantity.set(key, value);
-    };
-
-    // Sales count only confirmed invoices; cancelled invoices never enter the net quantity.
-    const completedInvoices = new Map<string, { customerCode: string; date: string }>();
-    for (const invoice of invoicesRecords) {
-      if (normalizeKey(invoice.InvoiceStatus).toLowerCase() !== "confirmed") continue;
-      const invoiceNo = normalizeKey(invoice.InvoiceNo);
-      const customerCode = normalizeKey(invoice.CustomerCode);
-      const time = toEpochMs(invoice.InvoiceDate);
-      if (!invoiceNo || !nextRouteCustomers.has(customerCode) || time === null) continue;
-      completedInvoices.set(invoiceNo, { customerCode, date: isoDay(time) });
-    }
-    for (const item of invoiceItemsRecords) {
-      const invoice = completedInvoices.get(normalizeKey(item.InvoiceNo));
-      const productCode = normalizeKey(item.ProductCode);
-      if (!invoice || !productCode) continue;
-      addNetQuantity(invoice.customerCode, productCode, toFiniteNumber(item.Quantity) ?? 0, invoice.date, "sale");
-    }
-
-    // Confirmed return items subtract from the same customer/product window.
-    const confirmedReturns = new Map<string, { customerCode: string; date: string }>();
-    for (const returned of returnsRecords) {
-      if (normalizeKey(returned.Status).toLowerCase() !== "confirmed") continue;
-      const returnNo = normalizeKey(returned.ReturnNo);
-      const customerCode = normalizeKey(returned.CustomerCode);
-      const time = toEpochMs(returned.ReturnDate);
-      if (!returnNo || !nextRouteCustomers.has(customerCode) || time === null) continue;
-      confirmedReturns.set(returnNo, { customerCode, date: isoDay(time) });
-    }
-    for (const item of returnItemsRecords) {
-      const returned = confirmedReturns.get(normalizeKey(item.ReturnNo));
-      const productCode = normalizeKey(item.ProductCode);
-      if (!returned || !productCode) continue;
-      addNetQuantity(returned.customerCode, productCode, -(toFiniteNumber(item.Quantity) ?? 0), returned.date, "return");
-    }
-
-    const quantityPairs = Array.from(netQuantity.values());
-    const pairsWithBaselineNetQuantityAboveZero = quantityPairs.filter(({ baseline }) => baseline > 0);
-    const pairsRemovedBecauseRecentQuantityAboveZero = pairsWithBaselineNetQuantityAboveZero.filter(({ recent }) => recent > 0).length;
-    const pairsRemovedBecauseReturnsMadeNetQuantityNonPositive = quantityPairs.filter(({ baselineSales, baseline }) => baselineSales > 0 && baseline <= 0).length;
-    const lostOpportunities = lostOpportunityDataUnavailable ? [] : pairsWithBaselineNetQuantityAboveZero
-      .filter(({ recent }) => recent === 0)
-      .map(({ customerCode, productCode, baseline, recent }) => ({
-        customerCode,
-        customerName: nextRouteCustomers.get(customerCode) ?? customerCode,
-        productCode,
-        productName: productMeta.get(productCode)?.name ?? productCode,
-        baselineNetQuantity: baseline,
-        recentNetQuantity: recent,
-        suggestedQuantity: Math.round(baseline / 3),
-      }))
-      .sort((a, b) => a.customerName.localeCompare(b.customerName, "ar") || a.productName.localeCompare(b.productName, "ar"));
+    const lostOpportunityResult = await this.lostOpportunityService.detect({
+      ...ctx,
+      selectedDate: asOfDateIso,
+      customerCodes: [...nextRouteCustomers.keys()],
+      customerNames: nextRouteCustomers,
+    });
+    const lostOpportunities = lostOpportunityResult.opportunities;
     const lostOpportunityReason = lostOpportunityDataUnavailable
       ? "data-unavailable"
       : nextRouteCustomers.size === 0
         ? hasUnsupportedVisitDayFormat ? "unsupported-visit-day-format" : "no-tomorrow-route-customers"
-        : pairsWithBaselineNetQuantityAboveZero.length === 0
-          ? "no-baseline-sales"
-          : lostOpportunities.length === 0 ? "no-lost-opportunities" : "available";
+        : lostOpportunityResult.status === "no-customers" ? "no-tomorrow-route-customers" : lostOpportunityResult.status;
     // ---- Invoices -> per-InvoiceNo customer/date lookup (same join shape
     // as sgi.service.ts / team-performance.service.ts).
     const invoiceDateByNo = new Map<string, number>();

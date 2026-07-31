@@ -31,6 +31,7 @@ import { resolveMentionedCustomer } from "../local-decision/dictionary-engine";
 import { LocalDecisionEngine } from "../local-decision/rule-engine";
 import { VisitCopilotRuleRegistry } from "./visit-copilot.rules";
 import { SgiService } from "../sgi/sgi.service";
+import { LostOpportunityService, type LostOpportunityResult } from "../lost-opportunity/lost-opportunity.service";
 import { buildLostOpportunityCoaching } from "./daily-360-recommendation-builder";
 
 // AI Visit Copilot — Phase 1. Decision-support screen for the field rep:
@@ -131,6 +132,7 @@ export interface DailyBriefResult {
   estimatedDurationMin: number;
   customers: DailyBriefCustomer[];
   warnings: string[];
+  lostOpportunityResult: LostOpportunityResult;
 }
 
 export interface BriefingProduct {
@@ -364,6 +366,7 @@ export class VisitCopilotService {
     // "ملخص اليوم 360°" (2026-07-28): sole facts/numbers source, already
     // hierarchy-scoped per viewer — see daily360Summary() below.
     private readonly sgiService: SgiService,
+    private readonly lostOpportunityService: LostOpportunityService,
   ) {}
 
   // Every RIE read must pass requestingUser — Hierarchy Row-Level Filtering
@@ -605,6 +608,13 @@ export class VisitCopilotService {
     if (workingDaysInMonth === 0) workingDaysInMonth = FALLBACK_WORKING_DAYS_PER_MONTH;
     const dailyTargetSales = hasTargetRows ? round2(targetSum / workingDaysInMonth) : null;
 
+    const lostOpportunityResult = await this.lostOpportunityService.detect({
+      ...ctx,
+      selectedDate: todayIso,
+      customerCodes: entries.map((entry) => entry.customerCode),
+      customerNames: new Map(entries.map((entry) => [entry.customerCode, entry.customerName])),
+    });
+
     return {
       date: todayIso,
       weekday,
@@ -616,6 +626,7 @@ export class VisitCopilotService {
       estimatedDurationMin,
       customers: entries,
       warnings,
+      lostOpportunityResult,
     };
   }
 
@@ -1113,50 +1124,16 @@ export class VisitCopilotService {
       remainingGap: goalTargetTotal !== null ? Math.max(0, goalTargetTotal - goalActualTotal) : null,
     };
 
-    // ---- Sales + lost opportunities (PRODUCT_DECLINE + LOST_SALES, ranked
-    // by decline value). 2026-07-28, corrected per explicit customer
-    // feedback: scoped to TODAY'S route customers only (brief.customers —
-    // the same "today's plan" set the rest of this screen already uses),
-    // not every historically-declining customer across the viewer's whole
-    // hierarchy. An earlier version first capped this at top-5 (too few),
-    // then removed the cap entirely (too many — showed customers who
-    // aren't even on today's route). This is the right scope: no numeric
-    // cap, but bounded to today's actual visit list.
-    const todayCustomerNames = new Set(brief.customers.map((c) => c.customerName));
-    const declineSituations = situations.filter(
-      (s) => (s.type === "PRODUCT_DECLINE" || s.type === "LOST_SALES") && todayCustomerNames.has(s.entityLabel),
-    );
-    const topDeclines = [...declineSituations].sort(
-      (a, b) => (b.metricValuePrior ?? 0) - b.metricValue - ((a.metricValuePrior ?? 0) - a.metricValue),
-    );
-
-    const lastVisitByCustomerName = new Map<string, string | null>();
-    for (const c of brief.customers) lastVisitByCustomerName.set(c.customerName, c.lastVisitDate);
-
-    const lostOpportunities = topDeclines.map((s) => {
-      const before = s.metricValuePrior ?? 0;
-      const after = s.metricValue;
-      const coaching = buildLostOpportunityCoaching({
-        customerName: s.entityLabel,
-        valueBefore: before,
-        valueAfter: after,
-        stoppedProducts: s.stoppedProducts ?? [],
-      });
-      return {
-        customerName: s.entityLabel,
-        declineValue: Math.max(0, before - after),
-        valueBefore: before,
-        valueAfter: after,
-        lastVisitDate: lastVisitByCustomerName.get(s.entityLabel) ?? null,
-        stoppedProducts: coaching.topProducts,
-        diagnosis: coaching.diagnosis,
-        visitDecision: coaching.visitAction,
-        likelyReason: coaching.likelyReason,
-        visitGoal: coaching.visitGoal,
-        extraProductCount: coaching.extraProductCount,
-      };
-    });
-
+    // ---- Lost opportunities are computed once in buildDailyBrief, using the
+    // same selected-date customer plan and shared engine as Smart Loading.
+    const lostOpportunityResult = brief.lostOpportunityResult;
+    const lostOpportunities = lostOpportunityResult.opportunities.map((opportunity) => ({
+      customerName: opportunity.customerName, declineValue: opportunity.baselineNetQuantity, valueBefore: opportunity.baselineNetQuantity, valueAfter: opportunity.recentNetQuantity,
+      lastVisitDate: brief.customers.find((customer) => customer.customerCode === opportunity.customerCode)?.lastVisitDate ?? null,
+      stoppedProducts: [{ productName: opportunity.productName, quantity: opportunity.baselineNetQuantity, unit: "", value: opportunity.suggestedQuantity }],
+      diagnosis: `توقف بيع ${opportunity.productName} خلال آخر 30 يومًا.`, visitDecision: `راجع احتياج العميل إلى ${opportunity.productName}.`, likelyReason: null, visitGoal: `اقتراح ${opportunity.suggestedQuantity} وحدة.`, extraProductCount: 0,
+      customerCode: opportunity.customerCode, productCode: opportunity.productCode, productName: opportunity.productName, baselineNetQuantity: opportunity.baselineNetQuantity, recentNetQuantity: opportunity.recentNetQuantity, suggestedQuantity: opportunity.suggestedQuantity,
+    }));
     // ---- Collections + priority debtors (COLLECTION_RISK situations for
     // the "who to chase" list; real collected/pending/bounced totals below,
     // computed directly from the Collections entity — was hardcoded to 0
@@ -1233,6 +1210,7 @@ export class VisitCopilotService {
       goal,
       sales: { total: brief.expectedSalesTotal, invoiceCount: lostOpportunities.length, visitCount: brief.visitCount },
       lostOpportunities,
+      lostOpportunityStatus: lostOpportunityResult.status,
       collections: {
         collected: round2(collectedTotal),
         pending: priorityDebtors.reduce((sum, d) => sum + d.amount, 0),
@@ -1261,6 +1239,7 @@ export class VisitCopilotService {
       goal: baseFacts.goal,
       sales: baseFacts.sales,
       lostOpportunities: baseFacts.lostOpportunities,
+      lostOpportunityStatus: baseFacts.lostOpportunityStatus,
       collections: baseFacts.collections,
       returns: baseFacts.returns,
       interventionNeeded: baseFacts.interventionNeeded,

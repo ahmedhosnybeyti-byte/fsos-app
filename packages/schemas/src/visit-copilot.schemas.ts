@@ -117,7 +117,7 @@ export type VisitCopilotChatRequest = z.infer<typeof visitCopilotChatRequestSche
 // GET /visit-copilot/discovery + GET /visit-copilot/route-opportunities —
 // period-only queries, same Analysis Scope semantics as daily-brief.
 export const visitCopilotDiscoveryQuerySchema = z
-  .object({ ...periodFields })
+  .object({ ...periodFields, ...planDateField })
   .refine(customPeriodRefinement.check, customPeriodRefinement.options);
 export type VisitCopilotDiscoveryQuery = z.infer<typeof visitCopilotDiscoveryQuerySchema>;
 
@@ -206,7 +206,7 @@ export function isFutureVisitCopilotPlanDate(dateIso: string, today: Date = new 
 // broader). Only `period` (the screen's existing Analysis Scope control) is
 // accepted, as the comparison reference for the report's numbers.
 export const visitCopilotDaily360SummaryQuerySchema = z
-  .object({ ...periodFields })
+  .object({ ...periodFields, ...planDateField })
   .refine(customPeriodRefinement.check, customPeriodRefinement.options);
 export type VisitCopilotDaily360SummaryQuery = z.infer<typeof visitCopilotDaily360SummaryQuerySchema>;
 
@@ -239,6 +239,12 @@ export const visitCopilot360LostOpportunitySchema = z.object({
   likelyReason: z.string().nullable().optional(),
   visitGoal: z.string().optional(),
   extraProductCount: z.number().optional(),
+  customerCode: z.string(),
+  productCode: z.string(),
+  productName: z.string(),
+  baselineNetQuantity: z.number(),
+  recentNetQuantity: z.number(),
+  suggestedQuantity: z.number(),
 });
 export type VisitCopilot360LostOpportunity = z.infer<typeof visitCopilot360LostOpportunitySchema>;
 
@@ -282,6 +288,7 @@ export const visitCopilot360SummarySchema = z.object({
   }),
 
   lostOpportunities: z.array(visitCopilot360LostOpportunitySchema),
+  lostOpportunityStatus: z.enum(["available", "no-customers", "no-baseline-sales", "no-lost-opportunities", "data-unavailable"]),
 
   collections: z.object({
     collected: z.number(),

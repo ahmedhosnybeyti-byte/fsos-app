@@ -1028,6 +1028,12 @@ export type TranslationKey =
   | "copilot.summary360NoGoal"
   | "copilot.summary360LostOpportunities"
   | "copilot.summary360NoLostOpportunities"
+  | "copilot.summary360NoCustomers"
+  | "copilot.summary360NoBaselineSales"
+  | "copilot.summary360DataUnavailable"
+  | "copilot.summary360BaselineQuantity"
+  | "copilot.summary360RecentQuantity"
+  | "copilot.summary360SuggestedQuantity"
   | "copilot.summary360DeclineValue"
   | "copilot.summary360BeforeAfter"
   | "copilot.summary360LastVisit"
@@ -2268,7 +2274,13 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360GoalRemaining": "المتبقي",
     "copilot.summary360NoGoal": "لا يوجد هدف محدد لنطاقك",
     "copilot.summary360LostOpportunities": "الفرص الضائعة",
-    "copilot.summary360NoLostOpportunities": "لا توجد فرص ضائعة بارزة حاليًا",
+    "copilot.summary360NoLostOpportunities": "لا توجد فرص ضائعة وفق المعيار الحالي",
+    "copilot.summary360NoCustomers": "لا يوجد عملاء مخططون للتاريخ المختار",
+    "copilot.summary360NoBaselineSales": "لا توجد مبيعات مرجعية كافية لحساب الفرص",
+    "copilot.summary360DataUnavailable": "تعذر حساب الفرص لعدم توفر البيانات المطلوبة",
+    "copilot.summary360BaselineQuantity": "مبيعات 90 يومًا: {{value}}",
+    "copilot.summary360RecentQuantity": "آخر 30 يومًا: {{value}}",
+    "copilot.summary360SuggestedQuantity": "الكمية المقترحة: {{value}}",
     "copilot.summary360DeclineValue": "قيمة التراجع: {value}",
     "copilot.summary360BeforeAfter": "قبل: {before} ← بعد: {after}",
     "copilot.summary360LastVisit": "آخر زيارة: {date}",
@@ -3509,7 +3521,13 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360GoalRemaining": "Remaining",
     "copilot.summary360NoGoal": "No target set for your scope",
     "copilot.summary360LostOpportunities": "Lost Opportunities",
-    "copilot.summary360NoLostOpportunities": "No notable lost opportunities right now",
+    "copilot.summary360NoLostOpportunities": "No lost opportunities under the current criterion",
+    "copilot.summary360NoCustomers": "No customers are planned for the selected date",
+    "copilot.summary360NoBaselineSales": "There are not enough baseline sales to calculate opportunities",
+    "copilot.summary360DataUnavailable": "Opportunities could not be calculated because required data is unavailable",
+    "copilot.summary360BaselineQuantity": "90-day sales: {{value}}",
+    "copilot.summary360RecentQuantity": "Last 30 days: {{value}}",
+    "copilot.summary360SuggestedQuantity": "Suggested quantity: {{value}}",
     "copilot.summary360DeclineValue": "Decline value: {value}",
     "copilot.summary360BeforeAfter": "Before: {before} → After: {after}",
     "copilot.summary360LastVisit": "Last visit: {date}",

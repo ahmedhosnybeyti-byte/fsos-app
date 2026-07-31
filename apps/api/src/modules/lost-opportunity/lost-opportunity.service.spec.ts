@@ -1,0 +1,15 @@
+import { strict as assert } from "node:assert";
+import test from "node:test";
+import { LostOpportunityService } from "./lost-opportunity.service";
+
+const ok = (records: Record<string, unknown>[]) => ({ available: true, records });
+const base = (overrides: Record<string, ReturnType<typeof ok>> = {}) => ({ Products: ok([{ ProductCode: " P1 ", ProductName: "Product" }]), Invoices: ok([{ InvoiceNo: " I1 ", CustomerCode: " C1 ", InvoiceDate: "2026-04-10", InvoiceStatus: "confirmed" }]), "Invoice Items": ok([{ InvoiceNo: "I1", ProductCode: "P1", Quantity: 9 }]), Returns: ok([]), "Return Items": ok([]), ...overrides });
+const input = { companyId: "company", requestingUser: { roleCode: "SALES_REP", email: "rep@example.com" }, selectedDate: "2026-07-31", customerCodes: [" C1 "], customerNames: new Map([["C1", "Customer"]]) };
+const service = (sets = base()) => new LostOpportunityService({ getEntityRecords: async (name: string) => sets[name as keyof typeof sets] ?? ok([]) } as any);
+
+test("baseline-only sale is one normalized opportunity", async () => { const result = await service().detect(input); assert.equal(result.status, "available"); assert.equal(result.opportunities.length, 1); assert.equal(result.opportunities[0]!.baselineNetQuantity, 9); assert.equal(result.opportunities[0]!.suggestedQuantity, Math.round(9 / 3)); });
+test("recent sale excludes opportunity", async () => { const sets=base({ Invoices:ok([{InvoiceNo:"I1",CustomerCode:"C1",InvoiceDate:"2026-04-10",InvoiceStatus:"confirmed"},{InvoiceNo:"I2",CustomerCode:"C1",InvoiceDate:"2026-07-10",InvoiceStatus:"confirmed"}]), "Invoice Items":ok([{InvoiceNo:"I1",ProductCode:"P1",Quantity:9},{InvoiceNo:"I2",ProductCode:"P1",Quantity:1}]) }); assert.equal((await service(sets).detect(input)).opportunities.length,0); });
+test("return reducing baseline to zero is excluded", async () => { const sets=base({Returns:ok([{ReturnNo:"R1",CustomerCode:"C1",ReturnDate:"2026-04-11",Status:"confirmed"}]),"Return Items":ok([{ReturnNo:"R1",ProductCode:"P1",Quantity:9}])}); assert.equal((await service(sets).detect(input)).status,"no-baseline-sales"); });
+test("out-of-scope customer has no baseline sales", async () => { const result = await service().detect({ ...input, customerCodes: ["C2"] }); assert.equal(result.status, "no-baseline-sales"); assert.deepEqual(result.opportunities, []); });
+test("empty customer scope returns no-customers", async () => { const result = await service().detect({ ...input, customerCodes: [] }); assert.equal(result.status, "no-customers"); assert.deepEqual(result.opportunities, []); });
+test("unavailable required entity returns data-unavailable", async () => { const unavailable = new LostOpportunityService({getEntityRecords:async()=>({available:false,records:[]})} as any); assert.equal((await unavailable.detect(input)).status,"data-unavailable"); });

@@ -1607,6 +1607,12 @@ export interface VisitCopilot360LostOpportunity {
   likelyReason?: string | null;
   visitGoal?: string;
   extraProductCount?: number;
+  customerCode: string;
+  productCode: string;
+  productName: string;
+  baselineNetQuantity: number;
+  recentNetQuantity: number;
+  suggestedQuantity: number;
 }
 
 export type VisitCopilot360Priority = "عالية" | "متوسطة" | "منخفضة";
@@ -1636,6 +1642,7 @@ export interface VisitCopilot360Summary {
   };
   sales: { total: number; invoiceCount: number; visitCount: number };
   lostOpportunities: VisitCopilot360LostOpportunity[];
+  lostOpportunityStatus: "available" | "no-customers" | "no-baseline-sales" | "no-lost-opportunities" | "data-unavailable";
   collections: {
     collected: number;
     pending: number;

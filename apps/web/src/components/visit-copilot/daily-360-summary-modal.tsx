@@ -219,7 +219,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
                     {t("copilot.summary360LostOpportunities")}
                   </h3>
                   {summary.lostOpportunities.length === 0 ? (
-                    <p className="text-sm text-muted-foreground">{t("copilot.summary360NoLostOpportunities")}</p>
+                    <p className="text-sm text-muted-foreground">{t(summary.lostOpportunityStatus === "no-customers" ? "copilot.summary360NoCustomers" : summary.lostOpportunityStatus === "no-baseline-sales" ? "copilot.summary360NoBaselineSales" : summary.lostOpportunityStatus === "data-unavailable" ? "copilot.summary360DataUnavailable" : "copilot.summary360NoLostOpportunities")}</p>
                   ) : (
                     <div className="space-y-3">
                       {summary.lostOpportunities.map((op, i) => (
@@ -232,12 +232,8 @@ export function Daily360SummaryModal({ open, onOpenChange, period, from, to }: P
                               {t("copilot.summary360DeclineValue", { value: op.declineValue.toLocaleString() })}
                             </Badge>
                           </div>
-                          <p className="text-xs text-muted-foreground">
-                            {t("copilot.summary360BeforeAfter", {
-                              before: op.valueBefore.toLocaleString(),
-                              after: op.valueAfter.toLocaleString(),
-                            })}
-                          </p>
+                          <p className="text-sm font-medium text-foreground">{op.productName}</p>
+                          <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-3"><span>{t("copilot.summary360BaselineQuantity", { value: op.baselineNetQuantity.toLocaleString() })}</span><span>{t("copilot.summary360RecentQuantity", { value: op.recentNetQuantity.toLocaleString() })}</span><span className="font-medium text-foreground">{t("copilot.summary360SuggestedQuantity", { value: op.suggestedQuantity.toLocaleString() })}</span></div>
                           <p className="text-xs text-muted-foreground">
                             {op.lastVisitDate
                               ? t("copilot.summary360LastVisit", { date: op.lastVisitDate })
