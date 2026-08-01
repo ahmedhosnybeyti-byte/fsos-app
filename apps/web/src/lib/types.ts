@@ -1615,6 +1615,7 @@ export interface VisitCopilot360LostOpportunity {
   customerCode: string;
   productCode: string;
   productName: string;
+  category: string | null;
   baselineNetQuantity: number;
   recentNetQuantity: number;
   suggestedQuantity: number;

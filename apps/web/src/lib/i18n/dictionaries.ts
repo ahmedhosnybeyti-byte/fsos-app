@@ -1078,6 +1078,7 @@ export type TranslationKey =
   | "copilot.summary360RecentQuantity"
   | "copilot.summary360SuggestedQuantity"
   | "copilot.summary360DeclineValue"
+  | "copilot.summary360DeclineQuantity"
   | "copilot.summary360BeforeAfter"
   | "copilot.summary360LastVisit"
   | "copilot.summary360LastVisitUnknown"
@@ -1087,6 +1088,11 @@ export type TranslationKey =
   | "copilot.summary360LikelyReason"
   | "copilot.summary360VisitGoal"
   | "copilot.summary360MoreProducts"
+  | "copilot.summary360Uncategorized"
+  | "copilot.summary360OpportunityCount"
+  | "copilot.summary360ProductCount"
+  | "copilot.summary360TotalSuggestedQuantity"
+  | "copilot.summary360TotalDecline"
   | "copilot.summary360Collections"
   | "copilot.summary360Collected"
   | "copilot.summary360Pending"
@@ -2381,10 +2387,11 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360NoCustomers": "لا يوجد عملاء مخططون للتاريخ المختار",
     "copilot.summary360NoBaselineSales": "لا توجد مبيعات مرجعية كافية لحساب الفرص",
     "copilot.summary360DataUnavailable": "تعذر حساب الفرص لعدم توفر البيانات المطلوبة",
-    "copilot.summary360BaselineQuantity": "مبيعات 90 يومًا: {{value}}",
-    "copilot.summary360RecentQuantity": "آخر 30 يومًا: {{value}}",
-    "copilot.summary360SuggestedQuantity": "الكمية المقترحة: {{value}}",
+    "copilot.summary360BaselineQuantity": "مبيعات 90 يومًا: {value}",
+    "copilot.summary360RecentQuantity": "آخر 30 يومًا: {value}",
+    "copilot.summary360SuggestedQuantity": "الكمية المقترحة: {value}",
     "copilot.summary360DeclineValue": "قيمة التراجع: {value}",
+    "copilot.summary360DeclineQuantity": "كمية التراجع: {value}",
     "copilot.summary360BeforeAfter": "قبل: {before} ← بعد: {after}",
     "copilot.summary360LastVisit": "آخر زيارة: {date}",
     "copilot.summary360LastVisitUnknown": "آخر زيارة: غير معروفة",
@@ -2394,6 +2401,11 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360LikelyReason": "السبب المرجح",
     "copilot.summary360VisitGoal": "هدف الزيارة",
     "copilot.summary360MoreProducts": "+ {count} صنف آخر",
+    "copilot.summary360Uncategorized": "غير مصنف",
+    "copilot.summary360OpportunityCount": "الفرص: {value}",
+    "copilot.summary360ProductCount": "الأصناف: {value}",
+    "copilot.summary360TotalSuggestedQuantity": "إجمالي الكمية المقترحة: {value}",
+    "copilot.summary360TotalDecline": "إجمالي كمية التراجع: {value}",
     "copilot.summary360Collections": "التحصيل",
     "copilot.summary360Collected": "تم تحصيله",
     "copilot.summary360Pending": "معلّق",
@@ -3688,10 +3700,11 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360NoCustomers": "No customers are planned for the selected date",
     "copilot.summary360NoBaselineSales": "There are not enough baseline sales to calculate opportunities",
     "copilot.summary360DataUnavailable": "Opportunities could not be calculated because required data is unavailable",
-    "copilot.summary360BaselineQuantity": "90-day sales: {{value}}",
-    "copilot.summary360RecentQuantity": "Last 30 days: {{value}}",
-    "copilot.summary360SuggestedQuantity": "Suggested quantity: {{value}}",
+    "copilot.summary360BaselineQuantity": "90-day sales: {value}",
+    "copilot.summary360RecentQuantity": "Last 30 days: {value}",
+    "copilot.summary360SuggestedQuantity": "Suggested quantity: {value}",
     "copilot.summary360DeclineValue": "Decline value: {value}",
+    "copilot.summary360DeclineQuantity": "Decline quantity: {value}",
     "copilot.summary360BeforeAfter": "Before: {before} → After: {after}",
     "copilot.summary360LastVisit": "Last visit: {date}",
     "copilot.summary360LastVisitUnknown": "Last visit: unknown",
@@ -3701,6 +3714,11 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360LikelyReason": "Likely reason",
     "copilot.summary360VisitGoal": "Visit goal",
     "copilot.summary360MoreProducts": "+{count} more product(s)",
+    "copilot.summary360Uncategorized": "Uncategorized",
+    "copilot.summary360OpportunityCount": "Opportunities: {value}",
+    "copilot.summary360ProductCount": "Products: {value}",
+    "copilot.summary360TotalSuggestedQuantity": "Total suggested quantity: {value}",
+    "copilot.summary360TotalDecline": "Total decline quantity: {value}",
     "copilot.summary360Collections": "Collections",
     "copilot.summary360Collected": "Collected",
     "copilot.summary360Pending": "Pending",

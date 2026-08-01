@@ -1132,7 +1132,7 @@ export class VisitCopilotService {
       lastVisitDate: brief.customers.find((customer) => customer.customerCode === opportunity.customerCode)?.lastVisitDate ?? null,
       stoppedProducts: [{ productName: opportunity.productName, quantity: opportunity.baselineNetQuantity, unit: "", value: opportunity.suggestedQuantity }],
       diagnosis: `توقف بيع ${opportunity.productName} خلال آخر 30 يومًا.`, visitDecision: `راجع احتياج العميل إلى ${opportunity.productName}.`, likelyReason: null, visitGoal: `اقتراح ${opportunity.suggestedQuantity} وحدة.`, extraProductCount: 0,
-      customerCode: opportunity.customerCode, productCode: opportunity.productCode, productName: opportunity.productName, baselineNetQuantity: opportunity.baselineNetQuantity, recentNetQuantity: opportunity.recentNetQuantity, suggestedQuantity: opportunity.suggestedQuantity,
+      customerCode: opportunity.customerCode, productCode: opportunity.productCode, productName: opportunity.productName, category: opportunity.category, baselineNetQuantity: opportunity.baselineNetQuantity, recentNetQuantity: opportunity.recentNetQuantity, suggestedQuantity: opportunity.suggestedQuantity,
     }));
     // ---- Collections + priority debtors (COLLECTION_RISK situations for
     // the "who to chase" list; real collected/pending/bounced totals below,

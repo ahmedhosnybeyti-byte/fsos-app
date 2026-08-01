@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, FileDown, Package, Quote, RefreshCw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -17,6 +17,7 @@ import type { VisitCopilot360ExecutionStep, VisitCopilot360Priority, VisitCopilo
 import { cn } from "@/lib/utils";
 import { exportDaily360SummaryPdf } from "@/lib/export/daily-360-summary-pdf";
 import { daily360SummaryQuery } from "./daily-360-summary-query";
+import { groupDaily360LostOpportunities } from "./daily-360-opportunity-groups";
 
 // "ملخص اليوم 360°" (2026-07-28) — a full-screen (on mobile) / large modal
 // (desktop) report inside Visit Copilot. Visual/structural fidelity to the
@@ -59,6 +60,10 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
   });
 
   const summary = query.data;
+  const lostOpportunityGroups = useMemo(
+    () => groupDaily360LostOpportunities(summary?.lostOpportunities ?? [], t("copilot.summary360Uncategorized")),
+    [summary?.lostOpportunities, t],
+  );
 
   async function handleExportPdf() {
     if (!summary || exporting) return;
@@ -213,82 +218,74 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                   )}
                 </section>
 
-                {/* Lost opportunities — numbered customer cards ("1. اسم
-                    العميل" prefix, matching the reference report's own
-                    numbering style instead of a separate round badge). */}
+                {/* Lost opportunities are grouped customer-first so one route visit is never repeated per product. */}
                 <section className="space-y-3">
                   <h3 className="flex items-center gap-2 text-sm font-semibold">
-                    <span aria-hidden>🎯</span>
+                    <span aria-hidden>{"\u{1F3AF}"}</span>
                     {t("copilot.summary360LostOpportunities")}
                   </h3>
                   {summary.lostOpportunities.length === 0 ? (
                     <p className="text-sm text-muted-foreground">{t(summary.lostOpportunityStatus === "no-customers" ? "copilot.summary360NoCustomers" : summary.lostOpportunityStatus === "no-baseline-sales" ? "copilot.summary360NoBaselineSales" : summary.lostOpportunityStatus === "data-unavailable" ? "copilot.summary360DataUnavailable" : "copilot.summary360NoLostOpportunities")}</p>
                   ) : (
                     <div className="space-y-3">
-                      {summary.lostOpportunities.map((op, i) => (
-                        <div key={`${op.customerName}-${i}`} className="glass-card space-y-2.5 p-4">
+                      {lostOpportunityGroups.map((customer, customerIndex) => (
+                        <div key={customer.customerCode} className="glass-card space-y-3 p-4">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-bold">
-                              {i + 1}. {op.customerName}
-                            </span>
+                            <span className="text-sm font-bold">{customerIndex + 1}. {customer.customerName}</span>
                             <Badge variant="secondary" className="ms-auto font-normal">
-                              {t("copilot.summary360DeclineValue", { value: op.declineValue.toLocaleString() })}
+                              {t("copilot.summary360TotalDecline", { value: customer.totalDeclineQuantity.toLocaleString() })}
                             </Badge>
                           </div>
-                          <p className="text-sm font-medium text-foreground">{op.productName}</p>
-                          <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-3"><span>{t("copilot.summary360BaselineQuantity", { value: op.baselineNetQuantity.toLocaleString() })}</span><span>{t("copilot.summary360RecentQuantity", { value: op.recentNetQuantity.toLocaleString() })}</span><span className="font-medium text-foreground">{t("copilot.summary360SuggestedQuantity", { value: op.suggestedQuantity.toLocaleString() })}</span></div>
-                          <p className="text-xs text-muted-foreground">
-                            {op.lastVisitDate
-                              ? t("copilot.summary360LastVisit", { date: op.lastVisitDate })
-                              : t("copilot.summary360LastVisitUnknown")}
-                          </p>
-
-                          {op.stoppedProducts.length > 0 && (
-                            <div>
-                              <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                                <Package className="h-3.5 w-3.5" />
-                                {t("copilot.summary360StoppedProducts")}
-                              </p>
-                              <div className="flex flex-wrap gap-1.5">
-                                {op.stoppedProducts.map((p, pi) => (
-                                  <span
-                                    key={pi}
-                                    className="rounded-full border border-orange-400/30 bg-orange-500/10 px-2.5 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-300"
-                                  >
-                                    {p.productName} · {p.quantity.toLocaleString()} {p.unit} · {p.value.toLocaleString()}
-                                  </span>
-                                ))}
-                                {Boolean(op.extraProductCount) && (
-                                  <span className="rounded-full border border-border bg-card px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
-                                    {t("copilot.summary360MoreProducts", { count: op.extraProductCount! })}
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="space-y-1.5 rounded-md border border-border bg-card p-2.5">
-                            <p className="text-xs text-foreground">
-                              <span className="font-medium text-muted-foreground">{t("copilot.summary360Diagnosis")}: </span>
-                              {op.diagnosis}
-                            </p>
-                            {op.likelyReason && (
-                              <p className="text-xs text-foreground">
-                                <span className="font-medium text-muted-foreground">{t("copilot.summary360LikelyReason")}: </span>
-                                {op.likelyReason}
-                              </p>
-                            )}
-                            <p className="text-xs text-foreground">
-                              <span className="font-medium text-muted-foreground">{t("copilot.summary360VisitDecision")}: </span>
-                              {op.visitDecision}
-                            </p>
-                            {op.visitGoal && (
-                              <p className="text-xs text-foreground">
-                                <span className="font-medium text-muted-foreground">{t("copilot.summary360VisitGoal")}: </span>
-                                {op.visitGoal}
-                              </p>
-                            )}
+                          <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-3">
+                            <span>{t("copilot.summary360OpportunityCount", { value: customer.opportunityCount })}</span>
+                            <span>{t("copilot.summary360ProductCount", { value: customer.productCount })}</span>
+                            <span className="font-medium text-foreground">{t("copilot.summary360TotalSuggestedQuantity", { value: customer.totalSuggestedQuantity.toLocaleString() })}</span>
                           </div>
+                          {customer.categories.map((category) => (
+                            <section key={category.category} className="space-y-2 rounded-md border border-border bg-card/40 p-3">
+                              <h4 className="text-sm font-semibold">{category.category}</h4>
+                              {category.products.map(({ productCode, opportunity: op }) => (
+                                <div key={productCode} className="space-y-2.5 border-t border-border pt-3 first:border-t-0 first:pt-0">
+                                  <p className="text-sm font-medium text-foreground">{op.productName}</p>
+                                  <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-4">
+                                    <span>{t("copilot.summary360BaselineQuantity", { value: op.baselineNetQuantity.toLocaleString() })}</span>
+                                    <span>{t("copilot.summary360RecentQuantity", { value: op.recentNetQuantity.toLocaleString() })}</span>
+                                    <span>{t("copilot.summary360DeclineQuantity", { value: op.declineValue.toLocaleString() })}</span>
+                                    <span className="font-medium text-foreground">{t("copilot.summary360SuggestedQuantity", { value: op.suggestedQuantity.toLocaleString() })}</span>
+                                  </div>
+                                  <p className="text-xs text-muted-foreground">
+                                    {op.lastVisitDate ? t("copilot.summary360LastVisit", { date: op.lastVisitDate }) : t("copilot.summary360LastVisitUnknown")}
+                                  </p>
+                                  {op.stoppedProducts.length > 0 && (
+                                    <div>
+                                      <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                                        <Package className="h-3.5 w-3.5" />
+                                        {t("copilot.summary360StoppedProducts")}
+                                      </p>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {op.stoppedProducts.map((product, productIndex) => (
+                                          <span key={`${product.productName}-${productIndex}`} className="rounded-full border border-orange-400/30 bg-orange-500/10 px-2.5 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-300">
+                                            {product.productName}{" \u00B7 "}{product.quantity.toLocaleString()} {product.unit}{" \u00B7 "}{product.value.toLocaleString()}
+                                          </span>
+                                        ))}
+                                        {Boolean(op.extraProductCount) && (
+                                          <span className="rounded-full border border-border bg-card px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                                            {t("copilot.summary360MoreProducts", { count: op.extraProductCount! })}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                  )}
+                                  <div className="space-y-1.5 rounded-md border border-border bg-card p-2.5">
+                                    <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360Diagnosis")}: </span>{op.diagnosis}</p>
+                                    {op.likelyReason && <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360LikelyReason")}: </span>{op.likelyReason}</p>}
+                                    <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360VisitDecision")}: </span>{op.visitDecision}</p>
+                                    {op.visitGoal && <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360VisitGoal")}: </span>{op.visitGoal}</p>}
+                                  </div>
+                                </div>
+                              ))}
+                            </section>
+                          ))}
                         </div>
                       ))}
                     </div>
