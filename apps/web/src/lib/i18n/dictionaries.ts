@@ -1178,10 +1178,14 @@ export type TranslationKey =
   | "smartLoading.alertsTitle"
   | "smartLoading.lostOpportunities"
   | "smartLoading.lostOpportunitiesDescription"
+  | "smartLoading.lostOpportunityCategories"
+  | "smartLoading.lostOpportunityProducts"
+  | "smartLoading.lostOpportunityCustomers"
   | "smartLoading.searchLostOpportunities"
   | "smartLoading.lostOpportunitiesError"
   | "smartLoading.noLostOpportunities"
   | "smartLoading.categoryTotal"
+  | "smartLoading.categoryPartiallyAdded"
   | "smartLoading.productSuggestedQuantity"
   | "smartLoading.customerSuggestedQuantity"
   | "smartLoading.addCategory"
@@ -2481,10 +2485,14 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.alertsTitle": "تنبيهات اليوم",
     "smartLoading.lostOpportunities": "\u0627\u0644\u0641\u0631\u0635 \u0627\u0644\u0636\u0627\u0626\u0639\u0629",
     "smartLoading.lostOpportunitiesDescription": "\u0641\u0631\u0635 \u0639\u0645\u0644\u0627\u0621 \u062e\u0637 \u0633\u064a\u0631 \u0627\u0644\u063a\u062f \u062d\u0633\u0628 \u0627\u0644\u0642\u0633\u0645 \u0648\u0627\u0644\u0645\u0646\u062a\u062c.",
+    "smartLoading.lostOpportunityCategories": "\u0627\u0644\u0623\u0642\u0633\u0627\u0645",
+    "smartLoading.lostOpportunityProducts": "\u0627\u0644\u0623\u0635\u0646\u0627\u0641",
+    "smartLoading.lostOpportunityCustomers": "\u0641\u0631\u0635 \u0627\u0644\u0639\u0645\u0644\u0627\u0621",
     "smartLoading.searchLostOpportunities": "\u0627\u0628\u062d\u062b \u0628\u0627\u0644\u0642\u0633\u0645 \u0623\u0648 \u0627\u0644\u0635\u0646\u0641 \u0623\u0648 \u0627\u0644\u0643\u0648\u062f \u0623\u0648 \u0627\u0644\u0639\u0645\u064a\u0644",
     "smartLoading.lostOpportunitiesError": "\u062a\u0639\u0630\u0631 \u062a\u062d\u0645\u064a\u0644 \u0627\u0644\u0641\u0631\u0635 \u0627\u0644\u0636\u0627\u0626\u0639\u0629. \u062d\u0627\u0648\u0644 \u062a\u062d\u062f\u064a\u062b \u0627\u0644\u0634\u0627\u0634\u0629.",
     "smartLoading.noLostOpportunities": "\u0644\u0627 \u062a\u0648\u062c\u062f \u0641\u0631\u0635 \u0636\u0627\u0626\u0639\u0629 \u0645\u0637\u0627\u0628\u0642\u0629.",
     "smartLoading.categoryTotal": "\u0625\u062c\u0645\u0627\u0644\u064a \u0627\u0644\u0643\u0645\u064a\u0629: {value}",
+    "smartLoading.categoryPartiallyAdded": "\u062a\u0645\u062a \u0625\u0636\u0627\u0641\u0629 {added} \u0645\u0646 {total} \u0623\u0635\u0646\u0627\u0641",
     "smartLoading.productSuggestedQuantity": "\u0627\u0644\u0643\u0645\u064a\u0629 \u0627\u0644\u0645\u0642\u062a\u0631\u062d\u0629: {value}",
     "smartLoading.customerSuggestedQuantity": "\u0627\u0644\u0643\u0645\u064a\u0629 \u0627\u0644\u0645\u0642\u062a\u0631\u062d\u0629 \u0644\u0644\u0639\u0645\u064a\u0644 {customer}",
     "smartLoading.addCategory": "\u0625\u0636\u0627\u0641\u0629 \u0627\u0644\u0642\u0633\u0645",
@@ -3784,10 +3792,14 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.alertsTitle": "Today's Alerts",
     "smartLoading.lostOpportunities": "Lost Opportunities",
     "smartLoading.lostOpportunitiesDescription": "Tomorrow route customer opportunities grouped by category and product.",
+    "smartLoading.lostOpportunityCategories": "Categories",
+    "smartLoading.lostOpportunityProducts": "Products",
+    "smartLoading.lostOpportunityCustomers": "Customer opportunities",
     "smartLoading.searchLostOpportunities": "Search category, product, code, or customer",
     "smartLoading.lostOpportunitiesError": "Unable to load lost opportunities. Try refreshing the screen.",
     "smartLoading.noLostOpportunities": "No matching lost opportunities.",
     "smartLoading.categoryTotal": "Total quantity: {value}",
+    "smartLoading.categoryPartiallyAdded": "Added {added} of {total} products",
     "smartLoading.productSuggestedQuantity": "Suggested quantity: {value}",
     "smartLoading.customerSuggestedQuantity": "Suggested quantity for {customer}",
     "smartLoading.addCategory": "Add category",

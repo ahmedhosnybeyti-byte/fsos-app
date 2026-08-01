@@ -11,17 +11,43 @@ export type LostOpportunityProductGroup = {
   productCode: string;
   productName: string;
   totalQuantity: number;
+  customerCount: number;
   customers: LostOpportunityCustomer[];
 };
 
 export type LostOpportunityCategoryGroup = {
   category: string;
   totalQuantity: number;
+  productCount: number;
+  customerCount: number;
   products: LostOpportunityProductGroup[];
 };
 
 export function lostOpportunityId(customerCode: string, productCode: string): string {
   return customerCode + "\u0000" + productCode;
+}
+
+export function lostOpportunityProductId(category: string, productCode: string): string {
+  return category + "\u0000" + productCode;
+}
+
+export function normalizeOpportunityQuantity(value: string | number): number {
+  const parsed = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.round(parsed * 10) / 10;
+}
+
+export function categoryAddedProductCount(category: LostOpportunityCategoryGroup, addedProductCodes: ReadonlySet<string>): number {
+  return category.products.filter((product) => addedProductCodes.has(product.productCode)).length;
+}
+
+/** Search-only matches augment the rendered accordion state without mutating the user's manual choices. */
+export function getEffectiveAccordionState(
+  manualOpen: ReadonlySet<string>,
+  matchedOpen: ReadonlySet<string>,
+  searchActive: boolean,
+): Set<string> {
+  return searchActive ? new Set([...manualOpen, ...matchedOpen]) : new Set(manualOpen);
 }
 
 function normalized(value: string): string {
@@ -60,11 +86,14 @@ export function groupLostOpportunities(
   uncategorized: string,
 ): LostOpportunityCategoryGroup[] {
   const categories = new Map<string, Map<string, LostOpportunityCustomer[]>>();
+  const seenOpportunityIds = new Set<string>();
 
   for (const opportunity of opportunities) {
     const category = opportunity.category?.trim() || uncategorized;
     const id = lostOpportunityId(opportunity.customerCode, opportunity.productCode);
-    const currentQuantity = Math.max(0, quantityDrafts[id] ?? opportunity.suggestedQuantity);
+    if (seenOpportunityIds.has(id)) continue;
+    seenOpportunityIds.add(id);
+    const currentQuantity = normalizeOpportunityQuantity(quantityDrafts[id] ?? opportunity.suggestedQuantity);
     const products = categories.get(category) ?? new Map<string, LostOpportunityCustomer[]>();
     const customers = products.get(opportunity.productCode) ?? [];
     customers.push({ ...opportunity, id, currentQuantity });
@@ -79,6 +108,7 @@ export function groupLostOpportunities(
         productCode,
         productName: customers[0]!.productName,
         totalQuantity,
+        customerCount: customers.length,
         customers: customers.sort((a, b) => compareByQuantityThenLabel(a, b, a.customerName, b.customerName)),
       };
     }).sort((a, b) => compareByQuantityThenLabel(a, b, a.productName, b.productName));
@@ -86,6 +116,8 @@ export function groupLostOpportunities(
     return {
       category,
       totalQuantity: groupedProducts.reduce((sum, product) => sum + product.totalQuantity, 0),
+      productCount: groupedProducts.length,
+      customerCount: groupedProducts.reduce((sum, product) => sum + product.customerCount, 0),
       products: groupedProducts,
     };
   }).sort((a, b) => compareByQuantityThenLabel(a, b, a.category, b.category));

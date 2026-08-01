@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
@@ -23,7 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useTranslation } from "@/components/translation-provider";
 import type { SmartLoadingLostOpportunity, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
-import { groupLostOpportunities, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
+import { categoryAddedProductCount, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
 
 type Inputs = { confirmedOrders: number; safetyStock: number; manual?: number };
 type LostOpportunityAddition = {
@@ -244,7 +244,7 @@ export function SmartLoadingScreen({
   }
 
   function setLostOpportunityQuantity(opportunityId: string, value: string) {
-    setLostOpportunityQuantityDrafts((current) => ({ ...current, [opportunityId]: parsePositiveNumber(value) }));
+    setLostOpportunityQuantityDrafts((current) => ({ ...current, [opportunityId]: normalizeOpportunityQuantity(value) }));
   }
 
   function restoreLostOpportunityQuantity(opportunityId: string) {
@@ -754,6 +754,9 @@ function LostOpportunitiesDialog({
 }) {
   const { locale, t } = useTranslation();
   const [search, setSearch] = useState("");
+  const [manualOpenCategories, setManualOpenCategories] = useState<Set<string>>(new Set());
+  const [manualOpenProducts, setManualOpenProducts] = useState<Set<string>>(new Set());
+  const hasInitializedAccordion = useRef(false);
   const allGroups = useMemo(
     () => groupLostOpportunities(opportunities, quantityDrafts, "", t("smartLoading.uncategorized")),
     [opportunities, quantityDrafts, t],
@@ -762,7 +765,30 @@ function LostOpportunitiesDialog({
     () => search ? groupLostOpportunities(opportunities, quantityDrafts, search, t("smartLoading.uncategorized")) : allGroups,
     [allGroups, opportunities, quantityDrafts, search, t],
   );
-  const totalQuantity = allGroups.reduce((sum, category) => sum + category.totalQuantity, 0);
+  const totalQuantity = groups.reduce((sum, category) => sum + category.totalQuantity, 0);
+  const productCount = groups.reduce((sum, category) => sum + category.productCount, 0);
+  const customerCount = groups.reduce((sum, category) => sum + category.customerCount, 0);
+
+  useEffect(() => {
+    if (!hasInitializedAccordion.current && allGroups.length > 0) {
+      hasInitializedAccordion.current = true;
+      setManualOpenCategories(new Set([allGroups[0]!.category]));
+    }
+  }, [allGroups]);
+
+  const searchActive = Boolean(search.trim());
+  const matchedCategories = useMemo(() => new Set(groups.map((category) => category.category)), [groups]);
+  const matchedProducts = useMemo(() => new Set(groups.flatMap((category) => category.products.map((product) => lostOpportunityProductId(category.category, product.productCode)))), [groups]);
+  const effectiveOpenCategories = getEffectiveAccordionState(manualOpenCategories, matchedCategories, searchActive);
+  const effectiveOpenProducts = getEffectiveAccordionState(manualOpenProducts, matchedProducts, searchActive);
+
+  function toggleCategory(category: string) {
+    setManualOpenCategories((current) => { const next = new Set(current); next.has(category) ? next.delete(category) : next.add(category); return next; });
+  }
+  function toggleProduct(category: string, productCode: string) {
+    const id = lostOpportunityProductId(category, productCode);
+    setManualOpenProducts((current) => { const next = new Set(current); next.has(id) ? next.delete(id) : next.add(id); return next; });
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-end bg-black/50 p-4 sm:items-center sm:justify-center" role="dialog" aria-modal="true" aria-label={t("smartLoading.lostOpportunities")}>
@@ -776,50 +802,54 @@ function LostOpportunitiesDialog({
         </CardHeader>
         <CardContent className="space-y-3">
           <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("smartLoading.searchLostOpportunities")} />
-          <p className="rounded-md bg-secondary/60 px-3 py-2 text-sm font-semibold">
-            {t("smartLoading.totalQuantity")}: {formatQuantity(totalQuantity, locale)}
-          </p>
+          <div className="grid grid-cols-2 gap-2 rounded-md bg-secondary/60 p-3 text-sm sm:grid-cols-4">
+            <p>{t("smartLoading.lostOpportunityCategories")}: <strong>{formatQuantity(groups.length, locale)}</strong></p>
+            <p>{t("smartLoading.lostOpportunityProducts")}: <strong>{formatQuantity(productCount, locale)}</strong></p>
+            <p>{t("smartLoading.lostOpportunityCustomers")}: <strong>{formatQuantity(customerCount, locale)}</strong></p>
+            <p>{t("smartLoading.totalQuantity")}: <strong>{formatQuantity(totalQuantity, locale)}</strong></p>
+          </div>
           {isLoading && <div className="space-y-2"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>}
           {isError && <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{t("smartLoading.lostOpportunitiesError")}</p>}
           {!isLoading && !isError && groups.length === 0 && <p className="rounded-md border p-4 text-center text-sm text-muted-foreground">{t("smartLoading.noLostOpportunities")}</p>}
-          {!isLoading && !isError && groups.map((category) => (
-            <section key={category.category} className="rounded-lg border p-3">
+          {!isLoading && !isError && groups.map((category) => {
+            const addedCount = categoryAddedProductCount(category, new Set(Object.keys(additions)));
+            const unaddedProducts = category.products.filter((product) => !additions[product.productCode]);
+            return <section key={category.category} className="rounded-lg border p-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
+                <button type="button" className="min-w-0 text-start" onClick={() => toggleCategory(category.category)} aria-expanded={effectiveOpenCategories.has(category.category)}>
                   <h3 className="font-semibold">{category.category}</h3>
                   <p className="text-xs text-muted-foreground">{t("smartLoading.categoryTotal", { value: formatQuantity(category.totalQuantity, locale) })}</p>
-                </div>
-                <Button variant="outline" disabled={category.totalQuantity <= 0} onClick={() => onAddProducts(category.products)}>{t("smartLoading.addCategory")}</Button>
+                  {addedCount > 0 && addedCount < category.productCount && <p className="text-xs text-amber-700">{t("smartLoading.categoryPartiallyAdded", { added: formatQuantity(addedCount, locale), total: formatQuantity(category.productCount, locale) })}</p>}
+                  {addedCount === category.productCount && <p className="text-xs text-emerald-700">{t("smartLoading.added")}</p>}
+                </button>
+                <Button variant="outline" disabled={unaddedProducts.length === 0 || unaddedProducts.every((product) => product.totalQuantity <= 0)} onClick={() => onAddProducts(unaddedProducts)}>{t("smartLoading.addCategory")}</Button>
               </div>
-              <div className="mt-3 space-y-3">
+              {effectiveOpenCategories.has(category.category) && <div className="mt-3 space-y-3">
                 {category.products.map((product) => {
                   const stockProduct = products.find((item) => item.productCode === product.productCode);
                   const added = Boolean(additions[product.productCode]);
-                  return (
-                    <article key={product.productCode} className="rounded-md border bg-background/50 p-3">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div>
-                          <p className="font-medium">{product.productName}</p>
-                          <p className="text-xs text-muted-foreground">{product.productCode} {"\u00b7"} {t("smartLoading.productSuggestedQuantity", { value: formatQuantity(product.totalQuantity, locale) })}</p>
-                        </div>
-                        <Button disabled={added || product.totalQuantity <= 0} onClick={() => onAddProducts([product])}>{added ? t("smartLoading.added") : t("smartLoading.addToLoading")}</Button>
-                      </div>
-                      <div className="mt-2 space-y-2 border-t pt-2">
-                        {product.customers.map((customer) => (
-                          <div key={customer.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 text-sm">
-                            <span className="min-w-0 truncate">{customer.customerName}</span>
-                            <Input className="h-8 w-24 text-center" type="number" min="0" step="0.1" value={formatQuantityInput(customer.currentQuantity)} onChange={(event) => onQuantityChange(customer.id, event.target.value)} aria-label={t("smartLoading.customerSuggestedQuantity", { customer: customer.customerName })} />
-                            <Button className="h-8" variant="ghost" size="sm" onClick={() => onRestoreQuantity(customer.id)}>{t("smartLoading.restore")}</Button>
-                          </div>
-                        ))}
-                      </div>
-                      <p className="mt-2 text-xs text-muted-foreground">{stockProduct ? t("smartLoading.vehicleStockQuantity", { value: formatQuantity(stockProduct.currentVehicleStock, locale) }) : t("smartLoading.vehicleStockUnavailable")}</p>
-                    </article>
-                  );
+                  const productId = lostOpportunityProductId(category.category, product.productCode);
+                  return <article key={product.productCode} className="rounded-md border bg-background/50 p-3">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <button type="button" className="min-w-0 text-start" onClick={() => toggleProduct(category.category, product.productCode)} aria-expanded={effectiveOpenProducts.has(productId)}>
+                        <p className="font-medium">{product.productName}</p>
+                        <p className="text-xs text-muted-foreground">{product.productCode} {"\u00b7"} {t("smartLoading.productSuggestedQuantity", { value: formatQuantity(product.totalQuantity, locale) })}</p>
+                      </button>
+                      <Button disabled={added || product.totalQuantity <= 0} onClick={() => onAddProducts([product])}>{added ? t("smartLoading.added") : t("smartLoading.addToLoading")}</Button>
+                    </div>
+                    {effectiveOpenProducts.has(productId) && <div className="mt-2 space-y-2 border-t pt-2">
+                      {product.customers.map((customer) => <div key={customer.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 text-sm">
+                        <span className="min-w-0 truncate">{customer.customerName}</span>
+                        <Input className="h-8 w-24 text-center" type="number" min="0" step="0.1" value={formatQuantityInput(customer.currentQuantity)} onChange={(event) => onQuantityChange(customer.id, event.target.value)} aria-label={t("smartLoading.customerSuggestedQuantity", { customer: customer.customerName })} />
+                        <Button className="h-8" variant="ghost" size="sm" onClick={() => onRestoreQuantity(customer.id)}>{t("smartLoading.restore")}</Button>
+                      </div>)}
+                    </div>}
+                    <p className="mt-2 text-xs text-muted-foreground">{stockProduct ? t("smartLoading.vehicleStockQuantity", { value: formatQuantity(stockProduct.currentVehicleStock, locale) }) : t("smartLoading.vehicleStockUnavailable")}</p>
+                  </article>;
                 })}
-              </div>
-            </section>
-          ))}
+              </div>}
+            </section>;
+          })}
           {warning && <p role="alert" className="rounded-md border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-800">{warning}</p>}
         </CardContent>
       </Card>
