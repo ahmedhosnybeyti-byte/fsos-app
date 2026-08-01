@@ -35,7 +35,7 @@ export class UsersService {
   // Internal use only (login/change-password verification) — includes
   // passwordHash. Never return this object directly from a controller.
   findByEmailWithPassword(email: string, tx: PrismaTx = this.prisma) {
-    return tx.user.findUnique({ where: { email }, include: { role: true } });
+    return tx.user.findUnique({ where: { email }, include: { role: true, company: true } });
   }
 
   findByIdWithPassword(id: string, tx: PrismaTx = this.prisma) {
@@ -51,7 +51,7 @@ export class UsersService {
   }
 
   async createCompanyAdmin(
-    params: { companyId: string; email: string; fullName: string; password: string; whatsapp?: string },
+    params: { companyId: string; email: string; fullName: string; password: string; whatsapp?: string; mustChangePassword?: boolean },
     tx: PrismaTx = this.prisma,
   ) {
     const role = await this.rolesService.findByCode("COMPANY_ADMIN");

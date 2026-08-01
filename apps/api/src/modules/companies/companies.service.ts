@@ -1,12 +1,15 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import * as argon2 from "argon2";
 import { randomBytes } from "node:crypto";
-import type { CompanyStatus, CompanyLifecycleEvent, CompanyAccountType, DiscoveryProvider } from "@field-sales-os/schemas";
+import type { CompanyStatus, CompanyLifecycleEvent, CompanyAccountType, CreatePlatformCompanyInput, DiscoveryProvider } from "@field-sales-os/schemas";
 import { AppConfigService } from "../../common/config/app-config.service";
 import { PrismaService, type PrismaTx, isUniqueConstraintError } from "../../common/prisma";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { PlatformEventsService } from "../governance/platform-events.service";
 import { encryptCredentials, decryptCredentials } from "../data-sources/credential-cipher.util";
 import { OrgUnitsService } from "./org-units.service";
+import { SubscriptionsService } from "../subscriptions/subscriptions.service";
+import { generateTemporaryPassword } from "../auth/temporary-password";
 
 function slugify(name: string): string {
   return (
@@ -92,6 +95,7 @@ export class CompaniesService {
     private readonly orgUnitsService: OrgUnitsService,
     private readonly platformEventsService: PlatformEventsService,
     private readonly appConfig: AppConfigService,
+    private readonly subscriptionsService: SubscriptionsService,
   ) {}
 
   async createCompany(name: string, tx: PrismaTx = this.prisma, accountType?: CompanyAccountType) {
@@ -150,6 +154,35 @@ export class CompaniesService {
     return { company: configured, branch: defaultBranch };
   }
 
+  async createPlatformCompany(input: CreatePlatformCompanyInput, actorUserId: string) {
+    const temporaryPassword = generateTemporaryPassword();
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        const company = await tx.company.create({ data: { name: input.name, slug: input.slug, status: input.initialStatus } });
+        await tx.companyProfile.create({ data: { companyId: company.id } });
+        const region = await this.orgUnitsService.ensureDefaultRegion(company.id, tx);
+        await this.orgUnitsService.create(company.id, { type: "BRANCH", code: "MAIN", name: "Main Branch", parentId: region.id }, tx);
+        const role = await tx.role.findUnique({ where: { code: "COMPANY_ADMIN" } });
+        if (!role) throw new NotFoundException("COMPANY_ADMIN role not found");
+        const admin = await tx.user.create({ data: { companyId: company.id, roleId: role.id, email: input.adminEmail, fullName: input.adminFullName, passwordHash: await argon2.hash(temporaryPassword), mustChangePassword: true }, select: { id: true, email: true, fullName: true, mustChangePassword: true } });
+        const subscription = await this.subscriptionsService.createInitialSubscription(company.id, tx, input.initialPlanCode);
+        await this.auditLogService.record({ companyId: company.id, userId: actorUserId, action: "company.create", entityType: "Company", entityId: company.id, metadata: { after: { name: company.name, slug: company.slug, status: company.status } } }, tx);
+        await this.auditLogService.record({ companyId: company.id, userId: actorUserId, action: "user.create", entityType: "User", entityId: admin.id, metadata: { roleCode: "COMPANY_ADMIN", mustChangePassword: true } }, tx);
+        await this.auditLogService.record({ companyId: company.id, userId: actorUserId, action: "subscription.create", entityType: "Subscription", entityId: subscription.id, metadata: { planCode: subscription.plan.code, status: subscription.status } }, tx);
+        return { company, admin, subscription };
+      });
+      return { ...result, temporaryPassword };
+    } catch (error) {
+      if (isUniqueConstraintError(error, "slug")) throw new ConflictException("Company slug already exists");
+      if (isUniqueConstraintError(error, "email")) throw new ConflictException("An account with this email already exists");
+      throw error;
+    }
+  }
+  async getAdminDetails(companyId: string) {
+    const company = await this.prisma.company.findUnique({ where: { id: companyId }, include: { subscriptions: { include: { plan: true }, orderBy: { createdAt: "desc" } }, users: { select: { id: true, email: true, fullName: true, status: true, mustChangePassword: true, createdAt: true, updatedAt: true, role: true }, orderBy: { createdAt: "asc" } }, payments: { orderBy: { createdAt: "desc" } } } });
+    if (!company) throw new NotFoundException("Company not found");
+    return company;
+  }
   // Validated lifecycle state machine (Phase 2's Draft/Configuring/Active/
   // Suspended/Archived diagram). Every transition is audit-logged via the
   // existing generic AuditLog table — no dedicated lifecycle-event table.
@@ -170,12 +203,15 @@ export class CompaniesService {
     }
 
     const updated = await tx.company.update({ where: { id: companyId }, data: { status: transition.to } });
+    if (transition.to === "SUSPENDED") {
+      await tx.refreshToken.updateMany({ where: { user: { companyId }, revokedAt: null }, data: { revokedAt: new Date() } });
+    }
 
     await this.auditLogService.record(
       {
         companyId,
         userId: actorUserId,
-        action: `company.lifecycle.${event.toLowerCase()}`,
+        action: event === "SUSPEND" ? "company.suspend" : event === "REACTIVATE" ? "company.reactivate" : `company.lifecycle.${event.toLowerCase()}`,
         entityType: "Company",
         entityId: companyId,
         metadata: { from: company.status, to: transition.to },
@@ -217,8 +253,13 @@ export class CompaniesService {
     return { items, total, page, pageSize };
   }
 
-  async update(id: string, data: { name?: string; status?: CompanyStatus }) {
+  async update(id: string, data: { name?: string; slug?: string; status?: CompanyStatus }, actorUserId?: string) {
+    const existing = await this.prisma.company.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException("Company not found");
     const updated = await this.prisma.company.update({ where: { id }, data });
+    if (existing.name !== updated.name || existing.slug !== updated.slug || existing.status !== updated.status) {
+      await this.auditLogService.record({ companyId: id, userId: actorUserId ?? null, action: "company.update", entityType: "Company", entityId: id, metadata: { before: { name: existing.name, slug: existing.slug, status: existing.status }, after: { name: updated.name, slug: updated.slug, status: updated.status } } });
+    }
     await this.platformEventsService.emit("CompanyUpdated", { companyId: id, entityType: "Company", entityId: id });
     return updated;
   }

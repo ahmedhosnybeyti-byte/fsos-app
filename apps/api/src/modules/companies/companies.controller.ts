@@ -2,10 +2,12 @@ import { Body, Controller, ForbiddenException, Get, NotFoundException, Param, Pa
 import { ApiTags } from "@nestjs/swagger";
 import {
   companyLifecycleEventSchema,
+  createPlatformCompanySchema,
   paginationQuerySchema,
   updateCompanySchema,
   updateCompanyProfileSchema,
   type CompanyLifecycleEvent,
+  type CreatePlatformCompanyInput,
   type UpdateCompanyInput,
   type UpdateCompanyProfileInput,
 } from "@field-sales-os/schemas";
@@ -43,6 +45,16 @@ export class CompaniesController {
     return this.companiesService.update(user.companyId, body);
   }
 
+  @Post()
+  @Auth("SUPER_ADMIN")
+  @SkipSubscriptionCheck()
+  createPlatformCompany(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body(new ZodValidationPipe(createPlatformCompanySchema)) body: CreatePlatformCompanyInput,
+  ) {
+    return this.companiesService.createPlatformCompany(body, user.userId);
+  }
+
   @Get()
   @Auth("SUPER_ADMIN")
   @SkipSubscriptionCheck()
@@ -62,11 +74,18 @@ export class CompaniesController {
     return company;
   }
 
+  @Get(":id/details")
+  @Auth("SUPER_ADMIN")
+  @SkipSubscriptionCheck()
+  getAdminDetails(@Param("id") id: string) {
+    return this.companiesService.getAdminDetails(id);
+  }
+
   @Patch(":id")
   @Auth("SUPER_ADMIN")
   @SkipSubscriptionCheck()
-  update(@Param("id") id: string, @Body(new ZodValidationPipe(updateCompanySchema)) body: UpdateCompanyInput) {
-    return this.companiesService.update(id, body);
+  update(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Body(new ZodValidationPipe(updateCompanySchema)) body: UpdateCompanyInput) {
+    return this.companiesService.update(id, body, user.userId);
   }
 
   // --- Phase 2: Company Profile (editable identity, distinct from the

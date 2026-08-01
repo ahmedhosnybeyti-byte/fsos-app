@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import * as argon2 from "argon2";
-import { randomBytes } from "node:crypto";
+import { generateTemporaryPassword } from "./temporary-password";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import type { LoginInput, RegisterInput } from "@field-sales-os/schemas";
 import { PrismaService } from "../../common/prisma";
@@ -9,29 +9,6 @@ import { UsersService } from "../users/users.service";
 import { SubscriptionsService } from "../subscriptions/subscriptions.service";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { TokensService, type RefreshTokenMeta } from "./tokens.service";
-
-// Admin-issued temporary passwords are random, not memorable — the admin
-// relays this string to the user out-of-band exactly once; it is never
-// logged or stored in plaintext anywhere. Built to satisfy PASSWORD_POLICY
-// (upper/lower/digit/special, min length 10) by construction rather than
-// generating-and-retrying against passwordSchema.
-function generateTemporaryPassword(): string {
-  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
-  const lower = "abcdefghijkmnpqrstuvwxyz";
-  const digits = "23456789";
-  const special = "!@#$%^&*";
-  const pick = (chars: string) => chars[randomBytes(1).readUInt8(0) % chars.length];
-
-  const chars = [pick(upper), pick(lower), pick(digits), pick(special)];
-  const fillerPool = upper + lower + digits + special;
-  for (let i = 0; i < 8; i++) chars.push(pick(fillerPool));
-
-  for (let i = chars.length - 1; i > 0; i--) {
-    const j = randomBytes(1).readUInt8(0) % (i + 1);
-    [chars[i], chars[j]] = [chars[j], chars[i]];
-  }
-  return chars.join("");
-}
 
 @Injectable()
 export class AuthService {
@@ -83,7 +60,7 @@ export class AuthService {
     // Active, or the password was wrong — the response message stays
     // identical in all three cases so the log (not the API) is where this
     // distinction lives.
-    if (!user || user.status !== "ACTIVE") {
+    if (!user || user.status !== "ACTIVE" || (user.company && user.company.status !== "ACTIVE")) {
       await this.auditLogService.record({
         companyId: user?.companyId ?? null,
         userId: user?.id ?? null,

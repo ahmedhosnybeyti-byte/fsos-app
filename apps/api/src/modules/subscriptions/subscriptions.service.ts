@@ -22,9 +22,9 @@ export class SubscriptionsService {
   //     (SUSPENDED) until a SUPER_ADMIN activates it or a future payment
   //     flow does. Reuses the existing status rather than inventing one.
   // Composable inside AuthService's registration transaction via `tx`.
-  async createInitialSubscription(companyId: string, tx: PrismaTx = this.prisma) {
+  async createInitialSubscription(companyId: string, tx: PrismaTx = this.prisma, planCode?: string) {
     const settings = await this.platformSettingsService.get();
-    const plan = await this.plansService.findByCodeOrThrow(settings.defaultPlanCode);
+    const plan = await this.plansService.findByCodeOrThrow(planCode ?? settings.defaultPlanCode);
     const willAutoStartTrial = settings.trialEnabled && settings.autoStartTrialOnRegistration;
 
     if (willAutoStartTrial) {

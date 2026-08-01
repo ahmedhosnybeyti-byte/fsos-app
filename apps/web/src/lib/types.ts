@@ -43,6 +43,11 @@ export interface User {
   permissions?: string[];
 }
 
+export interface AdminCompanyDetails extends Company {
+  users: User[];
+  subscriptions: Subscription[];
+  payments: Payment[];
+}
 export interface Company {
   id: string;
   name: string;
