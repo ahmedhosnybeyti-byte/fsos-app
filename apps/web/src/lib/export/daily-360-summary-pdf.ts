@@ -1,237 +1,139 @@
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
 import type { VisitCopilot360Summary } from "@/lib/types";
 
-// "تصدير PDF" (2026-07-28) — Arabic RTL PDF replica of the on-screen
-// "ملخص اليوم 360°" report. Mirrors the exact html2canvas + jspdf pattern
-// already established for Geo Intelligence Engine's Export PDF (see
-// components/geo-engine/executive-tools.tsx) — dynamic-imported on click
-// only, kept out of the SSR bundle, same as every other xlsx/pptx/pdf
-// export in this app. Unlike that single-viewport capture, this report can
-// be much taller than one page, so the captured canvas is sliced into
-// multiple A4 pages here (still just one long screenshot, not real
-// selectable PDF text — a deliberate, honest trade-off: the reference
-// screenshots this feature must visually match are themselves images, and
-// building a fully independent PDF text layout would risk drifting from
-// the on-screen version, which the product requirement explicitly forbids
-// — "نسخة … من نفس التقرير الظاهر").
-//
-// No new data: the PDF renders the exact DOM node the modal already built
-// from the same VisitCopilot360Summary the user is looking at — same
-// permissions, same hierarchy-scoped numbers, zero extra network calls.
 export type Daily360PdfCaptureDimensions = { width: number; height: number };
+
+const EXPORT_PAGE_WIDTH = 900;
+const EXPORT_PAGE_HEIGHT = 1_200;
 
 export function getDaily360PdfCaptureDimensions(element: Pick<HTMLElement, "scrollWidth" | "scrollHeight" | "getBoundingClientRect">): Daily360PdfCaptureDimensions {
   const rect = element.getBoundingClientRect();
   const width = Math.ceil(Math.max(rect.width, element.scrollWidth));
   const height = Math.ceil(Math.max(rect.height, element.scrollHeight));
-  if (width < 1 || height < 1) throw new Error("Daily 360 report has no visible size to export");
+  if (width < 1 || height < 1) throw new Error("Daily 360 report has no measurable content to export");
   return { width, height };
+}
+
+export function getDaily360PdfPageSlices(totalHeight: number, pageHeight = EXPORT_PAGE_HEIGHT): Array<{ y: number; height: number }> {
+  if (totalHeight < 1 || pageHeight < 1) throw new Error("Daily 360 PDF page dimensions are invalid");
+  const slices: Array<{ y: number; height: number }> = [];
+  for (let y = 0; y < totalHeight; y += pageHeight) slices.push({ y, height: Math.min(pageHeight, totalHeight - y) });
+  return slices;
 }
 
 export function assertDaily360PdfCanvas(canvas: Pick<HTMLCanvasElement, "width" | "height" | "toDataURL">): string {
   if (canvas.width < 1 || canvas.height < 1) throw new Error("Daily 360 export canvas is empty");
   const image = canvas.toDataURL("image/png");
-  // A PNG data URL below this threshold is the empty-canvas signature in browsers.
   if (!image.startsWith("data:image/png;base64,") || image.length < 1_000) throw new Error("Daily 360 export image is empty");
   return image;
+}
+
+function buildDaily360ExportClone(source: HTMLElement): HTMLElement {
+  const clone = source.cloneNode(true) as HTMLElement;
+  clone.id = "daily-360-summary-export-clone";
+  clone.setAttribute("data-daily-360-export", "true");
+  clone.removeAttribute("class");
+  clone.removeAttribute("style");
+  clone.dir = source.closest("[dir]")?.getAttribute("dir") ?? (document.documentElement.dir || "ltr");
+  clone.style.cssText = [
+    "position:absolute", "left:-100000px", "top:0", `width:${EXPORT_PAGE_WIDTH}px`, "height:auto", "min-height:1px",
+    "display:block", "visibility:visible", "overflow:visible", "box-sizing:border-box", "padding:24px",
+    "background:#fffdf8", "color:#14304d", "font-family:Tahoma, Arial, sans-serif", "line-height:1.5", "z-index:-1",
+  ].join(";");
+
+  for (const element of Array.from(clone.querySelectorAll<HTMLElement>("*"))) {
+    element.removeAttribute("class");
+    element.removeAttribute("style");
+    element.style.boxSizing = "border-box";
+    element.style.color = "#14304d";
+    element.style.backgroundColor = "transparent";
+    element.style.borderColor = "#cbd5e1";
+    element.style.fontFamily = "Tahoma, Arial, sans-serif";
+    element.style.backdropFilter = "none";
+    element.style.boxShadow = "none";
+  }
+
+  for (const icon of Array.from(clone.querySelectorAll("svg, script, style"))) icon.remove();
+  for (const element of Array.from(clone.querySelectorAll<HTMLElement>("section, article, header, div, table"))) {
+    element.style.display = element.tagName === "TABLE" ? "table" : "block";
+    element.style.width = "100%";
+  }
+  for (const element of Array.from(clone.querySelectorAll<HTMLElement>("section, article"))) {
+    element.style.marginBottom = "14px";
+    element.style.padding = "14px";
+    element.style.border = "1px solid #bcd4ec";
+    element.style.borderRadius = "8px";
+    element.style.backgroundColor = "#eef4fb";
+  }
+  for (const element of Array.from(clone.querySelectorAll<HTMLElement>("button, details, summary"))) {
+    element.style.display = "block";
+    element.style.width = "100%";
+    element.style.padding = "8px 0";
+    element.style.border = "0";
+    element.style.backgroundColor = "transparent";
+    element.style.textAlign = clone.dir === "rtl" ? "right" : "left";
+  }
+  for (const element of Array.from(clone.querySelectorAll<HTMLElement>("p, li, td, th, span"))) element.style.margin = "0 0 6px";
+  return clone;
+}
+
+async function waitForDaily360ExportRender(): Promise<void> {
+  await document.fonts?.ready;
+  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
 }
 
 export async function exportDaily360SummaryPdf(
   summary: VisitCopilot360Summary,
   t: (key: TranslationKey, params?: Record<string, string | number>) => string,
 ): Promise<void> {
-  const root = document.getElementById("daily-360-summary-print-root");
-  if (!root) throw new Error("daily-360-summary-print-root not found");
-
-  const html2canvas = (await import("html2canvas")).default;
-  const { jsPDF } = await import("jspdf");
-
-  // Capture only the scrollable report body, not the whole (viewport-
-  // clipped) modal shell — otherwise we'd only ever get whatever fit on
-  // screen. Selector kept in lockstep with the modal's own body div
-  // className (see daily-360-summary-modal.tsx) — it drifted out of sync
-  // once (still said "flex-1" after the modal moved to a CSS grid layout),
-  // which silently fell back to capturing the whole root including the
-  // header. Falls back to `root` only if the selector ever mismatches
-  // again, so this never hard-fails just because of a className rename.
-  const scrollBody = root.querySelector<HTMLElement>(".min-h-0.overflow-y-auto");
-  const captureTarget = scrollBody ?? root;
-  const captureSize = getDaily360PdfCaptureDimensions(captureTarget);
-  console.info("[daily-360-summary] PDF export: captureTarget=", captureTarget === root ? "root (fallback)" : "scrollBody", "size=", captureSize);
-
-  // html2canvas (v1.4.1) parses every CSS rule itself rather than asking the
-  // browser to resolve it, and doesn't understand modern color syntax like
-  // `color-mix(...)` (used by .crystal-badge's box-shadow — see
-  // globals.css). Left alone this throws "Attempting to parse an
-  // unsupported color function 'color'" and aborts the whole capture before
-  // a single pixel is drawn (confirmed via Console during 2026-07-29
-  // debugging — every attempt failed at exactly this point, never a canvas
-  // size mismatch or a jsPDF issue). Fix is scoped to the export path only:
-  // temporarily swap each affected element's inline box-shadow to a
-  // plain rgba() equivalent (same visual ring, but a syntax html2canvas can
-  // parse), capture, then restore the original inline style so the live
-  // on-screen design is untouched.
-  const colorMixNodes = Array.from(captureTarget.querySelectorAll<HTMLElement>(".crystal-badge"));
-  const restoreBoxShadow: Array<() => void> = [];
-  for (const node of colorMixNodes) {
-    const prevInline = node.style.boxShadow;
-    node.style.boxShadow = "inset 0 0 0 1px rgba(255, 255, 255, 0.35)";
-    restoreBoxShadow.push(() => {
-      node.style.boxShadow = prevInline;
-    });
-  }
-
-  // 2026-07-29 (explicit feedback after the first successful export): the
-  // live "Crystal AI" glass surfaces (.glass-card, secondary Badge pills,
-  // bg-background/60 sub-boxes) are theme-aware — translucent dark glass
-  // with light text in the app's dark theme. html2canvas captures against
-  // a forced white page background, which flattens that translucency into
-  // solid dark-gray boxes while the text stays light, so large parts of
-  // the PDF became illegible ("النص غاطس"). Product decision: not a color
-  // bug to patch defensively — the PDF gets its own deliberate palette, a
-  // warm-orange / cool-blue high-contrast identity distinct from the live
-  // in-app theme ("ألوان مبهرة وذات وقار … البرتقالي مع الأزرق الثلجي").
-  //
-  // Applied by walking the DOM and setting inline styles directly (same
-  // restore-after pattern as the crystal-badge fix above) rather than a
-  // class-selector stylesheet — Tailwind's generated class order/escaping
-  // isn't a stable target to select against, and html2canvas resolves
-  // computed style per element anyway, so inline styles are both simpler
-  // and more reliable here. Every group below is reverted in `finally`.
-  const pdfColorRestores: Array<() => void> = [];
-  function paintForExport(el: HTMLElement, styles: Partial<CSSStyleDeclaration>) {
-    const prev: Partial<CSSStyleDeclaration> = {};
-    for (const key of Object.keys(styles) as Array<keyof CSSStyleDeclaration>) {
-      (prev as Record<string, string>)[key as string] = el.style[key] as string;
-      (el.style as unknown as Record<string, string>)[key as string] = styles[key] as string;
-    }
-    pdfColorRestores.push(() => {
-      for (const key of Object.keys(prev) as Array<keyof CSSStyleDeclaration>) {
-        (el.style as unknown as Record<string, string>)[key as string] = prev[key] as string;
-      }
-    });
-  }
-
-  const PDF_INK = "#14304d"; // primary text — deep navy, strong contrast on white
-  const PDF_MUTED_INK = "#3d6690"; // secondary/meta text — cool blue, still easily readable
-  const PDF_CARD_BG = "#eef4fb"; // section cards — pale ice-blue instead of translucent dark glass
-  const PDF_CARD_BORDER = "#bcd4ec";
-  const PDF_SUBBOX_BORDER = "#dbe6f2";
-  const PDF_BADGE_BG = "#fff1e6"; // pill badges — warm pale orange
-  const PDF_BADGE_BORDER = "#f3b988";
-  const PDF_BADGE_INK = "#9a4a12";
-
-  // Header hero — the one deliberately bold moment: a warm-orange to
-  // cool-blue diagonal gradient with white text, "مبهر وذو وقار" instead
-  // of a flat single color.
-  const heroEl = captureTarget.querySelector<HTMLElement>(".glass-hero");
-  if (heroEl) {
-    paintForExport(heroEl, {
-      background: "linear-gradient(135deg, #ffb066, #2f7fd6)",
-      border: "none",
-      boxShadow: "none",
-    });
-    const heroAurora = heroEl.querySelector<HTMLElement>(".hero-aurora");
-    if (heroAurora) paintForExport(heroAurora, { display: "none" });
-    for (const node of Array.from(heroEl.querySelectorAll<HTMLElement>("*"))) {
-      paintForExport(node, { color: "#ffffff" });
-    }
-    paintForExport(heroEl, { color: "#ffffff" });
-  }
-
-  // Section cards + the "top issue" glow box — pale ice-blue card, no
-  // translucency/blur (meaningless once flattened onto a white capture).
-  for (const node of Array.from(captureTarget.querySelectorAll<HTMLElement>(".glass-card, .glow-ai"))) {
-    paintForExport(node, {
-      background: PDF_CARD_BG,
-      border: `1px solid ${PDF_CARD_BORDER}`,
-      boxShadow: "none",
-      backdropFilter: "none",
-    });
-  }
-
-  // Nested sub-boxes (diagnosis/decision text blocks) — plain white with a
-  // faint border so they read as a distinct inset, not another dark panel.
-  for (const node of Array.from(captureTarget.querySelectorAll<HTMLElement>(".bg-background\\/60"))) {
-    paintForExport(node, { background: "#ffffff", border: `1px solid ${PDF_SUBBOX_BORDER}` });
-  }
-
-  // Every text node color — deep navy by default, cool-blue for the
-  // existing "muted" meta text, both far above WCAG contrast on white
-  // (unlike the flattened dark-glass-plus-light-text combination the bug
-  // report was about).
-  for (const node of Array.from(captureTarget.querySelectorAll<HTMLElement>("h3, p, span, li, td, th"))) {
-    paintForExport(node, { color: PDF_INK });
-  }
-  for (const node of Array.from(captureTarget.querySelectorAll<HTMLElement>(".text-muted-foreground"))) {
-    paintForExport(node, { color: PDF_MUTED_INK });
-  }
-
-  // Badge pills (declined-value / stopped-product / priority-debtor tags)
-  // — warm pale-orange, matching the "برتقالي" half of the requested
-  // palette, legible regardless of which Badge `variant` was used live.
-  for (const node of Array.from(captureTarget.querySelectorAll<HTMLElement>(".rounded-full.border"))) {
-    paintForExport(node, {
-      background: PDF_BADGE_BG,
-      border: `1px solid ${PDF_BADGE_BORDER}`,
-      color: PDF_BADGE_INK,
-    });
-  }
-
-  let canvas: HTMLCanvasElement;
+  let phase = "locate report";
+  let clone: HTMLElement | null = null;
   try {
-    canvas = await html2canvas(captureTarget, {
-      useCORS: true,
-      backgroundColor: "#ffffff",
-      scale: 2,
-      // Capture the full scrollable content, not just the visible clipped
-      // viewport — html2canvas otherwise only rasterizes what's on screen.
-      width: captureSize.width,
-      height: captureSize.height,
-      windowWidth: captureSize.width,
-      windowHeight: captureSize.height,
-    });
+    const root = document.getElementById("daily-360-summary-print-root");
+    if (!root) throw new Error("daily-360-summary-print-root not found");
+
+    phase = "build safe export document";
+    clone = buildDaily360ExportClone(root);
+    document.body.appendChild(clone);
+    await waitForDaily360ExportRender();
+    const captureSize = getDaily360PdfCaptureDimensions(clone);
+
+    phase = "load PDF renderer";
+    const html2canvas = (await import("html2canvas")).default;
+    const { jsPDF } = await import("jspdf");
+    const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const pageHeightCss = Math.max(1, Math.floor((pageHeight * captureSize.width) / pageWidth));
+    const slices = getDaily360PdfPageSlices(captureSize.height, pageHeightCss);
+
+    for (const [index, slice] of slices.entries()) {
+      phase = `render page ${index + 1} of ${slices.length}`;
+      const canvas = await html2canvas(clone, {
+        backgroundColor: "#fffdf8",
+        height: slice.height,
+        logging: false,
+        scale: 2,
+        useCORS: true,
+        width: captureSize.width,
+        windowHeight: slice.height,
+        windowWidth: captureSize.width,
+        x: 0,
+        y: slice.y,
+      });
+      const image = assertDaily360PdfCanvas(canvas);
+      if (index > 0) pdf.addPage();
+      pdf.addImage(image, "PNG", 0, 0, pageWidth, (slice.height * pageWidth) / captureSize.width);
+    }
+
+    phase = "save PDF";
+    pdf.save(`daily-360-summary-${summary.reportDate}.pdf`);
+    void t;
+  } catch (error) {
+    const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+    console.error("[daily-360-summary] PDF export failed", { phase, detail, error });
+    throw new Error(`Daily 360 PDF export failed during ${phase}: ${detail}`);
   } finally {
-    for (const restore of restoreBoxShadow) restore();
-    for (const restore of pdfColorRestores) restore();
+    clone?.remove();
   }
-  assertDaily360PdfCanvas(canvas);
-  console.info("[daily-360-summary] PDF export: canvas captured", canvas.width, "x", canvas.height);
-
-  const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
-  const pageWidth = pdf.internal.pageSize.getWidth();
-  const pageHeight = pdf.internal.pageSize.getHeight();
-
-  const imgWidthPt = pageWidth;
-
-  // Slice the tall canvas into page-height chunks and add one jsPDF page per
-  // chunk — a plain scaled single addImage would otherwise stretch/crop a
-  // multi-page report onto a single A4 sheet.
-  const pageHeightPx = (pageHeight * canvas.width) / imgWidthPt;
-  let renderedHeightPx = 0;
-  let pageIndex = 0;
-
-  while (renderedHeightPx < canvas.height) {
-    const sliceHeightPx = Math.min(pageHeightPx, canvas.height - renderedHeightPx);
-    const pageCanvas = document.createElement("canvas");
-    pageCanvas.width = canvas.width;
-    pageCanvas.height = sliceHeightPx;
-    const ctx = pageCanvas.getContext("2d");
-    if (!ctx) break;
-    ctx.drawImage(canvas, 0, renderedHeightPx, canvas.width, sliceHeightPx, 0, 0, canvas.width, sliceHeightPx);
-
-    if (pageIndex > 0) pdf.addPage();
-    const sliceHeightPt = (sliceHeightPx * imgWidthPt) / canvas.width;
-    const pageImage = pageCanvas.toDataURL("image/png");
-    if (!pageImage.startsWith("data:image/png;base64,") || pageImage.length < 1_000) throw new Error("Daily 360 PDF page image is empty");
-    pdf.addImage(pageImage, "PNG", 0, 0, imgWidthPt, sliceHeightPt);
-
-    renderedHeightPx += sliceHeightPx;
-    pageIndex += 1;
-  }
-
-  void t; // reserved for a future filename/localized-metadata pass
-
-  console.info("[daily-360-summary] PDF export: saving", pageIndex, "page(s)");
-  pdf.save(`daily-360-summary-${summary.reportDate}.pdf`);
 }
