@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { LayoutDashboard, FileSpreadsheet, FileText, Sparkles, Users, Settings, Map, Flame, UserPlus, GitCompare, Bot, TrendingUp, Users2, Footprints, Target, LocateFixed, IdCard, Compass, MapPinned, BarChart3, Globe2, PackagePlus } from "lucide-react";
+import { LayoutDashboard, FileSpreadsheet, FileText, Sparkles, Users, Settings, Map, Flame, UserPlus, GitCompare, Bot, TrendingUp, Users2, Footprints, Target, LocateFixed, IdCard, Compass, MapPinned, BarChart3, Globe2, PackagePlus, CircleUserRound } from "lucide-react";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { AppShell, type NavItem } from "@/components/shell/app-shell";
 import { useTranslation } from "@/components/translation-provider";
@@ -143,6 +143,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     ...(user.role.code === "COMPANY_ADMIN"
       ? [{ href: "/dashboard/settings", label: t("nav.settings"), icon: Settings, colorKey: "settings" as const, group: t("group.system") }]
       : []),
+    { href: "/account", label: t("nav.account"), icon: CircleUserRound, colorKey: "settings", group: t("group.system") },
   ];
 
   return (

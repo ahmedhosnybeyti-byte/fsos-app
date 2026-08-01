@@ -9,12 +9,14 @@ import {
   ShieldCheck,
   BarChart3,
   Settings,
+  CircleUserRound,
 } from "lucide-react";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { AppShell, type NavItem } from "@/components/shell/app-shell";
+import { useTranslation } from "@/components/translation-provider";
 import { Spinner } from "@/components/ui/spinner";
 
-const navItems: NavItem[] = [
+const adminNavItems: NavItem[] = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/users", label: "Users", icon: Users },
   { href: "/admin/companies", label: "Companies", icon: Building2 },
@@ -27,6 +29,8 @@ const navItems: NavItem[] = [
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useRequireAuth(["SUPER_ADMIN"]);
+  const { t } = useTranslation();
+  const navItems: NavItem[] = [...adminNavItems, { href: "/account", label: t("nav.account"), icon: CircleUserRound }];
 
   if (isLoading || !user) {
     return (

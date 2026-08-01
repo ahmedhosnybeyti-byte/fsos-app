@@ -7,11 +7,9 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Database, Settings as SettingsIcon, CreditCard } from "lucide-react";
 import { toast } from "sonner";
 import {
-  changePasswordSchema,
   configureGptSchema,
   COMPANY_POLICY_TYPES,
   createDataSourceSchema,
-  type ChangePasswordInput,
   type CompanyPolicyType,
   type ConfigureGptInput,
   type CreateBranchInput,
@@ -19,7 +17,6 @@ import {
   type DataSourceStatus,
 } from "@field-sales-os/schemas";
 import {
-  authApi,
   branchesApi,
   companiesApi,
   companyPoliciesApi,
@@ -44,6 +41,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Spinner } from "@/components/ui/spinner";
+import { AccountSecurityForm } from "@/components/account/account-security-form";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { cn, formatDate, formatMoneyCents } from "@/lib/utils";
 import { useTranslation } from "@/components/translation-provider";
@@ -1106,51 +1104,7 @@ function PoliciesTab() {
 }
 
 function AccountTab() {
-  const { t } = useTranslation();
-  const {
-    register,
-    handleSubmit,
-    reset,
-    formState: { errors },
-  } = useForm<ChangePasswordInput>({ resolver: zodResolver(changePasswordSchema) });
-
-  const mutation = useMutation({
-    mutationFn: (values: ChangePasswordInput) => authApi.changePassword(values),
-    onSuccess: () => {
-      toast.success(t("settings.changePasswordSuccess"));
-      reset();
-    },
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : t("settings.changePasswordError")),
-  });
-
-  return (
-    <div className="glass-card mt-4">
-      <CardHeader>
-        <CardTitle>{t("settings.changePasswordTitle")}</CardTitle>
-        <CardDescription>{t("settings.changePasswordDescription")}</CardDescription>
-      </CardHeader>
-      <form onSubmit={handleSubmit((values) => mutation.mutate(values))}>
-        <CardContent className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="currentPassword">{t("settings.currentPasswordLabel")}</Label>
-            <Input id="currentPassword" type="password" {...register("currentPassword")} />
-            {errors.currentPassword && <p className="text-xs text-destructive">{errors.currentPassword.message}</p>}
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="newPassword">{t("settings.newPasswordLabel")}</Label>
-            <Input id="newPassword" type="password" {...register("newPassword")} />
-            {errors.newPassword && <p className="text-xs text-destructive">{errors.newPassword.message}</p>}
-          </div>
-        </CardContent>
-        <CardContent className="pt-0">
-          <Button type="submit" disabled={mutation.isPending}>
-            {mutation.isPending && <Spinner />}
-            {t("settings.changePasswordTitle")}
-          </Button>
-        </CardContent>
-      </form>
-    </div>
-  );
+  return <AccountSecurityForm />;
 }
 
 function GptTab() {

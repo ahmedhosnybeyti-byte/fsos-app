@@ -40,6 +40,32 @@ export type TranslationKey =
   | "nav.team"
   | "nav.employees"
   | "nav.settings"
+  | "nav.account"
+  | "account.title"
+  | "account.subtitle"
+  | "account.profileTitle"
+  | "account.name"
+  | "account.email"
+  | "account.role"
+  | "account.company"
+  | "account.companyUnavailable"
+  | "account.noCompany"
+  | "account.passwordTitle"
+  | "account.passwordDescription"
+  | "account.currentPassword"
+  | "account.newPassword"
+  | "account.confirmNewPassword"
+  | "account.showPassword"
+  | "account.hidePassword"
+  | "account.currentPasswordRequired"
+  | "account.passwordRequirements"
+  | "account.passwordMismatch"
+  | "account.passwordReuseError"
+  | "account.currentPasswordIncorrect"
+  | "account.passwordChangeSuccess"
+  | "account.passwordChangeError"
+  | "account.changePassword"
+  | "account.loggingOut"
   | "territoryIntelligence.title"
   | "territoryIntelligence.subtitle"
   | "territoryIntelligence.libraryTitle"
@@ -1287,6 +1313,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "nav.team": "الفريق",
     "nav.employees": "الموظفون",
     "nav.settings": "الإعدادات",
+    "nav.account": "الحساب",
     "territoryIntelligence.title": "ذكاء الأقاليم",
     "territoryIntelligence.subtitle": "مش خريطة بس — كل إقليم بيقولك مشكلته، السبب، والقرار المناسب.",
     "territoryIntelligence.libraryTitle": "مكتبة الذكاء",
@@ -2088,6 +2115,31 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "settings.newPasswordLabel": "كلمة المرور الجديدة",
     "settings.changePasswordSuccess": "تم تغيير كلمة المرور. هيتم تسجيل خروجك من باقي الأجهزة.",
     "settings.changePasswordError": "تعذر تغيير كلمة المرور",
+    "account.title": "الحساب والأمان",
+    "account.subtitle": "راجع بيانات حسابك وأدِر كلمة المرور بأمان.",
+    "account.profileTitle": "معلومات الحساب",
+    "account.name": "الاسم",
+    "account.email": "البريد الإلكتروني",
+    "account.role": "الدور",
+    "account.company": "الشركة",
+    "account.companyUnavailable": "تعذر تحميل الشركة",
+    "account.noCompany": "لا توجد شركة مرتبطة",
+    "account.passwordTitle": "تغيير كلمة المرور",
+    "account.passwordDescription": "بعد التغيير سيتم تسجيل خروجك من هذا الجهاز وجميع الأجهزة الأخرى.",
+    "account.currentPassword": "كلمة المرور الحالية",
+    "account.newPassword": "كلمة المرور الجديدة",
+    "account.confirmNewPassword": "تأكيد كلمة المرور الجديدة",
+    "account.showPassword": "إظهار كلمة المرور",
+    "account.hidePassword": "إخفاء كلمة المرور",
+    "account.currentPasswordRequired": "أدخل كلمة المرور الحالية.",
+    "account.passwordRequirements": "يجب أن تتوافق كلمة المرور مع سياسة القوة المطلوبة.",
+    "account.passwordMismatch": "تأكيد كلمة المرور لا يطابق كلمة المرور الجديدة.",
+    "account.passwordReuseError": "يجب أن تختلف كلمة المرور الجديدة عن كلمة المرور الحالية.",
+    "account.currentPasswordIncorrect": "كلمة المرور الحالية غير صحيحة.",
+    "account.passwordChangeSuccess": "تم تغيير كلمة المرور. جارٍ تسجيل الخروج.",
+    "account.passwordChangeError": "تعذر تغيير كلمة المرور. حاول مرة أخرى.",
+    "account.changePassword": "تغيير كلمة المرور",
+    "account.loggingOut": "جارٍ تسجيل الخروج…",
     "settings.gptSettingsTitle": "إعدادات GPT",
     "settings.gptSettingsDescription":
       "الاسم ومفتاح الـ API المستخدمين في التحقق من الـ Action. رابط الـ Custom GPT نفسه بيحدده Super Admin على مستوى المنصة كلها.",
@@ -2546,6 +2598,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "nav.team": "Team",
     "nav.employees": "Employees",
     "nav.settings": "Settings",
+    "nav.account": "Account",
     "territoryIntelligence.title": "Territory Intelligence",
     "territoryIntelligence.subtitle": "Not just a map — every territory tells you the problem, the why, and the right decision.",
     "territoryIntelligence.libraryTitle": "Intelligence Library",
@@ -3348,6 +3401,31 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "settings.newPasswordLabel": "New Password",
     "settings.changePasswordSuccess": "Password changed. You'll be signed out of your other devices.",
     "settings.changePasswordError": "Failed to change password",
+    "account.title": "Account & Security",
+    "account.subtitle": "Review your account details and manage your password securely.",
+    "account.profileTitle": "Account Information",
+    "account.name": "Name",
+    "account.email": "Email",
+    "account.role": "Role",
+    "account.company": "Company",
+    "account.companyUnavailable": "Company could not be loaded",
+    "account.noCompany": "No company is linked",
+    "account.passwordTitle": "Change Password",
+    "account.passwordDescription": "After changing it, you will be signed out from this device and all other devices.",
+    "account.currentPassword": "Current Password",
+    "account.newPassword": "New Password",
+    "account.confirmNewPassword": "Confirm New Password",
+    "account.showPassword": "Show password",
+    "account.hidePassword": "Hide password",
+    "account.currentPasswordRequired": "Enter your current password.",
+    "account.passwordRequirements": "Your new password must meet the required strength policy.",
+    "account.passwordMismatch": "Password confirmation does not match the new password.",
+    "account.passwordReuseError": "Your new password must be different from your current password.",
+    "account.currentPasswordIncorrect": "Your current password is incorrect.",
+    "account.passwordChangeSuccess": "Password changed. Signing you out now.",
+    "account.passwordChangeError": "Could not change your password. Please try again.",
+    "account.changePassword": "Change Password",
+    "account.loggingOut": "Signing out…",
     "settings.gptSettingsTitle": "GPT Settings",
     "settings.gptSettingsDescription":
       "The name and API key used to authenticate the Action. The Custom GPT's link itself is set by the Super Admin at the platform level.",

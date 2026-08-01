@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, UnauthorizedException } from "@nestjs/common";
 import * as argon2 from "argon2";
 import { randomBytes } from "node:crypto";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
@@ -119,6 +119,14 @@ export class AuthService {
 
     const currentValid = await argon2.verify(user.passwordHash, currentPassword);
     if (!currentValid) throw new UnauthorizedException("Current password is incorrect");
+
+    if (await argon2.verify(user.passwordHash, newPassword)) {
+      throw new BadRequestException({
+        code: "PASSWORD_REUSE_NOT_ALLOWED",
+        message: "New password must be different from your current password",
+        messageAr: "يجب أن تختلف كلمة المرور الجديدة عن كلمة المرور الحالية",
+      });
+    }
 
     await this.usersService.setPasswordHash(userId, await argon2.hash(newPassword), false);
     await this.tokensService.revokeAllForUser(userId);
