@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { ShieldCheck, UserRound } from "lucide-react";
 import { AccountSecurityForm } from "@/components/account/account-security-form";
+import { AccountEmailForm } from "@/components/account/account-email-form";
 import { useTranslation } from "@/components/translation-provider";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
@@ -66,6 +67,7 @@ export default function AccountPage() {
       </Card>
 
       <AccountSecurityForm />
+      <AccountEmailForm />
     </main>
   );
 }

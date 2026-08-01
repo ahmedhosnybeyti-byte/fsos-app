@@ -5,13 +5,17 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function formatDate(value: string | Date): string {
-  const date = typeof value === "string" ? new Date(value) : value;
-  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+function activeLocale() {
+  return typeof document !== "undefined" && document.documentElement.lang === "ar" ? "ar-SA" : "en-US";
 }
 
-export function formatMoneyCents(cents: number, currency = "USD"): string {
-  return new Intl.NumberFormat(undefined, { style: "currency", currency }).format(cents / 100);
+export function formatDate(value: string | Date, locale = activeLocale()): string {
+  const date = typeof value === "string" ? new Date(value) : value;
+  return new Intl.DateTimeFormat(locale, { year: "numeric", month: "short", day: "numeric" }).format(date);
+}
+
+export function formatMoneyCents(cents: number, currency = "USD", locale = activeLocale()): string {
+  return new Intl.NumberFormat(locale, { style: "currency", currency }).format(cents / 100);
 }
 
 const quantityFormatters = {

@@ -7,6 +7,7 @@ import { PrismaModule } from "./common/prisma";
 import { HealthModule } from "./modules/health/health.module";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
+import { PermissionsGuard } from "./common/guards/permissions.guard";
 import { SubscriptionActiveGuard } from "./common/guards/subscription-active.guard";
 import { RequiresPaidPlanGuard } from "./common/guards/requires-paid-plan.guard";
 import { AuthModule } from "./modules/auth/auth.module";
@@ -100,6 +101,7 @@ import { SmartLoadingModule } from "./modules/smart-loading/smart-loading.module
     // two guards then see no req.user and simply allow (nothing to check).
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_GUARD, useClass: SubscriptionActiveGuard },
     // Opt-in: only routes marked @RequiresPaidPlan() are affected — narrows
     // "TRIAL or ACTIVE" (above) to "ACTIVE only" for spend-triggering or

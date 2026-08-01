@@ -1,6 +1,10 @@
-import { Controller, Get } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
+import type { RoleCode } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
+import { CurrentUser } from "../../common/decorators/current-user.decorator";
+import { Permissions } from "../../common/decorators/permissions.decorator";
+import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RolesService } from "./roles.service";
 
 @ApiTags("roles")
@@ -8,19 +12,20 @@ import { RolesService } from "./roles.service";
 export class RolesController {
   constructor(private readonly rolesService: RolesService) {}
 
-  // Non-SUPER_ADMIN roles only — used to populate the "assign role" dropdown
-  // when a Company Admin creates a user. Companies never see/assign SUPER_ADMIN.
   @Get()
   @Auth("COMPANY_ADMIN", "SUPER_ADMIN")
-  async list() {
-    const roles = await this.rolesService.list();
-    return roles.filter((r) => r.code !== "SUPER_ADMIN");
-  }
+  @Permissions("users.view")
+  async list() { return (await this.rolesService.list()).filter((role) => role.code !== "SUPER_ADMIN"); }
 
-  // Read-only role -> permissions matrix for the platform Access Control page.
   @Get("permissions-matrix")
   @Auth("SUPER_ADMIN")
-  permissionsMatrix() {
-    return this.rolesService.listWithPermissions();
+  @Permissions("access_control.view")
+  permissionsMatrix() { return this.rolesService.listWithPermissions(); }
+
+  @Patch(":roleCode/permissions")
+  @Auth("SUPER_ADMIN")
+  @Permissions("access_control.manage")
+  updatePermissions(@CurrentUser() actor: AuthenticatedUser, @Param("roleCode") roleCode: RoleCode, @Body() body: { permissions?: string[] }) {
+    return this.rolesService.updatePermissions(roleCode, Array.isArray(body.permissions) ? body.permissions : [], actor);
   }
 }

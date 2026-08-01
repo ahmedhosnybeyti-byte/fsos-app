@@ -7,9 +7,12 @@ import {
   type CreateUserInput,
   type ListUsersQueryInput,
   type UpdateUserInput,
+  adminUpdateEmailSchema,
+  type AdminUpdateEmailInput,
 } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
+import { Permissions } from "../../common/decorators/permissions.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { UsersService } from "./users.service";
@@ -50,6 +53,16 @@ export class UsersController {
     return this.usersService.listByCompany(scopedCompanyId, query);
   }
 
+  @Patch(":id/email")
+  @Auth("SUPER_ADMIN")
+  @Permissions("users.manage")
+  updateEmail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(adminUpdateEmailSchema)) body: AdminUpdateEmailInput,
+  ) {
+    return this.usersService.adminChangeEmail(id, body.email, user);
+  }
   @Patch(":id")
   @Auth("COMPANY_ADMIN")
   update(

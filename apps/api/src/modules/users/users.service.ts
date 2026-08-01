@@ -304,6 +304,36 @@ export class UsersService {
     });
   }
 
+
+
+  async adminChangeEmail(id: string, email: string, actor: { userId: string }) {
+    const existing = await this.prisma.user.findUnique({ where: { id } });
+    if (!existing) throw new NotFoundException("User not found");
+    const normalizedEmail = email.trim().toLowerCase();
+    if (existing.email === normalizedEmail) return this.findById(id);
+    let updated;
+    try {
+      updated = await this.prisma.$transaction(async (tx) => {
+        const result = await tx.user.update({ where: { id }, data: { email: normalizedEmail }, select: publicUserSelect });
+        await tx.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
+        await this.auditLogService.record({ companyId: existing.companyId, userId: actor.userId, action: "identity.email_change_admin", entityType: "User", entityId: id, metadata: { before: { email: existing.email }, after: { email: normalizedEmail } } }, tx);
+        await this.auditLogService.record({ companyId: existing.companyId, userId: actor.userId, action: "identity.session_revoked", entityType: "User", entityId: id, metadata: { reason: "admin_email_change" } }, tx);
+        return result;
+      });
+    } catch (err) {
+      if (isUniqueConstraintError(err, "email")) throw new ConflictException("An account with this email already exists");
+      throw err;
+    }
+    return updated;
+  }
+  async changeEmail(id: string, email: string) {
+    try {
+      return await this.prisma.user.update({ where: { id }, data: { email } });
+    } catch (err) {
+      if (isUniqueConstraintError(err, "email")) throw new ConflictException("An account with this email already exists");
+      throw err;
+    }
+  }
   // Phase 4: Password Management. Hashing/verification stays in AuthService
   // (the Identity Platform surface) — this is only the write path, keeping
   // passwordHash writes centralized here alongside createUserInternal.

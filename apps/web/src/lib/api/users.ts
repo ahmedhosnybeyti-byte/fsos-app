@@ -9,6 +9,7 @@ export const usersApi = {
     apiFetch<Paginated<User>>("/users", { query: { page, pageSize, companyId, ...filters } }),
   create: (input: CreateUserInput, companyId?: string) =>
     apiFetch<User>("/users", { method: "POST", body: input, query: { companyId } }),
+  updateEmail: (id: string, email: string) => apiFetch<User>(`/users/${id}/email`, { method: "PATCH", body: { email } }),
   update: (id: string, input: UpdateUserInput, companyId?: string) =>
     apiFetch<User>(`/users/${id}`, { method: "PATCH", body: input, query: { companyId } }),
   disable: (id: string, companyId?: string) => apiFetch<User>(`/users/${id}/disable`, { method: "POST", query: { companyId } }),

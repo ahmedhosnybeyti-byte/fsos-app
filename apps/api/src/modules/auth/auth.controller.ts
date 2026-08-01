@@ -5,9 +5,11 @@ import type { Request, Response } from "express";
 import {
   AUTH_COOKIE_NAMES,
   changePasswordSchema,
+  changeEmailSchema,
   loginSchema,
   registerSchema,
   type ChangePasswordInput,
+  type ChangeEmailInput,
   type LoginInput,
   type RegisterInput,
 } from "@field-sales-os/schemas";
@@ -105,6 +107,17 @@ export class AuthController {
     return { success: true };
   }
 
+  @Post("change-email")
+  @Auth()
+  async changeEmail(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body(new ZodValidationPipe(changeEmailSchema)) body: ChangeEmailInput,
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    await this.authService.changeEmail(user.userId, body.currentPassword, body.newEmail);
+    clearAuthCookies(res, this.config);
+    return { success: true };
+  }
   // Phase 4: admin-issued Reset Password — Platform Administrator or
   // Company Administrator only, per the Identity Platform's Password
   // Management rules. No request body: the server generates the temporary

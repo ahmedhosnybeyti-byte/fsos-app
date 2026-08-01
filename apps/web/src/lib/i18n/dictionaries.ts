@@ -41,6 +41,14 @@ export type TranslationKey =
   | "nav.employees"
   | "nav.settings"
   | "nav.account"
+  | "admin.nav.dashboard"
+  | "admin.nav.users"
+  | "admin.nav.companies"
+  | "admin.nav.subscriptions"
+  | "admin.nav.payments"
+  | "admin.nav.accessControl"
+  | "admin.nav.usage"
+  | "admin.nav.settings"
   | "account.title"
   | "account.subtitle"
   | "account.profileTitle"
@@ -66,6 +74,14 @@ export type TranslationKey =
   | "account.passwordChangeError"
   | "account.changePassword"
   | "account.loggingOut"
+  | "account.emailTitle"
+  | "account.emailDescription"
+  | "account.newEmail"
+  | "account.confirmEmail"
+  | "account.emailMismatch"
+  | "account.changeEmail"
+  | "account.emailChangeSuccess"
+  | "account.emailChangeError"
   | "territoryIntelligence.title"
   | "territoryIntelligence.subtitle"
   | "territoryIntelligence.libraryTitle"
@@ -1314,6 +1330,14 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "nav.employees": "الموظفون",
     "nav.settings": "الإعدادات",
     "nav.account": "الحساب",
+    "admin.nav.dashboard": "لوحة الإدارة",
+    "admin.nav.users": "المستخدمون",
+    "admin.nav.companies": "الشركات",
+    "admin.nav.subscriptions": "الاشتراكات",
+    "admin.nav.payments": "المدفوعات",
+    "admin.nav.accessControl": "إدارة الصلاحيات",
+    "admin.nav.usage": "إحصاءات الاستخدام",
+    "admin.nav.settings": "إعدادات المنصة",
     "territoryIntelligence.title": "ذكاء الأقاليم",
     "territoryIntelligence.subtitle": "مش خريطة بس — كل إقليم بيقولك مشكلته، السبب، والقرار المناسب.",
     "territoryIntelligence.libraryTitle": "مكتبة الذكاء",
@@ -2140,6 +2164,14 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "account.passwordChangeError": "تعذر تغيير كلمة المرور. حاول مرة أخرى.",
     "account.changePassword": "تغيير كلمة المرور",
     "account.loggingOut": "جارٍ تسجيل الخروج…",
+    "account.emailTitle": "تغيير البريد الإلكتروني",
+    "account.emailDescription": "سيتم تسجيل خروجك من جميع الجلسات بعد تغيير البريد.",
+    "account.newEmail": "البريد الإلكتروني الجديد",
+    "account.confirmEmail": "تأكيد البريد الإلكتروني",
+    "account.emailMismatch": "البريد الإلكتروني غير متطابق",
+    "account.changeEmail": "تغيير البريد الإلكتروني",
+    "account.emailChangeSuccess": "تم تغيير البريد الإلكتروني. جارٍ تسجيل الخروج…",
+    "account.emailChangeError": "تعذر تغيير البريد الإلكتروني.",
     "settings.gptSettingsTitle": "إعدادات GPT",
     "settings.gptSettingsDescription":
       "الاسم ومفتاح الـ API المستخدمين في التحقق من الـ Action. رابط الـ Custom GPT نفسه بيحدده Super Admin على مستوى المنصة كلها.",
@@ -2599,6 +2631,14 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "nav.employees": "Employees",
     "nav.settings": "Settings",
     "nav.account": "Account",
+    "admin.nav.dashboard": "Dashboard",
+    "admin.nav.users": "Users",
+    "admin.nav.companies": "Companies",
+    "admin.nav.subscriptions": "Subscriptions",
+    "admin.nav.payments": "Payments",
+    "admin.nav.accessControl": "Access control",
+    "admin.nav.usage": "Usage statistics",
+    "admin.nav.settings": "Platform settings",
     "territoryIntelligence.title": "Territory Intelligence",
     "territoryIntelligence.subtitle": "Not just a map — every territory tells you the problem, the why, and the right decision.",
     "territoryIntelligence.libraryTitle": "Intelligence Library",
@@ -3426,6 +3466,14 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "account.passwordChangeError": "Could not change your password. Please try again.",
     "account.changePassword": "Change Password",
     "account.loggingOut": "Signing out…",
+    "account.emailTitle": "Change email address",
+    "account.emailDescription": "Changing your email signs you out of every session.",
+    "account.newEmail": "New email address",
+    "account.confirmEmail": "Confirm email address",
+    "account.emailMismatch": "Email addresses do not match",
+    "account.changeEmail": "Change email address",
+    "account.emailChangeSuccess": "Email changed. Signing out…",
+    "account.emailChangeError": "Could not change email address.",
     "settings.gptSettingsTitle": "GPT Settings",
     "settings.gptSettingsDescription":
       "The name and API key used to authenticate the Action. The Custom GPT's link itself is set by the Super Admin at the platform level.",

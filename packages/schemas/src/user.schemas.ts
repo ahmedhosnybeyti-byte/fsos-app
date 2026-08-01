@@ -38,3 +38,8 @@ export const resetPasswordResultSchema = z.object({
   temporaryPassword: z.string(),
 });
 export type ResetPasswordResult = z.infer<typeof resetPasswordResultSchema>;
+
+export const adminUpdateEmailSchema = z.object({
+  email: z.string().trim().email().toLowerCase(),
+});
+export type AdminUpdateEmailInput = z.infer<typeof adminUpdateEmailSchema>;

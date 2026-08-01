@@ -117,6 +117,17 @@ export class AuthService {
     });
   }
 
+
+  async changeEmail(userId: string, currentPassword: string, newEmail: string) {
+    const user = await this.usersService.findByIdWithPassword(userId);
+    if (!user) throw new NotFoundException("User not found");
+    if (!(await argon2.verify(user.passwordHash, currentPassword))) throw new UnauthorizedException("Current password is incorrect");
+    const normalizedEmail = newEmail.trim().toLowerCase();
+    if (normalizedEmail === user.email) throw new BadRequestException("New email must be different from your current email");
+    await this.usersService.changeEmail(userId, normalizedEmail);
+    await this.tokensService.revokeAllForUser(userId);
+    await this.auditLogService.record({ companyId: user.companyId, userId, action: "identity.email_change", entityType: "User", entityId: userId });
+  }
   // Phase 4: admin-issued Reset Password ("Platform Administrator or
   // Company Administrator" per the constitution). Generates a temporary
   // password, forces the user to set their own on next login

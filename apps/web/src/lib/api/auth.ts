@@ -1,4 +1,4 @@
-import type { ChangePasswordInput, ResetPasswordResult } from "@field-sales-os/schemas";
+import type { ChangeEmailInput, ChangePasswordInput, ResetPasswordResult } from "@field-sales-os/schemas";
 import type { LoginInput, RegisterInput } from "@field-sales-os/schemas";
 import { apiFetch } from "../api-client";
 import type { User } from "../types";
@@ -9,6 +9,7 @@ export const authApi = {
   logout: () => apiFetch<{ success: boolean }>("/auth/logout", { method: "POST" }),
   me: () => apiFetch<User>("/auth/me"),
   // Phase 4: Identity Platform password/session actions.
+  changeEmail: (input: ChangeEmailInput) => apiFetch<{ success: boolean }>("/auth/change-email", { method: "POST", body: input }),
   changePassword: (input: ChangePasswordInput) =>
     apiFetch<{ success: boolean }>("/auth/change-password", { method: "POST", body: input }),
   resetPassword: (userId: string) =>

@@ -55,3 +55,13 @@ export const changePasswordSchema = z.object({
   path: ["confirmNewPassword"],
 });
 export type ChangePasswordInput = z.infer<typeof changePasswordSchema>;
+
+export const changeEmailSchema = z.object({
+  currentPassword: z.string().min(1),
+  newEmail: z.string().trim().email().toLowerCase(),
+  confirmEmail: z.string().trim().email().toLowerCase(),
+}).refine((values) => values.newEmail === values.confirmEmail, {
+  message: "Email addresses do not match",
+  path: ["confirmEmail"],
+});
+export type ChangeEmailInput = z.infer<typeof changeEmailSchema>;

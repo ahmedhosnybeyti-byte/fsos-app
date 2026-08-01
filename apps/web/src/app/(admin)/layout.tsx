@@ -18,22 +18,22 @@ import { AppShell, type NavItem } from "@/components/shell/app-shell";
 import { useTranslation } from "@/components/translation-provider";
 import { Spinner } from "@/components/ui/spinner";
 
-const adminNavItems: NavItem[] = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/users", label: "Users", icon: Users },
-  { href: "/admin/companies", label: "Companies", icon: Building2 },
-  { href: "/admin/subscriptions", label: "Subscriptions", icon: CreditCard },
-  { href: "/admin/payments", label: "Payments", icon: Receipt },
-  { href: "/admin/access-control", label: "Access Control", icon: ShieldCheck },
-  { href: "/admin/usage", label: "Usage Statistics", icon: BarChart3 },
-  { href: "/admin/settings", label: "Platform Settings", icon: Settings },
+const adminNavItems = (t: (key: any) => string): NavItem[] => [
+  { href: "/admin", label: t("admin.nav.dashboard"), icon: LayoutDashboard },
+  { href: "/admin/users", label: t("admin.nav.users"), icon: Users },
+  { href: "/admin/companies", label: t("admin.nav.companies"), icon: Building2 },
+  { href: "/admin/subscriptions", label: t("admin.nav.subscriptions"), icon: CreditCard },
+  { href: "/admin/payments", label: t("admin.nav.payments"), icon: Receipt },
+  { href: "/admin/access-control", label: t("admin.nav.accessControl"), icon: ShieldCheck },
+  { href: "/admin/usage", label: t("admin.nav.usage"), icon: BarChart3 },
+  { href: "/admin/settings", label: t("admin.nav.settings"), icon: Settings },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useRequireAuth(["SUPER_ADMIN"]);
   const router = useRouter();
   const { t } = useTranslation();
-  const navItems: NavItem[] = [...adminNavItems, { href: "/account", label: t("nav.account"), icon: CircleUserRound }];
+  const navItems: NavItem[] = [...adminNavItems(t), { href: "/account", label: t("nav.account"), icon: CircleUserRound }];
   const mustChangePassword = user?.mustChangePassword === true;
 
   useEffect(() => {
