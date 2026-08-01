@@ -30,7 +30,7 @@ export default function LoginPage() {
     mutationFn: authApi.login,
     onSuccess: async ({ user }) => {
       await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
-      router.push(getPostLoginPath(user.role.code));
+      router.push(getPostLoginPath(user.role.code, user.mustChangePassword));
     },
     onError: (error) => {
       toast.error(error instanceof ApiError ? error.message : "Something went wrong. Please try again.");

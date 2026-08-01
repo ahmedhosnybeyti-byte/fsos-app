@@ -10,3 +10,7 @@ test("routes company and field roles to the dashboard", () => {
   assert.equal(getPostLoginPath("COMPANY_ADMIN"), "/dashboard");
   assert.equal(getPostLoginPath("SALES_REP"), "/dashboard");
 });
+test("forces any role with a temporary password to the account page", () => {
+  assert.equal(getPostLoginPath("SUPER_ADMIN", true), "/account");
+  assert.equal(getPostLoginPath("SALES_REP", true), "/account");
+});

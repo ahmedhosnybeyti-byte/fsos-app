@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { BadRequestException, UnauthorizedException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, UnauthorizedException } from "@nestjs/common";
 import * as argon2 from "argon2";
 import { AuthService } from "./auth.service";
 
@@ -116,4 +116,52 @@ test("rejects reuse of the current password before changing password state", asy
   assert.deepEqual(harness.passwordUpdates, []);
   assert.deepEqual(harness.revokedUserIds, []);
   assert.deepEqual(harness.auditEntries, []);
+});
+test("resets a target password, forces a change, revokes sessions, and audits the action", async (t) => {
+  const passwordUpdates: Array<{ userId: string; mustChangePassword: boolean }> = [];
+  const revoked: string[] = [];
+  const audits: Array<{ action: string; entityId?: string | null }> = [];
+  const hashMock = t.mock.method(argon2MockTarget, "hash", async () => NEW_HASH);
+  const service = new AuthService(
+    {} as never,
+    {} as never,
+    {
+      findById: async () => ({ id: USER_ID, companyId: COMPANY_ID }),
+      setPasswordHash: async (userId: string, _passwordHash: string, mustChangePassword: boolean) => passwordUpdates.push({ userId, mustChangePassword }),
+    } as never,
+    {} as never,
+    { revokeAllForUser: async (userId: string) => revoked.push(userId) } as never,
+    { record: async (entry: { action: string; entityId?: string | null }) => audits.push(entry) } as never,
+  );
+
+  const result = await service.resetPassword(USER_ID, { userId: "admin-1", companyId: null, email: "admin@example.test", roleCode: "SUPER_ADMIN", permissions: [], mustChangePassword: false, orgUnitId: null });
+
+  assert.ok(result.temporaryPassword.length >= 12);
+  assert.equal(hashMock.mock.callCount(), 1);
+  assert.deepEqual(passwordUpdates, [{ userId: USER_ID, mustChangePassword: true }]);
+  assert.deepEqual(revoked, [USER_ID]);
+  assert.deepEqual(audits.map((entry) => entry.action), ["identity.password_reset", "identity.session_revoked"]);
+});
+test("prevents a company admin from resetting a user in another company", async (t) => {
+  const passwordUpdates: unknown[] = [];
+  const revoked: string[] = [];
+  const audits: unknown[] = [];
+  const hashMock = t.mock.method(argon2MockTarget, "hash", async () => NEW_HASH);
+  const service = new AuthService(
+    {} as never,
+    {} as never,
+    { findById: async () => ({ id: USER_ID, companyId: "other-company" }), setPasswordHash: async (...args: unknown[]) => passwordUpdates.push(args) } as never,
+    {} as never,
+    { revokeAllForUser: async (userId: string) => revoked.push(userId) } as never,
+    { record: async (entry: unknown) => audits.push(entry) } as never,
+  );
+
+  await assert.rejects(
+    () => service.resetPassword(USER_ID, { userId: "company-admin-1", companyId: COMPANY_ID, email: "admin@example.test", roleCode: "COMPANY_ADMIN", permissions: [], mustChangePassword: false, orgUnitId: null }),
+    (error: unknown) => error instanceof ForbiddenException,
+  );
+  assert.equal(hashMock.mock.callCount(), 0);
+  assert.deepEqual(passwordUpdates, []);
+  assert.deepEqual(revoked, []);
+  assert.deepEqual(audits, []);
 });

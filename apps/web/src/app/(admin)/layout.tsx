@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   Users,
@@ -29,20 +31,18 @@ const adminNavItems: NavItem[] = [
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useRequireAuth(["SUPER_ADMIN"]);
+  const router = useRouter();
   const { t } = useTranslation();
   const navItems: NavItem[] = [...adminNavItems, { href: "/account", label: t("nav.account"), icon: CircleUserRound }];
+  const mustChangePassword = user?.mustChangePassword === true;
 
-  if (isLoading || !user) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <Spinner className="h-6 w-6" />
-      </div>
-    );
+  useEffect(() => {
+    if (mustChangePassword) router.replace("/account");
+  }, [mustChangePassword, router]);
+
+  if (isLoading || !user || mustChangePassword) {
+    return <div className="flex min-h-screen items-center justify-center"><Spinner className="h-6 w-6" /></div>;
   }
 
-  return (
-    <AppShell navItems={navItems} user={user}>
-      {children}
-    </AppShell>
-  );
+  return <AppShell navItems={navItems} user={user}>{children}</AppShell>;
 }

@@ -2,9 +2,10 @@ import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, 
 import { ApiTags } from "@nestjs/swagger";
 import {
   createUserSchema,
-  paginationQuerySchema,
+  listUsersQuerySchema,
   updateUserSchema,
   type CreateUserInput,
+  type ListUsersQueryInput,
   type UpdateUserInput,
 } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
@@ -35,7 +36,7 @@ export class UsersController {
     @Body(new ZodValidationPipe(createUserSchema)) body: CreateUserInput,
   ) {
     const scopedCompanyId = this.resolveCompanyScope(user, companyId);
-    return this.usersService.createUser(scopedCompanyId, body);
+    return this.usersService.createUser(scopedCompanyId, body, user.userId);
   }
 
   @Get()
@@ -43,10 +44,10 @@ export class UsersController {
   list(
     @CurrentUser() user: AuthenticatedUser,
     @Query("companyId") companyId: string | undefined,
-    @Query(new ZodValidationPipe(paginationQuerySchema)) pagination: { page: number; pageSize: number },
+    @Query(new ZodValidationPipe(listUsersQuerySchema)) query: ListUsersQueryInput,
   ) {
     const scopedCompanyId = this.resolveCompanyScope(user, companyId);
-    return this.usersService.listByCompany(scopedCompanyId, pagination);
+    return this.usersService.listByCompany(scopedCompanyId, query);
   }
 
   @Patch(":id")
@@ -65,14 +66,14 @@ export class UsersController {
   @Auth("COMPANY_ADMIN")
   disable(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Query("companyId") companyId: string | undefined) {
     const scopedCompanyId = this.resolveCompanyScope(user, companyId);
-    return this.usersService.setStatus(id, scopedCompanyId, "DISABLED");
+    return this.usersService.setStatus(id, scopedCompanyId, "DISABLED", user.userId);
   }
 
   @Post(":id/enable")
   @Auth("COMPANY_ADMIN")
   enable(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Query("companyId") companyId: string | undefined) {
     const scopedCompanyId = this.resolveCompanyScope(user, companyId);
-    return this.usersService.setStatus(id, scopedCompanyId, "ACTIVE");
+    return this.usersService.setStatus(id, scopedCompanyId, "ACTIVE", user.userId);
   }
 
   // "حذف مستخدم" — soft delete: ARCHIVED + sessions revoked + hidden from

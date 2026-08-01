@@ -5,7 +5,7 @@ import { passwordSchema } from "./auth.schemas";
 // Company admins create users within their own company and assign the role
 // — the platform never infers or assigns it.
 export const createUserSchema = z.object({
-  email: z.string().email().toLowerCase(),
+  email: z.string().trim().email().toLowerCase(),
   fullName: z.string().min(2).max(120),
   roleCode: roleCodeSchema.exclude(["SUPER_ADMIN"]),
   password: passwordSchema,
@@ -21,6 +21,15 @@ export const updateUserSchema = z.object({
   orgUnitId: z.string().trim().min(1).optional().nullable(),
 });
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
+
+export const listUsersQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  search: z.string().trim().min(1).max(120).optional(),
+  roleCode: roleCodeSchema.exclude(["SUPER_ADMIN"]).optional(),
+  status: userStatusSchema.optional(),
+});
+export type ListUsersQueryInput = z.infer<typeof listUsersQuerySchema>;
 
 // Phase 4: admin-issued temporary password. No request body — the caller
 // (Company/Platform Administrator) never chooses the value; the server

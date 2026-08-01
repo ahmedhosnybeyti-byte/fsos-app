@@ -13,12 +13,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter();
   const { t } = useTranslation();
   const isSuperAdmin = user?.role.code === "SUPER_ADMIN";
+  const mustChangePassword = user?.mustChangePassword === true;
 
   useEffect(() => {
-    if (isSuperAdmin) router.replace("/admin");
-  }, [isSuperAdmin, router]);
+    if (mustChangePassword) router.replace("/account");
+    else if (isSuperAdmin) router.replace("/admin");
+  }, [isSuperAdmin, mustChangePassword, router]);
 
-  if (isLoading || !user || isSuperAdmin) {
+  if (isLoading || !user || isSuperAdmin || mustChangePassword) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Spinner className="h-6 w-6" />

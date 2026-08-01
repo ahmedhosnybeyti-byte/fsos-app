@@ -1,6 +1,6 @@
 import { ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import * as argon2 from "argon2";
-import type { CreateUserInput, UpdateUserInput, UserStatus } from "@field-sales-os/schemas";
+import type { CreateUserInput, ListUsersQueryInput, UpdateUserInput, UserStatus } from "@field-sales-os/schemas";
 import { PrismaService, type PrismaTx, isUniqueConstraintError } from "../../common/prisma";
 import { RolesService } from "../roles/roles.service";
 import { OrgUnitsService } from "../companies/org-units.service";
@@ -68,20 +68,30 @@ export class UsersService {
     );
   }
 
-  async createUser(companyId: string, dto: CreateUserInput) {
+  async createUser(companyId: string, dto: CreateUserInput, actorUserId: string) {
     await this.assertUnderSeatLimit(companyId);
     const role = await this.rolesService.findByCode(dto.roleCode);
-    return this.createUserInternal({
+    const user = await this.createUserInternal({
       companyId,
       roleId: role.id,
       email: dto.email,
       fullName: dto.fullName,
       password: dto.password,
+      mustChangePassword: true,
     });
+    await this.auditLogService.record({
+      companyId,
+      userId: actorUserId,
+      action: "user.create",
+      entityType: "User",
+      entityId: user.id,
+      metadata: { roleCode: role.code, status: user.status, mustChangePassword: true },
+    });
+    return user;
   }
 
   private async createUserInternal(
-    params: { companyId: string; roleId: string; email: string; fullName: string; password: string; whatsapp?: string },
+    params: { companyId: string; roleId: string; email: string; fullName: string; password: string; whatsapp?: string; mustChangePassword?: boolean },
     tx: PrismaTx = this.prisma,
   ) {
     try {
@@ -93,6 +103,7 @@ export class UsersService {
           fullName: params.fullName,
           passwordHash: await argon2.hash(params.password),
           whatsapp: params.whatsapp,
+          mustChangePassword: params.mustChangePassword ?? false,
         },
         select: publicUserSelect,
       });
@@ -119,11 +130,18 @@ export class UsersService {
     }
   }
 
-  async listByCompany(companyId: string, pagination: { page: number; pageSize: number }) {
-    const { page, pageSize } = pagination;
+  async listByCompany(companyId: string, query: ListUsersQueryInput) {
+    const { page, pageSize, search, roleCode, status } = query;
     // ARCHIVED = soft-deleted (see archiveUser) — hidden from the Team list
     // entirely, unlike DISABLED which stays visible with a re-enable action.
-    const where = { companyId, status: { not: "ARCHIVED" as const } };
+    const where = {
+      companyId,
+      status: status ?? { not: "ARCHIVED" as const },
+      ...(roleCode ? { role: { code: roleCode } } : {}),
+      ...(search
+        ? { OR: [{ fullName: { contains: search, mode: "insensitive" as const } }, { email: { contains: search, mode: "insensitive" as const } }] }
+        : {}),
+    };
     const [items, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
@@ -163,6 +181,33 @@ export class UsersService {
       select: publicUserSelect,
     });
 
+    if (dto.status !== undefined && dto.status !== existing.status) {
+      if (dto.status !== "ACTIVE") {
+        await this.revokeAllSessions(id);
+        await this.auditLogService.record({ companyId, userId: actorUserId ?? null, action: "identity.session_revoked", entityType: "User", entityId: id, metadata: { reason: "status_change" } });
+      }
+      await this.auditLogService.record({
+        companyId,
+        userId: actorUserId ?? null,
+        action: dto.status === "ACTIVE" ? "user.enable" : "user.disable",
+        entityType: "User",
+        entityId: id,
+        metadata: { before: { status: existing.status }, after: { status: dto.status } },
+      });
+    }
+    const before = { fullName: existing.fullName, status: existing.status, roleCode: existing.role.code };
+    const after = { fullName: updated.fullName, status: updated.status, roleCode: updated.role.code };
+    if (before.fullName !== after.fullName || before.status !== after.status || before.roleCode !== after.roleCode) {
+      await this.auditLogService.record({
+        companyId,
+        userId: actorUserId ?? null,
+        action: "user.update",
+        entityType: "User",
+        entityId: id,
+        metadata: { before, after },
+      });
+    }
+
     if (newRole && newRole.code !== existing.role.code) {
       // Single-role-per-user model: a "role change" is simultaneously the
       // Identity Audit's Role Assignment (new role) and Role Removal (old
@@ -171,7 +216,7 @@ export class UsersService {
       await this.auditLogService.record({
         companyId,
         userId: actorUserId ?? null,
-        action: "identity.role_assigned",
+        action: "user.role_change",
         entityType: "User",
         entityId: id,
         metadata: { previousRoleCode: existing.role.code, newRoleCode: newRole.code },
@@ -181,7 +226,7 @@ export class UsersService {
     return updated;
   }
 
-  async setStatus(id: string, companyId: string, status: UserStatus) {
+  async setStatus(id: string, companyId: string, status: UserStatus, actorUserId: string) {
     const existing = await this.prisma.user.findUnique({ where: { id } });
     if (!existing || existing.companyId !== companyId) {
       throw new NotFoundException("User not found");
@@ -192,8 +237,27 @@ export class UsersService {
     // lifetime, not whenever their refresh token happens to expire.
     if (status !== "ACTIVE") {
       await this.revokeAllSessions(id);
+      await this.auditLogService.record({
+        companyId,
+        userId: actorUserId,
+        action: "identity.session_revoked",
+        entityType: "User",
+        entityId: id,
+        metadata: { reason: "status_change" },
+      });
     }
-    return this.prisma.user.update({ where: { id }, data: { status }, select: publicUserSelect });
+    const updated = await this.prisma.user.update({ where: { id }, data: { status }, select: publicUserSelect });
+    if (existing.status !== status) {
+      await this.auditLogService.record({
+        companyId,
+        userId: actorUserId,
+        action: status === "ACTIVE" ? "user.enable" : "user.disable",
+        entityType: "User",
+        entityId: id,
+        metadata: { before: { status: existing.status }, after: { status } },
+      });
+    }
+    return updated;
   }
 
   // "حذف مستخدم" — soft delete (2026-07-19): status ARCHIVED + all sessions
