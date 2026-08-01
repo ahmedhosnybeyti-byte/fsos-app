@@ -298,6 +298,7 @@ export type TranslationKey =
   | "shell.brand"
   | "shell.tagline"
   | "shell.logout"
+  | "shell.more"
   | "shell.searchPlaceholder"
   | "group.data"
   | "group.aiInsights"
@@ -1554,6 +1555,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "shell.brand": "مرشدك",
     "shell.tagline": "ذكاء المبيعات في يدك",
     "shell.logout": "تسجيل الخروج",
+    "shell.more": "المزيد",
     "shell.searchPlaceholder": "دوّر على شاشة أو ميزة…",
     "group.data": "البيانات",
     "group.aiInsights": "الذكاء والتحليل",
@@ -2855,6 +2857,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "shell.brand": "Murshidak",
     "shell.tagline": "Sales Intelligence in Your Hands",
     "shell.logout": "Log out",
+    "shell.more": "More",
     "shell.searchPlaceholder": "Search a screen or feature…",
     "group.data": "Data",
     "group.aiInsights": "AI & Insights",

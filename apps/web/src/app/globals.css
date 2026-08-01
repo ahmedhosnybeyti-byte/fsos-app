@@ -368,3 +368,10 @@
     }
   }
 }
+
+@media (max-width: 767px) {
+  .glass-card { border-radius: 0.875rem; backdrop-filter: blur(8px); box-shadow: 0 1px 8px rgb(0 0 0 / 0.06); }
+  .glass-hero { border-radius: 1rem; backdrop-filter: blur(10px); box-shadow: 0 8px 24px -12px rgb(0 0 0 / 0.14); }
+  .dark .glass-card { box-shadow: 0 1px 10px rgb(0 0 0 / 0.28); }
+  .dark .glass-hero { box-shadow: 0 10px 28px -12px rgb(0 0 0 / 0.48); }
+}

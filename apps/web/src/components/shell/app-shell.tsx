@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, LogOut, Menu, Search, X, Zap, type LucideIcon } from "lucide-react";
+import { ChevronDown, LogOut, Menu, MoreHorizontal, Search, X, Zap, type LucideIcon } from "lucide-react";
 import { authApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -105,12 +105,22 @@ export function AppShell({
             البيانات" was actually reporting — every dashboard page with a
             wide table was affected, not just Visit Efficiency/Team
             Performance. */}
-        <main className="min-w-0 flex-1 overflow-y-auto p-6 md:p-8">{children}</main>
+        <main className="min-w-0 flex-1 overflow-y-auto p-4 pb-24 sm:p-6 sm:pb-24 md:p-8 md:pb-8">{children}</main>
+        <MobileBottomNav navItems={navItems} pathname={pathname} onMore={() => setMobileNavOpen((value) => !value)} />
       </div>
     </div>
   );
 }
 
+function MobileBottomNav({ navItems, pathname, onMore }: { navItems: NavItem[]; pathname: string; onMore: () => void }) {
+  const { t } = useTranslation();
+  const primary = navItems.slice(0, 4);
+  const active = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
+  return <nav className="fixed inset-x-0 bottom-0 z-40 flex h-16 items-stretch border-t border-border bg-background/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-lg backdrop-blur md:hidden" aria-label="Mobile navigation">
+    {primary.map((item) => <Link key={item.href} href={item.href} className={cn("flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] font-medium", active(item.href) ? "text-primary" : "text-muted-foreground")}><item.icon className="h-5 w-5" /><span className="max-w-full truncate px-1">{item.label}</span></Link>)}
+    {navItems.length > primary.length && <button type="button" onClick={onMore} className="flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] font-medium text-muted-foreground" aria-label="More navigation"><MoreHorizontal className="h-5 w-5" /><span>{t("shell.more")}</span></button>}
+  </nav>;
+}
 function NavList({
   navItems,
   pathname,
@@ -221,7 +231,7 @@ function DashboardHeader({
     .toUpperCase();
 
   return (
-    <header className="glass-panel sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-border px-4 md:px-6" ref={containerRef}>
+    <header className="glass-panel z-30 flex h-16 items-center gap-3 border-b border-border px-4 md:px-6" ref={containerRef}>
       <Button variant="ghost" size="icon" className="shrink-0 md:hidden" onClick={onToggleMobileNav} aria-label="فتح القائمة">
         {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
       </Button>
