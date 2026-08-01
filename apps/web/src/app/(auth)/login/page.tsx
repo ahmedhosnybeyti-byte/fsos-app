@@ -8,6 +8,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { loginSchema, type LoginInput } from "@field-sales-os/schemas";
 import { authApi } from "@/lib/api";
+import { getPostLoginPath } from "@/lib/auth-routing";
 import { ApiError } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -27,9 +28,9 @@ export default function LoginPage() {
 
   const mutation = useMutation({
     mutationFn: authApi.login,
-    onSuccess: async () => {
+    onSuccess: async ({ user }) => {
       await queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
-      router.push("/dashboard");
+      router.push(getPostLoginPath(user.role.code));
     },
     onError: (error) => {
       toast.error(error instanceof ApiError ? error.message : "Something went wrong. Please try again.");
