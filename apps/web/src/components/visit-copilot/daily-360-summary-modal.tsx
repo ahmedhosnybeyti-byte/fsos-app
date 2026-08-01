@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, FileDown, Package, Quote, RefreshCw, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, ChevronDown, FileDown, Package, Quote, RefreshCw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { visitCopilotApi } from "@/lib/api";
 import { ApiError } from "@/lib/api-client";
 import { useTranslation } from "@/components/translation-provider";
+import { useAuth } from "@/hooks/use-auth";
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,14 @@ import type { VisitCopilot360ExecutionStep, VisitCopilot360Priority, VisitCopilo
 import { cn } from "@/lib/utils";
 import { exportDaily360SummaryPdf } from "@/lib/export/daily-360-summary-pdf";
 import { daily360SummaryQuery } from "./daily-360-summary-query";
-import { groupDaily360LostOpportunities } from "./daily-360-opportunity-groups";
+import {
+  daily360CategoryKey,
+  groupDaily360LostOpportunities,
+  toggleDaily360OpenCategory,
+  toggleDaily360OpenCustomer,
+  daily360AllowedExclusionActions,
+  type Daily360ExclusionAction,
+} from "./daily-360-opportunity-groups";
 
 // "ملخص اليوم 360°" (2026-07-28) — a full-screen (on mobile) / large modal
 // (desktop) report inside Visit Copilot. Visual/structural fidelity to the
@@ -45,7 +53,13 @@ function priorityBadgeClass(priority: VisitCopilot360Priority): string {
 
 export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate, from, to }: Props) {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [exporting, setExporting] = useState(false);
+  const [isExportExpanded, setIsExportExpanded] = useState(false);
+  const [hasInitializedAccordion, setHasInitializedAccordion] = useState(false);
+  const [openCustomerCode, setOpenCustomerCode] = useState<string | null>(null);
+  const [openCategoryKeys, setOpenCategoryKeys] = useState<Set<string>>(() => new Set());
 
   const daily360Query = daily360SummaryQuery({ period, from, to, selectedDate });
   const query = useQuery({
@@ -59,16 +73,77 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
     refetchOnWindowFocus: false,
   });
 
+  const exclusionsQuery = useQuery({
+    queryKey: ["visit-copilot", "lost-opportunity-exclusions"],
+    queryFn: visitCopilotApi.lostOpportunityExclusions,
+    enabled: open && !!user,
+  });
+  const revokeExclusionMutation = useMutation({
+    mutationFn: visitCopilotApi.revokeLostOpportunityExclusion,
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: daily360Query.queryKey }),
+        queryClient.invalidateQueries({ queryKey: ["visit-copilot", "lost-opportunity-exclusions"] }),
+      ]);
+      toast.success(t("copilot.summary360ExclusionRevoked"));
+    },
+    onError: () => toast.error(t("copilot.summary360ExclusionError")),
+  });
+  const exclusionMutation = useMutation({
+    mutationFn: (input: { scopeType: Daily360ExclusionAction; customerCode: string; productCode: string; reason?: string }) =>
+      visitCopilotApi.createLostOpportunityExclusion(input),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: daily360Query.queryKey }),
+        queryClient.invalidateQueries({ queryKey: ["visit-copilot", "lost-opportunity-exclusions"] }),
+      ]);
+      toast.success(t("copilot.summary360ExclusionSaved"));
+    },
+    onError: () => toast.error(t("copilot.summary360ExclusionError")),
+  });
+  const allowedExclusionActions = daily360AllowedExclusionActions(user?.role.code);
+
+  function excludeProduct(scopeType: Daily360ExclusionAction, customerCode: string, productCode: string) {
+    const labelKey: Record<Daily360ExclusionAction, TranslationKey> = {
+      CUSTOMER_PRODUCT: "copilot.summary360ExcludeCustomerProduct",
+      SALESPERSON_PRODUCT: "copilot.summary360ExcludeSalespersonProduct",
+      TEAM_PRODUCT: "copilot.summary360ExcludeTeamProduct",
+      COMPANY_PRODUCT: "copilot.summary360ExcludeCompanyProduct",
+    };
+    if (!window.confirm(t("copilot.summary360ExcludeConfirm", { scope: t(labelKey[scopeType]) }))) return;
+    const reason = window.prompt(t("copilot.summary360ExcludeReason"));
+    if (reason === null) return;
+    exclusionMutation.mutate({ scopeType, customerCode, productCode, reason: reason.trim() || undefined });
+  }
+
   const summary = query.data;
   const lostOpportunityGroups = useMemo(
     () => groupDaily360LostOpportunities(summary?.lostOpportunities ?? [], t("copilot.summary360Uncategorized")),
     [summary?.lostOpportunities, t],
   );
 
+  useEffect(() => {
+    if (!hasInitializedAccordion && lostOpportunityGroups.length > 0) {
+      setOpenCustomerCode(lostOpportunityGroups[0]!.customerCode);
+      setHasInitializedAccordion(true);
+    }
+  }, [hasInitializedAccordion, lostOpportunityGroups]);
+
+  useEffect(() => {
+    if (!open) {
+      setHasInitializedAccordion(false);
+      setOpenCustomerCode(null);
+      setOpenCategoryKeys(new Set());
+    }
+  }, [open]);
+
   async function handleExportPdf() {
     if (!summary || exporting) return;
     setExporting(true);
+    setIsExportExpanded(true);
     try {
+      // Let React paint the fully expanded report before html2canvas reads the DOM.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
       await exportDaily360SummaryPdf(summary, t);
     } catch (err) {
       // 2026-07-28: was a bare `catch {}` swallowing the real error —
@@ -78,6 +153,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
       console.error("[daily-360-summary] PDF export failed:", err);
       toast.error(t("copilot.summary360ExportError"));
     } finally {
+      setIsExportExpanded(false);
       setExporting(false);
     }
   }
@@ -228,69 +304,132 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                     <p className="text-sm text-muted-foreground">{t(summary.lostOpportunityStatus === "no-customers" ? "copilot.summary360NoCustomers" : summary.lostOpportunityStatus === "no-baseline-sales" ? "copilot.summary360NoBaselineSales" : summary.lostOpportunityStatus === "data-unavailable" ? "copilot.summary360DataUnavailable" : "copilot.summary360NoLostOpportunities")}</p>
                   ) : (
                     <div className="space-y-3">
-                      {lostOpportunityGroups.map((customer, customerIndex) => (
-                        <div key={customer.customerCode} className="glass-card space-y-3 p-4">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm font-bold">{customerIndex + 1}. {customer.customerName}</span>
-                            <Badge variant="secondary" className="ms-auto font-normal">
-                              {t("copilot.summary360TotalDecline", { value: customer.totalDeclineQuantity.toLocaleString() })}
-                            </Badge>
+                      {lostOpportunityGroups.map((customer, customerIndex) => {
+                        const customerIsOpen = isExportExpanded || openCustomerCode === customer.customerCode;
+                        return (
+                          <div key={customer.customerCode} className="glass-card overflow-hidden">
+                            <button
+                              type="button"
+                              className="flex w-full flex-wrap items-center gap-2 p-4 text-start transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              aria-expanded={customerIsOpen}
+                              aria-controls={`daily-360-customer-${customer.customerCode}`}
+                              onClick={() => setOpenCustomerCode((current) => toggleDaily360OpenCustomer(current, customer.customerCode))}
+                            >
+                              <ChevronDown className={cn("h-5 w-5 shrink-0 transition-transform", customerIsOpen && "rotate-180")} aria-hidden />
+                              <span className="text-sm font-bold">{customerIndex + 1}. {customer.customerName}</span>
+                              <Badge variant="secondary" className="ms-auto font-normal">
+                                {t("copilot.summary360TotalDecline", { value: customer.totalDeclineQuantity.toLocaleString() })}
+                              </Badge>
+                              <span className="grid w-full gap-1 text-xs text-muted-foreground sm:grid-cols-3">
+                                <span>{t("copilot.summary360OpportunityCount", { value: customer.opportunityCount })}</span>
+                                <span>{t("copilot.summary360ProductCount", { value: customer.productCount })}</span>
+                                <span className="font-medium text-foreground">{t("copilot.summary360TotalSuggestedQuantity", { value: customer.totalSuggestedQuantity.toLocaleString() })}</span>
+                              </span>
+                            </button>
+                            {customerIsOpen && (
+                              <div id={`daily-360-customer-${customer.customerCode}`} className="space-y-3 border-t border-border p-4">
+                                {customer.categories.map((category) => {
+                                  const categoryKey = daily360CategoryKey(customer.customerCode, category.category);
+                                  const categoryIsOpen = isExportExpanded || openCategoryKeys.has(categoryKey);
+                                  return (
+                                    <section key={categoryKey} className="overflow-hidden rounded-md border border-border bg-card/40">
+                                      <button
+                                        type="button"
+                                        className="flex w-full items-center gap-2 p-3 text-start text-sm font-semibold transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                        aria-expanded={categoryIsOpen}
+                                        aria-controls={`daily-360-category-${customer.customerCode}-${category.category}`}
+                                        onClick={() => setOpenCategoryKeys((current) => toggleDaily360OpenCategory(current, categoryKey))}
+                                      >
+                                        <ChevronDown className={cn("h-4 w-4 shrink-0 transition-transform", categoryIsOpen && "rotate-180")} aria-hidden />
+                                        {category.category}
+                                      </button>
+                                      {categoryIsOpen && (
+                                        <div id={`daily-360-category-${customer.customerCode}-${category.category}`} className="space-y-2 p-3 pt-0">
+                                          {category.products.map(({ productCode, opportunity: op }) => (
+                                            <div key={productCode} className="space-y-2.5 border-t border-border pt-3 first:border-t-0 first:pt-0">
+                                              <div className="flex flex-wrap items-center justify-between gap-2">
+                                                <p className="text-sm font-medium text-foreground">{op.productName}</p>
+                                                {allowedExclusionActions.length > 0 && (
+                                                  <details className="text-xs">
+                                                    <summary className="cursor-pointer text-muted-foreground">{t("copilot.summary360ExcludeMenu")}</summary>
+                                                    <div className="mt-2 flex flex-wrap gap-1">
+                                                      {allowedExclusionActions.map((scopeType) => {
+                                                        const labels: Record<Daily360ExclusionAction, TranslationKey> = {
+                                                          CUSTOMER_PRODUCT: "copilot.summary360ExcludeCustomerProduct",
+                                                          SALESPERSON_PRODUCT: "copilot.summary360ExcludeSalespersonProduct",
+                                                          TEAM_PRODUCT: "copilot.summary360ExcludeTeamProduct",
+                                                          COMPANY_PRODUCT: "copilot.summary360ExcludeCompanyProduct",
+                                                        };
+                                                        return <Button key={scopeType} type="button" size="sm" variant="outline" disabled={exclusionMutation.isPending} onClick={() => excludeProduct(scopeType, op.customerCode, op.productCode)}>{t(labels[scopeType])}</Button>;
+                                                      })}
+                                                    </div>
+                                                  </details>
+                                                )}
+                                              </div>
+                                              <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-4">
+                                                <span>{t("copilot.summary360BaselineQuantity", { value: op.baselineNetQuantity.toLocaleString() })}</span>
+                                                <span>{t("copilot.summary360RecentQuantity", { value: op.recentNetQuantity.toLocaleString() })}</span>
+                                                <span>{t("copilot.summary360DeclineQuantity", { value: op.declineValue.toLocaleString() })}</span>
+                                                <span className="font-medium text-foreground">{t("copilot.summary360SuggestedQuantity", { value: op.suggestedQuantity.toLocaleString() })}</span>
+                                              </div>
+                                              <p className="text-xs text-muted-foreground">
+                                                {op.lastVisitDate ? t("copilot.summary360LastVisit", { date: op.lastVisitDate }) : t("copilot.summary360LastVisitUnknown")}
+                                              </p>
+                                              {op.stoppedProducts.length > 0 && (
+                                                <div>
+                                                  <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                                                    <Package className="h-3.5 w-3.5" />
+                                                    {t("copilot.summary360StoppedProducts")}
+                                                  </p>
+                                                  <div className="flex flex-wrap gap-1.5">
+                                                    {op.stoppedProducts.map((product, productIndex) => (
+                                                      <span key={`${product.productName}-${productIndex}`} className="rounded-full border border-orange-400/30 bg-orange-500/10 px-2.5 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-300">
+                                                        {product.productName}{" \u00B7 "}{product.quantity.toLocaleString()} {product.unit}{" \u00B7 "}{product.value.toLocaleString()}
+                                                      </span>
+                                                    ))}
+                                                    {Boolean(op.extraProductCount) && (
+                                                      <span className="rounded-full border border-border bg-card px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                                                        {t("copilot.summary360MoreProducts", { count: op.extraProductCount! })}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                </div>
+                                              )}
+                                              <div className="space-y-1.5 rounded-md border border-border bg-card p-2.5">
+                                                <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360Diagnosis")}: </span>{op.diagnosis}</p>
+                                                {op.likelyReason && <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360LikelyReason")}: </span>{op.likelyReason}</p>}
+                                                <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360VisitDecision")}: </span>{op.visitDecision}</p>
+                                                {op.visitGoal && <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360VisitGoal")}: </span>{op.visitGoal}</p>}
+                                              </div>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </section>
+                                  );
+                                })}
+                              </div>
+                            )}
                           </div>
-                          <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-3">
-                            <span>{t("copilot.summary360OpportunityCount", { value: customer.opportunityCount })}</span>
-                            <span>{t("copilot.summary360ProductCount", { value: customer.productCount })}</span>
-                            <span className="font-medium text-foreground">{t("copilot.summary360TotalSuggestedQuantity", { value: customer.totalSuggestedQuantity.toLocaleString() })}</span>
-                          </div>
-                          {customer.categories.map((category) => (
-                            <section key={category.category} className="space-y-2 rounded-md border border-border bg-card/40 p-3">
-                              <h4 className="text-sm font-semibold">{category.category}</h4>
-                              {category.products.map(({ productCode, opportunity: op }) => (
-                                <div key={productCode} className="space-y-2.5 border-t border-border pt-3 first:border-t-0 first:pt-0">
-                                  <p className="text-sm font-medium text-foreground">{op.productName}</p>
-                                  <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-4">
-                                    <span>{t("copilot.summary360BaselineQuantity", { value: op.baselineNetQuantity.toLocaleString() })}</span>
-                                    <span>{t("copilot.summary360RecentQuantity", { value: op.recentNetQuantity.toLocaleString() })}</span>
-                                    <span>{t("copilot.summary360DeclineQuantity", { value: op.declineValue.toLocaleString() })}</span>
-                                    <span className="font-medium text-foreground">{t("copilot.summary360SuggestedQuantity", { value: op.suggestedQuantity.toLocaleString() })}</span>
-                                  </div>
-                                  <p className="text-xs text-muted-foreground">
-                                    {op.lastVisitDate ? t("copilot.summary360LastVisit", { date: op.lastVisitDate }) : t("copilot.summary360LastVisitUnknown")}
-                                  </p>
-                                  {op.stoppedProducts.length > 0 && (
-                                    <div>
-                                      <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                                        <Package className="h-3.5 w-3.5" />
-                                        {t("copilot.summary360StoppedProducts")}
-                                      </p>
-                                      <div className="flex flex-wrap gap-1.5">
-                                        {op.stoppedProducts.map((product, productIndex) => (
-                                          <span key={`${product.productName}-${productIndex}`} className="rounded-full border border-orange-400/30 bg-orange-500/10 px-2.5 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-300">
-                                            {product.productName}{" \u00B7 "}{product.quantity.toLocaleString()} {product.unit}{" \u00B7 "}{product.value.toLocaleString()}
-                                          </span>
-                                        ))}
-                                        {Boolean(op.extraProductCount) && (
-                                          <span className="rounded-full border border-border bg-card px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
-                                            {t("copilot.summary360MoreProducts", { count: op.extraProductCount! })}
-                                          </span>
-                                        )}
-                                      </div>
-                                    </div>
-                                  )}
-                                  <div className="space-y-1.5 rounded-md border border-border bg-card p-2.5">
-                                    <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360Diagnosis")}: </span>{op.diagnosis}</p>
-                                    {op.likelyReason && <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360LikelyReason")}: </span>{op.likelyReason}</p>}
-                                    <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360VisitDecision")}: </span>{op.visitDecision}</p>
-                                    {op.visitGoal && <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360VisitGoal")}: </span>{op.visitGoal}</p>}
-                                  </div>
-                                </div>
-                              ))}
-                            </section>
-                          ))}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
                 </section>
+
+                {exclusionsQuery.data && exclusionsQuery.data.length > 0 && (
+                  <section className="glass-card space-y-2 p-4">
+                    <h3 className="text-sm font-semibold">{t("copilot.summary360ExcludedProducts")}</h3>
+                    <div className="space-y-2">
+                      {exclusionsQuery.data.map((exclusion) => (
+                        <div key={exclusion.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                          <span>{exclusion.productCode} ? {t(`copilot.summary360Scope${exclusion.scopeType}` as TranslationKey)}</span>
+                          <Button type="button" size="sm" variant="outline" disabled={revokeExclusionMutation.isPending} onClick={() => revokeExclusionMutation.mutate(exclusion.id)}>{t("copilot.summary360RevokeExclusion")}</Button>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                )}
 
                 {/* Collections */}
                 <section className="glass-card space-y-3 p-4">

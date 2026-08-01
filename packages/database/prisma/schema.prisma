@@ -67,6 +67,13 @@ enum OrgUnitStatus {
   ARCHIVED
 }
 
+enum LostOpportunityExclusionScope {
+  CUSTOMER_PRODUCT
+  SALESPERSON_PRODUCT
+  TEAM_PRODUCT
+  COMPANY_PRODUCT
+}
+
 // Phase 4 — User & Identity Management. PENDING/SUSPENDED/LOCKED/ARCHIVED are
 // additive on top of Phase 1/2's original ACTIVE/INVITED/DISABLED — no
 // behavior change for existing rows or the login gate (still just
@@ -217,6 +224,7 @@ model Company {
   policies      CompanyPolicy[]
   salesCalendarDays SalesCalendar[]
   prospects     Prospect[]
+  lostOpportunityExclusions LostOpportunityExclusion[]
 
   @@map("companies")
 }
@@ -422,10 +430,41 @@ model User {
   // Phase 8: refresh runs this user triggered (Migration Readiness Review fix).
   triggeredRefreshRuns RefreshRun[]
   discoveredProspects  Prospect[]
+  createdLostOpportunityExclusions LostOpportunityExclusion[] @relation("LostOpportunityExclusionCreatedBy")
+  revokedLostOpportunityExclusions LostOpportunityExclusion[] @relation("LostOpportunityExclusionRevokedBy")
 
   @@index([companyId])
   @@index([orgUnitId])
   @@map("users")
+}
+
+// Persistent opt-out rules for Daily 360 lost opportunities. Scope keys are
+// derived server-side; no client can choose another company, salesperson, or team.
+model LostOpportunityExclusion {
+  id              String                         @id @default(cuid())
+  companyId       String                         @map("company_id")
+  scopeType       LostOpportunityExclusionScope  @map("scope_type")
+  scopeKey        String                         @map("scope_key")
+  customerCode    String?                        @map("customer_code")
+  productCode     String                         @map("product_code")
+  salespersonId   String?                        @map("salesperson_id")
+  teamScopeId     String?                        @map("team_scope_id")
+  createdByUserId String                         @map("created_by_user_id")
+  reason          String?
+  createdAt       DateTime                       @default(now()) @map("created_at")
+  revokedAt       DateTime?                      @map("revoked_at")
+  revokedByUserId String?                        @map("revoked_by_user_id")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdByUser User @relation("LostOpportunityExclusionCreatedBy", fields: [createdByUserId], references: [id])
+  revokedByUser User? @relation("LostOpportunityExclusionRevokedBy", fields: [revokedByUserId], references: [id])
+
+  @@unique([companyId, scopeType, scopeKey])
+  @@index([companyId, productCode, revokedAt])
+  @@index([companyId, salespersonId, productCode, revokedAt])
+  @@index([companyId, teamScopeId, productCode, revokedAt])
+  @@index([companyId, customerCode, productCode, revokedAt])
+  @@map("lost_opportunity_exclusions")
 }
 
 // DB-tracked refresh tokens (not purely stateless) so a company going

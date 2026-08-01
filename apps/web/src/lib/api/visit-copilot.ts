@@ -1,3 +1,4 @@
+import type { CreateLostOpportunityExclusion } from "@field-sales-os/schemas";
 import { apiFetch } from "../api-client";
 import type {
   VisitCopilot360Summary,
@@ -79,4 +80,11 @@ export const visitCopilotApi = {
     apiFetch<VisitCopilot360Summary>("/visit-copilot/daily-360-summary", {
       query: { period: params.period, from: params.from, to: params.to, date: params.date },
     }),
+
+  lostOpportunityExclusions: () =>
+    apiFetch<Array<{ id: string; scopeType: string; customerCode: string | null; productCode: string; reason: string | null }>>("/visit-copilot/lost-opportunity-exclusions"),
+  createLostOpportunityExclusion: (body: CreateLostOpportunityExclusion) =>
+    apiFetch<{ id: string }>("/visit-copilot/lost-opportunity-exclusions", { method: "POST", body }),
+  revokeLostOpportunityExclusion: (id: string) =>
+    apiFetch<{ id: string }>(`/visit-copilot/lost-opportunity-exclusions/${encodeURIComponent(id)}/revoke`, { method: "POST" }),
 };

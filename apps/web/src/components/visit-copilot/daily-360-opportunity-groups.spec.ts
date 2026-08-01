@@ -1,7 +1,12 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import type { VisitCopilot360LostOpportunity } from "@/lib/types";
-import { groupDaily360LostOpportunities } from "./daily-360-opportunity-groups";
+import {
+  daily360CategoryKey,
+  groupDaily360LostOpportunities,
+  toggleDaily360OpenCategory,
+  toggleDaily360OpenCustomer,
+} from "./daily-360-opportunity-groups";
 
 function opportunity(input: Partial<VisitCopilot360LostOpportunity> & Pick<VisitCopilot360LostOpportunity, "customerCode" | "customerName" | "productCode" | "productName">): VisitCopilot360LostOpportunity {
   return {
@@ -64,4 +69,22 @@ test("deduplicates customer-product pairs, uses Uncategorized, and retains oppor
   assert.equal(product.opportunity.diagnosis, "Keep me");
   assert.equal(product.opportunity.stoppedProducts[0]!.productName, "Milk");
   assert.equal(product.opportunity.category, null);
+});
+
+
+test("customer accordion is exclusive by customer code and categories start closed", () => {
+  let openCustomer = "C1";
+  openCustomer = toggleDaily360OpenCustomer(openCustomer, "C2")!;
+  assert.equal(openCustomer, "C2");
+  assert.equal(toggleDaily360OpenCustomer(openCustomer, "C2"), null);
+
+  const dairyForFirstCustomer = daily360CategoryKey("C1", "Dairy");
+  const dairyForSecondCustomer = daily360CategoryKey("C2", "Dairy");
+  let openCategories = new Set<string>();
+  assert.equal(openCategories.size, 0);
+  openCategories = toggleDaily360OpenCategory(openCategories, dairyForFirstCustomer);
+  assert.equal(openCategories.has(dairyForFirstCustomer), true);
+  assert.equal(openCategories.has(dairyForSecondCustomer), false);
+  openCategories = toggleDaily360OpenCategory(openCategories, dairyForFirstCustomer);
+  assert.equal(openCategories.size, 0);
 });

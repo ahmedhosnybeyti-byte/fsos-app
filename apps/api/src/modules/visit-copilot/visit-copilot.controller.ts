@@ -13,6 +13,8 @@ import {
   type VisitCopilotChatRequest,
   type VisitCopilotDailyBriefQuery,
   type VisitCopilotDaily360SummaryQuery,
+  createLostOpportunityExclusionSchema,
+  type CreateLostOpportunityExclusion,
   type VisitCopilotDiscoveryQuery,
   type VisitCopilotGoogleSearchRequest,
   type VisitCopilotPlanRequest,
@@ -89,6 +91,27 @@ export class VisitCopilotController {
   // ------------------------------------------------------------------
   // Customer Discovery — Phase 2
   // ------------------------------------------------------------------
+
+  @Get("lost-opportunity-exclusions")
+  @Auth()
+  listLostOpportunityExclusions(@CurrentUser() user: AuthenticatedUser) {
+    return this.visitCopilotService.listLostOpportunityExclusions(user);
+  }
+
+  @Post("lost-opportunity-exclusions")
+  @Auth()
+  createLostOpportunityExclusion(
+    @CurrentUser() user: AuthenticatedUser,
+    @Body(new ZodValidationPipe(createLostOpportunityExclusionSchema)) body: CreateLostOpportunityExclusion,
+  ) {
+    return this.visitCopilotService.createLostOpportunityExclusion(user, body);
+  }
+
+  @Post("lost-opportunity-exclusions/:id/revoke")
+  @Auth()
+  revokeLostOpportunityExclusion(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.visitCopilotService.revokeLostOpportunityExclusion(user, id);
+  }
 
   @Get("discovery")
   @Auth()

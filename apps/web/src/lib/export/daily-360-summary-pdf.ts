@@ -18,6 +18,24 @@ import type { VisitCopilot360Summary } from "@/lib/types";
 // No new data: the PDF renders the exact DOM node the modal already built
 // from the same VisitCopilot360Summary the user is looking at — same
 // permissions, same hierarchy-scoped numbers, zero extra network calls.
+export type Daily360PdfCaptureDimensions = { width: number; height: number };
+
+export function getDaily360PdfCaptureDimensions(element: Pick<HTMLElement, "scrollWidth" | "scrollHeight" | "getBoundingClientRect">): Daily360PdfCaptureDimensions {
+  const rect = element.getBoundingClientRect();
+  const width = Math.ceil(Math.max(rect.width, element.scrollWidth));
+  const height = Math.ceil(Math.max(rect.height, element.scrollHeight));
+  if (width < 1 || height < 1) throw new Error("Daily 360 report has no visible size to export");
+  return { width, height };
+}
+
+export function assertDaily360PdfCanvas(canvas: Pick<HTMLCanvasElement, "width" | "height" | "toDataURL">): string {
+  if (canvas.width < 1 || canvas.height < 1) throw new Error("Daily 360 export canvas is empty");
+  const image = canvas.toDataURL("image/png");
+  // A PNG data URL below this threshold is the empty-canvas signature in browsers.
+  if (!image.startsWith("data:image/png;base64,") || image.length < 1_000) throw new Error("Daily 360 export image is empty");
+  return image;
+}
+
 export async function exportDaily360SummaryPdf(
   summary: VisitCopilot360Summary,
   t: (key: TranslationKey, params?: Record<string, string | number>) => string,
@@ -38,7 +56,8 @@ export async function exportDaily360SummaryPdf(
   // again, so this never hard-fails just because of a className rename.
   const scrollBody = root.querySelector<HTMLElement>(".min-h-0.overflow-y-auto");
   const captureTarget = scrollBody ?? root;
-  console.info("[daily-360-summary] PDF export: captureTarget=", captureTarget === root ? "root (fallback)" : "scrollBody", "scrollHeight=", captureTarget.scrollHeight);
+  const captureSize = getDaily360PdfCaptureDimensions(captureTarget);
+  console.info("[daily-360-summary] PDF export: captureTarget=", captureTarget === root ? "root (fallback)" : "scrollBody", "size=", captureSize);
 
   // html2canvas (v1.4.1) parses every CSS rule itself rather than asking the
   // browser to resolve it, and doesn't understand modern color syntax like
@@ -167,13 +186,16 @@ export async function exportDaily360SummaryPdf(
       scale: 2,
       // Capture the full scrollable content, not just the visible clipped
       // viewport — html2canvas otherwise only rasterizes what's on screen.
-      height: captureTarget.scrollHeight,
-      windowHeight: captureTarget.scrollHeight,
+      width: captureSize.width,
+      height: captureSize.height,
+      windowWidth: captureSize.width,
+      windowHeight: captureSize.height,
     });
   } finally {
     for (const restore of restoreBoxShadow) restore();
     for (const restore of pdfColorRestores) restore();
   }
+  assertDaily360PdfCanvas(canvas);
   console.info("[daily-360-summary] PDF export: canvas captured", canvas.width, "x", canvas.height);
 
   const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
@@ -200,7 +222,9 @@ export async function exportDaily360SummaryPdf(
 
     if (pageIndex > 0) pdf.addPage();
     const sliceHeightPt = (sliceHeightPx * imgWidthPt) / canvas.width;
-    pdf.addImage(pageCanvas.toDataURL("image/png"), "PNG", 0, 0, imgWidthPt, sliceHeightPt);
+    const pageImage = pageCanvas.toDataURL("image/png");
+    if (!pageImage.startsWith("data:image/png;base64,") || pageImage.length < 1_000) throw new Error("Daily 360 PDF page image is empty");
+    pdf.addImage(pageImage, "PNG", 0, 0, imgWidthPt, sliceHeightPt);
 
     renderedHeightPx += sliceHeightPx;
     pageIndex += 1;

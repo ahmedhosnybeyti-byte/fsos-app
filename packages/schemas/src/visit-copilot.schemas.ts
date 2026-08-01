@@ -210,6 +210,30 @@ export const visitCopilotDaily360SummaryQuerySchema = z
   .refine(customPeriodRefinement.check, customPeriodRefinement.options);
 export type VisitCopilotDaily360SummaryQuery = z.infer<typeof visitCopilotDaily360SummaryQuerySchema>;
 
+
+export const lostOpportunityExclusionScopeSchema = z.enum([
+  "CUSTOMER_PRODUCT",
+  "SALESPERSON_PRODUCT",
+  "TEAM_PRODUCT",
+  "COMPANY_PRODUCT",
+]);
+export type LostOpportunityExclusionScope = z.infer<typeof lostOpportunityExclusionScopeSchema>;
+
+export const createLostOpportunityExclusionSchema = z.object({
+  scopeType: lostOpportunityExclusionScopeSchema,
+  customerCode: z.string().trim().min(1).max(200).optional(),
+  productCode: z.string().trim().min(1).max(200),
+  reason: z.string().trim().max(500).optional(),
+}).superRefine((value, ctx) => {
+  if (value.scopeType === "CUSTOMER_PRODUCT" && !value.customerCode) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["customerCode"], message: "customerCode is required for CUSTOMER_PRODUCT" });
+  }
+  if (value.scopeType !== "CUSTOMER_PRODUCT" && value.customerCode) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["customerCode"], message: "customerCode is only valid for CUSTOMER_PRODUCT" });
+  }
+});
+export type CreateLostOpportunityExclusion = z.infer<typeof createLostOpportunityExclusionSchema>;
+
 export const visitCopilot360StoppedProductSchema = z.object({
   productName: z.string(),
   quantity: z.number(),

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from "@nestjs/common";
 import {
   resolveVisitCopilotPeriod,
   resolveVisitCopilotPlanDate,
@@ -9,6 +9,8 @@ import {
   type VisitCopilotChatRequest,
   type VisitCopilotDailyBriefQuery,
   type VisitCopilotDaily360SummaryQuery,
+  type CreateLostOpportunityExclusion,
+  type LostOpportunityExclusionScope,
   type VisitCopilotDiscoveryQuery,
   type VisitCopilotGoogleSearchRequest,
   type VisitCopilotPeriod,
@@ -33,6 +35,7 @@ import { VisitCopilotRuleRegistry } from "./visit-copilot.rules";
 import { SgiService } from "../sgi/sgi.service";
 import { LostOpportunityService, type LostOpportunityResult } from "../lost-opportunity/lost-opportunity.service";
 import { buildLostOpportunityCoaching } from "./daily-360-recommendation-builder";
+import { AuditLogService } from "../audit-log/audit-log.service";
 
 // AI Visit Copilot — Phase 1. Decision-support screen for the field rep:
 // today's visit plan + a per-customer pre-visit briefing that must be
@@ -368,6 +371,7 @@ export class VisitCopilotService {
     // hierarchy-scoped per viewer — see daily360Summary() below.
     private readonly sgiService: SgiService,
     private readonly lostOpportunityService: LostOpportunityService,
+    private readonly auditLogService: AuditLogService,
   ) {}
 
   // Every RIE read must pass requestingUser — Hierarchy Row-Level Filtering
@@ -1089,6 +1093,91 @@ export class VisitCopilotService {
     SALES_REP: "مندوب مبيعات",
   };
 
+  private async teamScopeIdFor(user: AuthenticatedUser): Promise<string | null> {
+    const employee = await this.prisma.employee.findUnique({ where: { userId: user.userId }, select: { id: true, managerId: true } });
+    if (!employee) return null;
+    return user.roleCode === "SUPERVISOR" ? employee.id : employee.managerId;
+  }
+
+  private canCreateExclusion(scopeType: LostOpportunityExclusionScope, roleCode: AuthenticatedUser["roleCode"]): boolean {
+    if (scopeType === "CUSTOMER_PRODUCT" || scopeType === "SALESPERSON_PRODUCT") return roleCode === "SALES_REP" || roleCode === "SUPERVISOR";
+    if (scopeType === "TEAM_PRODUCT") return roleCode === "SUPERVISOR";
+    return roleCode === "MANAGER" || roleCode === "COMPANY_ADMIN";
+  }
+
+  async createLostOpportunityExclusion(user: AuthenticatedUser, input: CreateLostOpportunityExclusion) {
+    if (!user.companyId || !this.canCreateExclusion(input.scopeType, user.roleCode)) throw new ForbiddenException();
+    const companyId = user.companyId;
+    const productCode = input.productCode.trim();
+    const customerCode = input.customerCode?.trim() || null;
+    const teamScopeId = input.scopeType === "TEAM_PRODUCT" ? await this.teamScopeIdFor(user) : null;
+    if (input.scopeType === "TEAM_PRODUCT" && !teamScopeId) throw new BadRequestException("Your supervisor team could not be resolved");
+    const salespersonId = input.scopeType === "SALESPERSON_PRODUCT" ? user.userId : null;
+    const scopeKey = input.scopeType === "CUSTOMER_PRODUCT" ? `${customerCode}\u0000${productCode}`
+      : input.scopeType === "SALESPERSON_PRODUCT" ? `${salespersonId}\u0000${productCode}`
+      : input.scopeType === "TEAM_PRODUCT" ? `${teamScopeId}\u0000${productCode}` : productCode;
+
+    return this.prisma.$transaction(async (tx) => {
+      const row = await tx.lostOpportunityExclusion.upsert({
+        where: { companyId_scopeType_scopeKey: { companyId, scopeType: input.scopeType, scopeKey } },
+        create: { companyId, scopeType: input.scopeType, scopeKey, customerCode, productCode, salespersonId, teamScopeId, createdByUserId: user.userId, reason: input.reason?.trim() || null },
+        update: { customerCode, productCode, salespersonId, teamScopeId, createdByUserId: user.userId, reason: input.reason?.trim() || null, revokedAt: null, revokedByUserId: null },
+      });
+      await this.auditLogService.record({ companyId, userId: user.userId, action: "lost_opportunity.exclusion_created", entityType: "LostOpportunityExclusion", entityId: row.id, metadata: { scopeType: input.scopeType, customerCode, productCode, salespersonId, teamScopeId } }, tx);
+      return row;
+    });
+  }
+
+  async listLostOpportunityExclusions(user: AuthenticatedUser) {
+    if (!user.companyId) throw new ForbiddenException();
+    const teamScopeId = user.roleCode === "SUPERVISOR" ? await this.teamScopeIdFor(user) : null;
+    const isCompanyManager = user.roleCode === "MANAGER" || user.roleCode === "COMPANY_ADMIN";
+    return this.prisma.lostOpportunityExclusion.findMany({
+      where: {
+        companyId: user.companyId,
+        revokedAt: null,
+        ...(isCompanyManager ? {} : {
+          OR: [
+            { scopeType: "CUSTOMER_PRODUCT", createdByUserId: user.userId },
+            { scopeType: "SALESPERSON_PRODUCT", salespersonId: user.userId },
+            ...(teamScopeId ? [{ scopeType: "TEAM_PRODUCT" as const, teamScopeId }] : []),
+          ],
+        }),
+      },
+      select: { id: true, scopeType: true, customerCode: true, productCode: true, reason: true },
+      orderBy: { createdAt: "desc" },
+    });
+  }
+
+  async revokeLostOpportunityExclusion(user: AuthenticatedUser, id: string) {
+    if (!user.companyId) throw new ForbiddenException();
+    const row = await this.prisma.lostOpportunityExclusion.findFirst({ where: { id, companyId: user.companyId } });
+    if (!row) throw new NotFoundException();
+    const canManageCompany = user.roleCode === "MANAGER" || user.roleCode === "COMPANY_ADMIN";
+    const ownSalesperson = row.scopeType === "SALESPERSON_PRODUCT" && row.salespersonId === user.userId;
+    const ownCustomer = row.scopeType === "CUSTOMER_PRODUCT" && row.createdByUserId === user.userId;
+    const ownTeam = row.scopeType === "TEAM_PRODUCT" && user.roleCode === "SUPERVISOR" && row.teamScopeId === await this.teamScopeIdFor(user);
+    if (!canManageCompany && !ownSalesperson && !ownCustomer && !ownTeam) throw new ForbiddenException();
+    return this.prisma.$transaction(async (tx) => {
+      const updated = await tx.lostOpportunityExclusion.update({ where: { id }, data: { revokedAt: new Date(), revokedByUserId: user.userId } });
+      await this.auditLogService.record({ companyId: user.companyId!, userId: user.userId, action: "lost_opportunity.exclusion_revoked", entityType: "LostOpportunityExclusion", entityId: id, metadata: { scopeType: row.scopeType, productCode: row.productCode } }, tx);
+      return updated;
+    });
+  }
+
+  private async filterDaily360LostOpportunities<T extends { customerCode: string; productCode: string }>(user: AuthenticatedUser, opportunities: readonly T[]): Promise<T[]> {
+    if (!user.companyId || opportunities.length === 0) return [...opportunities];
+    const teamScopeId = await this.teamScopeIdFor(user);
+    const productCodes = [...new Set(opportunities.map((opportunity) => opportunity.productCode))];
+    const exclusions = await this.prisma.lostOpportunityExclusion.findMany({ where: { companyId: user.companyId, revokedAt: null, productCode: { in: productCodes } } });
+    return opportunities.filter((opportunity) => !exclusions.some((exclusion) =>
+      exclusion.scopeType === "COMPANY_PRODUCT"
+      || (exclusion.scopeType === "CUSTOMER_PRODUCT" && exclusion.customerCode === opportunity.customerCode)
+      || (exclusion.scopeType === "SALESPERSON_PRODUCT" && exclusion.salespersonId === user.userId)
+      || (exclusion.scopeType === "TEAM_PRODUCT" && teamScopeId !== null && exclusion.teamScopeId === teamScopeId)
+    ));
+  }
+
   async daily360Summary(user: AuthenticatedUser, query: VisitCopilotDaily360SummaryQuery): Promise<VisitCopilot360Summary> {
     const warnings: string[] = [];
 
@@ -1127,7 +1216,8 @@ export class VisitCopilotService {
     // ---- Lost opportunities are computed once in buildDailyBrief, using the
     // same selected-date customer plan and shared engine as Smart Loading.
     const lostOpportunityResult = brief.lostOpportunityResult;
-    const lostOpportunities = lostOpportunityResult.opportunities.map((opportunity) => ({
+    const visibleLostOpportunities = await this.filterDaily360LostOpportunities(user, lostOpportunityResult.opportunities);
+    const lostOpportunities = visibleLostOpportunities.map((opportunity) => ({
       customerName: opportunity.customerName, declineValue: opportunity.baselineNetQuantity, valueBefore: opportunity.baselineNetQuantity, valueAfter: opportunity.recentNetQuantity,
       lastVisitDate: brief.customers.find((customer) => customer.customerCode === opportunity.customerCode)?.lastVisitDate ?? null,
       stoppedProducts: [{ productName: opportunity.productName, quantity: opportunity.baselineNetQuantity, unit: "", value: opportunity.suggestedQuantity }],

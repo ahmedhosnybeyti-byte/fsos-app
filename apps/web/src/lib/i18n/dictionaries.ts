@@ -1093,6 +1093,22 @@ export type TranslationKey =
   | "copilot.summary360ProductCount"
   | "copilot.summary360TotalSuggestedQuantity"
   | "copilot.summary360TotalDecline"
+  | "copilot.summary360ExcludeReason"
+  | "copilot.summary360ScopeCOMPANY_PRODUCT"
+  | "copilot.summary360ScopeTEAM_PRODUCT"
+  | "copilot.summary360ScopeSALESPERSON_PRODUCT"
+  | "copilot.summary360ScopeCUSTOMER_PRODUCT"
+  | "copilot.summary360ExclusionRevoked"
+  | "copilot.summary360RevokeExclusion"
+  | "copilot.summary360ExcludedProducts"
+  | "copilot.summary360ExclusionError"
+  | "copilot.summary360ExclusionSaved"
+  | "copilot.summary360ExcludeConfirm"
+  | "copilot.summary360ExcludeCompanyProduct"
+  | "copilot.summary360ExcludeTeamProduct"
+  | "copilot.summary360ExcludeSalespersonProduct"
+  | "copilot.summary360ExcludeCustomerProduct"
+  | "copilot.summary360ExcludeMenu"
   | "copilot.summary360Collections"
   | "copilot.summary360Collected"
   | "copilot.summary360Pending"
@@ -2406,6 +2422,22 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360ProductCount": "الأصناف: {value}",
     "copilot.summary360TotalSuggestedQuantity": "إجمالي الكمية المقترحة: {value}",
     "copilot.summary360TotalDecline": "إجمالي كمية التراجع: {value}",
+    "copilot.summary360ExcludeReason": "سبب الاستبعاد (اختياري)",
+    "copilot.summary360ExcludedProducts": "الأصناف المستبعدة",
+    "copilot.summary360RevokeExclusion": "إلغاء الاستبعاد",
+    "copilot.summary360ExclusionRevoked": "تم إلغاء الاستبعاد",
+    "copilot.summary360ScopeCUSTOMER_PRODUCT": "رفض العميل للصنف",
+    "copilot.summary360ScopeSALESPERSON_PRODUCT": "استبعاد المندوب",
+    "copilot.summary360ScopeTEAM_PRODUCT": "استبعاد الفريق",
+    "copilot.summary360ScopeCOMPANY_PRODUCT": "استبعاد الشركة",
+    "copilot.summary360ExcludeMenu": "إخفاء الصنف",
+    "copilot.summary360ExcludeCustomerProduct": "العميل يرفض الصنف",
+    "copilot.summary360ExcludeSalespersonProduct": "إخفاؤه عني",
+    "copilot.summary360ExcludeTeamProduct": "إلغاؤه لفريقي",
+    "copilot.summary360ExcludeCompanyProduct": "إلغاؤه من الشركة",
+    "copilot.summary360ExcludeConfirm": "هل تريد تطبيق: {scope}؟",
+    "copilot.summary360ExclusionSaved": "تم إخفاء الصنف من الفرص الضائعة",
+    "copilot.summary360ExclusionError": "تعذر حفظ استبعاد الصنف",
     "copilot.summary360Collections": "التحصيل",
     "copilot.summary360Collected": "تم تحصيله",
     "copilot.summary360Pending": "معلّق",
@@ -3719,6 +3751,22 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.summary360ProductCount": "Products: {value}",
     "copilot.summary360TotalSuggestedQuantity": "Total suggested quantity: {value}",
     "copilot.summary360TotalDecline": "Total decline quantity: {value}",
+    "copilot.summary360ExcludeReason": "Reason for exclusion (optional)",
+    "copilot.summary360ExcludedProducts": "Excluded products",
+    "copilot.summary360RevokeExclusion": "Revoke exclusion",
+    "copilot.summary360ExclusionRevoked": "Exclusion revoked",
+    "copilot.summary360ScopeCUSTOMER_PRODUCT": "Customer rejection",
+    "copilot.summary360ScopeSALESPERSON_PRODUCT": "Salesperson exclusion",
+    "copilot.summary360ScopeTEAM_PRODUCT": "Team exclusion",
+    "copilot.summary360ScopeCOMPANY_PRODUCT": "Company exclusion",
+    "copilot.summary360ExcludeMenu": "Exclude product",
+    "copilot.summary360ExcludeCustomerProduct": "Customer rejects product",
+    "copilot.summary360ExcludeSalespersonProduct": "Hide for me",
+    "copilot.summary360ExcludeTeamProduct": "Exclude for my team",
+    "copilot.summary360ExcludeCompanyProduct": "Exclude company-wide",
+    "copilot.summary360ExcludeConfirm": "Apply: {scope}?",
+    "copilot.summary360ExclusionSaved": "Product excluded from lost opportunities",
+    "copilot.summary360ExclusionError": "Could not save the product exclusion",
     "copilot.summary360Collections": "Collections",
     "copilot.summary360Collected": "Collected",
     "copilot.summary360Pending": "Pending",

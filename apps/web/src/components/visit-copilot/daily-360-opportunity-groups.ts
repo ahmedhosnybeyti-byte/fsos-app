@@ -21,6 +21,29 @@ export type Daily360CustomerGroup = {
   categories: Daily360CategoryGroup[];
 };
 
+/** Keeps the customer accordion exclusive without coupling it to customer names. */
+export function toggleDaily360OpenCustomer(
+  currentCustomerCode: string | null,
+  customerCode: string,
+): string | null {
+  return currentCustomerCode === customerCode ? null : customerCode;
+}
+
+/** Category state is scoped to its customer, so equal category labels never collide. */
+export function daily360CategoryKey(customerCode: string, category: string): string {
+  return `${customerCode}\u0000${category}`;
+}
+
+export function toggleDaily360OpenCategory(
+  currentCategoryKeys: ReadonlySet<string>,
+  categoryKey: string,
+): Set<string> {
+  const next = new Set(currentCategoryKeys);
+  if (next.has(categoryKey)) next.delete(categoryKey);
+  else next.add(categoryKey);
+  return next;
+}
+
 const compareByDeclineThenName = (a: Daily360ProductGroup, b: Daily360ProductGroup) =>
   b.opportunity.declineValue - a.opportunity.declineValue
   || a.productName.localeCompare(b.productName, "ar")
@@ -85,4 +108,13 @@ export function groupDaily360LostOpportunities(
       categories: groupedCategories,
     };
   });
+}
+
+export type Daily360ExclusionAction = "CUSTOMER_PRODUCT" | "SALESPERSON_PRODUCT" | "TEAM_PRODUCT" | "COMPANY_PRODUCT";
+
+export function daily360AllowedExclusionActions(roleCode: string | undefined): Daily360ExclusionAction[] {
+  if (roleCode === "SALES_REP") return ["CUSTOMER_PRODUCT", "SALESPERSON_PRODUCT"];
+  if (roleCode === "SUPERVISOR") return ["CUSTOMER_PRODUCT", "SALESPERSON_PRODUCT", "TEAM_PRODUCT"];
+  if (roleCode === "MANAGER" || roleCode === "COMPANY_ADMIN") return ["COMPANY_PRODUCT"];
+  return [];
 }
