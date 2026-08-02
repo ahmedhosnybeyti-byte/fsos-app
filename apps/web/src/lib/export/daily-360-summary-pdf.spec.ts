@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 import type { VisitCopilot360LostOpportunity } from "@/lib/types";
 import {
+  assertDaily360PdfBytes,
   assertDaily360PdfCanvas,
   getDaily360PdfCaptureDimensions,
   getDaily360PdfPageSlices,
@@ -11,10 +12,10 @@ import {
 function opportunity(overrides: Partial<VisitCopilot360LostOpportunity>): VisitCopilot360LostOpportunity {
   return {
     customerCode: "C-1",
-    customerName: "عميل واحد",
+    customerName: "ط¹ظ…ظٹظ„ ظˆط§ط­ط¯",
     productCode: "P-1",
-    productName: "صنف واحد",
-    category: "ألبان",
+    productName: "طµظ†ظپ ظˆط§ط­ط¯",
+    category: "ط£ظ„ط¨ط§ظ†",
     declineValue: 2,
     valueBefore: 2,
     valueAfter: 0,
@@ -23,8 +24,8 @@ function opportunity(overrides: Partial<VisitCopilot360LostOpportunity>): VisitC
     suggestedQuantity: 1,
     lastVisitDate: null,
     stoppedProducts: [],
-    diagnosis: "تشخيص",
-    visitDecision: "قرار",
+    diagnosis: "طھط´ط®ظٹطµ",
+    visitDecision: "ظ‚ط±ط§ط±",
     ...overrides,
   };
 }
@@ -48,14 +49,19 @@ test("splits long Daily 360 reports into bounded PDF pages", () => {
 
 test("builds PDF groups from filtered opportunities without accordion state or duplicates", () => {
   const groups = groupDaily360PdfOpportunities([
-    opportunity({ productCode: "P-1", productName: "حليب", category: "ألبان" }),
-    opportunity({ productCode: "P-1", productName: "نسخة مكررة" }),
-    opportunity({ productCode: "P-2", productName: "شيبس", category: null }),
-    opportunity({ customerCode: "C-2", customerName: "عميل ثان", productCode: "P-3", productName: "عصير" }),
-  ], "غير مصنف");
+    opportunity({ productCode: "P-1", productName: "ط­ظ„ظٹط¨", category: "ط£ظ„ط¨ط§ظ†" }),
+    opportunity({ productCode: "P-1", productName: "ظ†ط³ط®ط© ظ…ظƒط±ط±ط©" }),
+    opportunity({ productCode: "P-2", productName: "ط´ظٹط¨ط³", category: null }),
+    opportunity({ customerCode: "C-2", customerName: "ط¹ظ…ظٹظ„ ط«ط§ظ†", productCode: "P-3", productName: "ط¹طµظٹط±" }),
+  ], "ط؛ظٹط± ظ…طµظ†ظپ");
 
   assert.equal(groups.length, 2);
   assert.equal(groups[0]?.opportunities.length, 2);
   assert.equal(groups[0]?.opportunities.find((item) => item.productCode === "P-2")?.category, null);
-  assert.equal(groups[1]?.customerName, "عميل ثان");
+  assert.equal(groups[1]?.customerName, "ط¹ظ…ظٹظ„ ط«ط§ظ†");
+});
+
+test("rejects invalid PDF byte output before download", () => {
+  assert.throws(() => assertDaily360PdfBytes(new Uint8Array([0x50, 0x44, 0x46])));
+  assert.doesNotThrow(() => assertDaily360PdfBytes(new Uint8Array([0x25, 0x50, 0x44, 0x46, ...new Array(1_000).fill(0)])));
 });

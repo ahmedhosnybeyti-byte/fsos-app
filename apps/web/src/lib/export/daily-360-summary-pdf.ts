@@ -40,6 +40,10 @@ export function assertDaily360PdfCanvas(canvas: Pick<HTMLCanvasElement, "width" 
   if (!image.startsWith("data:image/png;base64,") || image.length < 1_000) throw new Error("Daily 360 export image is empty");
   return image;
 }
+export function assertDaily360PdfBytes(bytes: Uint8Array): void {
+  const header = new TextDecoder("ascii").decode(bytes.slice(0, 4));
+  if (bytes.byteLength < 1_000 || header !== "%PDF") throw new Error("Daily 360 PDF output is invalid");
+}
 
 export function groupDaily360PdfOpportunities(
   opportunities: readonly VisitCopilot360LostOpportunity[],
@@ -276,8 +280,20 @@ export async function exportDaily360SummaryPdf(
     });
     if (renderedPages === 0) throw new Error("Daily 360 report has no pages");
 
-    phase = "save PDF";
-    pdf.save(`daily-360-summary-${summary.reportDate}.pdf`);
+    phase = "validate PDF bytes";
+    const bytes = new Uint8Array(pdf.output("arraybuffer"));
+    assertDaily360PdfBytes(bytes);
+
+    phase = "trigger download";
+    const blob = new Blob([bytes], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `daily-360-summary-${summary.reportDate}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
   } catch (error) {
     const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     console.error("[daily-360-summary] PDF export failed", { phase, detail, error });
