@@ -141,48 +141,52 @@ function drawPageFooter(page: ReportPage, pageNumber: number, direction: CanvasD
   context.fillText(`${pageNumber}`, direction === "rtl" ? PAGE_WIDTH - PAGE_MARGIN : PAGE_MARGIN, PAGE_HEIGHT - 38);
 }
 
-export function buildDaily360PdfPages(
+
+export function renderDaily360PdfPages(
   summary: VisitCopilot360Summary,
   t: (key: TranslationKey, params?: Record<string, string | number>) => string,
-): HTMLCanvasElement[] {
+  onPage: (canvas: HTMLCanvasElement, pageNumber: number) => void,
+): number {
   const locale = document.documentElement.lang || "ar";
   const direction: CanvasDirection = document.documentElement.dir === "rtl" ? "rtl" : "ltr";
   const contentX = direction === "rtl" ? PAGE_WIDTH - PAGE_MARGIN - 28 : PAGE_MARGIN + 28;
   const contentWidth = PAGE_WIDTH - PAGE_MARGIN * 2 - 56;
   const number = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 });
-  const pages: ReportPage[] = [createPage(direction)];
+  let page = createPage(direction);
+  let pageNumber = 1;
 
-  const current = () => pages[pages.length - 1]!;
+  const current = () => page;
+  const finishPage = () => {
+    drawPageFooter(current(), pageNumber, direction);
+    onPage(current().canvas, pageNumber);
+  };
   const nextPage = () => {
-    drawPageFooter(current(), pages.length, direction);
-    pages.push(createPage(direction));
+    finishPage();
+    pageNumber += 1;
+    page = createPage(direction);
   };
   const ensure = (height: number) => {
     if (current().y + height > PAGE_HEIGHT - PAGE_MARGIN) nextPage();
   };
   const label = (key: TranslationKey, value?: number) => value === undefined ? t(key) : t(key, { value: number.format(value) });
 
-  const heading = () => {
-    const page = current();
-    page.context.fillStyle = NAVY;
-    page.context.fillRect(PAGE_MARGIN, page.y, PAGE_WIDTH - PAGE_MARGIN * 2, 88);
-    page.context.fillStyle = "#ffffff";
-    page.context.font = "700 38px Tahoma, Arial, sans-serif";
-    page.context.fillText(t("copilot.summary360Title"), contentX, page.y + 20);
-    page.y += 110;
-    drawSectionCard(page, 96);
-    page.y += 18;
-    drawWrappedText(page, t("copilot.summary360ScopeLine", {
-      scope: summary.scopeLabel,
-      role: summary.roleLabel,
-      user: summary.userName,
-      from: summary.period.from,
-      to: summary.period.to,
-    }), "500 21px Tahoma, Arial, sans-serif", NAVY, contentWidth, 31, contentX);
-    page.y += 26;
-  };
+  current().context.fillStyle = NAVY;
+  current().context.fillRect(PAGE_MARGIN, current().y, PAGE_WIDTH - PAGE_MARGIN * 2, 88);
+  current().context.fillStyle = "#ffffff";
+  current().context.font = "700 38px Tahoma, Arial, sans-serif";
+  current().context.fillText(t("copilot.summary360Title"), contentX, current().y + 20);
+  current().y += 110;
+  drawSectionCard(current(), 96);
+  current().y += 18;
+  drawWrappedText(current(), t("copilot.summary360ScopeLine", {
+    scope: summary.scopeLabel,
+    role: summary.roleLabel,
+    user: summary.userName,
+    from: summary.period.from,
+    to: summary.period.to,
+  }), "500 21px Tahoma, Arial, sans-serif", NAVY, contentWidth, 31, contentX);
+  current().y += 26;
 
-  heading();
   ensure(120);
   drawSectionCard(current(), 98);
   current().y += 16;
@@ -244,8 +248,8 @@ export function buildDaily360PdfPages(
     }
   }
 
-  for (const [index, page] of pages.entries()) drawPageFooter(page, index + 1, direction);
-  return pages.map((page) => page.canvas);
+  finishPage();
+  return pageNumber;
 }
 
 export async function exportDaily360SummaryPdf(
@@ -256,19 +260,21 @@ export async function exportDaily360SummaryPdf(
   try {
     await document.fonts?.ready;
     const { jsPDF } = await import("jspdf");
-    phase = "render report data";
-    const canvases = buildDaily360PdfPages(summary, t);
-    if (canvases.length === 0) throw new Error("Daily 360 report has no pages");
-
-    phase = "assemble PDF pages";
     const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    for (const [index, canvas] of canvases.entries()) {
+    let renderedPages = 0;
+
+    phase = "render report data";
+    renderDaily360PdfPages(summary, t, (canvas) => {
       const image = assertDaily360PdfCanvas(canvas);
-      if (index > 0) pdf.addPage();
+      if (renderedPages > 0) pdf.addPage();
       pdf.addImage(image, "PNG", 0, 0, pageWidth, pageHeight);
-    }
+      renderedPages += 1;
+      canvas.width = 1;
+      canvas.height = 1;
+    });
+    if (renderedPages === 0) throw new Error("Daily 360 report has no pages");
 
     phase = "save PDF";
     pdf.save(`daily-360-summary-${summary.reportDate}.pdf`);
