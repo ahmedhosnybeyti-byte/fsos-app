@@ -1,10 +1,23 @@
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
-import type { VisitCopilot360Summary } from "@/lib/types";
+import type { VisitCopilot360LostOpportunity, VisitCopilot360Summary } from "@/lib/types";
 
 export type Daily360PdfCaptureDimensions = { width: number; height: number };
+export type Daily360PdfPageSlice = { y: number; height: number };
+export type Daily360PdfCustomerGroup = {
+  customerCode: string;
+  customerName: string;
+  opportunities: VisitCopilot360LostOpportunity[];
+};
 
-const EXPORT_PAGE_WIDTH = 900;
-const EXPORT_PAGE_HEIGHT = 1_200;
+const PAGE_WIDTH = 1240;
+const PAGE_HEIGHT = 1754;
+const PAGE_MARGIN = 64;
+const NAVY = "#123053";
+const BLUE = "#1769d1";
+const PALE_BLUE = "#edf5ff";
+const BORDER = "#bfd6ef";
+const AMBER = "#d97706";
+const PAPER = "#fffdf8";
 
 export function getDaily360PdfCaptureDimensions(element: Pick<HTMLElement, "scrollWidth" | "scrollHeight" | "getBoundingClientRect">): Daily360PdfCaptureDimensions {
   const rect = element.getBoundingClientRect();
@@ -14,9 +27,9 @@ export function getDaily360PdfCaptureDimensions(element: Pick<HTMLElement, "scro
   return { width, height };
 }
 
-export function getDaily360PdfPageSlices(totalHeight: number, pageHeight = EXPORT_PAGE_HEIGHT): Array<{ y: number; height: number }> {
+export function getDaily360PdfPageSlices(totalHeight: number, pageHeight: number): Daily360PdfPageSlice[] {
   if (totalHeight < 1 || pageHeight < 1) throw new Error("Daily 360 PDF page dimensions are invalid");
-  const slices: Array<{ y: number; height: number }> = [];
+  const slices: Daily360PdfPageSlice[] = [];
   for (let y = 0; y < totalHeight; y += pageHeight) slices.push({ y, height: Math.min(pageHeight, totalHeight - y) });
   return slices;
 }
@@ -28,112 +41,240 @@ export function assertDaily360PdfCanvas(canvas: Pick<HTMLCanvasElement, "width" 
   return image;
 }
 
-function buildDaily360ExportClone(source: HTMLElement): HTMLElement {
-  const clone = source.cloneNode(true) as HTMLElement;
-  clone.id = "daily-360-summary-export-clone";
-  clone.setAttribute("data-daily-360-export", "true");
-  clone.removeAttribute("class");
-  clone.removeAttribute("style");
-  clone.dir = source.closest("[dir]")?.getAttribute("dir") ?? (document.documentElement.dir || "ltr");
-  clone.style.cssText = [
-    "position:absolute", "left:-100000px", "top:0", `width:${EXPORT_PAGE_WIDTH}px`, "height:auto", "min-height:1px",
-    "display:block", "visibility:visible", "overflow:visible", "box-sizing:border-box", "padding:24px",
-    "background:#fffdf8", "color:#14304d", "font-family:Tahoma, Arial, sans-serif", "line-height:1.5", "z-index:-1",
-  ].join(";");
-
-  for (const element of Array.from(clone.querySelectorAll<HTMLElement>("*"))) {
-    element.removeAttribute("class");
-    element.removeAttribute("style");
-    element.style.boxSizing = "border-box";
-    element.style.color = "#14304d";
-    element.style.backgroundColor = "transparent";
-    element.style.borderColor = "#cbd5e1";
-    element.style.fontFamily = "Tahoma, Arial, sans-serif";
-    element.style.backdropFilter = "none";
-    element.style.boxShadow = "none";
+export function groupDaily360PdfOpportunities(
+  opportunities: readonly VisitCopilot360LostOpportunity[],
+  uncategorized: string,
+): Daily360PdfCustomerGroup[] {
+  const customers = new Map<string, Daily360PdfCustomerGroup>();
+  const seen = new Set<string>();
+  for (const opportunity of opportunities) {
+    const key = `${opportunity.customerCode}\u0000${opportunity.productCode}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const customer = customers.get(opportunity.customerCode) ?? {
+      customerCode: opportunity.customerCode,
+      customerName: opportunity.customerName,
+      opportunities: [],
+    };
+    customer.opportunities.push(opportunity);
+    customers.set(opportunity.customerCode, customer);
   }
-
-  for (const icon of Array.from(clone.querySelectorAll("svg, script, style"))) icon.remove();
-  for (const element of Array.from(clone.querySelectorAll<HTMLElement>("section, article, header, div, table"))) {
-    element.style.display = element.tagName === "TABLE" ? "table" : "block";
-    element.style.width = "100%";
-  }
-  for (const element of Array.from(clone.querySelectorAll<HTMLElement>("section, article"))) {
-    element.style.marginBottom = "14px";
-    element.style.padding = "14px";
-    element.style.border = "1px solid #bcd4ec";
-    element.style.borderRadius = "8px";
-    element.style.backgroundColor = "#eef4fb";
-  }
-  for (const element of Array.from(clone.querySelectorAll<HTMLElement>("button, details, summary"))) {
-    element.style.display = "block";
-    element.style.width = "100%";
-    element.style.padding = "8px 0";
-    element.style.border = "0";
-    element.style.backgroundColor = "transparent";
-    element.style.textAlign = clone.dir === "rtl" ? "right" : "left";
-  }
-  for (const element of Array.from(clone.querySelectorAll<HTMLElement>("p, li, td, th, span"))) element.style.margin = "0 0 6px";
-  return clone;
+  return [...customers.values()].map((customer) => ({
+    ...customer,
+    opportunities: [...customer.opportunities].sort((a, b) =>
+      a.category?.localeCompare(b.category ?? uncategorized, "ar")
+      || b.declineValue - a.declineValue
+      || a.productName.localeCompare(b.productName, "ar"),
+    ),
+  }));
 }
 
-async function waitForDaily360ExportRender(): Promise<void> {
-  await document.fonts?.ready;
-  await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+type ReportPage = { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D; y: number };
+
+function createPage(direction: CanvasDirection): ReportPage {
+  const canvas = document.createElement("canvas");
+  canvas.width = PAGE_WIDTH;
+  canvas.height = PAGE_HEIGHT;
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Daily 360 PDF canvas context is unavailable");
+  context.fillStyle = PAPER;
+  context.fillRect(0, 0, PAGE_WIDTH, PAGE_HEIGHT);
+  context.direction = direction;
+  context.textAlign = direction === "rtl" ? "right" : "left";
+  context.textBaseline = "top";
+  return { canvas, context, y: PAGE_MARGIN };
+}
+
+function wrapText(context: CanvasRenderingContext2D, text: string, maxWidth: number): string[] {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
+  const lines: string[] = [];
+  let line = "";
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (context.measureText(candidate).width <= maxWidth || !line) line = candidate;
+    else {
+      lines.push(line);
+      line = word;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function drawWrappedText(
+  page: ReportPage,
+  text: string,
+  font: string,
+  color: string,
+  maxWidth: number,
+  lineHeight: number,
+  x: number,
+): number {
+  const { context } = page;
+  context.font = font;
+  context.fillStyle = color;
+  const lines = wrapText(context, text, maxWidth);
+  for (const line of lines) {
+    context.fillText(line, x, page.y);
+    page.y += lineHeight;
+  }
+  return lines.length * lineHeight;
+}
+
+function drawSectionCard(page: ReportPage, height: number): void {
+  const { context } = page;
+  context.fillStyle = PALE_BLUE;
+  context.strokeStyle = BORDER;
+  context.lineWidth = 2;
+  context.beginPath();
+  context.roundRect(PAGE_MARGIN, page.y, PAGE_WIDTH - PAGE_MARGIN * 2, height, 14);
+  context.fill();
+  context.stroke();
+}
+
+function drawPageFooter(page: ReportPage, pageNumber: number, direction: CanvasDirection): void {
+  const { context } = page;
+  context.font = "500 18px Tahoma, Arial, sans-serif";
+  context.fillStyle = "#54718e";
+  context.textAlign = direction === "rtl" ? "right" : "left";
+  context.fillText(`${pageNumber}`, direction === "rtl" ? PAGE_WIDTH - PAGE_MARGIN : PAGE_MARGIN, PAGE_HEIGHT - 38);
+}
+
+export function buildDaily360PdfPages(
+  summary: VisitCopilot360Summary,
+  t: (key: TranslationKey, params?: Record<string, string | number>) => string,
+): HTMLCanvasElement[] {
+  const locale = document.documentElement.lang || "ar";
+  const direction: CanvasDirection = document.documentElement.dir === "rtl" ? "rtl" : "ltr";
+  const contentX = direction === "rtl" ? PAGE_WIDTH - PAGE_MARGIN - 28 : PAGE_MARGIN + 28;
+  const contentWidth = PAGE_WIDTH - PAGE_MARGIN * 2 - 56;
+  const number = new Intl.NumberFormat(locale, { maximumFractionDigits: 1 });
+  const pages: ReportPage[] = [createPage(direction)];
+
+  const current = () => pages[pages.length - 1]!;
+  const nextPage = () => {
+    drawPageFooter(current(), pages.length, direction);
+    pages.push(createPage(direction));
+  };
+  const ensure = (height: number) => {
+    if (current().y + height > PAGE_HEIGHT - PAGE_MARGIN) nextPage();
+  };
+  const label = (key: TranslationKey, value?: number) => value === undefined ? t(key) : t(key, { value: number.format(value) });
+
+  const heading = () => {
+    const page = current();
+    page.context.fillStyle = NAVY;
+    page.context.fillRect(PAGE_MARGIN, page.y, PAGE_WIDTH - PAGE_MARGIN * 2, 88);
+    page.context.fillStyle = "#ffffff";
+    page.context.font = "700 38px Tahoma, Arial, sans-serif";
+    page.context.fillText(t("copilot.summary360Title"), contentX, page.y + 20);
+    page.y += 110;
+    drawSectionCard(page, 96);
+    page.y += 18;
+    drawWrappedText(page, t("copilot.summary360ScopeLine", {
+      scope: summary.scopeLabel,
+      role: summary.roleLabel,
+      user: summary.userName,
+      from: summary.period.from,
+      to: summary.period.to,
+    }), "500 21px Tahoma, Arial, sans-serif", NAVY, contentWidth, 31, contentX);
+    page.y += 26;
+  };
+
+  heading();
+  ensure(120);
+  drawSectionCard(current(), 98);
+  current().y += 16;
+  drawWrappedText(current(), t("copilot.summary360ExecutiveSummary"), "700 25px Tahoma, Arial, sans-serif", BLUE, contentWidth, 32, contentX);
+  drawWrappedText(current(), summary.executiveSummary, "400 20px Tahoma, Arial, sans-serif", NAVY, contentWidth, 30, contentX);
+  current().y += 28;
+
+  const groups = groupDaily360PdfOpportunities(summary.lostOpportunities, t("copilot.summary360Uncategorized"));
+  ensure(48);
+  drawWrappedText(current(), t("copilot.summary360LostOpportunities"), "700 30px Tahoma, Arial, sans-serif", NAVY, contentWidth, 38, contentX);
+  current().y += 10;
+
+  for (const customer of groups) {
+    const totalSuggested = customer.opportunities.reduce((sum, opportunity) => sum + opportunity.suggestedQuantity, 0);
+    const totalDecline = customer.opportunities.reduce((sum, opportunity) => sum + opportunity.declineValue, 0);
+    ensure(144);
+    drawSectionCard(current(), 124);
+    current().y += 16;
+    drawWrappedText(current(), customer.customerName, "700 25px Tahoma, Arial, sans-serif", NAVY, contentWidth, 32, contentX);
+    drawWrappedText(
+      current(),
+      `${label("copilot.summary360OpportunityCount", customer.opportunities.length)}  |  ${label("copilot.summary360ProductCount", customer.opportunities.length)}  |  ${label("copilot.summary360SuggestedQuantity", totalSuggested)}  |  ${label("copilot.summary360DeclineQuantity", totalDecline)}`,
+      "500 18px Tahoma, Arial, sans-serif",
+      AMBER,
+      contentWidth,
+      26,
+      contentX,
+    );
+    current().y += 28;
+
+    let category = "";
+    for (const opportunity of customer.opportunities) {
+      const nextCategory = opportunity.category?.trim() || t("copilot.summary360Uncategorized");
+      if (nextCategory !== category) {
+        ensure(56);
+        category = nextCategory;
+        current().context.fillStyle = BLUE;
+        current().context.font = "700 22px Tahoma, Arial, sans-serif";
+        current().context.fillText(category, contentX, current().y);
+        current().y += 36;
+      }
+      ensure(190);
+      drawSectionCard(current(), 168);
+      current().y += 14;
+      drawWrappedText(current(), opportunity.productName, "700 21px Tahoma, Arial, sans-serif", NAVY, contentWidth, 28, contentX);
+      drawWrappedText(
+        current(),
+        `${label("copilot.summary360BaselineQuantity", opportunity.baselineNetQuantity)}  |  ${label("copilot.summary360RecentQuantity", opportunity.recentNetQuantity)}  |  ${label("copilot.summary360DeclineQuantity", opportunity.declineValue)}  |  ${label("copilot.summary360SuggestedQuantity", opportunity.suggestedQuantity)}`,
+        "500 17px Tahoma, Arial, sans-serif",
+        "#365c82",
+        contentWidth,
+        25,
+        contentX,
+      );
+      drawWrappedText(current(), `${t("copilot.summary360Diagnosis")}: ${opportunity.diagnosis}`, "400 17px Tahoma, Arial, sans-serif", NAVY, contentWidth, 24, contentX);
+      drawWrappedText(current(), `${t("copilot.summary360VisitDecision")}: ${opportunity.visitDecision}`, "400 17px Tahoma, Arial, sans-serif", NAVY, contentWidth, 24, contentX);
+      if (opportunity.visitGoal) drawWrappedText(current(), `${t("copilot.summary360VisitGoal")}: ${opportunity.visitGoal}`, "400 17px Tahoma, Arial, sans-serif", NAVY, contentWidth, 24, contentX);
+      current().y += 22;
+    }
+  }
+
+  for (const [index, page] of pages.entries()) drawPageFooter(page, index + 1, direction);
+  return pages.map((page) => page.canvas);
 }
 
 export async function exportDaily360SummaryPdf(
   summary: VisitCopilot360Summary,
   t: (key: TranslationKey, params?: Record<string, string | number>) => string,
 ): Promise<void> {
-  let phase = "locate report";
-  let clone: HTMLElement | null = null;
+  let phase = "load PDF renderer";
   try {
-    const root = document.getElementById("daily-360-summary-print-root");
-    if (!root) throw new Error("daily-360-summary-print-root not found");
-
-    phase = "build safe export document";
-    clone = buildDaily360ExportClone(root);
-    document.body.appendChild(clone);
-    await waitForDaily360ExportRender();
-    const captureSize = getDaily360PdfCaptureDimensions(clone);
-
-    phase = "load PDF renderer";
-    const html2canvas = (await import("html2canvas")).default;
+    await document.fonts?.ready;
     const { jsPDF } = await import("jspdf");
+    phase = "render report data";
+    const canvases = buildDaily360PdfPages(summary, t);
+    if (canvases.length === 0) throw new Error("Daily 360 report has no pages");
+
+    phase = "assemble PDF pages";
     const pdf = new jsPDF({ orientation: "portrait", unit: "pt", format: "a4" });
     const pageWidth = pdf.internal.pageSize.getWidth();
     const pageHeight = pdf.internal.pageSize.getHeight();
-    const pageHeightCss = Math.max(1, Math.floor((pageHeight * captureSize.width) / pageWidth));
-    const slices = getDaily360PdfPageSlices(captureSize.height, pageHeightCss);
-
-    for (const [index, slice] of slices.entries()) {
-      phase = `render page ${index + 1} of ${slices.length}`;
-      const canvas = await html2canvas(clone, {
-        backgroundColor: "#fffdf8",
-        height: slice.height,
-        logging: false,
-        scale: 2,
-        useCORS: true,
-        width: captureSize.width,
-        windowHeight: slice.height,
-        windowWidth: captureSize.width,
-        x: 0,
-        y: slice.y,
-      });
+    for (const [index, canvas] of canvases.entries()) {
       const image = assertDaily360PdfCanvas(canvas);
       if (index > 0) pdf.addPage();
-      pdf.addImage(image, "PNG", 0, 0, pageWidth, (slice.height * pageWidth) / captureSize.width);
+      pdf.addImage(image, "PNG", 0, 0, pageWidth, pageHeight);
     }
 
     phase = "save PDF";
     pdf.save(`daily-360-summary-${summary.reportDate}.pdf`);
-    void t;
   } catch (error) {
     const detail = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
     console.error("[daily-360-summary] PDF export failed", { phase, detail, error });
     throw new Error(`Daily 360 PDF export failed during ${phase}: ${detail}`);
-  } finally {
-    clone?.remove();
   }
 }
