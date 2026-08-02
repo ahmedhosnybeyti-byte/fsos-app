@@ -1242,6 +1242,10 @@ export type TranslationKey =
   | "fsos360.error"
   | "fsos360.executiveInsight"
   | "fsos360.noInsight"
+  | "fsos360.insightWhatHappened"
+  | "fsos360.insightBiggestChange"
+  | "fsos360.insightWorthFollowUp"
+  | "fsos360.insightNoSignificantChange"
   | "fsos360.kpiSummary"
   | "fsos360.comparedToPrevious"
   | "fsos360.performanceComparison"
@@ -2571,6 +2575,10 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "fsos360.error": "تعذر تحميل بيانات مساحة العمل.",
     "fsos360.executiveInsight": "الرؤية التنفيذية",
     "fsos360.noInsight": "لا توجد رؤية تنفيذية متاحة حاليًا.",
+    "fsos360.insightWhatHappened": "خلال {period}، بلغت المبيعات {value} مقابل {previousValue} في الفترة المرجعية ({changePercentage}).",
+    "fsos360.insightBiggestChange": "أكبر تغيّر ظهر في مؤشر {kpi} بنسبة {changePercentage}.",
+    "fsos360.insightWorthFollowUp": "قد يكون من المناسب متابعة هذا التغيّر لفهم أسبابه.",
+    "fsos360.insightNoSignificantChange": "لم يظهر تغيّر ملحوظ في المؤشرات الرئيسية خلال هذه الفترة.",
     "fsos360.kpiSummary": "ملخص المؤشرات",
     "fsos360.comparedToPrevious": "مقارنة بالفترة السابقة",
     "fsos360.performanceComparison": "مقارنة الأداء",
@@ -3900,6 +3908,10 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "fsos360.error": "Unable to load the workspace data.",
     "fsos360.executiveInsight": "Executive Insight",
     "fsos360.noInsight": "No executive insight is available right now.",
+    "fsos360.insightWhatHappened": "During {period}, sales reached {value} versus {previousValue} in the reference period ({changePercentage}).",
+    "fsos360.insightBiggestChange": "The biggest change appeared in {kpi}, at {changePercentage}.",
+    "fsos360.insightWorthFollowUp": "It may be worth following up on this change to understand its causes.",
+    "fsos360.insightNoSignificantChange": "No significant change appeared in the key indicators during this period.",
     "fsos360.kpiSummary": "KPI Summary",
     "fsos360.comparedToPrevious": "Compared to the previous period",
     "fsos360.performanceComparison": "Performance Comparison",
