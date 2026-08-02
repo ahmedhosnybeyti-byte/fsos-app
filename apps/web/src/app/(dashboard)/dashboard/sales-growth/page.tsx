@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bot, Clock, Download, RefreshCw, Settings2, Target } from "lucide-react";
+import { Bot, Clock, Download, RefreshCw, Settings2, Target, Users, Wallet } from "lucide-react";
 import { toast } from "sonner";
 import { sgiApi } from "@/lib/api";
 import { ApiError } from "@/lib/api-client";
@@ -19,6 +19,7 @@ import type { SgiSituation } from "@/lib/types";
 import { useTranslation } from "@/components/translation-provider";
 import { exportSgiReportPdf } from "@/lib/export/sgi-report-pdf";
 import { PriorityCenter } from "./priority-tree";
+import { selectSgiRepStats } from "./sgi-rep-stats";
 
 // Sales Growth Intelligence (SGI) Phase 1 — "How to Increase Your Sales",
 // trimmed to the 3 sections the product owner picked for v1 (see
@@ -135,6 +136,14 @@ export default function SalesGrowthPage() {
   }
 
   const result = latestQuery.data;
+  const repStatsSelection = result
+    ? selectSgiRepStats({
+        roleCode: user?.role.code ?? "",
+        currentUserEmail: user?.email,
+        repDirectory: result.repDirectory,
+        repStats: result.repStats,
+      })
+    : null;
 
   // First-time setup: no result yet, so the form must show — there's
   // nothing else to render. After that, it only reappears if the admin
@@ -228,7 +237,18 @@ export default function SalesGrowthPage() {
       )}
 
       {latestQuery.isLoading ? (
-        <Skeleton className="h-40" />
+        <Card className="glass-card">
+          <CardHeader>
+            <CardTitle>{t("sgi.performanceKpis")}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">{t("sgi.kpiLoading")}</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Skeleton className="h-24" />
+              <Skeleton className="h-24" />
+            </div>
+          </CardContent>
+        </Card>
       ) : latestQuery.isError ? (
         <Card className="glass-card">
           <CardContent className="py-8 text-center text-sm text-destructive">{t("sgi.loadErrorMessage")}</CardContent>
@@ -287,6 +307,48 @@ export default function SalesGrowthPage() {
               ))}
             </div>
           )}
+
+          {/* KPI values come from the already-scoped GET /sgi/latest result.
+              This component never changes monthlyGoal; it only exposes the
+              existing repStats sales/customer figures for the viewer's role. */}
+          <Card className="glass-card rise-in">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <span className="crystal-badge h-7 w-7 bg-success/15 text-success">
+                  <Wallet className="h-4 w-4" />
+                </span>
+                {t("sgi.performanceKpis")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {repStatsSelection?.state === "ready" ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-lg border border-border bg-background/30 p-4">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Wallet className="h-4 w-4 text-success" />
+                      {t("sgi.actualSales")}
+                    </div>
+                    <p className="mt-2 text-2xl font-semibold tabular-nums">{formatAmount(repStatsSelection.salesActual)}</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-background/30 p-4">
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Users className="h-4 w-4 text-primary" />
+                      {t("sgi.activeCustomers")}
+                    </div>
+                    <p className="mt-2 text-2xl font-semibold tabular-nums">{formatAmount(repStatsSelection.activeCustomers)}</p>
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground" role="status">
+                  {repStatsSelection?.state === "missing-current-user-email"
+                    ? t("sgi.kpiMissingCurrentUserEmail")
+                    : repStatsSelection?.state === "empty-team"
+                      ? t("sgi.kpiEmptyTeam")
+                      : t("sgi.kpiNoRepStats")}
+                </p>
+              )}
+            </CardContent>
+          </Card>
 
           {/* Section 1: Monthly Goal */}
           <Card className="glass-card rise-in">

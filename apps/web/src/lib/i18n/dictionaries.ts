@@ -639,6 +639,13 @@ export type TranslationKey =
   | "sgi.noTargetsMessage"
   | "sgi.progressOf"
   | "sgi.priorityCenterTitle"
+  | "sgi.performanceKpis"
+  | "sgi.actualSales"
+  | "sgi.activeCustomers"
+  | "sgi.kpiLoading"
+  | "sgi.kpiNoRepStats"
+  | "sgi.kpiMissingCurrentUserEmail"
+  | "sgi.kpiEmptyTeam"
   | "sgi.exportPdf"
   | "sgi.exportPdfPending"
   | "sgi.exportPdfError"
@@ -1926,6 +1933,13 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "sgi.noTargetsMessage": "لسه مفيش أهداف مسجلة لشهر {month} — المبيعات المحققة لحد دلوقتي: {amount}.",
     "sgi.progressOf": "{actual} من {target}",
     "sgi.priorityCenterTitle": "مركز الأولويات",
+    "sgi.performanceKpis": "مؤشرات الأداء",
+    "sgi.actualSales": "المبيعات الفعلية",
+    "sgi.activeCustomers": "العملاء النشطون",
+    "sgi.kpiLoading": "جارٍ تحميل مؤشرات الأداء…",
+    "sgi.kpiNoRepStats": "لا توجد مؤشرات أداء متاحة لهذا التقرير.",
+    "sgi.kpiMissingCurrentUserEmail": "تعذر تحديد بريد المستخدم لعرض مؤشرات الأداء.",
+    "sgi.kpiEmptyTeam": "لا يوجد مندوبون ضمن فريقك في هذا التقرير.",
     "sgi.exportPdf": "تصدير تقرير PDF",
     "sgi.exportPdfPending": "جاري إنشاء التقرير…",
     "sgi.exportPdfError": "تعذّر تصدير التقرير",
@@ -3254,6 +3268,13 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "sgi.noTargetsMessage": "No targets set yet for {month} — sales achieved so far: {amount}.",
     "sgi.progressOf": "{actual} of {target}",
     "sgi.priorityCenterTitle": "Priority Center",
+    "sgi.performanceKpis": "Performance KPIs",
+    "sgi.actualSales": "Actual sales",
+    "sgi.activeCustomers": "Active customers",
+    "sgi.kpiLoading": "Loading performance KPIs…",
+    "sgi.kpiNoRepStats": "No performance KPIs are available for this report.",
+    "sgi.kpiMissingCurrentUserEmail": "Your email could not be identified to show performance KPIs.",
+    "sgi.kpiEmptyTeam": "No team members are available in this report.",
     "sgi.exportPdf": "Export PDF report",
     "sgi.exportPdfPending": "Generating report…",
     "sgi.exportPdfError": "Couldn't export the report",
