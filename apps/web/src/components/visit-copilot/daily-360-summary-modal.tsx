@@ -226,6 +226,15 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
               <p className="py-16 text-center text-sm text-muted-foreground">{t("copilot.summary360Empty")}</p>
             ) : (
               <div className="space-y-6" dir="rtl">
+                {/* Executive summary */}
+                <section className="glass-card space-y-2 p-4">
+                  <h3 className="flex items-center gap-2 text-sm font-semibold">
+                    <span aria-hidden>📈</span>
+                    {t("copilot.summary360ExecutiveSummary")}
+                  </h3>
+                  <p className="text-sm leading-relaxed">{summary.executiveSummary}</p>
+                </section>
+
                 {/* نطاق التقرير — bulleted, matching the reference report's
                     own structure (route/rep/visit-date/customer-count as
                     separate lines, not one merged sentence). */}
@@ -252,15 +261,6 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                       {summary.period.from} إلى {summary.period.to}
                     </li>
                   </ul>
-                </section>
-
-                {/* Executive summary */}
-                <section className="glass-card space-y-2 p-4">
-                  <h3 className="flex items-center gap-2 text-sm font-semibold">
-                    <span aria-hidden>📈</span>
-                    {t("copilot.summary360ExecutiveSummary")}
-                  </h3>
-                  <p className="text-sm leading-relaxed">{summary.executiveSummary}</p>
                 </section>
 
                 {/* Top issue */}
@@ -310,20 +310,20 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                           <div key={customer.customerCode} className="glass-card overflow-hidden">
                             <button
                               type="button"
-                              className="flex w-full flex-wrap items-center gap-2 p-4 text-start transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              className="flex w-full flex-wrap items-center gap-2 bg-slate-900 p-4 text-start text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:bg-slate-950 dark:hover:bg-slate-900"
                               aria-expanded={customerIsOpen}
                               aria-controls={`daily-360-customer-${customer.customerCode}`}
                               onClick={() => setOpenCustomerCode((current) => toggleDaily360OpenCustomer(current, customer.customerCode))}
                             >
                               <ChevronDown className={cn("h-5 w-5 shrink-0 transition-transform", customerIsOpen && "rotate-180")} aria-hidden />
-                              <span className="text-sm font-bold">{customerIndex + 1}. {customer.customerName}</span>
-                              <Badge variant="secondary" className="ms-auto font-normal">
+                              <span className="text-sm font-bold text-white">{customerIndex + 1}. {customer.customerName}</span>
+                              <Badge variant="secondary" className="ms-auto border border-slate-500 bg-slate-800 text-slate-100 dark:bg-slate-900">
                                 {t("copilot.summary360TotalDecline", { value: customer.totalDeclineQuantity.toLocaleString() })}
                               </Badge>
-                              <span className="grid w-full gap-1 text-xs text-muted-foreground sm:grid-cols-3">
+                              <span className="grid w-full gap-1 text-xs text-slate-300 sm:grid-cols-3">
                                 <span>{t("copilot.summary360OpportunityCount", { value: customer.opportunityCount })}</span>
                                 <span>{t("copilot.summary360ProductCount", { value: customer.productCount })}</span>
-                                <span className="font-medium text-foreground">{t("copilot.summary360TotalSuggestedQuantity", { value: customer.totalSuggestedQuantity.toLocaleString() })}</span>
+                                <span className="font-medium text-white">{t("copilot.summary360TotalSuggestedQuantity", { value: customer.totalSuggestedQuantity.toLocaleString() })}</span>
                               </span>
                             </button>
                             {customerIsOpen && (
