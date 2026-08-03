@@ -33,7 +33,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const { user, isLoading } = useRequireAuth(["SUPER_ADMIN"]);
   const router = useRouter();
   const { t } = useTranslation();
-  const navItems: NavItem[] = [...adminNavItems(t), { href: "/account", label: t("nav.account"), icon: CircleUserRound }];
+  const navItems: NavItem[] = [...adminNavItems(t), { href: "/admin/account", label: t("nav.account"), icon: CircleUserRound }];
   const mustChangePassword = user?.mustChangePassword === true;
 
   useEffect(() => {
