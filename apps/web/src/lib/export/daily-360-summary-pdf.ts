@@ -1,5 +1,6 @@
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
 import type { VisitCopilot360LostOpportunity, VisitCopilot360Summary } from "@/lib/types";
+import { sortDaily360Customers } from "@/lib/daily-360-customer-order";
 
 export type Daily360PdfCaptureDimensions = { width: number; height: number };
 export type Daily360PdfPageSlice = { y: number; height: number };
@@ -63,13 +64,19 @@ export function groupDaily360PdfOpportunities(
     customer.opportunities.push(opportunity);
     customers.set(opportunity.customerCode, customer);
   }
-  return [...customers.values()].map((customer) => ({
+  const groups = [...customers.values()].map((customer) => ({
     ...customer,
     opportunities: [...customer.opportunities].sort((a, b) =>
       a.category?.localeCompare(b.category ?? uncategorized, "ar")
       || b.declineValue - a.declineValue
       || a.productName.localeCompare(b.productName, "ar"),
     ),
+  }));
+
+  return sortDaily360Customers(groups, (customer) => ({
+    customerName: customer.customerName,
+    itemsCount: customer.opportunities.length,
+    suggestedQuantity: customer.opportunities.reduce((sum, opportunity) => sum + opportunity.suggestedQuantity, 0),
   }));
 }
 

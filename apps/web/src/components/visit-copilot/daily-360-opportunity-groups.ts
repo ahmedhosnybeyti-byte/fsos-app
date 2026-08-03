@@ -1,4 +1,5 @@
 import type { VisitCopilot360LostOpportunity } from "@/lib/types";
+import { sortDaily360Customers } from "@/lib/daily-360-customer-order";
 
 export type Daily360ProductGroup = {
   productCode: string;
@@ -78,7 +79,7 @@ export function groupDaily360LostOpportunities(
     customers.set(opportunity.customerCode, customer);
   }
 
-  return [...customers.values()].map((customer) => {
+  const groups = [...customers.values()].map((customer) => {
     const categories = new Map<string, Daily360ProductGroup[]>();
     for (const opportunity of customer.opportunities) {
       const category = opportunity.category?.trim() || uncategorized;
@@ -108,6 +109,12 @@ export function groupDaily360LostOpportunities(
       categories: groupedCategories,
     };
   });
+
+  return sortDaily360Customers(groups, (customer) => ({
+    customerName: customer.customerName,
+    itemsCount: customer.productCount,
+    suggestedQuantity: customer.totalSuggestedQuantity,
+  }));
 }
 
 export type Daily360ExclusionAction = "CUSTOMER_PRODUCT" | "SALESPERSON_PRODUCT" | "TEAM_PRODUCT" | "COMPANY_PRODUCT";
