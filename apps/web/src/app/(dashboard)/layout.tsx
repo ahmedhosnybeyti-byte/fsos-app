@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { CircleUserRound } from "lucide-react";
+
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { AppShell, type NavItem } from "@/components/shell/app-shell";
 import { CompanyScreenAccessGuard } from "@/components/company-screen-access-guard";
@@ -26,7 +26,6 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const navItems: NavItem[] = [
     ...buildCompanyNavItems({ featureAccess: user.featureAccess, locale, roleCode: user.role.code, groupLabels: { data: t("group.data"), aiInsights: t("group.aiInsights"), customersTerritory: t("group.customersTerritory"), team: t("group.team"), system: t("group.system") } }),
-    { href: "/account", label: t("nav.account"), icon: CircleUserRound, colorKey: "settings", group: t("group.system") },
   ];
 
   return <AppShell navItems={navItems} user={user}><CompanyScreenAccessGuard user={user}>{children}</CompanyScreenAccessGuard></AppShell>;

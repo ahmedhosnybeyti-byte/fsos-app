@@ -28,6 +28,7 @@ export const companyScreenRegistry = [
   { featureKey: "team", route: "/dashboard/team", arabicLabel: "الفريق", englishLabel: "Team", navigationGroup: "team", icon: "Users" },
   { featureKey: "employees", route: "/dashboard/employees", arabicLabel: "الموظفون", englishLabel: "Employees", navigationGroup: "team", icon: "IdCard" },
   { featureKey: "settings", route: "/dashboard/settings", arabicLabel: "الإعدادات", englishLabel: "Settings", navigationGroup: "system", icon: "Settings" },
+  { featureKey: "account", route: "/account", arabicLabel: "الحساب", englishLabel: "Account", navigationGroup: "system", icon: "CircleUserRound" },
 ] as const;
 
 export type CompanyScreenFeatureKey = (typeof companyScreenRegistry)[number]["featureKey"];

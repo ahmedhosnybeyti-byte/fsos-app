@@ -1,12 +1,12 @@
 import type { CompanyFeatureAccess, CompanyScreenFeatureKey } from "@field-sales-os/schemas";
 import { companyScreenRegistry, getCompanyFeatureAccessState } from "@field-sales-os/schemas";
-import { BarChart3, Bot, Compass, FileSpreadsheet, FileText, Flame, GitCompare, Globe2, IdCard, LayoutDashboard, LocateFixed, Map, MapPinned, PackagePlus, Settings, Sparkles, Target, TrendingUp, UserPlus, Users, Users2, Footprints, type LucideIcon } from "lucide-react";
+import { BarChart3, Bot, CircleUserRound, Compass, FileSpreadsheet, FileText, Flame, GitCompare, Globe2, IdCard, LayoutDashboard, LocateFixed, Map, MapPinned, PackagePlus, Settings, Sparkles, Target, TrendingUp, UserPlus, Users, Users2, Footprints, type LucideIcon } from "lucide-react";
 import type { NavItem } from "@/components/shell/app-shell";
 
-const icons: Record<(typeof companyScreenRegistry)[number]["icon"], LucideIcon> = { LayoutDashboard, FileSpreadsheet, Bot, Compass, PackagePlus, Sparkles, Flame, Target, MapPinned, BarChart3, Globe2, UserPlus, GitCompare, Users2, Map, Footprints, LocateFixed, TrendingUp, FileText, Users, IdCard, Settings };
+const icons: Record<(typeof companyScreenRegistry)[number]["icon"], LucideIcon> = { LayoutDashboard, FileSpreadsheet, Bot, Compass, PackagePlus, Sparkles, Flame, Target, MapPinned, BarChart3, Globe2, UserPlus, GitCompare, Users2, Map, Footprints, LocateFixed, TrendingUp, FileText, Users, IdCard, Settings, CircleUserRound };
 
 const colorKeys: Record<CompanyScreenFeatureKey, NonNullable<NavItem["colorKey"]>> = {
-  overview: "overview", files: "files", assistant: "assistant", "visit-copilot": "visitCopilot", "smart-loading": "smartLoading", "analysis-studio": "analysisStudio", heatmap: "heatmap", "sales-growth": "sgi", "territory-intelligence": "territoryIntelligence", "decision-analytics-studio": "decisionAnalyticsStudio", "geo-engine": "geoEngine", "fsos-360": "decisionAnalyticsStudio", "new-customer": "newCustomer", "customer-comparison": "customerComparison", "customer-similarity": "customerSimilarity", "route-planning": "routePlanning", "visit-efficiency": "visitEfficiency", "customer-locations": "customerLocations", "team-performance": "teamPerformance", reports: "reports", team: "team", employees: "employees", settings: "settings",
+  overview: "overview", files: "files", assistant: "assistant", "visit-copilot": "visitCopilot", "smart-loading": "smartLoading", "analysis-studio": "analysisStudio", heatmap: "heatmap", "sales-growth": "sgi", "territory-intelligence": "territoryIntelligence", "decision-analytics-studio": "decisionAnalyticsStudio", "geo-engine": "geoEngine", "fsos-360": "decisionAnalyticsStudio", "new-customer": "newCustomer", "customer-comparison": "customerComparison", "customer-similarity": "customerSimilarity", "route-planning": "routePlanning", "visit-efficiency": "visitEfficiency", "customer-locations": "customerLocations", "team-performance": "teamPerformance", reports: "reports", team: "team", employees: "employees", settings: "settings", account: "settings",
 };
 
 export function companyScreenLabel(screen: (typeof companyScreenRegistry)[number], locale: "ar" | "en") {
