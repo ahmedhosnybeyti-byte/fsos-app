@@ -235,6 +235,7 @@ export class SmartLoadingService {
     const targetRouteWeekday = weekdayForDate(targetDate);
     const normalizeKey = (value: unknown) => String(value ?? "").trim();
     const nextRouteCustomers = new Map<string, string>();
+    const routeCustomersByCode = new Map<string, { customerCode: string; customerName: string; routeId: string | null; visitSequence: number | null }>();
     let hasUnsupportedVisitDayFormat = false;
     for (const customer of customersRecords) {
       const rawVisitDay = normalizeKey(customer.VisitDay);
@@ -245,7 +246,10 @@ export class SmartLoadingService {
       }
       if (visitDay !== targetRouteWeekday) continue;
       const customerCode = normalizeKey(customer.CustomerCode);
-      if (customerCode) nextRouteCustomers.set(customerCode, normalizeKey(customer.CustomerName) || customerCode);
+      if (!customerCode) continue;
+      const customerName = normalizeKey(customer.CustomerName) || customerCode;
+      nextRouteCustomers.set(customerCode, customerName);
+      routeCustomersByCode.set(customerCode, { customerCode, customerName, routeId: normalizeKey(customer.RouteID) || null, visitSequence: toFiniteNumber(customer.VisitSequence) });
     }
 
     const lostOpportunityResult = await this.lostOpportunityService.detect({
@@ -370,7 +374,7 @@ export class SmartLoadingService {
       asOfDate: targetDateIso,
       targetDate: targetDateIso,
       route: nextRouteCustomers.size > 0 ? { targetDate: targetDateIso, customerCount: nextRouteCustomers.size } : null,
-      routeCustomers: await this.searchCustomers(user).then((result) => result.customers),
+      routeCustomers: [...routeCustomersByCode.values()].sort((a, b) => (a.visitSequence ?? Number.MAX_SAFE_INTEGER) - (b.visitSequence ?? Number.MAX_SAFE_INTEGER) || a.customerName.localeCompare(b.customerName, "ar")),
       priorityProducts,
       lostOpportunities,
       lostOpportunityReason,

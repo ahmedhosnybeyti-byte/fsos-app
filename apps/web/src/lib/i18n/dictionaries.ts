@@ -1271,6 +1271,7 @@ export type TranslationKey =
   | "smartLoading.noConfirmedOrders"
   | "smartLoading.exceptionalCustomer"
   | "smartLoading.applyAndClose"
+  | "smartLoading.exceptionalCustomers"
   | "fsos360.company"
   | "fsos360.region"
   | "fsos360.city"
@@ -2640,6 +2641,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.exceptionalCustomer": "مضاف استثنائيًا",
     "smartLoading.sessionSummary": "ملخص الجلسة",
     "smartLoading.applyAndClose": "تطبيق وإغلاق",
+    "smartLoading.exceptionalCustomers": "مضاف استثنائيًا",
     "smartLoading.noConfirmedOrders": "لا توجد طلبيات مؤكدة مضافة.",
     "smartLoading.visitCustomers": "عملاء الزيارة",
     "smartLoading.selectedCustomers": "المحددون",
@@ -4024,6 +4026,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.exceptionalCustomer": "Exceptionally added",
     "smartLoading.sessionSummary": "Session summary",
     "smartLoading.applyAndClose": "Apply and close",
+    "smartLoading.exceptionalCustomers": "Exceptionally added",
     "smartLoading.noConfirmedOrders": "No confirmed orders added.",
     "smartLoading.visitCustomers": "Visit customers",
     "smartLoading.selectedCustomers": "Selected",
