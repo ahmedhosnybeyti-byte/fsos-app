@@ -93,7 +93,7 @@ export class AuthController {
   @SkipSubscriptionCheck()
   async me(@CurrentUser() user: AuthenticatedUser) {
     const profile = await this.usersService.findById(user.userId);
-    return { ...profile, permissions: user.permissions };
+    return { ...profile, permissions: user.permissions, featureAccess: user.featureAccess };
   }
 
   // Phase 4: self-service Password Management.

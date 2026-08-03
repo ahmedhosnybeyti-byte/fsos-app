@@ -6,10 +6,12 @@ import {
   paginationQuerySchema,
   updateCompanySchema,
   updateCompanyProfileSchema,
+  updateCompanyFeatureAccessSchema,
   type CompanyLifecycleEvent,
   type CreatePlatformCompanyInput,
   type UpdateCompanyInput,
   type UpdateCompanyProfileInput,
+  type UpdateCompanyFeatureAccessInput,
 } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
@@ -72,6 +74,24 @@ export class CompaniesController {
     const company = await this.companiesService.findById(id);
     if (!company) throw new NotFoundException("Company not found");
     return company;
+  }
+
+  @Get(":id/feature-access")
+  @Auth("SUPER_ADMIN")
+  @SkipSubscriptionCheck()
+  getFeatureAccess(@Param("id") id: string) {
+    return this.companiesService.getFeatureAccess(id);
+  }
+
+  @Patch(":id/feature-access")
+  @Auth("SUPER_ADMIN")
+  @SkipSubscriptionCheck()
+  updateFeatureAccess(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(updateCompanyFeatureAccessSchema)) body: UpdateCompanyFeatureAccessInput,
+  ) {
+    return this.companiesService.updateFeatureAccess(id, body.featureAccess, user.userId);
   }
 
   @Get(":id/details")

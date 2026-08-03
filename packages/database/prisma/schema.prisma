@@ -200,6 +200,7 @@ model Company {
   name      String
   slug      String        @unique
   status    CompanyStatus @default(ACTIVE)
+  featureAccess Json? @map("feature_access")
   // Captured at signup — see CompanyAccountType. Nullable for pre-existing
   // companies created before this field was added.
   accountType CompanyAccountType? @map("account_type")

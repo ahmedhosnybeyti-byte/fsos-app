@@ -1,7 +1,7 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import * as argon2 from "argon2";
 import { randomBytes } from "node:crypto";
-import type { CompanyStatus, CompanyLifecycleEvent, CompanyAccountType, CreatePlatformCompanyInput, DiscoveryProvider } from "@field-sales-os/schemas";
+import { normalizeCompanyFeatureAccess, type CompanyFeatureAccess, type CompanyStatus, type CompanyLifecycleEvent, type CompanyAccountType, type CreatePlatformCompanyInput, type DiscoveryProvider } from "@field-sales-os/schemas";
 import { AppConfigService } from "../../common/config/app-config.service";
 import { PrismaService, type PrismaTx, isUniqueConstraintError } from "../../common/prisma";
 import { AuditLogService } from "../audit-log/audit-log.service";
@@ -183,6 +183,21 @@ export class CompaniesService {
     if (!company) throw new NotFoundException("Company not found");
     return company;
   }
+  async getFeatureAccess(companyId: string) {
+    const company = await this.prisma.company.findUnique({ where: { id: companyId }, select: { featureAccess: true } });
+    if (!company) throw new NotFoundException("Company not found");
+    return { featureAccess: normalizeCompanyFeatureAccess(company.featureAccess) };
+  }
+
+  async updateFeatureAccess(companyId: string, featureAccess: Record<string, unknown>, actorUserId: string) {
+    const existing = await this.prisma.company.findUnique({ where: { id: companyId }, select: { id: true, featureAccess: true } });
+    if (!existing) throw new NotFoundException("Company not found");
+    const normalized = normalizeCompanyFeatureAccess(featureAccess) as CompanyFeatureAccess;
+    const updated = await this.prisma.company.update({ where: { id: companyId }, data: { featureAccess: normalized } });
+    await this.auditLogService.record({ companyId, userId: actorUserId, action: "company.feature_access.update", entityType: "Company", entityId: companyId, metadata: { before: normalizeCompanyFeatureAccess(existing.featureAccess), after: normalized } });
+    return { featureAccess: normalizeCompanyFeatureAccess(updated.featureAccess) };
+  }
+
   // Validated lifecycle state machine (Phase 2's Draft/Configuring/Active/
   // Suspended/Archived diagram). Every transition is audit-logged via the
   // existing generic AuditLog table — no dedicated lifecycle-event table.

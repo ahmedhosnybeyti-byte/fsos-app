@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, LogOut, Menu, MoreHorizontal, Search, X, Zap, type LucideIcon } from "lucide-react";
+import { ChevronDown, LockKeyhole, LogOut, Menu, MoreHorizontal, Search, X, Zap, type LucideIcon } from "lucide-react";
 import { authApi } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -30,6 +30,8 @@ export interface NavItem {
   // component stays decoupled from the dictionary system. Purely a
   // rendering hint, not used for routing/logic.
   group?: string;
+  featureKey?: string;
+  locked?: boolean;
 }
 
 export function AppShell({
@@ -117,7 +119,7 @@ function MobileBottomNav({ navItems, pathname, onMore }: { navItems: NavItem[]; 
   const primary = navItems.slice(0, 4);
   const active = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
   return <nav className="fixed inset-x-0 bottom-0 z-40 flex h-16 items-stretch border-t border-border bg-background/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-lg backdrop-blur md:hidden" aria-label="Mobile navigation">
-    {primary.map((item) => <Link key={item.href} href={item.href} className={cn("flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] font-medium", active(item.href) ? "text-primary" : "text-muted-foreground")}><item.icon className="h-5 w-5" /><span className="max-w-full truncate px-1">{item.label}</span></Link>)}
+    {primary.map((item) => <div key={item.href} className={cn("flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] font-medium", item.locked ? "cursor-not-allowed text-muted-foreground/60" : active(item.href) ? "text-primary" : "text-muted-foreground")}>{item.locked ? <><LockKeyhole className="h-5 w-5" /><span className="max-w-full truncate px-1">{item.label}</span></> : <Link href={item.href} className="flex flex-col items-center gap-0.5"><item.icon className="h-5 w-5" /><span className="max-w-full truncate px-1">{item.label}</span></Link>}</div>)}
     {navItems.length > primary.length && <button type="button" onClick={onMore} className="flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] font-medium text-muted-foreground" aria-label="More navigation"><MoreHorizontal className="h-5 w-5" /><span>{t("shell.more")}</span></button>}
   </nav>;
 }
@@ -145,26 +147,17 @@ function NavList({
                 {item.group}
               </p>
             )}
-            <Link
-              href={item.href}
-              onClick={onNavigate}
-              className={cn(
-                "flex items-center gap-3 rounded-full px-3 py-2 text-sm font-medium transition-colors",
-                active
-                  ? "bg-gradient-to-l from-primary to-primary/80 text-primary-foreground shadow-md"
-                  : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
-              )}
-            >
-              <span
-                className={cn(
-                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
-                  active ? "bg-white/20 text-primary-foreground" : badgeClasses,
-                )}
-              >
-                <item.icon className="h-3.5 w-3.5" />
-              </span>
-              {item.label}
-            </Link>
+            {item.locked ? (
+              <div className="flex cursor-not-allowed items-center gap-3 rounded-full px-3 py-2 text-sm font-medium text-muted-foreground/60" aria-disabled="true">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-secondary/60"><LockKeyhole className="h-3.5 w-3.5" /></span>
+                {item.label}
+              </div>
+            ) : (
+              <Link href={item.href} onClick={onNavigate} className={cn("flex items-center gap-3 rounded-full px-3 py-2 text-sm font-medium transition-colors", active ? "bg-gradient-to-l from-primary to-primary/80 text-primary-foreground shadow-md" : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground")}>
+                <span className={cn("flex h-7 w-7 shrink-0 items-center justify-center rounded-lg", active ? "bg-white/20 text-primary-foreground" : badgeClasses)}><item.icon className="h-3.5 w-3.5" /></span>
+                {item.label}
+              </Link>
+            )}
           </div>
         );
       })}

@@ -1,4 +1,4 @@
-import type { CreatePlatformCompanyInput, UpdateCompanyInput, UpdateCompanyProfileInput, CreateBranchInput, UpdateBranchInput } from "@field-sales-os/schemas";
+import type { CompanyFeatureAccess, CreatePlatformCompanyInput, UpdateCompanyInput, UpdateCompanyProfileInput, CreateBranchInput, UpdateBranchInput } from "@field-sales-os/schemas";
 import { apiFetch } from "../api-client";
 import type { AdminCompanyDetails, Branch, Company, CompanyProfileData, DiscoveryProvider, Paginated } from "../types";
 
@@ -19,6 +19,8 @@ export const companiesApi = {
     apiFetch<Paginated<Company>>("/companies", { query: { page, pageSize, search } }),
   get: (id: string) => apiFetch<Company>(`/companies/${id}`),
   details: (id: string) => apiFetch<AdminCompanyDetails>(`/companies/${id}/details`),
+  featureAccess: (id: string) => apiFetch<{ featureAccess: CompanyFeatureAccess }>(`/companies/${id}/feature-access`),
+  updateFeatureAccess: (id: string, featureAccess: CompanyFeatureAccess) => apiFetch<{ featureAccess: CompanyFeatureAccess }>(`/companies/${id}/feature-access`, { method: "PATCH", body: { featureAccess } }),
   createPlatform: (input: CreatePlatformCompanyInput) => apiFetch<{ company: Company; admin: { id: string; email: string; fullName: string; mustChangePassword: boolean }; temporaryPassword: string }>("/companies", { method: "POST", body: input }),
   update: (id: string, input: UpdateCompanyInput) => apiFetch<Company>(`/companies/${id}`, { method: "PATCH", body: input }),
   lifecycle: (id: string, event: "CREATE" | "ACTIVATE" | "SUSPEND" | "REACTIVATE" | "ARCHIVE") =>

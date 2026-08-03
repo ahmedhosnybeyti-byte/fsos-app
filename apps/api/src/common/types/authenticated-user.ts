@@ -8,6 +8,7 @@ export interface AuthenticatedUser {
   email: string;
   roleCode: RoleCode;
   permissions: string[];
+  featureAccess?: unknown;
   mustChangePassword: boolean;
   // Phase 4: Organizational Context — completes User Context (User Identity
   // + Company Context + Organizational Context + Roles + Effective

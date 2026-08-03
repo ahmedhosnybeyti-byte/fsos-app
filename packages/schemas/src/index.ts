@@ -4,6 +4,7 @@ export * from "./common.schemas";
 export * from "./auth.schemas";
 export * from "./user.schemas";
 export * from "./company.schemas";
+export * from "./company-feature-access.schemas";
 export * from "./employee.schemas";
 export * from "./data-source.schemas";
 export * from "./data-source-platform.schemas";

@@ -42,6 +42,7 @@ export interface User {
   updatedAt: string;
   role: Role;
   permissions?: string[];
+  featureAccess?: import("@field-sales-os/schemas").CompanyFeatureAccess;
 }
 
 export interface AdminCompanyDetails extends Company {
