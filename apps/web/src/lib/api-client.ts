@@ -31,13 +31,14 @@ interface RequestOptions {
   body?: unknown;
   formData?: FormData;
   query?: Record<string, string | number | boolean | undefined>;
+  signal?: AbortSignal;
 }
 
 // Single fetch wrapper for the whole app: sends the httpOnly session cookie
 // on every request, normalizes errors into ApiError so callers/react-query
 // can handle them uniformly.
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = "GET", body, formData, query } = options;
+  const { method = "GET", body, formData, query, signal } = options;
 
   const url = new URL(`${API_URL}${path}`);
   if (query) {
@@ -51,6 +52,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     credentials: "include",
     headers: formData ? undefined : body !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: formData ?? (body !== undefined ? JSON.stringify(body) : undefined),
+    signal,
   });
 
   const contentType = res.headers.get("content-type");
