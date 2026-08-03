@@ -1266,6 +1266,11 @@ export type TranslationKey =
   | "smartLoading.noRecommendations"
   | "smartLoading.estimatedDemand"
   | "smartLoading.estimatedSuggestedQuantity"
+  | "smartLoading.editRoute"
+  | "smartLoading.sessionSummary"
+  | "smartLoading.noConfirmedOrders"
+  | "smartLoading.exceptionalCustomer"
+  | "smartLoading.applyAndClose"
   | "fsos360.company"
   | "fsos360.region"
   | "fsos360.city"
@@ -2631,6 +2636,11 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.visitsPerWeek": "نمط زيارات خط السير",
     "smartLoading.add": "إضافة",
     "smartLoading.estimatedSuggestedQuantity": "الكمية المقترحة التقديرية",
+    "smartLoading.editRoute": "تعديل خط السير",
+    "smartLoading.exceptionalCustomer": "مضاف استثنائيًا",
+    "smartLoading.sessionSummary": "ملخص الجلسة",
+    "smartLoading.applyAndClose": "تطبيق وإغلاق",
+    "smartLoading.noConfirmedOrders": "لا توجد طلبيات مؤكدة مضافة.",
     "smartLoading.visitCustomers": "عملاء الزيارة",
     "smartLoading.selectedCustomers": "المحددون",
     "smartLoading.estimatedDemand": "احتياج العملاء التقديري",
@@ -4010,6 +4020,11 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.visitsPerWeek": "Route visits pattern",
     "smartLoading.add": "Add",
     "smartLoading.estimatedSuggestedQuantity": "Estimated suggested quantity",
+    "smartLoading.editRoute": "Edit route",
+    "smartLoading.exceptionalCustomer": "Exceptionally added",
+    "smartLoading.sessionSummary": "Session summary",
+    "smartLoading.applyAndClose": "Apply and close",
+    "smartLoading.noConfirmedOrders": "No confirmed orders added.",
     "smartLoading.visitCustomers": "Visit customers",
     "smartLoading.selectedCustomers": "Selected",
     "smartLoading.estimatedDemand": "Estimated customer demand",

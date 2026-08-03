@@ -23,7 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useTranslation } from "@/components/translation-provider";
 import type { SmartLoadingLostOpportunity, SmartLoadingPriorityProduct, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
 import { smartLoadingApi } from "@/lib/api/smart-loading";
-import type { SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
+import type { SmartLoadingRecalculateResult, SmartLoadingRouteCustomer } from "@field-sales-os/schemas";
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
 import { categoryAddedProductCount, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
 import { classifySalesRecency, summarizeSalesRecency } from "./sales-classification";
@@ -84,7 +84,6 @@ export function SmartLoadingScreen({
   const [refreshError, setRefreshError] = useState<string | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [openRows, setOpenRows] = useState<Set<string>>(new Set());
-  const [attentionOpen, setAttentionOpen] = useState(false);
   const [openRecommendationGroups, setOpenRecommendationGroups] = useState<Set<string>>(new Set());
   const [recommendationSearch, setRecommendationSearch] = useState("");
   const [panel, setPanel] = useState<"priority" | "stale" | null>(null);
@@ -99,8 +98,8 @@ export function SmartLoadingScreen({
   const [lostOpportunitiesOpen, setLostOpportunitiesOpen] = useState(false);
   const [lostOpportunityAdditions, setLostOpportunityAdditions] = useState<Record<string, LostOpportunityAddition>>({});
   const [lostOpportunityQuantityDrafts, setLostOpportunityQuantityDrafts] = useState<OpportunityQuantityDrafts>({});
-  const [lostOpportunityWarning, setLostOpportunityWarning] = useState<string | null>(null);  const [selectedCustomerCodes, setSelectedCustomerCodes] = useState<Set<string>>(new Set());
-  const [customerSearch, setCustomerSearch] = useState("");
+  const [lostOpportunityWarning, setLostOpportunityWarning] = useState<string | null>(null);
+  const [selectedCustomerCodes, setSelectedCustomerCodes] = useState<Set<string>>(new Set());
   const [fromDate, setFromDate] = useState(() => { const date = new Date(); date.setMonth(date.getMonth() - 3); return date.toISOString().slice(0, 10); });
   const [toDate, setToDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [visitsPerWeek, setVisitsPerWeek] = useState<1 | 2 | 6>(1);
@@ -571,117 +570,23 @@ export function SmartLoadingScreen({
         toDate={toDate}
         visitsPerWeek={visitsPerWeek}
         selectedCustomerCodes={selectedCustomerCodes}
-        customerSearch={customerSearch}
         confirmedOrders={confirmedOrdersByProduct}
         confirmedProductCode={confirmedProductCode}
         confirmedQuantity={confirmedQuantity}
-        calculation={recalculation}
-        loading={recalculationLoading}
-        error={recalculationError}
         onFromDateChange={setFromDate}
         onToDateChange={setToDate}
         onVisitsPerWeekChange={setVisitsPerWeek}
-        onCustomerSearchChange={setCustomerSearch}
-        onToggleCustomer={(customerCode) => setSelectedCustomerCodes((current) => { const next = new Set(current); next.has(customerCode) ? next.delete(customerCode) : next.add(customerCode); return next; })}
+        onCustomerCodesChange={setSelectedCustomerCodes}
         onConfirmedProductCodeChange={setConfirmedProductCode}
         onConfirmedQuantityChange={setConfirmedQuantity}
         onAddConfirmedOrder={() => { if (confirmedProductCode && confirmedQuantity > 0) setConfirmedOrdersByProduct((current) => ({ ...current, [confirmedProductCode]: confirmedQuantity })); }}
         onRemoveConfirmedOrder={(productCode) => setConfirmedOrdersByProduct((current) => { const next = { ...current }; delete next[productCode]; return next; })}
-        onRetry={() => setRecalculateNonce((value) => value + 1)}
       />
       {refreshError && (
         <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {refreshError}
         </div>
       )}
-
-      <section className="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
-        <Card className="glass-hero">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">{t("smartLoading.summaryTitle")}</CardTitle>
-            <CardDescription>
-              {t("smartLoading.summaryDescription")} · {t("smartLoading.lastCalculation")}:{" "}
-              {formatGregorianDate(session.calculatedAt) ?? "—"}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-2 p-4 sm:grid-cols-4">
-            <Metric label={t("smartLoading.productsToLoad")} value={formatQuantity(rows.length, locale)} />
-            <Metric
-              label={t("smartLoading.totalQuantity")}
-              value={formatQuantity(rows.reduce((sum, row) => sum + row.suggested, 0), locale)}
-              strong
-            />
-            <MetricButton
-              label={t("smartLoading.operationalPriorityProducts")}
-              value={formatQuantity(priorityProducts.length, locale)}
-              description={priorityProducts.length === 0 ? label("smartLoading.noRoutePriority", "No route priority products are available for this day.") : undefined}
-              onClick={(event) => {
-                event.stopPropagation();
-                setPanel(panel === "priority" ? null : "priority");
-              }}
-            />
-            <MetricButton
-              label={t("smartLoading.staleProducts")}
-              value={formatQuantity(staleRows.length, locale)}
-              description={staleRows.length === 0 ? t("smartLoading.noStaleSalesOverThreshold") : undefined}
-              onClick={(event) => {
-                event.stopPropagation();
-                setPanel(panel === "stale" ? null : "stale");
-              }}
-            />
-          </CardContent>
-          <CardContent className="space-y-2 border-t border-border/60 px-4 pb-4 pt-3">
-            {rows.some((row) => row.preliminary) && <p role="status" className="rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-800">{label("smartLoading.preliminaryStockNotice", "رصيد السيارة غير متوفر. الكميات المعروضة احتياج مبدئي قبل خصم المخزون الحالي.")}</p>}
-            {salesRecency.missing > 0 && (
-              <p role="status" className="rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
-                {t("smartLoading.missingLastSaleData", { count: salesRecency.missing })}
-              </p>
-            )}
-            <details className="rounded-md border border-border/70 bg-background/30 px-3 py-2 text-xs">
-              <summary className="cursor-pointer font-medium text-foreground">{t("smartLoading.salesDataDetails")}</summary>
-              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-                <RecencyDetail label={t("smartLoading.productsWithRecentSales")} value={salesRecency.recent} locale={locale} />
-                <RecencyDetail label={t("smartLoading.productsWithStaleSales")} value={salesRecency.stale} locale={locale} />
-                <RecencyDetail label={t("smartLoading.productsWithoutLastSaleDate")} value={salesRecency.missing} locale={locale} />
-              </div>
-            </details>
-          </CardContent>
-        </Card>
-
-        <Card className="glass-card">
-          <CardContent className="p-4">
-            <h2 className="mb-1 flex items-center gap-2 font-semibold">
-              <AlertTriangle className="h-4 w-4 text-amber-600" />
-              {label("smartLoading.alertsTitle", "Today alerts")}
-            </h2>
-            <p className="mb-2 text-xs text-muted-foreground">{t("smartLoading.attentionDescription")}</p>
-            <div className="space-y-2">
-              {staleRows.length > 0 && (
-                <div className="rounded border border-amber-500/20">
-                  <button
-                    className="flex w-full items-center justify-between px-3 py-2 text-sm font-medium"
-                    onClick={() => setAttentionOpen((value) => !value)}
-                  >
-                    <span>
-                      {t("smartLoading.staleProducts")} — {formatQuantity(staleRows.length, locale)} {t("smartLoading.quantityUnit")}
-                    </span>
-                    <ChevronDown className={cn("h-4 w-4 transition-transform", attentionOpen && "rotate-180")} />
-                  </button>
-                  {attentionOpen && (
-                    <div className="max-h-72 space-y-3 overflow-y-auto border-t p-3">
-                      <CategoryProductGroups rows={staleRows} stale />
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {staleRows.length === 0 && (
-                <p className="text-sm text-muted-foreground">{t("smartLoading.noOtherAlerts")}</p>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-      </section>
 
       {lostOpportunitiesOpen && (
         <LostOpportunitiesDialog
@@ -1361,40 +1266,57 @@ type SmartLoadingPhaseTwoProps = {
   toDate: string;
   visitsPerWeek: 1 | 2 | 6;
   selectedCustomerCodes: Set<string>;
-  customerSearch: string;
   confirmedOrders: Record<string, number>;
   confirmedProductCode: string;
   confirmedQuantity: number;
-  calculation: SmartLoadingRecalculateResult | null;
-  loading: boolean;
-  error: string | null;
   onFromDateChange: (value: string) => void;
   onToDateChange: (value: string) => void;
   onVisitsPerWeekChange: (value: 1 | 2 | 6) => void;
-  onCustomerSearchChange: (value: string) => void;
-  onToggleCustomer: (value: string) => void;
+  onCustomerCodesChange: (value: Set<string>) => void;
   onConfirmedProductCodeChange: (value: string) => void;
   onConfirmedQuantityChange: (value: number) => void;
   onAddConfirmedOrder: () => void;
   onRemoveConfirmedOrder: (value: string) => void;
-  onRetry: () => void;
 };
 
 function SmartLoadingPhaseTwo(props: SmartLoadingPhaseTwoProps) {
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [draftCustomerCodes, setDraftCustomerCodes] = useState<Set<string>>(new Set());
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [customerResults, setCustomerResults] = useState<SmartLoadingRouteCustomer[]>([]);
   const days = props.fromDate <= props.toDate ? Math.floor((new Date(`${props.toDate}T00:00:00`).getTime() - new Date(`${props.fromDate}T00:00:00`).getTime()) / 86_400_000) + 1 : 0;
-  const customerQuery = props.customerSearch.trim().toLocaleLowerCase();
-  const customers = props.session.routeCustomers.filter((customer) => !customerQuery || `${customer.customerName} ${customer.customerCode}`.toLocaleLowerCase().includes(customerQuery));
-  const products = props.session.products.filter((product) => !props.confirmedProductCode || `${product.productName} ${product.productCode}`.toLocaleLowerCase().includes(props.confirmedProductCode.toLocaleLowerCase()));
-  const productByCode = new Map(props.session.products.map((product) => [product.productCode, product]));
   const orders = Object.entries(props.confirmedOrders);
-  return <section className="grid gap-3 lg:grid-cols-2">
-    <Card><CardHeader><CardTitle className="text-base">{props.label("smartLoading.routeSetup", "Route setup")}</CardTitle><CardDescription>{props.label("smartLoading.targetDate", "Prepare loading for")}: {props.targetDate}</CardDescription></CardHeader><CardContent className="space-y-4">
-      <div className="grid gap-3 sm:grid-cols-2"><div><Label htmlFor="smart-loading-from-date">{props.label("smartLoading.fromDate", "From date")}</Label><Input id="smart-loading-from-date" type="date" value={props.fromDate} max={props.toDate} onChange={(event) => props.onFromDateChange(event.target.value)} /></div><div><Label htmlFor="smart-loading-to-date">{props.label("smartLoading.toDate", "To date")}</Label><Input id="smart-loading-to-date" type="date" value={props.toDate} min={props.fromDate} onChange={(event) => props.onToDateChange(event.target.value)} /></div></div>
-      {days === 0 ? <p role="alert" className="text-sm text-destructive">{props.label("smartLoading.invalidDateRange", "The start date must be on or before the end date.")}</p> : <p className="text-xs text-muted-foreground">{props.label("smartLoading.calendarDays", "Calendar days")}: {days}</p>}
-      <div><Label htmlFor="smart-loading-visits">{props.label("smartLoading.visitsPerWeek", "Route visits pattern")}</Label><select id="smart-loading-visits" className="mt-1 h-10 w-full rounded-md border bg-background px-3" value={props.visitsPerWeek} onChange={(event) => { const value = Number(event.target.value); if (value === 1 || value === 2 || value === 6) props.onVisitsPerWeekChange(value); }}><option value="1">{props.label("smartLoading.onceWeekly", "Once weekly")}</option><option value="2">{props.label("smartLoading.twiceWeekly", "Twice weekly")}</option><option value="6">{props.label("smartLoading.sixWeekly", "6 times weekly")}</option></select><p className="mt-1 text-xs text-muted-foreground">{props.label("smartLoading.visitsHint", "This value is used to calculate an estimated quantity for each visit.")}</p></div>
-    </CardContent></Card>
-    <Card><CardHeader><CardTitle className="text-base">{props.label("smartLoading.visitCustomers", "Visit customers")}</CardTitle><CardDescription>{props.label("smartLoading.selectedCustomers", "Selected")}: {props.selectedCustomerCodes.size}/{props.session.routeCustomers.length}</CardDescription></CardHeader><CardContent><Input aria-label={props.label("smartLoading.searchCustomers", "Search customers")} placeholder={props.label("smartLoading.searchCustomers", "Search customers")} value={props.customerSearch} onChange={(event) => props.onCustomerSearchChange(event.target.value)} /><div className="mt-3 max-h-56 space-y-2 overflow-auto">{customers.length === 0 ? <p className="text-sm text-muted-foreground">{props.label("smartLoading.noCustomersFound", "No customers found")}</p> : customers.map((customer) => <label key={customer.customerCode} className="flex min-h-10 items-center gap-3 rounded border p-2 text-sm"><input type="checkbox" checked={props.selectedCustomerCodes.has(customer.customerCode)} onChange={() => props.onToggleCustomer(customer.customerCode)} /><span className="min-w-0"><span className="block truncate">{customer.customerName}</span><span className="text-xs text-muted-foreground">{customer.customerCode}</span></span></label>)}</div>{props.selectedCustomerCodes.size === 0 && <p role="alert" className="mt-2 text-sm text-destructive">{props.label("smartLoading.noSelectedCustomers", "Select at least one customer before calculation.")}</p>}</CardContent></Card>
-    <Card><CardHeader><CardTitle className="text-base">{props.label("smartLoading.aggregatedConfirmedOrders", "Aggregated confirmed orders")}</CardTitle></CardHeader><CardContent className="space-y-3"><div className="grid gap-2 sm:grid-cols-[1fr_8rem_auto]"><select aria-label={props.label("smartLoading.searchProducts", "Search products")} className="h-10 rounded-md border bg-background px-3" value={props.confirmedProductCode} onChange={(event) => props.onConfirmedProductCodeChange(event.target.value)}><option value="">{props.label("smartLoading.selectProduct", "Select a product")}</option>{products.map((product) => <option key={product.productCode} value={product.productCode}>{product.productName} ({product.productCode})</option>)}</select><Input type="number" min="1" value={props.confirmedQuantity} onChange={(event) => props.onConfirmedQuantityChange(Math.max(1, Number(event.target.value) || 1))} /><Button type="button" onClick={props.onAddConfirmedOrder} disabled={!props.confirmedProductCode || props.confirmedQuantity <= 0}>{props.label("smartLoading.add", "Add")}</Button></div><div className="space-y-2">{orders.map(([code, quantity]) => <div key={code} className="flex items-center justify-between rounded border p-2 text-sm"><span>{productByCode.get(code)?.productName ?? code}: {formatQuantity(quantity, props.locale)}</span><Button variant="ghost" size="sm" onClick={() => props.onRemoveConfirmedOrder(code)}>{props.label("smartLoading.remove", "Remove")}</Button></div>)}</div><p className="text-xs text-muted-foreground">{props.label("smartLoading.orderTotals", "Products")}: {orders.length} · {props.label("smartLoading.totalQuantity", "Total quantity")}: {formatQuantity(orders.reduce((sum, [, quantity]) => sum + quantity, 0), props.locale)}</p></CardContent></Card>
-    <Card><CardHeader><CardTitle className="text-base">{props.label("smartLoading.currentRecommendations", "Current loading recommendations")}</CardTitle></CardHeader><CardContent>{props.loading ? <div className="space-y-2"><Skeleton className="h-12 w-full" /><Skeleton className="h-12 w-full" /></div> : props.error ? <div role="alert" className="space-y-2 text-sm text-destructive"><p>{props.error}</p><Button variant="outline" onClick={props.onRetry}>{props.label("smartLoading.retry", "Try again")}</Button></div> : !props.calculation ? <p className="text-sm text-muted-foreground">{props.label("smartLoading.awaitingCalculation", "Choose customers to calculate recommendations.")}</p> : <div className="space-y-2">{props.calculation.products.length === 0 ? <p className="text-sm text-muted-foreground">{props.label("smartLoading.noRecommendations", "No recommendations for this period.")}</p> : props.calculation.products.map((product) => <div key={product.productCode} className="rounded border p-3 text-sm"><strong>{product.productName}</strong><div className="mt-2 grid grid-cols-2 gap-2 text-xs text-muted-foreground"><span>{props.label("smartLoading.estimatedDemand", "Estimated customer demand")}: {formatQuantity(product.estimatedCustomerDemand, props.locale)}</span><span>{props.label("smartLoading.confirmedOrders", "Confirmed orders")}: {formatQuantity(product.confirmedOrderQuantity, props.locale)}</span><span>{props.label("smartLoading.safetyStock", "Safety stock")}: {formatQuantity(product.safetyStock, props.locale)}</span><span>{props.label("smartLoading.vehicleStock", "Vehicle stock")}: {product.vehicleStock === null ? props.label("smartLoading.preliminaryNeed", "Preliminary need") : formatQuantity(product.vehicleStock, props.locale)}</span></div><p className="mt-2 font-semibold">{props.label("smartLoading.estimatedSuggestedQuantity", "Estimated suggested quantity")}: {formatQuantity(product.suggestedQuantity, props.locale)}</p></div>)}</div>}</CardContent></Card>
-  </section>;
+  const productByCode = new Map(props.session.products.map((product) => [product.productCode, product]));
+
+  useEffect(() => {
+    if (!editorOpen || !customerQuery.trim()) { setCustomerResults([]); return; }
+    const timer = window.setTimeout(() => {
+      void smartLoadingApi.searchCustomers(customerQuery, [...draftCustomerCodes]).then((result) => setCustomerResults(result.customers)).catch(() => setCustomerResults([]));
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [customerQuery, draftCustomerCodes, editorOpen]);
+
+  function openEditor() { setDraftCustomerCodes(new Set(props.selectedCustomerCodes)); setCustomerQuery(""); setCustomerResults([]); setEditorOpen(true); }
+  function toggleCustomer(code: string) { setDraftCustomerCodes((current) => { const next = new Set(current); next.has(code) ? next.delete(code) : next.add(code); return next; }); }
+  function applyCustomers() { props.onCustomerCodesChange(new Set(draftCustomerCodes)); setEditorOpen(false); }
+  function changeVisits(value: string) { const parsed = Number(value); if (parsed === 1 || parsed === 2 || parsed === 6) props.onVisitsPerWeekChange(parsed); }
+
+  return <>
+    <section className="grid gap-3 lg:h-[22rem] lg:grid-cols-[3fr_2fr]">
+      <div className="order-1 grid min-h-0 gap-3 lg:col-start-2 lg:row-span-2">
+        <Card className="min-h-0"><CardHeader className="pb-2"><div className="flex items-center justify-between gap-2"><div><CardTitle className="text-base">{props.label("smartLoading.routeSetup", "Route setup")}</CardTitle><CardDescription>{props.label("smartLoading.targetDate", "Prepare loading for")}: {props.targetDate}</CardDescription></div><Button size="sm" variant="outline" onClick={openEditor}>{props.label("smartLoading.editRoute", "Edit route")}</Button></div></CardHeader><CardContent className="grid gap-2 text-sm sm:grid-cols-2"><div><span className="text-muted-foreground">{props.label("smartLoading.fromDate", "From date")}</span><Input className="mt-1 h-8" type="date" value={props.fromDate} max={props.toDate} onChange={(event) => props.onFromDateChange(event.target.value)} /></div><div><span className="text-muted-foreground">{props.label("smartLoading.toDate", "To date")}</span><Input className="mt-1 h-8" type="date" value={props.toDate} min={props.fromDate} onChange={(event) => props.onToDateChange(event.target.value)} /></div><div className="sm:col-span-2"><Label htmlFor="smart-loading-visits" className="text-muted-foreground">{props.label("smartLoading.visitsPerWeek", "Route visits pattern")}</Label><select id="smart-loading-visits" className="mt-1 h-8 w-full rounded-md border bg-background px-2" value={props.visitsPerWeek} onChange={(event) => changeVisits(event.target.value)}><option value="1">{props.label("smartLoading.onceWeekly", "Once weekly")}</option><option value="2">{props.label("smartLoading.twiceWeekly", "Twice weekly")}</option><option value="6">{props.label("smartLoading.sixWeekly", "6 times weekly")}</option></select></div>{days === 0 && <p role="alert" className="sm:col-span-2 text-xs text-destructive">{props.label("smartLoading.invalidDateRange", "The start date must be on or before the end date.")}</p>}</CardContent></Card>
+        <Card className="min-h-0"><CardHeader className="pb-2"><CardTitle className="text-base">{props.label("smartLoading.sessionSummary", "Session summary")}</CardTitle></CardHeader><CardContent className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm"><SessionMetric label={props.label("smartLoading.selectedCustomers", "Selected customers")} value={String(props.selectedCustomerCodes.size)} /><SessionMetric label={props.label("smartLoading.calendarDays", "Calendar days")} value={days ? String(days) : "—"} /><SessionMetric label={props.label("smartLoading.visitsPerWeek", "Route visits pattern")} value={String(props.visitsPerWeek)} /><SessionMetric label={props.label("smartLoading.orderTotals", "Confirmed products")} value={String(orders.length)} /><SessionMetric label={props.label("smartLoading.totalQuantity", "Total quantity")} value={formatQuantity(orders.reduce((sum, [, quantity]) => sum + quantity, 0), props.locale)} /></CardContent></Card>
+      </div>
+      <Card className="order-2 min-h-0 lg:col-start-1 lg:row-span-2"><CardHeader className="pb-2"><CardTitle className="text-base">{props.label("smartLoading.aggregatedConfirmedOrders", "Aggregated confirmed orders")}</CardTitle><CardDescription>{props.label("smartLoading.orderTotals", "Products")}: {orders.length} · {props.label("smartLoading.totalQuantity", "Total quantity")}: {formatQuantity(orders.reduce((sum, [, quantity]) => sum + quantity, 0), props.locale)}</CardDescription></CardHeader><CardContent className="flex min-h-0 flex-1 flex-col space-y-3"><div className="grid gap-2 sm:grid-cols-[1fr_7rem_auto]"><select aria-label={props.label("smartLoading.searchProducts", "Search products")} className="h-9 min-w-0 rounded-md border bg-background px-3" value={props.confirmedProductCode} onChange={(event) => props.onConfirmedProductCodeChange(event.target.value)}><option value="">{props.label("smartLoading.selectProduct", "Select a product")}</option>{props.session.products.map((product) => <option key={product.productCode} value={product.productCode}>{product.productName} ({product.productCode})</option>)}</select><Input className="h-9" type="number" min="1" value={props.confirmedQuantity} onChange={(event) => props.onConfirmedQuantityChange(Math.max(1, Number(event.target.value) || 1))} /><Button className="h-9" type="button" onClick={props.onAddConfirmedOrder} disabled={!props.confirmedProductCode}>{props.label("smartLoading.add", "Add")}</Button></div><div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">{orders.length === 0 ? <p className="py-4 text-sm text-muted-foreground">{props.label("smartLoading.noConfirmedOrders", "No confirmed orders added.")}</p> : orders.map(([code, quantity]) => <div key={code} className="flex items-center justify-between gap-2 rounded border p-2 text-sm"><span className="truncate">{productByCode.get(code)?.productName ?? code}</span><span>{formatQuantity(quantity, props.locale)}</span><Button variant="ghost" size="sm" onClick={() => props.onRemoveConfirmedOrder(code)}>{props.label("smartLoading.remove", "Remove")}</Button></div>)}</div></CardContent></Card>
+    </section>
+    {editorOpen && <RouteEditorDialog session={props.session} label={props.label} query={customerQuery} results={customerResults} selected={draftCustomerCodes} onQueryChange={setCustomerQuery} onToggle={toggleCustomer} onClose={() => setEditorOpen(false)} onApply={applyCustomers} />}
+  </>;
+}
+
+function SessionMetric({ label, value }: { label: string; value: string }) { return <div><p className="text-xs text-muted-foreground">{label}</p><p className="font-semibold">{value}</p></div>; }
+
+function RouteEditorDialog({ session, label, query, results, selected, onQueryChange, onToggle, onClose, onApply }: { session: Extract<SmartLoadingSession, { state: "ready" }>; label: (key: string, fallback: string) => string; query: string; results: SmartLoadingRouteCustomer[]; selected: Set<string>; onQueryChange: (value: string) => void; onToggle: (code: string) => void; onClose: () => void; onApply: () => void; }) {
+  const routeCodes = new Set(session.routeCustomers.map((customer) => customer.customerCode));
+  const visible = query.trim() ? results : session.routeCustomers;
+  return <div role="dialog" aria-modal="true" aria-label={label("smartLoading.editRoute", "Edit route")} className="fixed inset-0 z-50 flex items-end bg-black/50 p-3 sm:items-center sm:justify-center"><Card className="max-h-[85vh] w-full max-w-2xl"><CardHeader><div className="flex items-center justify-between gap-3"><div><CardTitle>{label("smartLoading.editRoute", "Edit route")}</CardTitle><CardDescription>{label("smartLoading.selectedCustomers", "Selected customers")}: {selected.size}</CardDescription></div><Button variant="ghost" onClick={onClose}>{label("smartLoading.close", "Close")}</Button></div></CardHeader><CardContent className="space-y-3"><Input aria-label={label("smartLoading.searchCustomers", "Search customers")} placeholder={label("smartLoading.searchCustomers", "Search customers")} value={query} onChange={(event) => onQueryChange(event.target.value)} /><div className="max-h-[50vh] space-y-2 overflow-y-auto">{visible.length === 0 ? <p className="text-sm text-muted-foreground">{label("smartLoading.noCustomersFound", "No customers found")}</p> : visible.map((customer) => <label key={customer.customerCode} className="flex min-h-11 items-center gap-3 rounded border p-2 text-sm"><input type="checkbox" checked={selected.has(customer.customerCode)} onChange={() => onToggle(customer.customerCode)} /><span className="min-w-0 flex-1"><span className="block truncate">{customer.customerName}</span><span className="text-xs text-muted-foreground">{customer.customerCode}</span></span>{!routeCodes.has(customer.customerCode) && <span className="rounded bg-muted px-2 py-1 text-xs">{label("smartLoading.exceptionalCustomer", "Exceptionally added")}</span>}</label>)}</div><div className="flex justify-end gap-2"><Button variant="outline" onClick={onClose}>{label("smartLoading.close", "Close")}</Button><Button onClick={onApply}>{label("smartLoading.applyAndClose", "Apply and close")}</Button></div></CardContent></Card></div>;
 }
