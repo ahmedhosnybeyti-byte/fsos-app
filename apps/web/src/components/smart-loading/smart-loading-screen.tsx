@@ -25,7 +25,7 @@ import type { SmartLoadingLostOpportunity, SmartLoadingPriorityProduct, SmartLoa
 import { smartLoadingApi } from "@/lib/api/smart-loading";
 import type { SmartLoadingRecalculateInput, SmartLoadingRecalculateResult, SmartLoadingRouteCustomer } from "@field-sales-os/schemas";
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
-import { categoryAddedProductCount, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
+import { categoryAddedProductCount, formatLostOpportunityQuantity, formatLostOpportunityQuantityInput, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
 import { classifySalesRecency, summarizeSalesRecency } from "./sales-classification";
 import { calculateSuggestedLoading } from "./suggested-loading";
 
@@ -147,8 +147,8 @@ export function SmartLoadingScreen({
   // just the ones that ended up with a positive loading recommendation.
   const lostOpportunityGroups = useMemo<LostOpportunityCategoryGroup[]>(() => {
     if (session?.state !== "ready") return [];
-    return groupLostOpportunities(session.lostOpportunities, lostOpportunityQuantityDrafts, "", t("smartLoading.uncategorized"));
-  }, [lostOpportunityQuantityDrafts, session, t]);
+    return groupLostOpportunities(session.lostOpportunities, lostOpportunityQuantityDrafts, "", t("smartLoading.uncategorized"), appliedInputs?.visitsPerWeek ?? 1);
+  }, [appliedInputs?.visitsPerWeek, lostOpportunityQuantityDrafts, session, t]);
 
   const allRows = useMemo<Row[]>(() => {
     if (session?.state !== "ready") return [];
@@ -642,6 +642,7 @@ export function SmartLoadingScreen({
           onClose={() => setLostOpportunitiesOpen(false)}
           onAddProducts={addLostOpportunities}
           onQuantityChange={setLostOpportunityQuantity}
+          visitsPerWeek={appliedInputs?.visitsPerWeek ?? 1}
           onRestoreQuantity={restoreLostOpportunityQuantity}
         />
       )}
@@ -786,6 +787,7 @@ function LostOpportunitiesDialog({
   isLoading,
   isError,
   warning,
+  visitsPerWeek,
   onClose,
   onAddProducts,
   onQuantityChange,
@@ -798,6 +800,7 @@ function LostOpportunitiesDialog({
   isLoading: boolean;
   isError: boolean;
   warning: string | null;
+  visitsPerWeek: 1 | 2 | 6;
   onClose: () => void;
   onAddProducts: (products: readonly LostOpportunityProductGroup[]) => void;
   onQuantityChange: (opportunityId: string, value: string) => void;
@@ -809,12 +812,12 @@ function LostOpportunitiesDialog({
   const [manualOpenProducts, setManualOpenProducts] = useState<Set<string>>(new Set());
   const hasInitializedAccordion = useRef(false);
   const allGroups = useMemo(
-    () => groupLostOpportunities(opportunities, quantityDrafts, "", t("smartLoading.uncategorized")),
-    [opportunities, quantityDrafts, t],
+    () => groupLostOpportunities(opportunities, quantityDrafts, "", t("smartLoading.uncategorized"), visitsPerWeek),
+    [opportunities, quantityDrafts, t, visitsPerWeek],
   );
   const groups = useMemo(
-    () => search ? groupLostOpportunities(opportunities, quantityDrafts, search, t("smartLoading.uncategorized")) : allGroups,
-    [allGroups, opportunities, quantityDrafts, search, t],
+    () => search ? groupLostOpportunities(opportunities, quantityDrafts, search, t("smartLoading.uncategorized"), visitsPerWeek) : allGroups,
+    [allGroups, opportunities, quantityDrafts, search, t, visitsPerWeek],
   );
   const totalQuantity = groups.reduce((sum, category) => sum + category.totalQuantity, 0);
   const productCount = groups.reduce((sum, category) => sum + category.productCount, 0);
@@ -858,7 +861,7 @@ function LostOpportunitiesDialog({
             <p>{t("smartLoading.lostOpportunityCategories")}: <strong>{formatQuantity(groups.length, locale)}</strong></p>
             <p>{t("smartLoading.lostOpportunityProducts")}: <strong>{formatQuantity(productCount, locale)}</strong></p>
             <p>{t("smartLoading.lostOpportunityCustomers")}: <strong>{formatQuantity(customerCount, locale)}</strong></p>
-            <p>{t("smartLoading.totalQuantity")}: <strong>{formatQuantity(totalQuantity, locale)}</strong></p>
+            <p>{t("smartLoading.totalQuantity")}: <strong>{formatLostOpportunityQuantity(totalQuantity, locale)}</strong></p>
           </div>
           {isLoading && <div className="space-y-2"><Skeleton className="h-20 w-full" /><Skeleton className="h-20 w-full" /></div>}
           {isError && <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{t("smartLoading.lostOpportunitiesError")}</p>}
@@ -870,7 +873,7 @@ function LostOpportunitiesDialog({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <button type="button" className="min-w-0 text-start" onClick={() => toggleCategory(category.category)} aria-expanded={effectiveOpenCategories.has(category.category)}>
                   <h3 className="font-semibold">{category.category}</h3>
-                  <p className="text-xs text-muted-foreground">{t("smartLoading.categoryTotal", { value: formatQuantity(category.totalQuantity, locale) })}</p>
+                  <p className="text-xs text-muted-foreground">{t("smartLoading.categoryTotal", { value: formatLostOpportunityQuantity(category.totalQuantity, locale) })}</p>
                   {addedCount > 0 && addedCount < category.productCount && <p className="text-xs text-amber-700">{t("smartLoading.categoryPartiallyAdded", { added: formatQuantity(addedCount, locale), total: formatQuantity(category.productCount, locale) })}</p>}
                   {addedCount === category.productCount && <p className="text-xs text-emerald-700">{t("smartLoading.added")}</p>}
                 </button>
@@ -885,14 +888,14 @@ function LostOpportunitiesDialog({
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <button type="button" className="min-w-0 text-start" onClick={() => toggleProduct(category.category, product.productCode)} aria-expanded={effectiveOpenProducts.has(productId)}>
                         <p className="font-medium">{product.productName}</p>
-                        <p className="text-xs text-muted-foreground">{product.productCode} {"\u00b7"} {t("smartLoading.productSuggestedQuantity", { value: formatQuantity(product.totalQuantity, locale) })}</p>
+                        <p className="text-xs text-muted-foreground">{product.productCode} {"\u00b7"} {t("smartLoading.productSuggestedQuantity", { value: formatLostOpportunityQuantity(product.totalQuantity, locale) })}</p>
                       </button>
                       <Button disabled={added || product.totalQuantity <= 0} onClick={() => onAddProducts([product])}>{added ? t("smartLoading.added") : t("smartLoading.addToLoading")}</Button>
                     </div>
                     {effectiveOpenProducts.has(productId) && <div className="mt-2 space-y-2 border-t pt-2">
                       {product.customers.map((customer) => <div key={customer.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 text-sm">
                         <span className="min-w-0 truncate">{customer.customerName}</span>
-                        <Input className="h-8 w-24 text-center" type="number" min="0" step="0.1" value={formatQuantityInput(customer.currentQuantity)} onChange={(event) => onQuantityChange(customer.id, event.target.value)} aria-label={t("smartLoading.customerSuggestedQuantity", { customer: customer.customerName })} />
+                        <Input className="h-8 w-24 text-center" type="number" min="0" step="0.01" value={formatLostOpportunityQuantityInput(customer.currentQuantity)} onChange={(event) => onQuantityChange(customer.id, event.target.value)} aria-label={t("smartLoading.customerSuggestedQuantity", { customer: customer.customerName })} />
                         <Button className="h-8" variant="ghost" size="sm" onClick={() => onRestoreQuantity(customer.id)}>{t("smartLoading.restore")}</Button>
                       </div>)}
                     </div>}
@@ -994,7 +997,7 @@ function ProductRow({
           </p>
           <div className="mt-1 grid gap-1 sm:grid-cols-3">
             <span>{t("smartLoading.suggestedLoading")}: {formatQuantity(row.baseSuggested, locale)}</span>
-            <span>{t("smartLoading.lostOpportunities")}: {formatQuantity(row.lostOpportunity.addedQuantity, locale)}</span>
+            <span>{t("smartLoading.lostOpportunities")}: {formatLostOpportunityQuantity(row.lostOpportunity.addedQuantity, locale)}</span>
             <span className="font-semibold">{t("smartLoading.totalQuantity")}: {formatQuantity(row.suggested, locale)}</span>
           </div>
           <p className="mt-1 text-amber-800">

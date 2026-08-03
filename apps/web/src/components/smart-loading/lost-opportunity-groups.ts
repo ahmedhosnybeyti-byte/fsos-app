@@ -2,6 +2,20 @@ import type { SmartLoadingLostOpportunity } from "../../lib/types";
 
 export type OpportunityQuantityDrafts = Record<string, number>;
 
+/** Converts a 90-day lost-opportunity baseline into the quantity required for one route visit. */
+export function formatLostOpportunityQuantity(value: number, locale: "ar" | "en"): string {
+  return new Intl.NumberFormat(locale === "ar" ? "ar-SA" : "en-US", { maximumFractionDigits: 2 }).format(Number.isFinite(value) ? value : 0);
+}
+
+export function formatLostOpportunityQuantityInput(value: number): string {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 2, useGrouping: false }).format(Number.isFinite(value) ? value : 0);
+}
+
+export function calculateVisitSuggestedQuantity(baselineNetQuantity: number, visitsPerWeek: 1 | 2 | 6): number {
+  if (!Number.isFinite(baselineNetQuantity) || baselineNetQuantity <= 0) return 0;
+  return baselineNetQuantity / 90 * (7 / visitsPerWeek);
+}
+
 export type LostOpportunityCustomer = SmartLoadingLostOpportunity & {
   id: string;
   currentQuantity: number;
@@ -24,7 +38,7 @@ export type LostOpportunityCategoryGroup = {
 };
 
 export function lostOpportunityId(customerCode: string, productCode: string): string {
-  return customerCode + "\u0000" + productCode;
+  return `${customerCode.trim()}::${productCode.trim()}`;
 }
 
 export function lostOpportunityProductId(category: string, productCode: string): string {
@@ -34,7 +48,7 @@ export function lostOpportunityProductId(category: string, productCode: string):
 export function normalizeOpportunityQuantity(value: string | number): number {
   const parsed = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-  return Math.round(parsed * 10) / 10;
+  return Math.round(parsed * 100) / 100;
 }
 
 export function categoryAddedProductCount(category: LostOpportunityCategoryGroup, addedProductCodes: ReadonlySet<string>): number {
@@ -84,20 +98,23 @@ export function groupLostOpportunities(
   quantityDrafts: OpportunityQuantityDrafts,
   query: string,
   uncategorized: string,
+  visitsPerWeek: 1 | 2 | 6,
 ): LostOpportunityCategoryGroup[] {
   const categories = new Map<string, Map<string, LostOpportunityCustomer[]>>();
   const seenOpportunityIds = new Set<string>();
 
   for (const opportunity of opportunities) {
     const category = opportunity.category?.trim() || uncategorized;
-    const id = lostOpportunityId(opportunity.customerCode, opportunity.productCode);
+    const customerCode = opportunity.customerCode.trim();
+    const productCode = opportunity.productCode.trim();
+    const id = lostOpportunityId(customerCode, productCode);
     if (seenOpportunityIds.has(id)) continue;
     seenOpportunityIds.add(id);
-    const currentQuantity = normalizeOpportunityQuantity(quantityDrafts[id] ?? opportunity.suggestedQuantity);
+    const currentQuantity = normalizeOpportunityQuantity(quantityDrafts[id] ?? calculateVisitSuggestedQuantity(opportunity.baselineNetQuantity, visitsPerWeek));
     const products = categories.get(category) ?? new Map<string, LostOpportunityCustomer[]>();
-    const customers = products.get(opportunity.productCode) ?? [];
-    customers.push({ ...opportunity, id, currentQuantity });
-    products.set(opportunity.productCode, customers);
+    const customers = products.get(productCode) ?? [];
+    customers.push({ ...opportunity, customerCode, productCode, id, currentQuantity });
+    products.set(productCode, customers);
     categories.set(category, products);
   }
 
