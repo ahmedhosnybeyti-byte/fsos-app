@@ -1667,7 +1667,7 @@ export interface VisitCopilot360Summary {
 // Smart Loading — a read-only loading-preparation session scoped by the signed-in account.
 export type SmartLoadingSessionState = "ready" | "vehicle-stock-unavailable";
 export type SmartLoadingPriority = "high" | "normal";
-export interface SmartLoadingProduct { productCode: string; productName: string; currentVehicleStock: number; weeklyAverageSales: number; priority: SmartLoadingPriority; category: string | null; lastSaleDate: string | null; }
+export interface SmartLoadingProduct { productCode: string; productName: string; currentVehicleStock: number | null; weeklyAverageSales: number; priority: SmartLoadingPriority; category: string | null; lastSaleDate: string | null; }
 export interface SmartLoadingAttention { id: string; message: string; }
 export interface SmartLoadingRoute { targetDate: string; customerCount: number; }
 export interface SmartLoadingPriorityProduct { productCode: string; productName: string; category: string | null; routeCustomerCount: number; totalQuantity: number; currentVehicleStock: number | null; }

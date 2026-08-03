@@ -189,12 +189,7 @@ export class SmartLoadingService {
     const returnItemsRecords = returnItemsResult.records;
     const lostOpportunityDataUnavailable = !customersResult.available || !invoicesResult.available || !invoiceItemsResult.available;
 
-    // Van Inventory unavailable for this company (no upload yet, or the
-    // caller's scope has none) — honest degrade, same contract the
-    // frontend stub already promised. Never fabricate a stock number.
-    if (!vanInventoryRecords.available || vanInventoryRecords.records.length === 0) {
-      return { state: "vehicle-stock-unavailable", targetDate: targetDateIso, route: null, lostOpportunityReason: lostOpportunityDataUnavailable ? "data-unavailable" : undefined };
-    }
+    const vehicleStockAvailable = vanInventoryRecords.available && vanInventoryRecords.records.length > 0;
 
     // ---- Van Inventory -> currentVehicleStock. Latest ReportDate only
     // (a snapshot entity — see canonical-entities.data.ts), same pattern
@@ -209,7 +204,7 @@ export class SmartLoadingService {
       if (!latestReportIso || d > latestReportIso) latestReportIso = d;
     }
     const vehicleStockByProduct = new Map<string, number>();
-    if (latestReportIso) {
+    if (vehicleStockAvailable && latestReportIso) {
       for (const row of vanInventoryRecords.records) {
         const t = toEpochMs(row.ReportDate);
         if (t === null || isoDay(t) !== latestReportIso) continue;
@@ -326,7 +321,9 @@ export class SmartLoadingService {
     const products: SmartLoadingProduct[] = [];
     const attentionList: { id: string; message: string }[] = [];
 
-    for (const [productCode, currentVehicleStock] of vehicleStockByProduct.entries()) {
+    const sessionProductCodes = new Set([...vehicleStockByProduct.keys(), ...windowQtyByProduct.keys()]);
+    for (const productCode of sessionProductCodes) {
+      const currentVehicleStock = vehicleStockAvailable ? vehicleStockByProduct.get(productCode) ?? 0 : null;
       const meta = productMeta.get(productCode);
       const lastSaleMs = lastSaleMsByProduct.get(productCode) ?? null;
       const lastSaleDate = lastSaleMs !== null ? isoDay(lastSaleMs) : null;

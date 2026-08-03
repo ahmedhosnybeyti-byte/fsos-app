@@ -23,7 +23,7 @@ export type SmartLoadingPriority = z.infer<typeof smartLoadingPrioritySchema>;
 export const smartLoadingProductSchema = z.object({
   productCode: z.string(),
   productName: z.string(),
-  currentVehicleStock: z.number(),
+  currentVehicleStock: z.number().nullable(),
   weeklyAverageSales: z.number(),
   priority: smartLoadingPrioritySchema,
   category: z.string().nullable(),

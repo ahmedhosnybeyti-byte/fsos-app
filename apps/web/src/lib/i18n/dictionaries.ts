@@ -1152,6 +1152,10 @@ export type TranslationKey =
   | "smartLoading.noOperationalPriority"
   | "smartLoading.operationalPriorityProductsPanelTitle"
   | "smartLoading.lastCalculation"
+  | "smartLoading.preliminaryStockNotice"
+  | "smartLoading.preliminaryNeed"
+  | "smartLoading.manualVehicleStock"
+  | "smartLoading.manualVehicleStockHint"
   | "smartLoading.targetDate"
   | "smartLoading.routeCustomers"
   | "smartLoading.noRouteForDate"
@@ -2502,6 +2506,10 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.noOperationalPriority": "لا توجد أولوية تشغيلية محددة حاليًا.",
     "smartLoading.operationalPriorityProductsPanelTitle": "أصناف ذات أولوية تشغيلية",
     "smartLoading.lastCalculation": "آخر حساب",
+    "smartLoading.preliminaryStockNotice": "رصيد السيارة غير متوفر. الكميات المعروضة احتياج مبدئي قبل خصم المخزون الحالي.",
+    "smartLoading.preliminaryNeed": "احتياج مبدئي",
+    "smartLoading.manualVehicleStock": "رصيد السيارة",
+    "smartLoading.manualVehicleStockHint": "أدخل الرصيد المتاح لتحويل الاحتياج المبدئي إلى توصية نهائية.",
     "smartLoading.targetDate": "تجهيز تحميل ليوم",
     "smartLoading.routeCustomers": "عملاء خط السير",
     "smartLoading.noRouteForDate": "لا يوجد خط سير محدد لهذا اليوم.",
@@ -3852,6 +3860,10 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.noOperationalPriority": "No operational priority is currently identified.",
     "smartLoading.operationalPriorityProductsPanelTitle": "Operational Priority Products",
     "smartLoading.lastCalculation": "Last Calculation",
+    "smartLoading.preliminaryStockNotice": "Vehicle stock is unavailable. Quantities shown are preliminary needs before deducting current stock.",
+    "smartLoading.preliminaryNeed": "Preliminary need",
+    "smartLoading.manualVehicleStock": "Vehicle stock",
+    "smartLoading.manualVehicleStockHint": "Enter the available balance to turn the preliminary need into a final recommendation.",
     "smartLoading.targetDate": "Prepare loading for",
     "smartLoading.routeCustomers": "Route customers",
     "smartLoading.noRouteForDate": "No route is scheduled for this day.",

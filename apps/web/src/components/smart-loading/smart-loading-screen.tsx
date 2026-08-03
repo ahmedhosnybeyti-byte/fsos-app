@@ -25,8 +25,9 @@ import type { SmartLoadingLostOpportunity, SmartLoadingPriorityProduct, SmartLoa
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
 import { categoryAddedProductCount, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
 import { classifySalesRecency, summarizeSalesRecency } from "./sales-classification";
+import { calculateSuggestedLoading } from "./suggested-loading";
 
-type Inputs = { confirmedOrders: number; safetyStock: number; manual?: number };
+type Inputs = { confirmedOrders: number; safetyStock: number; vehicleStock?: number; manual?: number };
 type LostOpportunityAddition = {
   source: "lost-opportunity";
   opportunityIds: string[];
@@ -35,7 +36,7 @@ type LostOpportunityAddition = {
   addedQuantity: number;
   customers: { id: string; name: string; baselineNetQuantity: number }[];
 };
-type Row = { product: SmartLoadingProduct; original: number; baseSuggested: number; suggested: number; input: Inputs; manuallyAdded: boolean; lostOpportunity?: LostOpportunityAddition; stockAvailable: boolean };
+type Row = { product: SmartLoadingProduct; original: number; baseSuggested: number; suggested: number; input: Inputs; manuallyAdded: boolean; lostOpportunity?: LostOpportunityAddition; stockAvailable: boolean; effectiveVehicleStock: number | null; preliminary: boolean };
 
 function parsePositiveNumber(value: string): number {
   return Math.max(0, Number(value) || 0);
@@ -122,20 +123,21 @@ export function SmartLoadingScreen({
     const rowsByProduct = new Map<string, Row>();
     for (const product of session.products) {
       const input = inputs[product.productCode] ?? { confirmedOrders: 0, safetyStock: 0 };
-      const original = product.weeklyAverageSales + input.confirmedOrders + input.safetyStock - product.currentVehicleStock;
+      const effectiveVehicleStock = input.vehicleStock ?? product.currentVehicleStock;
+      const calculation = calculateSuggestedLoading({ weeklyAverageSales: product.weeklyAverageSales, confirmedOrders: input.confirmedOrders, safetyStock: input.safetyStock, vehicleStock: effectiveVehicleStock });
       const savedAddition = lostOpportunityAdditions[product.productCode];
       const opportunityProduct = lostOpportunityGroups.flatMap((category) => category.products).find((item) => item.productCode === product.productCode);
       const addition = savedAddition && opportunityProduct ? { ...savedAddition, addedQuantity: opportunityProduct.totalQuantity } : savedAddition;
-      const baseSuggested = Math.max(0, original);
-      rowsByProduct.set(product.productCode, { product, input, original, baseSuggested, suggested: input.manual ?? baseSuggested + (addition?.addedQuantity ?? 0), manuallyAdded: manuallyAddedProductCodes.has(product.productCode), lostOpportunity: addition, stockAvailable: true });
+      const baseSuggested = calculation.suggestedQuantity;
+      rowsByProduct.set(product.productCode, { product, input, original: calculation.grossSuggestedQuantity, baseSuggested, suggested: input.manual ?? baseSuggested + (addition?.addedQuantity ?? 0), manuallyAdded: manuallyAddedProductCodes.has(product.productCode), lostOpportunity: addition, stockAvailable: effectiveVehicleStock !== null, effectiveVehicleStock, preliminary: calculation.isPreliminary });
     }
     for (const addition of Object.values(lostOpportunityAdditions)) {
       if (rowsByProduct.has(addition.productId)) continue;
       const lostOpportunityProduct = lostOpportunityGroups.flatMap((category) => category.products).find((item) => item.productCode === addition.productId);
-      const product = productsByCode.get(addition.productId) ?? { productCode: addition.productId, productName: lostOpportunityProduct?.productName ?? addition.productId, currentVehicleStock: 0, weeklyAverageSales: 0, priority: "normal" as const, category: null, lastSaleDate: null };
+      const product = productsByCode.get(addition.productId) ?? { productCode: addition.productId, productName: lostOpportunityProduct?.productName ?? addition.productId, currentVehicleStock: null, weeklyAverageSales: 0, priority: "normal" as const, category: null, lastSaleDate: null };
       const input = inputs[addition.productId] ?? { confirmedOrders: 0, safetyStock: 0 };
       const effectiveAddition = lostOpportunityProduct ? { ...addition, addedQuantity: lostOpportunityProduct.totalQuantity } : addition;
-      rowsByProduct.set(addition.productId, { product, input, original: 0, baseSuggested: 0, suggested: input.manual ?? effectiveAddition.addedQuantity, manuallyAdded: manuallyAddedProductCodes.has(addition.productId), lostOpportunity: effectiveAddition, stockAvailable: false });
+      rowsByProduct.set(addition.productId, { product, input, original: 0, baseSuggested: 0, suggested: input.manual ?? effectiveAddition.addedQuantity, manuallyAdded: manuallyAddedProductCodes.has(addition.productId), lostOpportunity: effectiveAddition, stockAvailable: false, effectiveVehicleStock: null, preliminary: true });
     }
     return Array.from(rowsByProduct.values());
   }, [inputs, lostOpportunityAdditions, lostOpportunityGroups, manuallyAddedProductCodes, session]);
@@ -263,7 +265,7 @@ export function SmartLoadingScreen({
       return next;
     });
     const stockProduct = positiveProducts.length === 1 ? stockProducts.get(positiveProducts[0]!.productCode) : undefined;
-    setLostOpportunityWarning(stockProduct ? `${t("smartLoading.vehicleStockQuantity", { value: formatQuantity(stockProduct.currentVehicleStock, locale) })}. ${t("smartLoading.reviewCapacity")}` : null);
+    setLostOpportunityWarning(stockProduct ? `${t("smartLoading.vehicleStockQuantity", { value: stockProduct.currentVehicleStock === null ? "—" : formatQuantity(stockProduct.currentVehicleStock, locale) })}. ${t("smartLoading.reviewCapacity")}` : null);
   }
 
   function setLostOpportunityQuantity(opportunityId: string, value: string) {
@@ -410,7 +412,7 @@ export function SmartLoadingScreen({
     const tbody = document.createElement("tbody");
     exportRowsSnapshot.forEach((row) => {
       const tr = document.createElement("tr");
-      [row.product, row.category, formatQuantity(row.vehicleStock, locale), formatQuantity(row.suggestedLoading, locale), row.source].forEach((value) => {
+      [row.product, row.category, row.vehicleStock === null ? "—" : formatQuantity(row.vehicleStock, locale), formatQuantity(row.suggestedLoading, locale), row.source].forEach((value) => {
         const cell = document.createElement("td");
         cell.textContent = value;
         cell.style.cssText = "border:1px solid #d1d5db;padding:7px;vertical-align:top;text-align:right;";
@@ -570,6 +572,7 @@ export function SmartLoadingScreen({
             />
           </CardContent>
           <CardContent className="space-y-2 border-t border-border/60 px-4 pb-4 pt-3">
+            {rows.some((row) => row.preliminary) && <p role="status" className="rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-800">{label("smartLoading.preliminaryStockNotice", "رصيد السيارة غير متوفر. الكميات المعروضة احتياج مبدئي قبل خصم المخزون الحالي.")}</p>}
             {salesRecency.missing > 0 && (
               <p role="status" className="rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
                 {t("smartLoading.missingLastSaleData", { count: salesRecency.missing })}
@@ -886,7 +889,7 @@ function LostOpportunitiesDialog({
                         <Button className="h-8" variant="ghost" size="sm" onClick={() => onRestoreQuantity(customer.id)}>{t("smartLoading.restore")}</Button>
                       </div>)}
                     </div>}
-                    <p className="mt-2 text-xs text-muted-foreground">{stockProduct ? t("smartLoading.vehicleStockQuantity", { value: formatQuantity(stockProduct.currentVehicleStock, locale) }) : t("smartLoading.vehicleStockUnavailable")}</p>
+                    <p className="mt-2 text-xs text-muted-foreground">{stockProduct ? t("smartLoading.vehicleStockQuantity", { value: stockProduct.currentVehicleStock === null ? "—" : formatQuantity(stockProduct.currentVehicleStock, locale) }) : t("smartLoading.vehicleStockUnavailable")}</p>
                   </article>;
                 })}
               </div>}
@@ -928,7 +931,7 @@ function ProductRow({
           <p className="truncate text-sm font-medium">{row.product.productName}</p>
           <p className="text-[11px] text-muted-foreground">
             {row.product.category ?? t("smartLoading.uncategorized")} · {t("smartLoading.vehicleStock")}{" "}
-            {formatQuantity(row.product.currentVehicleStock, locale)}
+            {row.effectiveVehicleStock === null ? "—" : formatQuantity(row.effectiveVehicleStock, locale)}
           </p>
         </button>
         <div className="flex items-start gap-2 text-left">
@@ -944,6 +947,7 @@ function ProductRow({
               setInput(row.product.productCode, "manual", String(nextValue));
             }}
           />
+            {row.preliminary && <p className="mt-1 text-[10px] font-medium text-amber-700">{label("smartLoading.preliminaryNeed", "احتياج مبدئي")}</p>}
             {row.manuallyAdded && (
               <p className="mt-1 text-[10px] font-medium text-teal-700">{label("smartLoading.addedManually", "Added manually")}</p>
             )}
@@ -988,7 +992,7 @@ function ProductRow({
           </div>
           <p className="mt-1 text-amber-800">
             {row.stockAvailable
-              ? `${t("smartLoading.vehicleStockQuantity", { value: formatQuantity(row.product.currentVehicleStock, locale) })}. ${t("smartLoading.reviewCapacity")}`
+              ? `${t("smartLoading.vehicleStockQuantity", { value: row.effectiveVehicleStock === null ? "—" : formatQuantity(row.effectiveVehicleStock, locale) })}. ${t("smartLoading.reviewCapacity")}`
               : `${t("smartLoading.vehicleStockUnavailable")} ${t("smartLoading.reviewCapacity")}`}
           </p>
         </div>
@@ -996,7 +1000,12 @@ function ProductRow({
 
       {open && (
         <div className="mt-2 grid gap-2 border-t pt-2 text-xs sm:grid-cols-4">
-          <Info label={t("smartLoading.weeklyAverage")} value={formatQuantity(row.product.weeklyAverageSales, locale)} />
+          {row.effectiveVehicleStock === null && <Field
+            label={label("smartLoading.manualVehicleStock", "رصيد السيارة")}
+            hint={label("smartLoading.manualVehicleStockHint", "أدخل الرصيد المتاح لتحويل الاحتياج المبدئي إلى توصية نهائية.")}
+            value={row.input.vehicleStock ?? 0}
+            onChange={(value) => setInput(row.product.productCode, "vehicleStock", value)}
+          />}          <Info label={t("smartLoading.weeklyAverage")} value={formatQuantity(row.product.weeklyAverageSales, locale)} />
           <Field
             label={t("smartLoading.confirmedOrders")}
             hint={t("smartLoading.confirmedOrdersHint")}
@@ -1011,7 +1020,7 @@ function ProductRow({
           />
           <Info
             label={t("smartLoading.showReason")}
-            value={`${formatQuantity(row.product.weeklyAverageSales, locale)} + ${formatQuantity(row.input.confirmedOrders, locale)} + ${formatQuantity(row.input.safetyStock, locale)} − ${formatQuantity(row.product.currentVehicleStock, locale)}`}
+            value={`${formatQuantity(row.product.weeklyAverageSales, locale)} + ${formatQuantity(row.input.confirmedOrders, locale)} + ${formatQuantity(row.input.safetyStock, locale)} − ${row.effectiveVehicleStock === null ? "—" : formatQuantity(row.effectiveVehicleStock, locale)}`}
           />
         </div>
       )}
@@ -1187,7 +1196,7 @@ function CategoryProductGroups({ rows, stale }: { rows: Row[]; stale: boolean })
                   <div key={row.product.productCode} className="grid grid-cols-[1fr_auto] gap-2 border-b py-1.5 text-xs last:border-0">
                     <span className="min-w-0 truncate font-medium">{row.product.productName}</span>
                     <span className="text-left text-muted-foreground">
-                      {t("smartLoading.vehicleStock")} {formatQuantity(row.product.currentVehicleStock, locale)}
+                      {t("smartLoading.vehicleStock")} {row.effectiveVehicleStock === null ? "—" : formatQuantity(row.effectiveVehicleStock, locale)}
                       {stale && (
                         <> · {t("smartLoading.lastSale")} {formatGregorianDate(row.product.lastSaleDate) ?? "—"} · {daysSinceLastSale(row.product.lastSaleDate) ?? "—"} {t("smartLoading.staleDaysUnit")}</>
                       )}
