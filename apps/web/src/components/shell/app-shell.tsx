@@ -107,7 +107,7 @@ export function AppShell({
             البيانات" was actually reporting — every dashboard page with a
             wide table was affected, not just Visit Efficiency/Team
             Performance. */}
-        <main className="min-w-0 flex-1 overflow-y-auto p-4 pb-24 sm:p-6 sm:pb-24 md:p-8 md:pb-8">{children}</main>
+        <main className="min-w-0 flex-1 overflow-y-auto p-3 pb-24 sm:p-6 sm:pb-24 md:p-8 md:pb-8">{children}</main>
         <MobileBottomNav navItems={navItems} pathname={pathname} onMore={() => setMobileNavOpen((value) => !value)} />
       </div>
     </div>

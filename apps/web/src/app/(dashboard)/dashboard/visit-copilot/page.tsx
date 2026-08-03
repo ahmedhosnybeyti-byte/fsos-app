@@ -388,7 +388,7 @@ function VisitCopilotScreen() {
   const showOppCard = !!plan && !!routeOpp && !routeOpp.disabled && routeOpp.highCount + routeOpp.mediumCount > 0;
 
   return (
-    <div className="relative space-y-6">
+    <div className="relative space-y-6 max-md:space-y-3">
       <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
       <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
 
@@ -416,12 +416,12 @@ function VisitCopilotScreen() {
           </h1>
           <p className="text-muted-foreground">{t("copilot.subtitle")}</p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 max-md:w-full">
           {/* "ملخص اليوم 360°" — visible and reachable from the top of the
               screen at all times, per the acceptance criteria. */}
           <Button
             variant="secondary"
-            className="glow-ai h-11 gap-2"
+            className="glow-ai h-11 gap-2 max-md:h-10 max-md:flex-1 max-md:px-3 max-md:text-xs"
             onClick={() => setShow360Summary(true)}
             disabled={show360Summary}
           >
@@ -431,7 +431,7 @@ function VisitCopilotScreen() {
           {/* Persistent Discovery toggle — never auto-opens the section. */}
           <Button
             variant={showDiscovery ? "default" : "secondary"}
-            className="h-11 gap-2"
+            className="h-11 gap-2 max-md:h-10 max-md:flex-1 max-md:px-3 max-md:text-xs"
             onClick={() => setShowDiscovery((v) => !v)}
           >
             <Search className="h-4 w-4" />
@@ -450,15 +450,15 @@ function VisitCopilotScreen() {
       />
 
       {/* Global controls — small, always visible (they also drive Visit Mode). */}
-      <div className="glass-card rise-in rise-d1 flex flex-wrap items-end gap-4 p-4">
-        <div className="grid gap-1.5">
+      <div className="glass-card rise-in rise-d1 flex flex-wrap items-end gap-4 p-4 max-md:gap-2.5 max-md:p-3">
+        <div className="grid gap-1.5 max-md:min-w-[140px] max-md:flex-1">
           <Label className="text-xs">{t("copilot.planDateLabel")}</Label>
           <div className="flex items-center gap-1.5">
             <Input
               type="date"
               value={planDate}
               onChange={(e) => e.target.value && changePlanDate(e.target.value)}
-              className="h-11 w-40"
+              className="h-11 w-40 max-md:h-10 max-md:w-full"
             />
             {planDate !== todayIsoDate() && (
               <Button type="button" variant="ghost" size="sm" className="h-11" onClick={() => changePlanDate(todayIsoDate())}>
@@ -467,10 +467,10 @@ function VisitCopilotScreen() {
             )}
           </div>
         </div>
-        <div className="grid gap-1.5">
+        <div className="grid gap-1.5 max-md:min-w-[140px] max-md:flex-1">
           <Label className="text-xs">{t("copilot.periodLabel")}</Label>
           <Select value={period} onValueChange={(v) => changePeriod(v as VisitCopilotPeriod)}>
-            <SelectTrigger className="h-11 w-40">
+            <SelectTrigger className="h-11 w-40 max-md:h-10 max-md:w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -484,17 +484,17 @@ function VisitCopilotScreen() {
         </div>
         {period === "custom" && (
           <>
-            <div className="grid gap-1.5">
+            <div className="grid gap-1.5 max-md:min-w-[140px] max-md:flex-1">
               <Label className="text-xs">{t("copilot.fromLabel")}</Label>
-              <Input type="date" value={from} onChange={(e) => changeFrom(e.target.value)} className="h-11 w-40" />
+              <Input type="date" value={from} onChange={(e) => changeFrom(e.target.value)} className="h-11 w-40 max-md:h-10 max-md:w-full" />
             </div>
-            <div className="grid gap-1.5">
+            <div className="grid gap-1.5 max-md:min-w-[140px] max-md:flex-1">
               <Label className="text-xs">{t("copilot.toLabel")}</Label>
-              <Input type="date" value={to} onChange={(e) => changeTo(e.target.value)} className="h-11 w-40" />
+              <Input type="date" value={to} onChange={(e) => changeTo(e.target.value)} className="h-11 w-40 max-md:h-10 max-md:w-full" />
             </div>
           </>
         )}
-        <label className="flex h-11 items-center gap-2 text-sm">
+        <label className="flex h-11 items-center gap-2 text-sm max-md:h-10 max-md:text-xs">
           <Switch checked={vanStock} onCheckedChange={setVanStock} />
           {t("copilot.vanStockLabel")}
         </label>
@@ -513,7 +513,7 @@ function VisitCopilotScreen() {
                 </h2>
                 <Button
                   variant="secondary"
-                  className="h-11 gap-2"
+                  className="h-11 gap-2 max-md:h-10 max-md:flex-1 max-md:px-3 max-md:text-xs"
                   onClick={searchGoogleAround}
                   disabled={googleSearchMutation.isPending || discoveryQuery.isLoading}
                 >
@@ -563,11 +563,11 @@ function VisitCopilotScreen() {
             </p>
           ) : brief ? (
             <>
-              <div className="glass-hero rise-in relative p-5">
+              <div className="glass-hero rise-in relative p-5 max-md:p-3">
                 <div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" />
-                <div className="relative space-y-4">
+                <div className="relative space-y-4 max-md:space-y-3">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                    <span className="text-lg font-semibold">{brief.weekday}</span>
+                    <span className="text-lg font-semibold max-md:text-base">{brief.weekday}</span>
                     <span className="text-sm text-muted-foreground">{brief.date}</span>
                   </div>
                   {!brief.isWorkingDay && <p className="text-xs text-muted-foreground">{t("copilot.notWorkingDay")}</p>}
@@ -584,7 +584,7 @@ function VisitCopilotScreen() {
                     </p>
                   )}
 
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+                  <div className="grid grid-cols-2 gap-3 max-md:gap-2 sm:grid-cols-3 lg:grid-cols-5">
                     <BriefStat label={t("copilot.visitsLabel")} value={brief.visitCount.toLocaleString()} />
                     <BriefStat
                       label={t("copilot.dailyTargetLabel")}
@@ -618,7 +618,7 @@ function VisitCopilotScreen() {
                     <Button
                       size="lg"
                       variant={plan?.mode === "route" ? "default" : "secondary"}
-                      className="h-12"
+                      className="h-12 max-md:h-10 max-md:text-xs"
                       onClick={() => buildPlan("route")}
                       disabled={planMutation.isPending || !customPeriodReady}
                     >
@@ -632,7 +632,7 @@ function VisitCopilotScreen() {
                     <Button
                       size="lg"
                       variant={plan?.mode === "priority" ? "default" : "secondary"}
-                      className="h-12"
+                      className="h-12 max-md:h-10 max-md:text-xs"
                       onClick={() => buildPlan("priority")}
                       disabled={planMutation.isPending || !customPeriodReady}
                     >
@@ -664,7 +664,7 @@ function VisitCopilotScreen() {
                       })}
                     </p>
                   )}
-                  <Button variant="secondary" className="h-11 gap-2" onClick={() => setShowDiscovery(true)}>
+                  <Button variant="secondary" className="h-11 gap-2 max-md:h-10 max-md:flex-1 max-md:px-3 max-md:text-xs" onClick={() => setShowDiscovery(true)}>
                     <Map className="h-4 w-4" />
                     {t("copilot.oppShowMap")}
                   </Button>
@@ -672,8 +672,8 @@ function VisitCopilotScreen() {
               )}
 
               {/* ——— Customer list ——— */}
-              <div className="glass-card rise-in rise-d1 p-4">
-                <h2 className="mb-3 text-sm font-semibold">{t("copilot.customersTitle")}</h2>
+              <div className="glass-card rise-in rise-d1 p-4 max-md:p-3">
+                <h2 className="mb-3 text-sm font-semibold max-md:mb-2">{t("copilot.customersTitle")}</h2>
                 {customers.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     {isPlanningMode ? t("copilot.noCustomersForDate", { weekday: brief?.weekday ?? "" }) : t("copilot.noCustomers")}
@@ -684,13 +684,13 @@ function VisitCopilotScreen() {
                       <li key={c.customerCode}>
                         <button
                           onClick={() => openVisit(c.customerCode)}
-                          className="flex w-full items-center gap-3 px-1 py-3 text-start transition-colors hover:bg-secondary/50"
+                          className="flex w-full items-center gap-3 px-1 py-3 text-start transition-colors hover:bg-secondary/50 max-md:gap-2 max-md:py-2"
                         >
-                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-semibold">
+                          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-semibold max-md:h-7 max-md:w-7 max-md:text-xs">
                             {c.visitSequence}
                           </span>
                           <span className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium">{c.customerName}</span>
+                            <span className="block truncate text-sm font-medium max-md:text-[13px]">{c.customerName}</span>
                             <span className="block text-xs text-muted-foreground">
                               {t("copilot.avgOrder", { value: c.avgOrderValue.toLocaleString() })}
                             </span>
@@ -700,7 +700,7 @@ function VisitCopilotScreen() {
                           </Badge>
                           <span
                             className={cn(
-                              "flex h-8 w-10 shrink-0 items-center justify-center rounded-md text-xs font-bold",
+                              "flex h-8 w-10 shrink-0 items-center justify-center rounded-md text-xs font-bold max-md:h-7 max-md:w-8 max-md:text-[11px]",
                               priorityBadgeClass(c.priorityScore),
                             )}
                           >
@@ -758,7 +758,7 @@ function VisitCopilotScreen() {
                   caption={t("copilot.returnRate", { value: briefing.returns.rate.toLocaleString() })}
                 />
                 <BigNumber label={t("copilot.pendingLabel")} value={briefing.collections.pending.toLocaleString()} />
-                <div className="rounded-lg bg-background/60 p-3">
+                <div className="rounded-lg bg-background/60 p-3 max-md:p-2">
                   <p className="text-xs text-muted-foreground">{t("copilot.trendLabel")}</p>
                   <p
                     className={cn(
@@ -846,7 +846,7 @@ function VisitCopilotScreen() {
                 ) : (
                   <Button
                     variant="secondary"
-                    className="h-11 gap-2"
+                    className="h-11 gap-2 max-md:h-10 max-md:flex-1 max-md:px-3 max-md:text-xs"
                     onClick={() => statusMutation.mutate({ id: selectedProspectId, status: "VISITED" })}
                     disabled={statusMutation.isPending}
                   >
@@ -928,16 +928,16 @@ function VisitCopilotScreen() {
 
 function BriefStat({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
   return (
-    <div className="rounded-lg bg-background/60 p-3">
+    <div className="rounded-lg bg-background/60 p-3 max-md:p-2">
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={cn("mt-1 text-lg font-semibold", muted && "text-sm font-normal text-muted-foreground")}>{value}</p>
+      <p className={cn("mt-1 text-lg font-semibold max-md:text-base", muted && "text-sm font-normal text-muted-foreground")}>{value}</p>
     </div>
   );
 }
 
 function BigNumber({ label, value, caption }: { label: string; value: string; caption?: string }) {
   return (
-    <div className="rounded-lg bg-background/60 p-3">
+    <div className="rounded-lg bg-background/60 p-3 max-md:p-2">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 text-xl font-bold">{value}</p>
       {caption && <p className="text-[11px] text-muted-foreground">{caption}</p>}

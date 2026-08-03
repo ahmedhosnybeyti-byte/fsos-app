@@ -45,7 +45,7 @@ const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<
       // (right/"start") — headers and their columns visually didn't line
       // up in Arabic. This affected every table in the app, not just the
       // two screens it was reported on.
-      className={cn("h-10 px-4 text-start align-middle text-xs font-medium uppercase tracking-wide text-muted-foreground", className)}
+      className={cn("h-9 px-3 text-start align-middle text-xs font-medium uppercase tracking-wide text-muted-foreground sm:h-10 sm:px-4", className)}
       {...props}
     />
   ),
@@ -53,7 +53,7 @@ const TableHead = React.forwardRef<HTMLTableCellElement, React.ThHTMLAttributes<
 TableHead.displayName = "TableHead";
 
 const TableCell = React.forwardRef<HTMLTableCellElement, React.TdHTMLAttributes<HTMLTableCellElement>>(
-  ({ className, ...props }, ref) => <td ref={ref} className={cn("px-4 py-3 align-middle", className)} {...props} />,
+  ({ className, ...props }, ref) => <td ref={ref} className={cn("px-3 py-2 align-middle sm:px-4 sm:py-3", className)} {...props} />,
 );
 TableCell.displayName = "TableCell";
 

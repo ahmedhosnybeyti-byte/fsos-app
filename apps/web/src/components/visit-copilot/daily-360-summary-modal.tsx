@@ -169,8 +169,8 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
         // breaking the inner scroll container in production (confirmed via
         // live screenshot: the body rendered with no scrollbar at all).
         className={cn(
-          "!grid !max-w-none !translate-x-0 !translate-y-0 !gap-0 overflow-hidden !rounded-none !border-0 !p-0",
-          "!left-0 !top-0 !h-[100dvh] !w-screen",
+          "!grid !max-w-none !gap-0 overflow-hidden !rounded-xl !border !p-0 max-md:[&>button]:right-3 max-md:[&>button]:top-3 max-md:[&>button_svg]:h-3.5 max-md:[&>button_svg]:w-3.5",
+          "!left-1/2 !top-1/2 !h-[85dvh] !max-h-[85vh] !w-[calc(100vw-24px)] !-translate-x-1/2 !-translate-y-1/2",
           "sm:!left-1/2 sm:!top-1/2 sm:!h-[90vh] sm:!w-[min(900px,92vw)] sm:!-translate-x-1/2 sm:!-translate-y-1/2 sm:!rounded-2xl sm:!border sm:border-border",
         )}
       >
@@ -179,11 +179,11 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
               "نطاق التقرير" bulleted section in the body, matching the
               reference report's structure exactly instead of one merged
               line. ——— */}
-          <div className="glass-hero relative shrink-0 border-b border-border/60 p-5 pe-14">
+          <div className="glass-hero relative shrink-0 border-b border-border/60 p-5 pe-14 max-md:p-3 max-md:pe-11">
             <div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" />
-            <div className="relative flex flex-wrap items-center justify-between gap-3">
-              <DialogTitle className="flex items-center gap-2 text-xl font-bold">
-                <span className="crystal-badge h-10 w-10 bg-ai/15 text-ai">
+            <div className="relative flex flex-wrap items-center justify-between gap-3 max-md:gap-2">
+              <DialogTitle className="flex items-center gap-2 text-xl font-bold max-md:text-lg">
+                <span className="crystal-badge h-10 w-10 bg-ai/15 text-ai max-md:h-8 max-md:w-8">
                   <Sparkles className="h-5 w-5" />
                 </span>
                 {t("copilot.summary360Title")}
@@ -203,7 +203,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
           </div>
 
           {/* ——— Body ——— */}
-          <div className="min-h-0 overflow-y-auto p-5">
+          <div className="min-h-0 overflow-y-auto p-5 max-md:p-3">
             {query.isLoading ? (
               <div className="space-y-4">
                 <Skeleton className="h-24" />
@@ -225,25 +225,25 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
             ) : !summary ? (
               <p className="py-16 text-center text-sm text-muted-foreground">{t("copilot.summary360Empty")}</p>
             ) : (
-              <div className="space-y-6" dir="rtl">
+              <div className="space-y-6 max-md:space-y-3" dir="rtl">
                 {/* Executive summary */}
-                <section className="glass-card space-y-2 p-4">
+                <section className="glass-card space-y-2 p-4 max-md:space-y-1.5 max-md:p-3">
                   <h3 className="flex items-center gap-2 text-sm font-semibold">
                     <span aria-hidden>📈</span>
                     {t("copilot.summary360ExecutiveSummary")}
                   </h3>
-                  <p className="text-sm leading-relaxed">{summary.executiveSummary}</p>
+                  <p className="text-sm leading-relaxed max-md:text-[13px] max-md:leading-5">{summary.executiveSummary}</p>
                 </section>
 
                 {/* نطاق التقرير — bulleted, matching the reference report's
                     own structure (route/rep/visit-date/customer-count as
                     separate lines, not one merged sentence). */}
-                <section className="glass-card space-y-1.5 p-4">
+                <section className="glass-card space-y-1.5 p-4 max-md:space-y-1 max-md:p-3">
                   <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold">
                     <span aria-hidden>📊</span>
                     نطاق التقرير
                   </h3>
-                  <ul className="space-y-1 text-sm">
+                  <ul className="space-y-1 text-sm max-md:text-[13px] max-md:leading-5">
                     <li>
                       <span className="font-medium text-muted-foreground">النطاق: </span>
                       {summary.scopeLabel}
@@ -265,12 +265,12 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
 
                 {/* Top issue */}
                 {summary.topIssue && (
-                  <section className="glow-ai rounded-lg p-4">
+                  <section className="glow-ai rounded-lg p-4 max-md:p-3">
                     <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold">
                       <span aria-hidden>🔴</span>
                       {t("copilot.summary360TopIssue")}
                     </h3>
-                    <p className="text-sm leading-relaxed">{summary.topIssue}</p>
+                    <p className="text-sm leading-relaxed max-md:text-[13px] max-md:leading-5">{summary.topIssue}</p>
                   </section>
                 )}
 
@@ -418,7 +418,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                 </section>
 
                 {exclusionsQuery.data && exclusionsQuery.data.length > 0 && (
-                  <section className="glass-card space-y-2 p-4">
+                  <section className="glass-card space-y-2 p-4 max-md:space-y-1.5 max-md:p-3">
                     <h3 className="text-sm font-semibold">{t("copilot.summary360ExcludedProducts")}</h3>
                     <div className="space-y-2">
                       {exclusionsQuery.data.map((exclusion) => (
@@ -480,7 +480,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
 
                 {/* Intervention needed */}
                 {summary.interventionNeeded.length > 0 && (
-                  <section className="glass-card space-y-2 p-4">
+                  <section className="glass-card space-y-2 p-4 max-md:space-y-1.5 max-md:p-3">
                     <h3 className="flex items-center gap-2 text-sm font-semibold">
                       <span aria-hidden>⚠️</span>
                       {t("copilot.summary360InterventionNeeded")}
@@ -504,7 +504,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                 )}
 
                 {/* Root causes — 3-item numbered list */}
-                <section className="glass-card space-y-2 p-4">
+                <section className="glass-card space-y-2 p-4 max-md:space-y-1.5 max-md:p-3">
                   <h3 className="flex items-center gap-2 text-sm font-semibold">
                     <span aria-hidden>🧩</span>
                     {t("copilot.summary360RootCauses")}
@@ -521,7 +521,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                 </section>
 
                 {/* Executive decision */}
-                <section className="glow-ai rounded-lg p-4">
+                <section className="glow-ai rounded-lg p-4 max-md:p-3">
                   <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold">
                     <span aria-hidden>🎯</span>
                     {t("copilot.summary360ExecutiveDecision")}
