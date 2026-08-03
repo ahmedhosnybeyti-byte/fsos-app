@@ -18,6 +18,7 @@ function createHarness(create: (args: { data: { companyId: string; mustChangePas
     { findByCode: async () => ({ id: "role-1", code: "SALES_REP" }) } as never,
     {} as never,
     { record: async (entry: { action: string; entityId?: string | null }) => audits.push(entry) } as never,
+    { listCompanyRouteIds: async () => [] } as never,
   );
   return { service, audits };
 }

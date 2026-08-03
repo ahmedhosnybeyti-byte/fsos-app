@@ -1,6 +1,7 @@
-import { Injectable, Logger } from "@nestjs/common";
+import { ForbiddenException, Injectable, Logger } from "@nestjs/common";
 import * as XLSX from "xlsx";
 import { FilesService } from "../files/files.service";
+import { PrismaService } from "../../common/prisma";
 import { normalizeHeader, type DatasetRow, type HierarchyFilterUser } from "../files/dataset-query.util";
 import { ENTITY_DATASET_TYPE_MAP } from "./excel-entity-provider.mapping";
 
@@ -73,13 +74,24 @@ export class CanonicalHierarchyResolverService {
   private readonly logger = new Logger(CanonicalHierarchyResolverService.name);
   private readonly rawCache = new Map<string, HierarchyRawCacheEntry>();
 
-  constructor(private readonly filesService: FilesService) {}
+  constructor(private readonly filesService: FilesService, private readonly prisma: PrismaService) {}
 
   // Returns the set of Route IDs (lowercased/trimmed) this user may see, or
   // null if the role isn't route-scoped (caller treats null as "no
   // route-based restriction applies" — see applyHierarchyFilter).
   async resolveAllowedRouteIds(companyId: string, user: HierarchyFilterUser): Promise<Set<string> | null> {
     if (!ROUTE_SCOPED_ROLES.has(user.roleCode)) return null;
+
+    // Sales representatives are scoped exclusively by their active operational
+    // assignment. No assignment is fail-closed: never fall back to all company data.
+    if (user.roleCode === "SALES_REP") {
+      const identity = await this.prisma.user.findFirst({ where: { companyId, email: user.email.trim().toLowerCase() }, select: { id: true } });
+      const assignment = identity ? await this.prisma.userRouteAssignment.findFirst({ where: { companyId, userId: identity.id, endedAt: null }, select: { routeId: true } }) : null;
+      if (!assignment) {
+        throw new ForbiddenException({ code: "SALES_REP_ROUTE_NOT_ASSIGNED", message: "Sales representative route is not assigned", messageAr: "\u0644\u0645 \u064a\u062a\u0645 \u062a\u0639\u064a\u064a\u0646 \u062e\u0637 \u0633\u064a\u0631 \u0644\u062d\u0633\u0627\u0628\u0643 \u062d\u062a\u0649 \u0627\u0644\u0622\u0646. \u062a\u0648\u0627\u0635\u0644 \u0645\u0639 \u0645\u0633\u0624\u0648\u0644 \u0627\u0644\u0634\u0631\u0643\u0629." });
+      }
+      return new Set([assignment.routeId.trim().toLowerCase()]);
+    }
 
     const routes = await this.fetchRawEntityRows("Routes", companyId);
     if (!routes) return new Set();
@@ -157,6 +169,28 @@ export class CanonicalHierarchyResolverService {
       }
     }
     return allowed;
+  }
+
+  async listCompanyRouteIds(companyId: string): Promise<string[]> {
+    const routes = await this.fetchRawEntityRows("Routes", companyId);
+    if (!routes) return [];
+    const routeIdCol = findHeader(routes.headers, "RouteID");
+    if (!routeIdCol) return [];
+    return Array.from(new Set(routes.rows.map((row) => String(row[routeIdCol] ?? "").trim()).filter(Boolean))).sort();
+  }
+
+  async listCompanyRoutes(companyId: string): Promise<Array<{ id: string; name: string | null }>> {
+    const routes = await this.fetchRawEntityRows("Routes", companyId);
+    if (!routes) return [];
+    const routeIdCol = findHeader(routes.headers, "RouteID");
+    const routeNameCol = findHeader(routes.headers, "RouteName") ?? findHeader(routes.headers, "Name");
+    if (!routeIdCol) return [];
+    const byId = new Map<string, { id: string; name: string | null }>();
+    for (const row of routes.rows) {
+      const id = String(row[routeIdCol] ?? "").trim();
+      if (id && !byId.has(id.toLowerCase())) byId.set(id.toLowerCase(), { id, name: routeNameCol ? String(row[routeNameCol] ?? "").trim() || null : null });
+    }
+    return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
   }
 
   // Raw (unfiltered) rows+headers for one Canonical Dataset, cached by

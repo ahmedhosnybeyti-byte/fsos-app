@@ -47,6 +47,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
       statusCode: status,
       message,
       errors: body && typeof body === "object" && "errors" in body ? (body as { errors: unknown }).errors : undefined,
+      code: body && typeof body === "object" && "code" in body ? (body as { code: unknown }).code : undefined,
+      messageAr: body && typeof body === "object" && "messageAr" in body ? (body as { messageAr: unknown }).messageAr : undefined,
       path: request.url,
       timestamp: new Date().toISOString(),
     });

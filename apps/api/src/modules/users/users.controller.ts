@@ -9,6 +9,10 @@ import {
   type UpdateUserInput,
   adminUpdateEmailSchema,
   type AdminUpdateEmailInput,
+  assignUserRouteSchema,
+  unassignUserRouteSchema,
+  type AssignUserRouteInput,
+  type UnassignUserRouteInput,
 } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
@@ -32,7 +36,7 @@ export class UsersController {
   }
 
   @Post()
-  @Auth("COMPANY_ADMIN")
+  @Auth("COMPANY_ADMIN", "SUPER_ADMIN")
   create(
     @CurrentUser() user: AuthenticatedUser,
     @Query("companyId") companyId: string | undefined,
@@ -53,6 +57,23 @@ export class UsersController {
     return this.usersService.listByCompany(scopedCompanyId, query);
   }
 
+  @Get(":id/route-assignment")
+  @Auth("COMPANY_ADMIN", "SUPER_ADMIN")
+  routeAssignment(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Query("companyId") companyId?: string) {
+    return this.usersService.getRouteAssignment(id, this.resolveCompanyScope(user, companyId));
+  }
+
+  @Post(":id/route-assignment")
+  @Auth("COMPANY_ADMIN", "SUPER_ADMIN")
+  assignRoute(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Query("companyId") companyId: string | undefined, @Body(new ZodValidationPipe(assignUserRouteSchema)) body: AssignUserRouteInput) {
+    return this.usersService.assignRoute(id, this.resolveCompanyScope(user, companyId), body, user.userId);
+  }
+
+  @Delete(":id/route-assignment")
+  @Auth("COMPANY_ADMIN", "SUPER_ADMIN")
+  unassignRoute(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Query("companyId") companyId: string | undefined, @Body(new ZodValidationPipe(unassignUserRouteSchema)) body: UnassignUserRouteInput) {
+    return this.usersService.unassignRoute(id, this.resolveCompanyScope(user, companyId), body.reason, user.userId);
+  }
   @Patch(":id/email")
   @Auth("SUPER_ADMIN")
   @Permissions("users.manage")
@@ -64,7 +85,7 @@ export class UsersController {
     return this.usersService.adminChangeEmail(id, body.email, user);
   }
   @Patch(":id")
-  @Auth("COMPANY_ADMIN")
+  @Auth("COMPANY_ADMIN", "SUPER_ADMIN")
   update(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -76,24 +97,24 @@ export class UsersController {
   }
 
   @Post(":id/disable")
-  @Auth("COMPANY_ADMIN")
+  @Auth("COMPANY_ADMIN", "SUPER_ADMIN")
   disable(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Query("companyId") companyId: string | undefined) {
     const scopedCompanyId = this.resolveCompanyScope(user, companyId);
     return this.usersService.setStatus(id, scopedCompanyId, "DISABLED", user.userId);
   }
 
   @Post(":id/enable")
-  @Auth("COMPANY_ADMIN")
+  @Auth("COMPANY_ADMIN", "SUPER_ADMIN")
   enable(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Query("companyId") companyId: string | undefined) {
     const scopedCompanyId = this.resolveCompanyScope(user, companyId);
     return this.usersService.setStatus(id, scopedCompanyId, "ACTIVE", user.userId);
   }
 
-  // "حذف مستخدم" — soft delete: ARCHIVED + sessions revoked + hidden from
+  // "ط­ط°ظپ ظ…ط³طھط®ط¯ظ…" â€” soft delete: ARCHIVED + sessions revoked + hidden from
   // the Team list. See UsersService.archiveUser for the guard rails (no
   // self-delete, no deleting admins).
   @Delete(":id")
-  @Auth("COMPANY_ADMIN")
+  @Auth("COMPANY_ADMIN", "SUPER_ADMIN")
   remove(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Query("companyId") companyId: string | undefined) {
     const scopedCompanyId = this.resolveCompanyScope(user, companyId);
     return this.usersService.archiveUser(id, scopedCompanyId, user.userId);

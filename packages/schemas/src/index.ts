@@ -3,6 +3,7 @@ export * from "./constants";
 export * from "./common.schemas";
 export * from "./auth.schemas";
 export * from "./user.schemas";
+export * from "./user-route-assignment.schemas";
 export * from "./company.schemas";
 export * from "./company-feature-access.schemas";
 export * from "./employee.schemas";

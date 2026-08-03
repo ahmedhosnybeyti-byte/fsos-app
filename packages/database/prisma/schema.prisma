@@ -102,6 +102,13 @@ enum UserStatus {
   DISABLED
   ARCHIVED
 }
+enum UserRouteAssignmentEndReason {
+  TRANSFER
+  PROMOTION
+  UNASSIGNED
+  ROLE_CHANGED
+}
+
 
 // Phase 6 — Data Sources Management. This governs a DataSource *definition*
 // only (metadata/connection config) — it has nothing to do with FileStatus
@@ -226,6 +233,7 @@ model Company {
   salesCalendarDays SalesCalendar[]
   prospects     Prospect[]
   lostOpportunityExclusions LostOpportunityExclusion[]
+  routeAssignments UserRouteAssignment[]
 
   @@map("companies")
 }
@@ -433,12 +441,35 @@ model User {
   discoveredProspects  Prospect[]
   createdLostOpportunityExclusions LostOpportunityExclusion[] @relation("LostOpportunityExclusionCreatedBy")
   revokedLostOpportunityExclusions LostOpportunityExclusion[] @relation("LostOpportunityExclusionRevokedBy")
+  routeAssignments UserRouteAssignment[] @relation("UserRouteAssignments")
+  routeAssignmentsMade UserRouteAssignment[] @relation("UserRouteAssignmentsMade")
 
   @@index([companyId])
   @@index([orgUnitId])
   @@map("users")
 }
 
+// Operational assignment history. Route IDs remain sourced from the active
+// company Routes dataset; this table owns only the user-to-route timeline.
+model UserRouteAssignment {
+  id               String                        @id @default(cuid())
+  companyId        String                        @map("company_id")
+  userId           String                        @map("user_id")
+  routeId          String                        @map("route_id")
+  startedAt        DateTime                      @default(now()) @map("started_at")
+  endedAt          DateTime?                     @map("ended_at")
+  assignedByUserId String                        @map("assigned_by_user_id")
+  endReason        UserRouteAssignmentEndReason? @map("end_reason")
+  createdAt        DateTime                      @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user User @relation("UserRouteAssignments", fields: [userId], references: [id], onDelete: Cascade)
+  assignedByUser User @relation("UserRouteAssignmentsMade", fields: [assignedByUserId], references: [id])
+
+  @@index([companyId, routeId])
+  @@index([userId, endedAt])
+  @@map("user_route_assignments")
+}
 // Persistent opt-out rules for Daily 360 lost opportunities. Scope keys are
 // derived server-side; no client can choose another company, salesperson, or team.
 model LostOpportunityExclusion {
