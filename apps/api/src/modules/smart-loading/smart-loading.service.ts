@@ -333,25 +333,17 @@ export class SmartLoadingService {
       const lastSaleDate = lastSaleMs !== null ? isoDay(lastSaleMs) : null;
       const weeklyAverageSales = (windowQtyByProduct.get(productCode) ?? 0) / WEEKS_DIVISOR;
 
-      const daysSinceLastSale = lastSaleMs !== null ? Math.floor((nowMs - lastSaleMs) / MS_PER_DAY) : null;
-      const isStale = daysSinceLastSale !== null && daysSinceLastSale > HIGH_PRIORITY_DAYS_STALE;
 
       products.push({
         productCode,
         productName: meta?.name ?? productCode,
         currentVehicleStock,
         weeklyAverageSales,
-        priority: isStale ? "high" : "normal",
+        priority: "normal",
         category: meta?.category ?? null,
         lastSaleDate,
       });
 
-      if (isStale && daysSinceLastSale !== null) {
-        attentionList.push({
-          id: productCode,
-          message: `${meta?.name ?? productCode} ط£آ¢أ¢â€ڑآ¬أ¢â‚¬â€Œ ط·آ¸أ¢â‚¬â€چط·آ¸أ¢â‚¬آ¦ ط·آ¸ط¸آ¹ط·آ¸ط¹ث†ط·آ·ط¢آ¨ط·آ·ط¢آ§ط·آ·ط¢آ¹ ط·آ¸أ¢â‚¬آ¦ط·آ¸أ¢â‚¬آ ط·آ·ط¢آ° ${daysSinceLastSale} ط·آ¸ط¸آ¹ط·آ¸ط«â€ ط·آ¸أ¢â‚¬آ¦ط·آ¸أ¢â‚¬آ¹ط·آ·ط¢آ§ ط·آ·ط¢آ±ط·آ·ط·â€؛ط·آ¸أ¢â‚¬آ¦ ط·آ¸ط«â€ ط·آ·ط¢آ¬ط·آ¸ط«â€ ط·آ·ط¢آ¯ط·آ¸أ¢â‚¬طŒ ط·آ¸ط¸آ¾ط·آ¸ط¸آ¹ ط·آ¸أ¢â‚¬آ¦ط·آ·ط¢آ®ط·آ·ط¢آ²ط·آ¸ط«â€ ط·آ¸أ¢â‚¬آ  ط·آ·ط¢آ§ط·آ¸أ¢â‚¬â€چط·آ·ط¢آ³ط·آ¸ط¸آ¹ط·آ·ط¢آ§ط·آ·ط¢آ±ط·آ·ط¢آ©.`,
-        });
-      }
     }
 
     products.sort((a, b) => a.productName.localeCompare(b.productName, "ar"));

@@ -126,7 +126,7 @@ export function SmartLoadingScreen({
     const saved = restoredWork.current; const customerCodes = [...new Set((saved?.selectedCustomerCodes ?? session.routeCustomers.map((customer) => customer.customerCode)).map((code) => code.trim()).filter(Boolean))];
     setSelectedCustomerCodes(new Set(customerCodes)); setExceptionalCustomers(saved?.exceptionalCustomers ?? []);
     if (saved) { setFromDate(saved.fromDate ?? fromDate); setToDate(saved.toDate ?? toDate); setVisitsPerWeek(saved.visitsPerWeek ?? visitsPerWeek); setConfirmedOrdersByProduct(saved.confirmedOrders ?? {}); setHasUnappliedChanges(saved.hasUnappliedChanges ?? false); setStaleDaysThreshold(Math.max(1, saved.staleDaysThreshold ?? 4)); setIsSessionClosed(saved.isSessionClosed ?? false); }
-    void applyRecalculation(saved?.appliedInputs ?? { targetDate, fromDate, toDate, visitsPerWeek, customerCodes, confirmedOrders: [] }); restoredWork.current = null; hydrated.current = true;
+    void applyRecalculation(saved?.appliedInputs ?? { targetDate, fromDate, toDate, visitsPerWeek, staleDaysThreshold, customerCodes, confirmedOrders: [] }); restoredWork.current = null; hydrated.current = true;
   }, [session]);
 
   useEffect(() => () => recalculateAbort.current?.abort(), []);
@@ -220,10 +220,10 @@ export function SmartLoadingScreen({
     });
   }, [productSearch, rows, session]);
 
-  const staleRows = useMemo(() => allRows.filter((row) => classifySalesRecency(row.product.lastSaleDate, new Date(), staleDaysThreshold) === "stale" && (!recalculation || appliedProductCodes.has(row.product.productCode))), [allRows, appliedProductCodes, recalculation, staleDaysThreshold]);
+  const staleRows = useMemo(() => allRows.filter((row) => classifySalesRecency(row.product.lastSaleDate, new Date(), appliedInputs?.staleDaysThreshold ?? 4) === "stale" && (!recalculation || appliedProductCodes.has(row.product.productCode))), [allRows, appliedProductCodes, recalculation, staleDaysThreshold]);
 
   const hasLocalChanges = Object.keys(inputs).length > 0 || removedProductCodes.size > 0 || manuallyAddedProductCodes.size > 0 || Object.keys(lostOpportunityAdditions).length > 0 || Object.keys(lostOpportunityQuantityDrafts).length > 0 || checkedItems.size > 0;
-  function currentRecalculationSnapshot(): SmartLoadingRecalculateInput { return { targetDate, fromDate, toDate, visitsPerWeek, customerCodes: [...new Set([...selectedCustomerCodes].map((code) => code.trim()).filter(Boolean))], confirmedOrders: Object.entries(confirmedOrdersByProduct).filter(([, quantity]) => Number.isFinite(quantity) && quantity > 0).map(([productCode, quantity]) => ({ productCode, quantity })) }; }
+  function currentRecalculationSnapshot(): SmartLoadingRecalculateInput { return { targetDate, fromDate, toDate, visitsPerWeek, staleDaysThreshold, customerCodes: [...new Set([...selectedCustomerCodes].map((code) => code.trim()).filter(Boolean))], confirmedOrders: Object.entries(confirmedOrdersByProduct).filter(([, quantity]) => Number.isFinite(quantity) && quantity > 0).map(([productCode, quantity]) => ({ productCode, quantity })) }; }
 
   async function applyRecalculation(snapshot = currentRecalculationSnapshot()) {
     if (snapshot.fromDate > snapshot.toDate) { setRecalculationError(label("smartLoading.invalidDateRange", "The start date must be on or before the end date.")); return; }
@@ -503,7 +503,7 @@ export function SmartLoadingScreen({
       root.remove();
     }
   }
-  function resetOperationalState() { const customerCodes = session?.state === "ready" ? session.routeCustomers.map((customer) => customer.customerCode) : []; setExceptionalCustomers([]); setSelectedCustomerCodes(new Set(customerCodes)); setConfirmedOrdersByProduct({}); setInputs({}); setRecalculation(null); setAppliedInputs(null); setHasUnappliedChanges(false); setIsSessionClosed(false); setVisitsPerWeek(1); setStaleDaysThreshold(4); void applyRecalculation({ targetDate, fromDate, toDate, visitsPerWeek: 1, customerCodes, confirmedOrders: [] }); }
+  function resetOperationalState() { const customerCodes = session?.state === "ready" ? session.routeCustomers.map((customer) => customer.customerCode) : []; setExceptionalCustomers([]); setSelectedCustomerCodes(new Set(customerCodes)); setConfirmedOrdersByProduct({}); setInputs({}); setRecalculation(null); setAppliedInputs(null); setHasUnappliedChanges(false); setIsSessionClosed(false); setVisitsPerWeek(1); setStaleDaysThreshold(4); void applyRecalculation({ targetDate, fromDate, toDate, visitsPerWeek: 1, staleDaysThreshold: 4, customerCodes, confirmedOrders: [] }); }
   async function closeAndExport() { if (hasUnappliedChanges) await applyRecalculation(); if (recalculationError || !window.confirm(locale === "ar" ? "هل أنت متأكد من إغلاق جلسة التحميل؟" : "Close the loading session?")) return; await exportExcel(); resetOperationalState(); }
   function startNewSession() { if (!window.confirm(locale === "ar" ? "بدء جلسة جديدة؟" : "Start a new session?")) return; window.sessionStorage.removeItem("smart-loading-work"); resetOperationalState(); }
   if (isLoading) {
