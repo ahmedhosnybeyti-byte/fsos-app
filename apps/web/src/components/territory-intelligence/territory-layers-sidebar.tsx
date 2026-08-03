@@ -85,7 +85,7 @@ export function TerritoryLayersSidebar({ activeMetric, onSelectMetric, displayMo
   const { t } = useTranslation();
 
   return (
-    <Card className="glass-card rise-in h-fit">
+    <Card className="glass-card rise-in h-fit w-full">
       <CardHeader>
         <CardTitle>{t("territoryIntelligence.layersPanelTitle")}</CardTitle>
       </CardHeader>
@@ -103,12 +103,12 @@ export function TerritoryLayersSidebar({ activeMetric, onSelectMetric, displayMo
                 aria-pressed={isActive}
                 title={t(item.labelKey)}
                 className={cn(
-                  "flex flex-col items-center gap-1 rounded-md border px-2 py-2 text-[11px] font-medium transition-colors",
+                  "flex min-h-14 flex-col items-center gap-1 rounded-md border px-2 py-2 text-center text-[11px] font-medium transition-colors",
                   isActive ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground hover:bg-secondary/30",
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" />
-                <span className="truncate">{t(item.labelKey)}</span>
+                <span className="max-w-full whitespace-normal break-words leading-4">{t(item.labelKey)}</span>
               </button>
             );
           })}
@@ -125,7 +125,7 @@ export function TerritoryLayersSidebar({ activeMetric, onSelectMetric, displayMo
               onClick={() => onSelectMetric(item.metric)}
               aria-pressed={isActive}
               className={cn(
-                "flex w-full items-center gap-3 rounded-md border px-3 py-2.5 text-start text-sm transition-colors",
+                "flex w-full items-start gap-3 rounded-md border px-3 py-2.5 text-start text-sm transition-colors",
                 isActive ? "border-primary bg-primary/10" : "border-border hover:bg-secondary/30",
               )}
             >
@@ -138,7 +138,7 @@ export function TerritoryLayersSidebar({ activeMetric, onSelectMetric, displayMo
                 {index + 1}
               </span>
               <Icon className={cn("h-4 w-4 shrink-0", isActive ? "text-primary" : "text-muted-foreground")} />
-              <span className={cn("min-w-0 flex-1 truncate font-medium", isActive ? "text-primary" : "text-foreground")}>
+              <span className={cn("min-w-0 flex-1 whitespace-normal break-words leading-5 font-medium", isActive ? "text-primary" : "text-foreground")}>
                 {t(item.labelKey)}
               </span>
               {isActive && <Badge variant="default">{t("territoryIntelligence.layerActiveBadge")}</Badge>}

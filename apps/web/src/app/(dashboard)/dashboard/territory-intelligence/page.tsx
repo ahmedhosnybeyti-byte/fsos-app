@@ -642,15 +642,17 @@ function NormalView({
     <div className="space-y-6">
       <TerritoryBreadcrumb drillPath={hierarchy.drillPath} onGoToLevel={handleGoToLevel} />
 
-      <div className={cn("grid gap-4", isCityLevel ? "lg:grid-cols-[220px_minmax(0,1fr)_360px]" : "lg:grid-cols-[220px_minmax(0,1fr)]")}>
-        <TerritoryLayersSidebar
-          activeMetric={activeMetric}
-          onSelectMetric={onSelectMetric}
-          displayMode={displayMode}
-          onSelectDisplayMode={onSelectDisplayMode}
-        />
+      <div className={cn("grid gap-4", isCityLevel ? "lg:grid-cols-[clamp(240px,18vw,270px)_minmax(0,1fr)_360px]" : "lg:grid-cols-[clamp(240px,18vw,270px)_minmax(0,1fr)]")}>
+        <div className="order-2 lg:order-none">
+          <TerritoryLayersSidebar
+            activeMetric={activeMetric}
+            onSelectMetric={onSelectMetric}
+            displayMode={displayMode}
+            onSelectDisplayMode={onSelectDisplayMode}
+          />
+        </div>
 
-        <div className="space-y-1.5">
+        <div className="order-1 space-y-1.5 lg:order-none">
           <Card ref={mapCardRef} className="glass-card rise-in overflow-hidden p-0">
             <TerritoryPointMap
               nodes={mapNodes}
