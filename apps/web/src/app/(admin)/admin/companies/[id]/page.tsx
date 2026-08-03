@@ -16,7 +16,7 @@ import { formatDate } from "@/lib/utils";
 import { canSubmitCompanyDetails, getCompanyDetailsViewState } from "@/lib/admin-company-details-state";
 import { useTranslation } from "@/components/translation-provider";
 
-const accessLabels: Record<CompanyScreenAccessState, string> = { ENABLED: "مفعّلة", LOCKED: "ظاهرة ومقفلة", HIDDEN: "مخفية" };
+const accessLabels: Record<CompanyScreenAccessState, string> = { ENABLED: "مفعّلة", LOCKED: "ظاهرة ومجمّدة", HIDDEN: "مخفية" };
 
 export default function AdminCompanyDetailsPage() {
   const params = useParams<{ id: string }>();

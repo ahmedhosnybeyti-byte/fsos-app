@@ -17,7 +17,17 @@ export function CompanyScreenAccessGuard({ user, children }: { user: User; child
     if (state === "HIDDEN") router.replace("/dashboard");
   }, [router, state]);
 
+  useEffect(() => {
+    if (state !== "LOCKED") return;
+    const blockKeyboardShortcuts = (event: KeyboardEvent) => {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    };
+    document.addEventListener("keydown", blockKeyboardShortcuts, true);
+    return () => document.removeEventListener("keydown", blockKeyboardShortcuts, true);
+  }, [state]);
+
   if (state === "HIDDEN") return <div className="flex min-h-[50vh] items-center justify-center"><Spinner className="h-6 w-6" /></div>;
-  if (state === "LOCKED") return <div className="mx-auto flex min-h-[50vh] max-w-lg flex-col items-center justify-center gap-3 text-center"><LockKeyhole className="h-10 w-10 text-muted-foreground" /><h1 className="text-xl font-semibold">This screen is unavailable</h1><p className="text-muted-foreground">This screen is not available under your company&apos;s current settings.</p></div>;
+  if (state === "LOCKED") return <div className="space-y-4"><div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-foreground"><LockKeyhole className="h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" />هذه الشاشة متاحة للعرض فقط ضمن إعدادات شركتك الحالية.</div><div inert aria-disabled="true" className="pointer-events-none select-none opacity-85">{children}</div></div>;
   return <>{children}</>;
 }
