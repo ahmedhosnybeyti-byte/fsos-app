@@ -503,8 +503,9 @@ export function SmartLoadingScreen({
       root.remove();
     }
   }
-  async function closeAndExport() { if (hasUnappliedChanges) await applyRecalculation(); if (recalculationError || !window.confirm(locale === "ar" ? "هل أنت متأكد من إغلاق جلسة التحميل؟" : "Close the loading session?")) return; await exportExcel(); setIsSessionClosed(true); }
-  function startNewSession() { if (!window.confirm(locale === "ar" ? "بدء جلسة جديدة؟" : "Start a new session?")) return; window.sessionStorage.removeItem("smart-loading-work"); setIsSessionClosed(false); setExceptionalCustomers([]); setConfirmedOrdersByProduct({}); setRecalculation(null); setHasUnappliedChanges(false); setVisitsPerWeek(1); setStaleDaysThreshold(4); }
+  function resetOperationalState() { const customerCodes = session?.state === "ready" ? session.routeCustomers.map((customer) => customer.customerCode) : []; setExceptionalCustomers([]); setSelectedCustomerCodes(new Set(customerCodes)); setConfirmedOrdersByProduct({}); setInputs({}); setRecalculation(null); setAppliedInputs(null); setHasUnappliedChanges(false); setIsSessionClosed(false); setVisitsPerWeek(1); setStaleDaysThreshold(4); void applyRecalculation({ targetDate, fromDate, toDate, visitsPerWeek: 1, customerCodes, confirmedOrders: [] }); }
+  async function closeAndExport() { if (hasUnappliedChanges) await applyRecalculation(); if (recalculationError || !window.confirm(locale === "ar" ? "هل أنت متأكد من إغلاق جلسة التحميل؟" : "Close the loading session?")) return; await exportExcel(); resetOperationalState(); }
+  function startNewSession() { if (!window.confirm(locale === "ar" ? "بدء جلسة جديدة؟" : "Start a new session?")) return; window.sessionStorage.removeItem("smart-loading-work"); resetOperationalState(); }
   if (isLoading) {
     return (
       <div className="space-y-3">
