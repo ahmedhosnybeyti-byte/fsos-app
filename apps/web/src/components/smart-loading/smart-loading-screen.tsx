@@ -112,9 +112,9 @@ export function SmartLoadingScreen({
   const [recalculationError, setRecalculationError] = useState<string | null>(null);
   const [hasUnappliedChanges, setHasUnappliedChanges] = useState(false);
   const [appliedInputs, setAppliedInputs] = useState<SmartLoadingRecalculateInput | null>(null);
-  const restoredWork = useRef<Partial<{ fromDate: string; toDate: string; visitsPerWeek: 1 | 2 | 6; selectedCustomerCodes: string[]; exceptionalCustomers: SmartLoadingRouteCustomer[]; confirmedOrders: Record<string, number>; appliedInputs: SmartLoadingRecalculateInput; hasUnappliedChanges: boolean }> | null>(null);
-  useEffect(() => { try { restoredWork.current = JSON.parse(window.sessionStorage.getItem("smart-loading-work") ?? "null") as typeof restoredWork.current; } catch { restoredWork.current = null; } }, []);
-  useEffect(() => { window.sessionStorage.setItem("smart-loading-work", JSON.stringify({ fromDate, toDate, visitsPerWeek, selectedCustomerCodes: [...selectedCustomerCodes], exceptionalCustomers, confirmedOrders: confirmedOrdersByProduct, appliedInputs, hasUnappliedChanges })); }, [appliedInputs, confirmedOrdersByProduct, exceptionalCustomers, fromDate, hasUnappliedChanges, selectedCustomerCodes, toDate, visitsPerWeek]);
+  const restoredWork = useRef<Partial<{ targetDate: string; fromDate: string; toDate: string; visitsPerWeek: 1 | 2 | 6; selectedCustomerCodes: string[]; exceptionalCustomers: SmartLoadingRouteCustomer[]; confirmedOrders: Record<string, number>; appliedInputs: SmartLoadingRecalculateInput; hasUnappliedChanges: boolean }> | null>(null);
+  useEffect(() => { try { restoredWork.current = JSON.parse(window.sessionStorage.getItem("smart-loading-work") ?? "null") as typeof restoredWork.current; if (restoredWork.current?.targetDate && restoredWork.current.targetDate !== targetDate) onTargetDateChange(restoredWork.current.targetDate); } catch { restoredWork.current = null; } }, []);
+  useEffect(() => { window.sessionStorage.setItem("smart-loading-work", JSON.stringify({ targetDate, fromDate, toDate, visitsPerWeek, selectedCustomerCodes: [...selectedCustomerCodes], exceptionalCustomers, confirmedOrders: confirmedOrdersByProduct, appliedInputs, hasUnappliedChanges })); }, [appliedInputs, confirmedOrdersByProduct, exceptionalCustomers, fromDate, hasUnappliedChanges, selectedCustomerCodes, toDate, visitsPerWeek]);
   const recalculateSequence = useRef(0);
   const recalculateAbort = useRef<AbortController | null>(null);
 
