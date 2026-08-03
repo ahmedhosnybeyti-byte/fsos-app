@@ -4,6 +4,11 @@ import type { Request, Response } from "express";
 // Normalizes every thrown error (HttpException or otherwise) into one JSON
 // shape so both the web app and the ChatGPT Action caller can rely on a
 // stable error contract.
+function safeRequestBody(body: unknown): string {
+  if (body && typeof body === "object" && Object.keys(body as Record<string, unknown>).some((key) => key.toLowerCase().includes("password"))) return "[REDACTED]";
+  return JSON.stringify(body);
+}
+
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
@@ -31,7 +36,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     // unchanged either way.
     const authHeader = request.headers.authorization;
     const authSummary = authHeader ? `${authHeader.slice(0, 14)}... (len ${authHeader.length})` : "MISSING";
-    const logLine = `${request.method} ${request.url} -> ${status} | auth=${authSummary} | body=${JSON.stringify(request.body)}`;
+    const logLine = `${request.method} ${request.url} -> ${status} | auth=${authSummary} | body=${safeRequestBody(request.body)}`;
     if (status >= 500) {
       this.logger.error(logLine, exception instanceof Error ? exception.stack : undefined);
     } else if (status >= 400) {

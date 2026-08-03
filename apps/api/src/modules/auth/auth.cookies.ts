@@ -50,7 +50,7 @@ export function setAuthCookies(
   res.cookie(AUTH_COOKIE_NAMES.refreshToken, tokens.refreshToken, {
     ...base,
     path: REFRESH_COOKIE_PATH,
-    maxAge: TOKEN_TTL.refreshTokenDays * 24 * 60 * 60 * 1000,
+    maxAge: TOKEN_TTL.idleSessionHours * 60 * 60 * 1000,
   });
 }
 

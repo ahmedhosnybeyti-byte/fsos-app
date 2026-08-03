@@ -1,27 +1,12 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
 
 export class ApiError extends Error {
-  constructor(
-    message: string,
-    public readonly status: number,
-    public readonly errors?: unknown,
-    // Machine-readable error code from the backend body (e.g.
-    // "TRIAL_FEATURE_LOCKED", "SUBSCRIPTION_INACTIVE") — lets callers branch
-    // on specific failure reasons instead of pattern-matching the message
-    // text. Undefined for errors that don't carry one.
-    public readonly code?: string,
-    // Arabic counterpart of `message`, when the backend provides one.
-    public readonly messageAr?: string,
-  ) {
+  constructor(message: string, public readonly status: number, public readonly errors?: unknown, public readonly code?: string, public readonly messageAr?: string) {
     super(message);
     this.name = "ApiError";
   }
 }
 
-// Shared check for the trial-tier feature lock (see
-// RequiresPaidPlanGuard on the backend) — used by every AI-feature call
-// site's onError so the "upgrade to unlock" message is worded consistently
-// instead of falling through to each feature's generic error fallback.
 export function isTrialFeatureLocked(error: unknown): error is ApiError {
   return error instanceof ApiError && error.code === "TRIAL_FEATURE_LOCKED";
 }
@@ -34,33 +19,42 @@ interface RequestOptions {
   signal?: AbortSignal;
 }
 
-// Single fetch wrapper for the whole app: sends the httpOnly session cookie
-// on every request, normalizes errors into ApiError so callers/react-query
-// can handle them uniformly.
-export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = "GET", body, formData, query, signal } = options;
+let refreshInFlight: Promise<boolean> | null = null;
 
-  const url = new URL(`${API_URL}${path}`);
-  if (query) {
-    for (const [key, value] of Object.entries(query)) {
-      if (value !== undefined) url.searchParams.set(key, String(value));
-    }
+async function refreshSession(): Promise<boolean> {
+  if (!refreshInFlight) {
+    refreshInFlight = fetch(`${API_URL}/auth/refresh`, { method: "POST", credentials: "include" })
+      .then((response) => response.ok)
+      .catch(() => false)
+      .finally(() => { refreshInFlight = null; });
   }
+  return refreshInFlight;
+}
 
-  const res = await fetch(url.toString(), {
+async function request(url: string, options: RequestOptions): Promise<{ response: Response; data: unknown }> {
+  const { method = "GET", body, formData, signal } = options;
+  const response = await fetch(url, {
     method,
     credentials: "include",
     headers: formData ? undefined : body !== undefined ? { "Content-Type": "application/json" } : undefined,
     body: formData ?? (body !== undefined ? JSON.stringify(body) : undefined),
     signal,
   });
+  const contentType = response.headers.get("content-type");
+  return { response, data: contentType?.includes("application/json") ? await response.json() : undefined };
+}
 
-  const contentType = res.headers.get("content-type");
-  const data = contentType?.includes("application/json") ? await res.json() : undefined;
+export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
+  const url = new URL(`${API_URL}${path}`);
+  if (options.query) for (const [key, value] of Object.entries(options.query)) if (value !== undefined) url.searchParams.set(key, String(value));
 
-  if (!res.ok) {
-    throw new ApiError(data?.message ?? res.statusText ?? "Request failed", res.status, data?.errors, data?.code, data?.messageAr);
+  let result = await request(url.toString(), options);
+  const canRefresh = result.response.status === 401 && !["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout"].includes(path);
+  if (canRefresh && await refreshSession()) result = await request(url.toString(), options);
+
+  if (!result.response.ok) {
+    const data = result.data as { message?: string; errors?: unknown; code?: string; messageAr?: string } | undefined;
+    throw new ApiError(data?.message ?? result.response.statusText ?? "Request failed", result.response.status, data?.errors, data?.code, data?.messageAr);
   }
-
-  return data as T;
+  return result.data as T;
 }

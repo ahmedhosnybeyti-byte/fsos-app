@@ -5,7 +5,8 @@ export const AUTH_COOKIE_NAMES = {
 
 export const TOKEN_TTL = {
   accessTokenMinutes: 15,
-  refreshTokenDays: 30,
+  idleSessionHours: 12,
+  absoluteSessionDays: 7,
   // Window to paste the one-time code into the GPT chat after clicking
   // "Launch GPT".
   gptLaunchTokenMinutes: 10,

@@ -14,12 +14,6 @@ export interface RefreshTokenMeta {
   ip?: string;
 }
 
-// Access tokens are stateless short-lived JWTs. Refresh tokens are opaque
-// random strings, stored only as a sha256 hash, DB-tracked so they can be
-// revoked instantly (required to lock out an expired/suspended company
-// mid-session — a stateless JWT alone can't do that). Rotation-on-use with
-// reuse detection: presenting an already-used refresh token revokes the
-// entire session family, treating it as a signal of token theft.
 @Injectable()
 export class TokensService {
   constructor(
@@ -29,90 +23,57 @@ export class TokensService {
   ) {}
 
   signAccessToken(userId: string): string {
-    return this.jwt.sign(
-      { sub: userId },
-      {
-        secret: this.config.values.jwt.accessSecret,
-        expiresIn: `${TOKEN_TTL.accessTokenMinutes}m`,
-      },
-    );
+    return this.jwt.sign({ sub: userId }, { secret: this.config.values.jwt.accessSecret, expiresIn: `${TOKEN_TTL.accessTokenMinutes}m` });
   }
 
-  async issueRefreshToken(userId: string, meta: RefreshTokenMeta = {}): Promise<string> {
+  async issueRefreshToken(userId: string, meta: RefreshTokenMeta = {}, sessionStartedAt = new Date()): Promise<string> {
     const raw = randomBytes(48).toString("base64url");
     const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + TOKEN_TTL.refreshTokenDays);
-
+    expiresAt.setHours(expiresAt.getHours() + TOKEN_TTL.idleSessionHours);
     await this.prisma.refreshToken.create({
-      data: {
-        userId,
-        tokenHash: hashToken(raw),
-        userAgent: meta.userAgent,
-        ip: meta.ip,
-        expiresAt,
-      },
+      data: { userId, tokenHash: hashToken(raw), userAgent: meta.userAgent, ip: meta.ip, expiresAt, sessionStartedAt },
     });
-
     return raw;
   }
 
-  // Validates + rotates in one step: returns the userId and a fresh raw
-  // refresh token, or throws.
   async rotateRefreshToken(rawToken: string, meta: RefreshTokenMeta = {}): Promise<{ userId: string; refreshToken: string }> {
     const tokenHash = hashToken(rawToken);
     const record = await this.prisma.refreshToken.findUnique({ where: { tokenHash } });
-
     if (!record) throw new UnauthorizedException("Invalid refresh token");
-
     if (record.revokedAt) {
-      // Reuse of an already-rotated token — treat as compromised and log the
-      // user out everywhere.
       await this.revokeAllForUser(record.userId);
       throw new UnauthorizedException("Refresh token reuse detected; all sessions revoked");
     }
 
-    if (record.expiresAt < new Date()) {
-      throw new UnauthorizedException("Refresh token expired");
+    const now = new Date();
+    const sessionStartedAt = record.sessionStartedAt ?? record.createdAt;
+    const absoluteExpiresAt = new Date(sessionStartedAt);
+    absoluteExpiresAt.setDate(absoluteExpiresAt.getDate() + TOKEN_TTL.absoluteSessionDays);
+    if (record.expiresAt < now || absoluteExpiresAt < now) {
+      await this.prisma.refreshToken.update({ where: { id: record.id }, data: { revokedAt: now } });
+      throw new UnauthorizedException("Session expired");
     }
 
-    // Account-status gate (2026-07-19 security fix): a suspended/disabled/
-    // archived user must not be able to keep a session alive by refreshing —
-    // login already blocks non-ACTIVE users, but without this check an
-    // existing session could rotate its refresh token indefinitely and
-    // never actually get locked out.
-    const owner = await this.prisma.user.findUnique({ where: { id: record.userId }, select: { status: true } });
-    if (!owner || owner.status !== "ACTIVE") {
+    const owner = await this.prisma.user.findUnique({ where: { id: record.userId }, select: { status: true, company: { select: { status: true } } } });
+    if (!owner || owner.status !== "ACTIVE" || (owner.company && owner.company.status !== "ACTIVE")) {
       await this.revokeAllForUser(record.userId);
       throw new UnauthorizedException("Account is not active");
     }
 
-    await this.prisma.refreshToken.update({ where: { id: record.id }, data: { revokedAt: new Date() } });
-    const refreshToken = await this.issueRefreshToken(record.userId, meta);
-
+    await this.prisma.refreshToken.update({ where: { id: record.id }, data: { revokedAt: now } });
+    const refreshToken = await this.issueRefreshToken(record.userId, meta, sessionStartedAt);
     return { userId: record.userId, refreshToken };
   }
 
   async revokeRefreshToken(rawToken: string): Promise<void> {
-    const tokenHash = hashToken(rawToken);
-    await this.prisma.refreshToken.updateMany({
-      where: { tokenHash, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    await this.prisma.refreshToken.updateMany({ where: { tokenHash: hashToken(rawToken), revokedAt: null }, data: { revokedAt: new Date() } });
   }
 
   async revokeAllForUser(userId: string): Promise<void> {
-    await this.prisma.refreshToken.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    await this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
   }
 
-  // Used by the scheduled expiry job to lock out an entire company the
-  // instant its subscription lapses.
   async revokeAllForCompany(companyId: string): Promise<void> {
-    await this.prisma.refreshToken.updateMany({
-      where: { user: { companyId }, revokedAt: null },
-      data: { revokedAt: new Date() },
-    });
+    await this.prisma.refreshToken.updateMany({ where: { user: { companyId }, revokedAt: null }, data: { revokedAt: new Date() } });
   }
 }
