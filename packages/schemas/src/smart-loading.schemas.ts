@@ -1,18 +1,18 @@
 import { z } from "zod";
 
-// Smart Loading — read-only loading-preparation session, computed entirely
+// Smart Loading â€” read-only loading-preparation session, computed entirely
 // from RIE-scoped real data at request time (no new Excel reads, no new
 // Prisma table, no persistence). Every field below is sourced from an
 // existing Canonical Entity via RieFacade, using the exact same
 // company/role hierarchy scoping every other RIE-backed module already
-// uses (server-derived, no manual scope picker) — see
+// uses (server-derived, no manual scope picker) â€” see
 // smart-loading.service.ts for the field-by-field provenance.
 //
 // 2026-07-28: initial real data source. `category` <- Products.Category.
 // `lastSaleDate` <- max(Invoices.InvoiceDate) per ProductCode across
 // Invoice Items joined to Invoices, within the caller's RIE scope.
 // `currentVehicleStock` <- Van Inventory (Quantity at the latest
-// ReportDate for the caller's own RouteID(s)) — confirmed as a real,
+// ReportDate for the caller's own RouteID(s)) â€” confirmed as a real,
 // already-consumed Canonical Entity (see visit-copilot.service.ts's
 // latestVanStockSet) after re-checking the RIE registry; not a gap that
 // needed inventing. `weeklyAverageSales` <- Invoice Items/Invoices,
@@ -36,6 +36,16 @@ export const smartLoadingRouteSchema = z.object({
   customerCount: z.number().int().nonnegative(),
 });
 export type SmartLoadingRoute = z.infer<typeof smartLoadingRouteSchema>;
+export const smartLoadingRouteCustomerSchema = z.object({ customerCode: z.string(), customerName: z.string(), routeId: z.string().nullable(), visitSequence: z.number().nullable() });
+export type SmartLoadingRouteCustomer = z.infer<typeof smartLoadingRouteCustomerSchema>;
+export const smartLoadingCustomerSearchResultSchema = z.object({ customers: z.array(smartLoadingRouteCustomerSchema) });
+export type SmartLoadingCustomerSearchResult = z.infer<typeof smartLoadingCustomerSearchResultSchema>;
+export const smartLoadingRecalculateInputSchema = z.object({ targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), visitsPerWeek: z.union([z.literal(1), z.literal(2), z.literal(6)]), customerCodes: z.array(z.string().trim().min(1)).min(1).max(500), confirmedOrders: z.array(z.object({ productCode: z.string().trim().min(1), quantity: z.number().positive() })) });
+export type SmartLoadingRecalculateInput = z.infer<typeof smartLoadingRecalculateInputSchema>;
+export const smartLoadingRecalculatedProductSchema = z.object({ productCode: z.string(), productName: z.string(), estimatedCustomerDemand: z.number(), confirmedOrderQuantity: z.number(), safetyStock: z.number(), vehicleStock: z.number().nullable(), suggestedQuantity: z.number() });
+export type SmartLoadingRecalculatedProduct = z.infer<typeof smartLoadingRecalculatedProductSchema>;
+export const smartLoadingRecalculateResultSchema = z.object({ targetDate: z.string(), fromDate: z.string(), toDate: z.string(), calendarDaysInPeriod: z.number().int().positive(), products: z.array(smartLoadingRecalculatedProductSchema), calculatedAt: z.string() });
+export type SmartLoadingRecalculateResult = z.infer<typeof smartLoadingRecalculateResultSchema>;
 
 export const smartLoadingPriorityProductSchema = z.object({
   productCode: z.string(),
@@ -88,6 +98,7 @@ export const smartLoadingReadySessionSchema = z.object({
   asOfDate: z.string(),
   targetDate: z.string(),
   route: smartLoadingRouteSchema.nullable(),
+  routeCustomers: z.array(smartLoadingRouteCustomerSchema),
   priorityProducts: z.array(smartLoadingPriorityProductSchema),
   lostOpportunities: z.array(smartLoadingLostOpportunitySchema),
   lostOpportunityReason: smartLoadingLostOpportunityReasonSchema,
@@ -100,6 +111,7 @@ export const smartLoadingVehicleStockUnavailableSessionSchema = z.object({
   lostOpportunityReason: smartLoadingLostOpportunityReasonSchema.optional(),
   targetDate: z.string(),
   route: smartLoadingRouteSchema.nullable(),
+  routeCustomers: z.array(smartLoadingRouteCustomerSchema),
 });
 export type SmartLoadingVehicleStockUnavailableSession = z.infer<typeof smartLoadingVehicleStockUnavailableSessionSchema>;
 
