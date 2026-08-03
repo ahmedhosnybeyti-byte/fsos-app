@@ -18,6 +18,7 @@ import type {
   SubscriptionPaymentStatus,
   SubscriptionStatus,
   UserStatus,
+  VisitCopilot360ExecutionStep as VisitCopilot360ExecutionStepContract,
 } from "@field-sales-os/schemas";
 
 export interface Role {
@@ -1621,10 +1622,8 @@ export interface VisitCopilot360LostOpportunity {
   suggestedQuantity: number;
 }
 
-export type VisitCopilot360Priority = "عالية" | "متوسطة" | "منخفضة";
-
 export interface VisitCopilot360ExecutionStep {
-  priority: VisitCopilot360Priority;
+  priority: VisitCopilot360ExecutionStepContract["priority"];
   action: string;
   owner: string;
   successMetric: string;

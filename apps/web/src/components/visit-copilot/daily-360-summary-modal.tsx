@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import type { VisitCopilot360ExecutionStep, VisitCopilot360Priority, VisitCopilotPeriod } from "@/lib/types";
+import type { VisitCopilot360ExecutionStep, VisitCopilotPeriod } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { exportDaily360SummaryPdf } from "@/lib/export/daily-360-summary-pdf";
 import { daily360SummaryQuery } from "./daily-360-summary-query";
@@ -45,7 +45,7 @@ interface Props {
   to?: string;
 }
 
-function priorityBadgeClass(priority: VisitCopilot360Priority): string {
+function priorityBadgeClass(priority: VisitCopilot360ExecutionStep["priority"]): string {
   if (priority === "عالية") return "bg-rose-500/15 text-rose-600 dark:bg-rose-400/15 dark:text-rose-300";
   if (priority === "متوسطة") return "bg-amber-500/15 text-amber-600 dark:bg-amber-400/15 dark:text-amber-300";
   return "bg-muted text-muted-foreground";
