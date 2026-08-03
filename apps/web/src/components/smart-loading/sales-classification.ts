@@ -23,3 +23,17 @@ export function summarizeSalesRecency<T extends { lastSaleDate: string | null }>
     { recent: 0, stale: 0, missing: 0 },
   );
 }
+
+export type OperationalPriorityInput = {
+  suggestedQuantity: number;
+  confirmedOrders: number;
+  selectedLostOpportunityQuantity: number;
+};
+
+export function isOperationalHighPriority(input: OperationalPriorityInput): boolean {
+  return input.suggestedQuantity > 0 && (input.confirmedOrders > 0 || input.selectedLostOpportunityQuantity > 0);
+}
+
+export function operationalPriorityProductCodes<T extends OperationalPriorityInput & { productCode: string }>(products: readonly T[]): Set<string> {
+  return new Set(products.filter(isOperationalHighPriority).map((product) => product.productCode));
+}

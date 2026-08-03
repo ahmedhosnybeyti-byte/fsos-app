@@ -24,7 +24,7 @@ import { useTranslation } from "@/components/translation-provider";
 import type { SmartLoadingLostOpportunity, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
 import { categoryAddedProductCount, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
-import { classifySalesRecency, summarizeSalesRecency } from "./sales-classification";
+import { classifySalesRecency, operationalPriorityProductCodes, summarizeSalesRecency } from "./sales-classification";
 
 type Inputs = { confirmedOrders: number; safetyStock: number; manual?: number };
 type LostOpportunityAddition = {
@@ -156,7 +156,18 @@ export function SmartLoadingScreen({
     }, {});
   }, [recommendationRows, t]);
 
-  const priorityRows = useMemo(() => rows.filter((row) => row.product.priority === "high"), [rows]);
+  const priorityRows = useMemo(() => {
+    const priorityCodes = operationalPriorityProductCodes(
+      rows.map((row) => ({
+        productCode: row.product.productCode,
+        suggestedQuantity: row.suggested,
+        confirmedOrders: row.input.confirmedOrders,
+        selectedLostOpportunityQuantity: row.lostOpportunity?.addedQuantity ?? 0,
+      })),
+    );
+    return rows.filter((row) => priorityCodes.has(row.product.productCode));
+  }, [rows]);
+
   const salesRecency = useMemo(
     () => session?.state === "ready" ? summarizeSalesRecency(session.products) : { recent: 0, stale: 0, missing: 0 },
     [session],
@@ -519,9 +530,9 @@ export function SmartLoadingScreen({
               strong
             />
             <MetricButton
-              label={t("smartLoading.priorityProducts")}
+              label={t("smartLoading.operationalPriorityProducts")}
               value={formatQuantity(priorityRows.length, locale)}
-              description={priorityRows.length === 0 ? t("smartLoading.noStaleSalesOverThreshold") : undefined}
+              description={priorityRows.length === 0 ? t("smartLoading.noOperationalPriority") : undefined}
               onClick={(event) => {
                 event.stopPropagation();
                 setPanel(panel === "priority" ? null : "priority");
@@ -1183,7 +1194,7 @@ function ProductListPopover({ rows, stale, onClose }: { rows: Row[]; stale: bool
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/20 pt-24" onClick={onClose}>
       <Card className="w-[min(92vw,520px)] shadow-xl" onClick={(event) => event.stopPropagation()}>
         <CardHeader className="flex-row items-center justify-between p-4">
-          <CardTitle>{stale ? t("smartLoading.staleProductsPanelTitle") : t("smartLoading.priorityProductsPanelTitle")}</CardTitle>
+          <CardTitle>{stale ? t("smartLoading.staleProductsPanelTitle") : t("smartLoading.operationalPriorityProductsPanelTitle")}</CardTitle>
           <Button size="sm" variant="ghost" onClick={onClose}>{t("smartLoading.close")}</Button>
         </CardHeader>
         <CardContent className="max-h-[60vh] overflow-y-auto p-4 pt-0">

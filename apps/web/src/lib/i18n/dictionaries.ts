@@ -1148,6 +1148,9 @@ export type TranslationKey =
   | "smartLoading.productsToLoad"
   | "smartLoading.totalQuantity"
   | "smartLoading.priorityProducts"
+  | "smartLoading.operationalPriorityProducts"
+  | "smartLoading.noOperationalPriority"
+  | "smartLoading.operationalPriorityProductsPanelTitle"
   | "smartLoading.lastCalculation"
   | "smartLoading.attentionTitle"
   | "smartLoading.attentionDescription"
@@ -2490,6 +2493,9 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.productsToLoad": "أصناف للتحميل",
     "smartLoading.totalQuantity": "إجمالي الكمية",
     "smartLoading.priorityProducts": "أصناف أولوية",
+    "smartLoading.operationalPriorityProducts": "أصناف ذات أولوية تشغيلية",
+    "smartLoading.noOperationalPriority": "لا توجد أولوية تشغيلية محددة حاليًا.",
+    "smartLoading.operationalPriorityProductsPanelTitle": "أصناف ذات أولوية تشغيلية",
     "smartLoading.lastCalculation": "آخر حساب",
     "smartLoading.attentionTitle": "انتباه اليوم",
     "smartLoading.attentionDescription": "حقائق تشغيلية تستحق المراجعة.",
@@ -3832,6 +3838,9 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.productsToLoad": "Products to Load",
     "smartLoading.totalQuantity": "Total Quantity",
     "smartLoading.priorityProducts": "Priority Products",
+    "smartLoading.operationalPriorityProducts": "Operational Priority Products",
+    "smartLoading.noOperationalPriority": "No operational priority is currently identified.",
+    "smartLoading.operationalPriorityProductsPanelTitle": "Operational Priority Products",
     "smartLoading.lastCalculation": "Last Calculation",
     "smartLoading.attentionTitle": "Today's Attention",
     "smartLoading.attentionDescription": "Operational facts worth reviewing.",
