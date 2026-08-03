@@ -111,18 +111,23 @@ export function SmartLoadingScreen({
   const [recalculationLoading, setRecalculationLoading] = useState(false);
   const [recalculationError, setRecalculationError] = useState<string | null>(null);
   const [hasUnappliedChanges, setHasUnappliedChanges] = useState(false);
+  const [appliedInputs, setAppliedInputs] = useState<SmartLoadingRecalculateInput | null>(null);
+  const restoredWork = useRef<Partial<{ fromDate: string; toDate: string; visitsPerWeek: 1 | 2 | 6; selectedCustomerCodes: string[]; exceptionalCustomers: SmartLoadingRouteCustomer[]; confirmedOrders: Record<string, number>; appliedInputs: SmartLoadingRecalculateInput; hasUnappliedChanges: boolean }> | null>(null);
+  useEffect(() => { try { restoredWork.current = JSON.parse(window.sessionStorage.getItem("smart-loading-work") ?? "null") as typeof restoredWork.current; } catch { restoredWork.current = null; } }, []);
+  useEffect(() => { window.sessionStorage.setItem("smart-loading-work", JSON.stringify({ fromDate, toDate, visitsPerWeek, selectedCustomerCodes: [...selectedCustomerCodes], exceptionalCustomers, confirmedOrders: confirmedOrdersByProduct, appliedInputs, hasUnappliedChanges })); }, [appliedInputs, confirmedOrdersByProduct, exceptionalCustomers, fromDate, hasUnappliedChanges, selectedCustomerCodes, toDate, visitsPerWeek]);
   const recalculateSequence = useRef(0);
   const recalculateAbort = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (session?.state !== "ready") return;
-    const customerCodes = [...new Set(session.routeCustomers.map((customer) => customer.customerCode.trim()).filter(Boolean))];
-    setSelectedCustomerCodes(new Set(customerCodes));
-    setExceptionalCustomers([]);
-    void applyRecalculation({ targetDate, fromDate, toDate, visitsPerWeek, customerCodes, confirmedOrders: [] });
+    const saved = restoredWork.current; const customerCodes = [...new Set((saved?.selectedCustomerCodes ?? session.routeCustomers.map((customer) => customer.customerCode)).map((code) => code.trim()).filter(Boolean))];
+    setSelectedCustomerCodes(new Set(customerCodes)); setExceptionalCustomers(saved?.exceptionalCustomers ?? []);
+    if (saved) { setFromDate(saved.fromDate ?? fromDate); setToDate(saved.toDate ?? toDate); setVisitsPerWeek(saved.visitsPerWeek ?? visitsPerWeek); setConfirmedOrdersByProduct(saved.confirmedOrders ?? {}); setHasUnappliedChanges(saved.hasUnappliedChanges ?? false); }
+    void applyRecalculation(saved?.appliedInputs ?? { targetDate, fromDate, toDate, visitsPerWeek, customerCodes, confirmedOrders: [] }); restoredWork.current = null;
   }, [session]);
 
   useEffect(() => () => recalculateAbort.current?.abort(), []);
+
 
   useEffect(() => {
     function closeOnEscape(event: KeyboardEvent) {
@@ -229,7 +234,7 @@ export function SmartLoadingScreen({
     setRecalculationError(null);
     try {
       const result = await smartLoadingApi.recalculate(snapshot, controller.signal);
-      if (sequence === recalculateSequence.current) { setRecalculation(result); setHasUnappliedChanges(false); }
+      if (sequence === recalculateSequence.current) { setRecalculation(result); setAppliedInputs(snapshot); setHasUnappliedChanges(false); }
     } catch (error) {
       if (sequence === recalculateSequence.current && !(error instanceof DOMException && error.name === "AbortError")) setRecalculationError(label("smartLoading.error", "Unable to calculate loading recommendations. Try again."));
     } finally {
@@ -804,6 +809,7 @@ function LostOpportunitiesDialog({
   const productCount = groups.reduce((sum, category) => sum + category.productCount, 0);
   const customerCount = groups.reduce((sum, category) => sum + category.customerCount, 0);
 
+
   useEffect(() => {
     if (!hasInitializedAccordion.current && allGroups.length > 0) {
       hasInitializedAccordion.current = true;
@@ -1322,6 +1328,7 @@ function SmartLoadingPhaseTwo(props: SmartLoadingPhaseTwoProps) {
   const [productSearchLoading, setProductSearchLoading] = useState(false);
   const [activeProductIndex, setActiveProductIndex] = useState(-1);
 
+
   useEffect(() => {
     const query = productQuery.trim().toLocaleLowerCase();
     if (!query) { setProductSuggestions([]); setProductSearchLoading(false); return; }
@@ -1333,6 +1340,7 @@ function SmartLoadingPhaseTwo(props: SmartLoadingPhaseTwoProps) {
     }, 180);
     return () => window.clearTimeout(timer);
   }, [productQuery, props.session.products]);
+
 
   useEffect(() => {
     if (!editorOpen || !customerQuery.trim()) { setCustomerResults([]); return; }
@@ -1363,7 +1371,7 @@ function SmartLoadingPhaseTwo(props: SmartLoadingPhaseTwoProps) {
 
   return <>
     <section className="grid items-stretch gap-3 lg:h-[26rem] lg:grid-cols-[26fr_24fr] lg:grid-rows-[1fr_1fr]" style={{ direction: "ltr" }}>
-      <div dir={props.locale === "ar" ? "rtl" : "ltr"} className="order-1 grid min-h-0 gap-3 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:grid-rows-[12rem_1fr]">
+      <div dir={props.locale === "ar" ? "rtl" : "ltr"} className="order-1 grid min-h-0 gap-3 lg:col-start-2 lg:row-start-1 lg:row-span-2 lg:grid-rows-[13rem_1fr]">
         <Card className="flex h-full min-h-0 flex-col"><CardHeader className="shrink-0 pb-2"><div className="flex items-center justify-between gap-2"><div><CardTitle className="text-base">{props.label("smartLoading.routeSetup", "Route setup")}</CardTitle><CardDescription>{props.label("smartLoading.targetDate", "Prepare loading for")}: {props.targetDate}</CardDescription></div><Button size="sm" variant="outline" onClick={openEditor}>{props.label("smartLoading.editRoute", "Edit route")}</Button></div></CardHeader><CardContent className="grid gap-2 text-sm sm:grid-cols-2"><div><Label htmlFor="smart-loading-from-date" className="text-xs text-muted-foreground">{props.label("smartLoading.fromDate", "From date")}</Label><Input id="smart-loading-from-date" className="mt-1 h-8" type="date" value={props.fromDate} max={props.toDate} onChange={(event) => props.onFromDateChange(event.target.value)} /></div><div><Label htmlFor="smart-loading-to-date" className="text-xs text-muted-foreground">{props.label("smartLoading.toDate", "To date")}</Label><Input id="smart-loading-to-date" className="mt-1 h-8" type="date" value={props.toDate} min={props.fromDate} onChange={(event) => props.onToDateChange(event.target.value)} /></div><div className="sm:col-span-2"><Label htmlFor="smart-loading-visits" className="text-xs text-muted-foreground">{props.label("smartLoading.visitsPerWeek", "Route visits pattern")}</Label><select id="smart-loading-visits" className="mt-1 h-8 w-full rounded-md border bg-background px-2" value={props.visitsPerWeek} onChange={(event) => changeVisits(event.target.value)}><option value="1">{props.label("smartLoading.onceWeekly", "Once weekly")}</option><option value="2">{props.label("smartLoading.twiceWeekly", "Twice weekly")}</option><option value="6">{props.label("smartLoading.sixWeekly", "6 times weekly")}</option></select></div>{days === 0 && <p role="alert" className="sm:col-span-2 text-xs text-destructive">{props.label("smartLoading.invalidDateRange", "The start date must be on or before the end date.")}</p>}</CardContent></Card>
         <Card className="glass-hero flex h-full min-h-0 flex-col"><CardHeader className="pb-1 pt-3"><CardTitle className="text-sm">{props.label("smartLoading.summaryTitle", "Loading summary")}</CardTitle></CardHeader><CardContent className="grid grid-cols-2 gap-2 pb-3 text-xs"><Metric label={props.label("smartLoading.productsToLoad", "Products to load")} value={formatQuantity(props.loadingSummary.productsToLoad, props.locale)} /><Metric label={props.label("smartLoading.totalQuantity", "Total quantity")} value={formatQuantity(props.loadingSummary.totalQuantity, props.locale)} strong /><MetricButton label={props.label("smartLoading.operationalPriorityProducts", "Priority products")} value={formatQuantity(props.loadingSummary.priorityProducts, props.locale)} onClick={props.onPriorityClick} /><MetricButton label={props.label("smartLoading.staleProducts", "Stale products")} value={formatQuantity(props.loadingSummary.staleProducts, props.locale)} onClick={props.onStaleClick} /></CardContent></Card>
       </div>
