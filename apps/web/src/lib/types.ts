@@ -1663,18 +1663,7 @@ export interface VisitCopilot360Summary {
   warnings: string[];
 }
 
-// Smart Loading — a read-only loading-preparation session scoped by the signed-in account.
-export type SmartLoadingSessionState = "ready" | "vehicle-stock-unavailable";
-export type SmartLoadingPriority = "high" | "normal";
-export interface SmartLoadingProduct { productCode: string; productName: string; currentVehicleStock: number | null; weeklyAverageSales: number; priority: SmartLoadingPriority; category: string | null; lastSaleDate: string | null; }
-export interface SmartLoadingAttention { id: string; message: string; }
-export interface SmartLoadingRoute { targetDate: string; customerCount: number; }
-export interface SmartLoadingPriorityProduct { productCode: string; productName: string; category: string | null; routeCustomerCount: number; totalQuantity: number; currentVehicleStock: number | null; }
-export interface SmartLoadingReadySession { state: "ready"; products: SmartLoadingProduct[]; attention: SmartLoadingAttention[]; asOfDate: string; targetDate: string; route: SmartLoadingRoute | null; priorityProducts: SmartLoadingPriorityProduct[]; lostOpportunities: SmartLoadingLostOpportunity[]; calculatedAt: string; }
-export interface SmartLoadingLostOpportunity { customerCode: string; customerName: string; productCode: string; productName: string; category: string | null; baselineNetQuantity: number; recentNetQuantity: number; suggestedQuantity: number; }
-export interface SmartLoadingVehicleStockUnavailableSession { state: "vehicle-stock-unavailable"; }
-export type SmartLoadingSession = SmartLoadingReadySession | SmartLoadingVehicleStockUnavailableSession;
-
+export type { SmartLoadingPriority, SmartLoadingProduct, SmartLoadingRoute, SmartLoadingRouteCustomer, SmartLoadingCustomerSearchResult, SmartLoadingPriorityProduct, SmartLoadingAttention, SmartLoadingReadySession, SmartLoadingLostOpportunity, SmartLoadingLostOpportunityReason, SmartLoadingVehicleStockUnavailableSession, SmartLoadingSession, SmartLoadingRecalculateInput, SmartLoadingRecalculatedProduct, SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
 // FSOS 360 ? mirrors the published unified workspace API contract.
 export type Fsos360AnalysisFocus = "company" | "region" | "branch" | "manager" | "supervisor" | "route" | "sales-rep" | "customer" | "brand" | "category" | "product";
 export type Fsos360Availability = "available" | "partial" | "unavailable" | "not-applicable" | "pending-business-approval";

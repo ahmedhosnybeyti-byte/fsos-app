@@ -1241,6 +1241,31 @@ export type TranslationKey =
   | "smartLoading.vehicleStockQuantity"
   | "smartLoading.reviewCapacity"
   | "smartLoading.pdfExportedAt"
+  | "smartLoading.routeSetup"
+  | "smartLoading.fromDate"
+  | "smartLoading.toDate"
+  | "smartLoading.invalidDateRange"
+  | "smartLoading.calendarDays"
+  | "smartLoading.visitsPerWeek"
+  | "smartLoading.onceWeekly"
+  | "smartLoading.twiceWeekly"
+  | "smartLoading.sixWeekly"
+  | "smartLoading.visitsHint"
+  | "smartLoading.visitCustomers"
+  | "smartLoading.selectedCustomers"
+  | "smartLoading.searchCustomers"
+  | "smartLoading.noCustomersFound"
+  | "smartLoading.noSelectedCustomers"
+  | "smartLoading.aggregatedConfirmedOrders"
+  | "smartLoading.selectProduct"
+  | "smartLoading.add"
+  | "smartLoading.remove"
+  | "smartLoading.orderTotals"
+  | "smartLoading.currentRecommendations"
+  | "smartLoading.awaitingCalculation"
+  | "smartLoading.noRecommendations"
+  | "smartLoading.estimatedDemand"
+  | "smartLoading.estimatedSuggestedQuantity"
   | "fsos360.company"
   | "fsos360.region"
   | "fsos360.city"
@@ -2595,6 +2620,31 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.vehicleStockQuantity": "\u0645\u062e\u0632\u0648\u0646 \u0627\u0644\u0633\u064a\u0627\u0631\u0629 \u0627\u0644\u062d\u0627\u0644\u064a: {value}",
     "smartLoading.reviewCapacity": "\u0631\u0627\u062c\u0639 \u0627\u0644\u0633\u0639\u0629 \u0642\u0628\u0644 \u0627\u0639\u062a\u0645\u0627\u062f \u0627\u0644\u062a\u062d\u0645\u064a\u0644.",
     "smartLoading.pdfExportedAt": "وقت التصدير",
+    "smartLoading.toDate": "إلى تاريخ",
+    "smartLoading.noRecommendations": "لا توجد توصيات لهذه الفترة.",
+    "smartLoading.awaitingCalculation": "اختر العملاء لاحتساب التوصيات.",
+    "smartLoading.selectProduct": "اختر صنفًا",
+    "smartLoading.onceWeekly": "مرة أسبوعيًا",
+    "smartLoading.invalidDateRange": "يجب أن يكون تاريخ البداية في أو قبل تاريخ النهاية.",
+    "smartLoading.noCustomersFound": "لا توجد نتائج للعملاء",
+    "smartLoading.calendarDays": "عدد الأيام التقويمية",
+    "smartLoading.visitsPerWeek": "نمط زيارات خط السير",
+    "smartLoading.add": "إضافة",
+    "smartLoading.estimatedSuggestedQuantity": "الكمية المقترحة التقديرية",
+    "smartLoading.visitCustomers": "عملاء الزيارة",
+    "smartLoading.selectedCustomers": "المحددون",
+    "smartLoading.estimatedDemand": "احتياج العملاء التقديري",
+    "smartLoading.aggregatedConfirmedOrders": "الطلبات المؤكدة المجمعة",
+    "smartLoading.visitsHint": "تُستخدم هذه القيمة لحساب كمية تقديرية لكل زيارة.",
+    "smartLoading.routeSetup": "إعداد خط السير",
+    "smartLoading.twiceWeekly": "مرتان أسبوعيًا",
+    "smartLoading.orderTotals": "إجمالي الأصناف",
+    "smartLoading.searchCustomers": "البحث عن العملاء",
+    "smartLoading.sixWeekly": "6 مرات أسبوعيًا",
+    "smartLoading.fromDate": "من تاريخ",
+    "smartLoading.noSelectedCustomers": "حدد عميلاً واحدًا على الأقل قبل الحساب.",
+    "smartLoading.currentRecommendations": "توصيات التحميل الحالية",
+    "smartLoading.remove": "حذف",
     "fsos360.company": "الشركة",
     "fsos360.region": "المنطقة",
     "fsos360.city": "المدينة",
@@ -3949,6 +3999,31 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.vehicleStockQuantity": "Current vehicle stock: {value}",
     "smartLoading.reviewCapacity": "Review capacity before approving loading.",
     "smartLoading.pdfExportedAt": "Exported at",
+    "smartLoading.toDate": "To date",
+    "smartLoading.noRecommendations": "No recommendations for this period.",
+    "smartLoading.awaitingCalculation": "Choose customers to calculate recommendations.",
+    "smartLoading.selectProduct": "Select a product",
+    "smartLoading.onceWeekly": "Once weekly",
+    "smartLoading.invalidDateRange": "The start date must be on or before the end date.",
+    "smartLoading.noCustomersFound": "No customers found",
+    "smartLoading.calendarDays": "Calendar days",
+    "smartLoading.visitsPerWeek": "Route visits pattern",
+    "smartLoading.add": "Add",
+    "smartLoading.estimatedSuggestedQuantity": "Estimated suggested quantity",
+    "smartLoading.visitCustomers": "Visit customers",
+    "smartLoading.selectedCustomers": "Selected",
+    "smartLoading.estimatedDemand": "Estimated customer demand",
+    "smartLoading.aggregatedConfirmedOrders": "Aggregated confirmed orders",
+    "smartLoading.visitsHint": "This value is used to calculate an estimated quantity for each visit.",
+    "smartLoading.routeSetup": "Route setup",
+    "smartLoading.twiceWeekly": "Twice weekly",
+    "smartLoading.orderTotals": "Products",
+    "smartLoading.searchCustomers": "Search customers",
+    "smartLoading.sixWeekly": "6 times weekly",
+    "smartLoading.fromDate": "From date",
+    "smartLoading.noSelectedCustomers": "Select at least one customer before calculation.",
+    "smartLoading.currentRecommendations": "Current loading recommendations",
+    "smartLoading.remove": "Remove",
     "fsos360.company": "Company",
     "fsos360.region": "Region",
     "fsos360.city": "City",
