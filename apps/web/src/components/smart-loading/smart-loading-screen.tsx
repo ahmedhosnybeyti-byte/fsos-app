@@ -24,6 +24,7 @@ import { useTranslation } from "@/components/translation-provider";
 import type { SmartLoadingLostOpportunity, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
 import { categoryAddedProductCount, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
+import { classifySalesRecency, summarizeSalesRecency } from "./sales-classification";
 
 type Inputs = { confirmedOrders: number; safetyStock: number; manual?: number };
 type LostOpportunityAddition = {
@@ -35,8 +36,6 @@ type LostOpportunityAddition = {
   customers: { id: string; name: string; baselineNetQuantity: number }[];
 };
 type Row = { product: SmartLoadingProduct; original: number; baseSuggested: number; suggested: number; input: Inputs; manuallyAdded: boolean; lostOpportunity?: LostOpportunityAddition; stockAvailable: boolean };
-
-const HIGH_PRIORITY_DAYS_STALE = 4;
 
 function parsePositiveNumber(value: string): number {
   return Math.max(0, Number(value) || 0);
@@ -158,6 +157,10 @@ export function SmartLoadingScreen({
   }, [recommendationRows, t]);
 
   const priorityRows = useMemo(() => rows.filter((row) => row.product.priority === "high"), [rows]);
+  const salesRecency = useMemo(
+    () => session?.state === "ready" ? summarizeSalesRecency(session.products) : { recent: 0, stale: 0, missing: 0 },
+    [session],
+  );
 
   const availableProducts = useMemo(() => {
     if (session?.state !== "ready") return [];
@@ -168,12 +171,7 @@ export function SmartLoadingScreen({
     });
   }, [productSearch, rows, session]);
 
-  const staleRows = useMemo(() => {
-    return allRows.filter((row) => {
-      const days = daysSinceLastSale(row.product.lastSaleDate);
-      return days !== null && days > HIGH_PRIORITY_DAYS_STALE;
-    });
-  }, [allRows]);
+  const staleRows = useMemo(() => allRows.filter((row) => classifySalesRecency(row.product.lastSaleDate) === "stale"), [allRows]);
 
   async function refresh() {
     setRefreshing(true);
@@ -523,6 +521,7 @@ export function SmartLoadingScreen({
             <MetricButton
               label={t("smartLoading.priorityProducts")}
               value={formatQuantity(priorityRows.length, locale)}
+              description={priorityRows.length === 0 ? t("smartLoading.noStaleSalesOverThreshold") : undefined}
               onClick={(event) => {
                 event.stopPropagation();
                 setPanel(panel === "priority" ? null : "priority");
@@ -531,11 +530,27 @@ export function SmartLoadingScreen({
             <MetricButton
               label={t("smartLoading.staleProducts")}
               value={formatQuantity(staleRows.length, locale)}
+              description={staleRows.length === 0 ? t("smartLoading.noStaleSalesOverThreshold") : undefined}
               onClick={(event) => {
                 event.stopPropagation();
                 setPanel(panel === "stale" ? null : "stale");
               }}
             />
+          </CardContent>
+          <CardContent className="space-y-2 border-t border-border/60 px-4 pb-4 pt-3">
+            {salesRecency.missing > 0 && (
+              <p role="status" className="rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+                {t("smartLoading.missingLastSaleData", { count: salesRecency.missing })}
+              </p>
+            )}
+            <details className="rounded-md border border-border/70 bg-background/30 px-3 py-2 text-xs">
+              <summary className="cursor-pointer font-medium text-foreground">{t("smartLoading.salesDataDetails")}</summary>
+              <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+                <RecencyDetail label={t("smartLoading.productsWithRecentSales")} value={salesRecency.recent} locale={locale} />
+                <RecencyDetail label={t("smartLoading.productsWithStaleSales")} value={salesRecency.stale} locale={locale} />
+                <RecencyDetail label={t("smartLoading.productsWithoutLastSaleDate")} value={salesRecency.missing} locale={locale} />
+              </div>
+            </details>
           </CardContent>
         </Card>
 
@@ -986,15 +1001,19 @@ function Metric({ label, value, strong }: { label: string; value: string; strong
   );
 }
 
-function MetricButton({ label, value, onClick }: { label: string; value: string; onClick: (event: React.MouseEvent) => void }) {
+function MetricButton({ label, value, description, onClick }: { label: string; value: string; description?: string; onClick: (event: React.MouseEvent) => void }) {
   return (
     <button onClick={onClick} className="rounded-md bg-background/60 p-2 text-right hover:bg-secondary">
       <p className="text-[11px] text-muted-foreground">{label}</p>
       <p className="mt-1 text-lg font-semibold">{value}</p>
+      {description && <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{description}</p>}
     </button>
   );
 }
 
+function RecencyDetail({ label, value, locale }: { label: string; value: number; locale: "ar" | "en" }) {
+  return <div className="rounded bg-background/50 px-2 py-1.5"><p className="text-muted-foreground">{label}</p><p className="mt-0.5 font-semibold text-foreground">{formatQuantity(value, locale)}</p></div>;
+}
 function Info({ label, value }: { label: string; value: string }) {
   return (
     <div>

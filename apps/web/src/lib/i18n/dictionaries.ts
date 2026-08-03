@@ -1187,6 +1187,12 @@ export type TranslationKey =
   | "smartLoading.quantityUnit"
   | "smartLoading.lastSale"
   | "smartLoading.staleDaysUnit"
+  | "smartLoading.noStaleSalesOverThreshold"
+  | "smartLoading.missingLastSaleData"
+  | "smartLoading.salesDataDetails"
+  | "smartLoading.productsWithRecentSales"
+  | "smartLoading.productsWithStaleSales"
+  | "smartLoading.productsWithoutLastSaleDate"
   | "smartLoading.exportExcel"
   | "smartLoading.exportOds"
   | "smartLoading.exportColumnProduct"
@@ -2523,6 +2529,12 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.quantityUnit": "صنف",
     "smartLoading.lastSale": "آخر بيع",
     "smartLoading.staleDaysUnit": "يوم",
+    "smartLoading.noStaleSalesOverThreshold": "لا توجد أصناف تجاوز آخر بيع لها 4 أيام.",
+    "smartLoading.missingLastSaleData": "{count} صنفًا لا تتوفر له بيانات آخر بيع.",
+    "smartLoading.salesDataDetails": "تفاصيل بيانات آخر بيع",
+    "smartLoading.productsWithRecentSales": "أصناف ذات بيع حديث",
+    "smartLoading.productsWithStaleSales": "أصناف راكدة",
+    "smartLoading.productsWithoutLastSaleDate": "أصناف بلا تاريخ آخر بيع",
     "smartLoading.exportExcel": "Excel",
     "smartLoading.exportOds": "ODS",
     "smartLoading.exportColumnProduct": "الصنف",
@@ -3859,6 +3871,12 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.quantityUnit": "product",
     "smartLoading.lastSale": "Last sale",
     "smartLoading.staleDaysUnit": "days",
+    "smartLoading.noStaleSalesOverThreshold": "No products have a last sale older than 4 days.",
+    "smartLoading.missingLastSaleData": "{count} products have no last sale data.",
+    "smartLoading.salesDataDetails": "Last sale data details",
+    "smartLoading.productsWithRecentSales": "Products with recent sales",
+    "smartLoading.productsWithStaleSales": "Products with stale sales",
+    "smartLoading.productsWithoutLastSaleDate": "Products without a last sale date",
     "smartLoading.exportExcel": "Excel",
     "smartLoading.exportOds": "ODS",
     "smartLoading.exportColumnProduct": "Product",
