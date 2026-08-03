@@ -1,9 +1,10 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from "@nestjs/common";
-import type { SmartLoadingProduct, SmartLoadingSession } from "@field-sales-os/schemas";
+import type { SmartLoadingPriorityProduct, SmartLoadingProduct, SmartLoadingSession } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
 import { LostOpportunityService } from "../lost-opportunity/lost-opportunity.service";
 import type { EntityQueryResult } from "../rie/entity-provider.interface";
+import { selectRoutePriorityProducts } from "./smart-loading-priority";
 
 // Smart Loading — read-only, computed-on-request from RIE (no new table, no
 // migration, no persistence, no Excel reads beyond what RieFacade already
@@ -102,6 +103,15 @@ export function parseAsOfDate(value: string | undefined): Date {
   return date;
 }
 
+export function parseTargetDate(value: string | undefined): Date {
+  const tomorrow = nextRouteDate(companyCalendarDate());
+  const date = value ? parseAsOfDate(value) : tomorrow;
+  if (date.getTime() < tomorrow.getTime()) {
+    throw new BadRequestException("targetDate must be tomorrow or a future calendar date.");
+  }
+  return date;
+}
+
 export function weekdayForDate(date: Date): VisitWeekday {
   return new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(date).toLowerCase() as VisitWeekday;
 }
@@ -157,11 +167,11 @@ export class SmartLoadingService {
     }
   }
 
-  async getSession(user: AuthenticatedUser, requestedAsOfDate?: string): Promise<SmartLoadingSession> {
+  async getSession(user: AuthenticatedUser, requestedTargetDate?: string): Promise<SmartLoadingSession> {
     if (!user.companyId) throw new ForbiddenException();
     const ctx = this.rieContext(user);
-    const asOfDate = parseAsOfDate(requestedAsOfDate);
-    const asOfDateIso = isoDay(asOfDate.getTime());
+    const targetDate = parseTargetDate(requestedTargetDate);
+    const targetDateIso = isoDay(targetDate.getTime());
 
     const [productsResult, customersResult, invoicesResult, invoiceItemsResult, returnsResult, returnItemsResult, vanInventoryRecords] = await Promise.all([
       this.rieFacade.getEntityRecords("Products", ctx),
@@ -183,7 +193,7 @@ export class SmartLoadingService {
     // caller's scope has none) — honest degrade, same contract the
     // frontend stub already promised. Never fabricate a stock number.
     if (!vanInventoryRecords.available || vanInventoryRecords.records.length === 0) {
-      return { state: "vehicle-stock-unavailable", lostOpportunityReason: lostOpportunityDataUnavailable ? "data-unavailable" : undefined };
+      return { state: "vehicle-stock-unavailable", targetDate: targetDateIso, route: null, lostOpportunityReason: lostOpportunityDataUnavailable ? "data-unavailable" : undefined };
     }
 
     // ---- Van Inventory -> currentVehicleStock. Latest ReportDate only
@@ -227,8 +237,7 @@ export class SmartLoadingService {
     // Route Assignments are not a mapped RIE dataset yet, so the documented
     // current source is Customers.VisitDay. Values are normalised here rather
     // than compared as raw display text.
-    const nextRouteDateValue = nextRouteDate(asOfDate);
-    const nextRouteWeekday = weekdayForDate(nextRouteDateValue);
+    const targetRouteWeekday = weekdayForDate(targetDate);
     const normalizeKey = (value: unknown) => String(value ?? "").trim();
     const nextRouteCustomers = new Map<string, string>();
     let hasUnsupportedVisitDayFormat = false;
@@ -239,14 +248,14 @@ export class SmartLoadingService {
         if (rawVisitDay) hasUnsupportedVisitDayFormat = true;
         continue;
       }
-      if (visitDay !== nextRouteWeekday) continue;
+      if (visitDay !== targetRouteWeekday) continue;
       const customerCode = normalizeKey(customer.CustomerCode);
       if (customerCode) nextRouteCustomers.set(customerCode, normalizeKey(customer.CustomerName) || customerCode);
     }
 
     const lostOpportunityResult = await this.lostOpportunityService.detect({
       ...ctx,
-      selectedDate: asOfDateIso,
+      selectedDate: targetDateIso,
       customerCodes: [...nextRouteCustomers.keys()],
       customerNames: nextRouteCustomers,
     });
@@ -258,11 +267,12 @@ export class SmartLoadingService {
         : lostOpportunityResult.status === "no-customers" ? "no-tomorrow-route-customers" : lostOpportunityResult.status;
     // ---- Invoices -> per-InvoiceNo customer/date lookup (same join shape
     // as sgi.service.ts / team-performance.service.ts).
-    const invoiceDateByNo = new Map<string, number>();
+    const invoiceMetaByNo = new Map<string, { date: number; customerCode: string }>();
     for (const inv of invoicesRecords) {
       const no = String(inv.InvoiceNo ?? "").trim();
       const t = toEpochMs(inv.InvoiceDate);
-      if (no && t !== null) invoiceDateByNo.set(no, t);
+      const customerCode = String(inv.CustomerCode ?? "").trim();
+      if (no && t !== null && customerCode) invoiceMetaByNo.set(no, { date: t, customerCode });
     }
 
     // ---- Invoice Items joined to Invoices -> lastSaleDate + weekly
@@ -285,20 +295,27 @@ export class SmartLoadingService {
 
     const lastSaleMsByProduct = new Map<string, number>();
     const windowQtyByProduct = new Map<string, number>();
+    const prioritySalesByProduct = new Map<string, { customers: Set<string>; totalQuantity: number }>();
 
     for (const item of invoiceItemsRecords) {
       const invoiceNo = String(item.InvoiceNo ?? "").trim();
-      const t = invoiceDateByNo.get(invoiceNo);
-      if (t === undefined) continue;
+      const invoice = invoiceMetaByNo.get(invoiceNo);
+      if (!invoice || !nextRouteCustomers.has(invoice.customerCode)) continue;
       const productCode = String(item.ProductCode ?? "").trim();
       if (!productCode) continue;
 
       const prevLast = lastSaleMsByProduct.get(productCode);
-      if (prevLast === undefined || t > prevLast) lastSaleMsByProduct.set(productCode, t);
+      if (prevLast === undefined || invoice.date > prevLast) lastSaleMsByProduct.set(productCode, invoice.date);
 
-      if (t >= windowStartMs && t <= nowMs) {
+      if (invoice.date >= windowStartMs && invoice.date <= nowMs) {
         const qty = toFiniteNumber(item.Quantity) ?? 0;
         windowQtyByProduct.set(productCode, (windowQtyByProduct.get(productCode) ?? 0) + qty);
+        if (qty > 0) {
+          const priority = prioritySalesByProduct.get(productCode) ?? { customers: new Set<string>(), totalQuantity: 0 };
+          priority.customers.add(invoice.customerCode);
+          priority.totalQuantity += qty;
+          prioritySalesByProduct.set(productCode, priority);
+        }
       }
     }
 
@@ -338,12 +355,25 @@ export class SmartLoadingService {
 
     products.sort((a, b) => a.productName.localeCompare(b.productName, "ar"));
 
+    const priorityProducts: SmartLoadingPriorityProduct[] = selectRoutePriorityProducts(
+      [...prioritySalesByProduct.entries()].map(([productCode, value]) => ({
+        productCode,
+        productName: productMeta.get(productCode)?.name ?? productCode,
+        category: productMeta.get(productCode)?.category ?? null,
+        routeCustomerCount: value.customers.size,
+        totalQuantity: value.totalQuantity,
+        currentVehicleStock: vehicleStockByProduct.get(productCode) ?? null,
+      })),
+    );
     return {
       state: "ready",
       products,
       attention: attentionList,
       calculatedAt: new Date(nowMs).toISOString(),
-      asOfDate: asOfDateIso,
+      asOfDate: targetDateIso,
+      targetDate: targetDateIso,
+      route: nextRouteCustomers.size > 0 ? { targetDate: targetDateIso, customerCount: nextRouteCustomers.size } : null,
+      priorityProducts,
       lostOpportunities,
       lostOpportunityReason,
     };

@@ -44,6 +44,8 @@ export {
 export type {
   SmartLoadingPriority,
   SmartLoadingProduct,
+  SmartLoadingRoute,
+  SmartLoadingPriorityProduct,
   SmartLoadingAttention,
   SmartLoadingReadySession,
   SmartLoadingLostOpportunity,

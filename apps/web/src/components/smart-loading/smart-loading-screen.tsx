@@ -21,10 +21,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTranslation } from "@/components/translation-provider";
-import type { SmartLoadingLostOpportunity, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
+import type { SmartLoadingLostOpportunity, SmartLoadingPriorityProduct, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
 import { categoryAddedProductCount, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
-import { classifySalesRecency, operationalPriorityProductCodes, summarizeSalesRecency } from "./sales-classification";
+import { classifySalesRecency, summarizeSalesRecency } from "./sales-classification";
 
 type Inputs = { confirmedOrders: number; safetyStock: number; manual?: number };
 type LostOpportunityAddition = {
@@ -61,11 +61,15 @@ export function SmartLoadingScreen({
   isLoading,
   isError,
   onRetry,
+  targetDate,
+  onTargetDateChange,
 }: {
   session?: SmartLoadingSession;
   isLoading: boolean;
   isError: boolean;
   onRetry: () => Promise<unknown> | void;
+  targetDate: string;
+  onTargetDateChange: (value: string) => void;
 }) {
   const { locale, t } = useTranslation();
   const label = (key: string, fallback: string) => {
@@ -81,6 +85,7 @@ export function SmartLoadingScreen({
   const [openRecommendationGroups, setOpenRecommendationGroups] = useState<Set<string>>(new Set());
   const [recommendationSearch, setRecommendationSearch] = useState("");
   const [panel, setPanel] = useState<"priority" | "stale" | null>(null);
+  const [openPriorityGroups, setOpenPriorityGroups] = useState<Set<string>>(new Set());
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
   const [removedProductCodes, setRemovedProductCodes] = useState<Set<string>>(new Set());
   const [manuallyAddedProductCodes, setManuallyAddedProductCodes] = useState<Set<string>>(new Set());
@@ -156,18 +161,14 @@ export function SmartLoadingScreen({
     }, {});
   }, [recommendationRows, t]);
 
-  const priorityRows = useMemo(() => {
-    const priorityCodes = operationalPriorityProductCodes(
-      rows.map((row) => ({
-        productCode: row.product.productCode,
-        suggestedQuantity: row.suggested,
-        confirmedOrders: row.input.confirmedOrders,
-        selectedLostOpportunityQuantity: row.lostOpportunity?.addedQuantity ?? 0,
-      })),
-    );
-    return rows.filter((row) => priorityCodes.has(row.product.productCode));
-  }, [rows]);
-
+  const priorityProducts = session?.state === "ready" ? session.priorityProducts : [];
+  const priorityGroups = useMemo(() => {
+    return priorityProducts.reduce<Record<string, SmartLoadingPriorityProduct[]>>((groups, product) => {
+      const category = product.category ?? t("smartLoading.uncategorized");
+      (groups[category] ??= []).push(product);
+      return groups;
+    }, {});
+  }, [priorityProducts, t]);
   const salesRecency = useMemo(
     () => session?.state === "ready" ? summarizeSalesRecency(session.products) : { recent: 0, stale: 0, missing: 0 },
     [session],
@@ -184,6 +185,19 @@ export function SmartLoadingScreen({
 
   const staleRows = useMemo(() => allRows.filter((row) => classifySalesRecency(row.product.lastSaleDate) === "stale"), [allRows]);
 
+  const hasLocalChanges = Object.keys(inputs).length > 0 || removedProductCodes.size > 0 || manuallyAddedProductCodes.size > 0 || Object.keys(lostOpportunityAdditions).length > 0 || Object.keys(lostOpportunityQuantityDrafts).length > 0 || checkedItems.size > 0;
+
+  function changeTargetDate(value: string) {
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const minimumDate = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+    if (!value || value < minimumDate) return;
+    if (hasLocalChanges && !window.confirm(label("smartLoading.changeDateConfirm", "Changing the loading day will discard local changes. Continue?"))) return;
+    if (hasLocalChanges) restoreOriginalList();
+    setCheckedItems(new Set());
+    setPanel(null);
+    onTargetDateChange(value);
+  }
   async function refresh() {
     setRefreshing(true);
     try {
@@ -476,6 +490,13 @@ export function SmartLoadingScreen({
             {t("smartLoading.title")}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">{t("smartLoading.subtitle")}</p>
+          <div className="mt-3 flex flex-wrap items-end gap-2">
+            <div className="grid gap-1">
+              <Label htmlFor="smart-loading-target-date" className="text-xs">{label("smartLoading.targetDate", "تجهيز تحميل ليوم")}</Label>
+              <Input id="smart-loading-target-date" className="h-9 w-48" type="date" min={new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)} value={targetDate} onChange={(event) => changeTargetDate(event.target.value)} />
+            </div>
+            {session.route ? <p className="pb-2 text-xs text-muted-foreground">{label("smartLoading.routeCustomers", "عملاء خط السير")}: {formatQuantity(session.route.customerCount, locale)}</p> : <p className="pb-2 text-xs text-amber-700">{label("smartLoading.noRouteForDate", "لا يوجد خط سير محدد لهذا اليوم.")}</p>}
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" onClick={() => { setLostOpportunitiesOpen(true); setLostOpportunityWarning(null); }}>
@@ -531,8 +552,8 @@ export function SmartLoadingScreen({
             />
             <MetricButton
               label={t("smartLoading.operationalPriorityProducts")}
-              value={formatQuantity(priorityRows.length, locale)}
-              description={priorityRows.length === 0 ? t("smartLoading.noOperationalPriority") : undefined}
+              value={formatQuantity(priorityProducts.length, locale)}
+              description={priorityProducts.length === 0 ? label("smartLoading.noRoutePriority", "No route priority products are available for this day.") : undefined}
               onClick={(event) => {
                 event.stopPropagation();
                 setPanel(panel === "priority" ? null : "priority");
@@ -631,13 +652,8 @@ export function SmartLoadingScreen({
         />
       )}
 
-      {panel && (
-        <ProductListPopover
-          rows={panel === "priority" ? priorityRows : staleRows}
-          stale={panel === "stale"}
-          onClose={() => setPanel(null)}
-        />
-      )}
+      {panel === "priority" && <PriorityProductsPopover groups={priorityGroups} openGroups={openPriorityGroups} onToggleGroup={(category) => setOpenPriorityGroups((current) => { const next = new Set(current); next.has(category) ? next.delete(category) : next.add(category); return next; })} onClose={() => setPanel(null)} />}
+      {panel === "stale" && <ProductListPopover rows={staleRows} stale onClose={() => setPanel(null)} />}
 
       <Card className="glass-card">
         <CardHeader className="pb-3">
@@ -1188,6 +1204,46 @@ function CategoryProductGroups({ rows, stale }: { rows: Row[]; stale: boolean })
   );
 }
 
+function PriorityProductsPopover({
+  groups,
+  openGroups,
+  onToggleGroup,
+  onClose,
+}: {
+  groups: Record<string, SmartLoadingPriorityProduct[]>;
+  openGroups: Set<string>;
+  onToggleGroup: (category: string) => void;
+  onClose: () => void;
+}) {
+  const { locale, t } = useTranslation();
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/20 pt-24" onClick={onClose}>
+      <Card className="w-[min(92vw,620px)] shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <CardHeader className="flex-row items-center justify-between p-4">
+          <CardTitle>{t("smartLoading.operationalPriorityProducts")}</CardTitle>
+          <Button size="sm" variant="ghost" onClick={onClose}>{t("smartLoading.close")}</Button>
+        </CardHeader>
+        <CardContent className="max-h-[60vh] space-y-2 overflow-y-auto p-4 pt-0">
+          {Object.entries(groups).map(([category, products]) => {
+            const open = openGroups.has(category);
+            return <section key={category} className="rounded border">
+              <button type="button" className="flex w-full items-center justify-between px-3 py-2 text-sm font-semibold" onClick={() => onToggleGroup(category)}>
+                <span>{category} ({formatQuantity(products.length, locale)})</span>
+                <ChevronDown className={cn("h-4 w-4 transition-transform", !open && "-rotate-90")} />
+              </button>
+              {open && <div className="divide-y border-t px-3">
+                {products.map((product) => <div key={product.productCode} className="grid grid-cols-[1fr_auto] gap-3 py-2 text-xs">
+                  <span className="min-w-0"><strong className="block truncate text-sm">{product.productName}</strong><span className="text-muted-foreground">{t("smartLoading.routeCustomers")}: {formatQuantity(product.routeCustomerCount, locale)}</span></span>
+                  <span className="text-left text-muted-foreground">{t("smartLoading.totalQuantity")}: {formatQuantity(product.totalQuantity, locale)}{product.currentVehicleStock !== null && <><br />{t("smartLoading.vehicleStock")}: {formatQuantity(product.currentVehicleStock, locale)}</>}</span>
+                </div>)}
+              </div>}
+            </section>;
+          })}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 function ProductListPopover({ rows, stale, onClose }: { rows: Row[]; stale: boolean; onClose: () => void }) {
   const { t } = useTranslation();
   return (

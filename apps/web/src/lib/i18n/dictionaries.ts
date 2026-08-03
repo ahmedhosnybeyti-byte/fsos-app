@@ -1152,6 +1152,11 @@ export type TranslationKey =
   | "smartLoading.noOperationalPriority"
   | "smartLoading.operationalPriorityProductsPanelTitle"
   | "smartLoading.lastCalculation"
+  | "smartLoading.targetDate"
+  | "smartLoading.routeCustomers"
+  | "smartLoading.noRouteForDate"
+  | "smartLoading.noRoutePriority"
+  | "smartLoading.changeDateConfirm"
   | "smartLoading.attentionTitle"
   | "smartLoading.attentionDescription"
   | "smartLoading.recommendationsTitle"
@@ -2497,6 +2502,11 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.noOperationalPriority": "لا توجد أولوية تشغيلية محددة حاليًا.",
     "smartLoading.operationalPriorityProductsPanelTitle": "أصناف ذات أولوية تشغيلية",
     "smartLoading.lastCalculation": "آخر حساب",
+    "smartLoading.targetDate": "تجهيز تحميل ليوم",
+    "smartLoading.routeCustomers": "عملاء خط السير",
+    "smartLoading.noRouteForDate": "لا يوجد خط سير محدد لهذا اليوم.",
+    "smartLoading.noRoutePriority": "لا توجد أصناف ذات أولوية لمسار هذا اليوم.",
+    "smartLoading.changeDateConfirm": "سيؤدي تغيير يوم التحميل إلى إلغاء التعديلات المحلية. هل تريد المتابعة؟",
     "smartLoading.attentionTitle": "انتباه اليوم",
     "smartLoading.attentionDescription": "حقائق تشغيلية تستحق المراجعة.",
     "smartLoading.recommendationsTitle": "توصيات التحميل",
@@ -3842,6 +3852,11 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.noOperationalPriority": "No operational priority is currently identified.",
     "smartLoading.operationalPriorityProductsPanelTitle": "Operational Priority Products",
     "smartLoading.lastCalculation": "Last Calculation",
+    "smartLoading.targetDate": "Prepare loading for",
+    "smartLoading.routeCustomers": "Route customers",
+    "smartLoading.noRouteForDate": "No route is scheduled for this day.",
+    "smartLoading.noRoutePriority": "No priority products are available for this route day.",
+    "smartLoading.changeDateConfirm": "Changing the loading day will discard local changes. Continue?",
     "smartLoading.attentionTitle": "Today's Attention",
     "smartLoading.attentionDescription": "Operational facts worth reviewing.",
     "smartLoading.recommendationsTitle": "Loading Recommendations",

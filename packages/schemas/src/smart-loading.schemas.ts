@@ -31,6 +31,22 @@ export const smartLoadingProductSchema = z.object({
 });
 export type SmartLoadingProduct = z.infer<typeof smartLoadingProductSchema>;
 
+export const smartLoadingRouteSchema = z.object({
+  targetDate: z.string(),
+  customerCount: z.number().int().nonnegative(),
+});
+export type SmartLoadingRoute = z.infer<typeof smartLoadingRouteSchema>;
+
+export const smartLoadingPriorityProductSchema = z.object({
+  productCode: z.string(),
+  productName: z.string(),
+  category: z.string().nullable(),
+  routeCustomerCount: z.number().int().nonnegative(),
+  totalQuantity: z.number(),
+  currentVehicleStock: z.number().nullable(),
+});
+export type SmartLoadingPriorityProduct = z.infer<typeof smartLoadingPriorityProductSchema>;
+
 export const smartLoadingAttentionSchema = z.object({
   id: z.string(),
   message: z.string(),
@@ -70,6 +86,9 @@ export const smartLoadingReadySessionSchema = z.object({
   products: z.array(smartLoadingProductSchema),
   attention: z.array(smartLoadingAttentionSchema),
   asOfDate: z.string(),
+  targetDate: z.string(),
+  route: smartLoadingRouteSchema.nullable(),
+  priorityProducts: z.array(smartLoadingPriorityProductSchema),
   lostOpportunities: z.array(smartLoadingLostOpportunitySchema),
   lostOpportunityReason: smartLoadingLostOpportunityReasonSchema,
   calculatedAt: z.string(),
@@ -79,6 +98,8 @@ export type SmartLoadingReadySession = z.infer<typeof smartLoadingReadySessionSc
 export const smartLoadingVehicleStockUnavailableSessionSchema = z.object({
   state: z.literal("vehicle-stock-unavailable"),
   lostOpportunityReason: smartLoadingLostOpportunityReasonSchema.optional(),
+  targetDate: z.string(),
+  route: smartLoadingRouteSchema.nullable(),
 });
 export type SmartLoadingVehicleStockUnavailableSession = z.infer<typeof smartLoadingVehicleStockUnavailableSessionSchema>;
 

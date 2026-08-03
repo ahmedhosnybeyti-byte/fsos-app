@@ -16,8 +16,8 @@ export class SmartLoadingController {
 
   @Get("session")
   @Auth()
-  getSession(@CurrentUser() user: AuthenticatedUser, @Query("asOfDate") asOfDate?: string) {
+  getSession(@CurrentUser() user: AuthenticatedUser, @Query("targetDate") targetDate?: string, @Query("asOfDate") asOfDate?: string) {
     if (!user.companyId) throw new ForbiddenException();
-    return this.smartLoadingService.getSession(user, asOfDate);
+    return this.smartLoadingService.getSession(user, targetDate ?? asOfDate);
   }
 }
