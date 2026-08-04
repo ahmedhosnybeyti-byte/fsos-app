@@ -200,6 +200,17 @@ export class GptService {
       throw new NotFoundException("Your company has not configured a Custom GPT yet");
     }
 
+    // Validate the platform-wide launch URL before creating any state.
+    // This keeps a missing or malformed configuration a clear client-side 4xx
+    // and avoids leaving behind an unusable launch code.
+    let gptBaseUrl: string;
+    try {
+      ({ gptBaseUrl } = await this.platformSettingsService.get());
+      const url = new URL(gptBaseUrl);
+      if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("unsupported protocol");
+    } catch {
+      throw new BadRequestException("Custom GPT URL is not configured. Ask a platform administrator to set it before launching GPT.");
+    }
     const raw = randomBytes(24).toString("base64url");
     const expiresAt = new Date(Date.now() + TOKEN_TTL.gptLaunchTokenMinutes * 60 * 1000);
 
@@ -214,18 +225,6 @@ export class GptService {
     });
 
     await this.usageAnalyticsService.recordEvent({ companyId, userId, gptId: gpt.id, eventType: "LAUNCH_TOKEN_ISSUED" });
-
-    // Always the platform's configured base URL — never a conversation URL.
-    // ChatGPT appends /c/<id> to the address bar once a chat starts; that's
-    // the browser's doing, not something we construct or persist here.
-    let gptBaseUrl: string;
-    try {
-      ({ gptBaseUrl } = await this.platformSettingsService.get());
-      const url = new URL(gptBaseUrl);
-      if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("unsupported protocol");
-    } catch {
-      throw new BadRequestException("Custom GPT URL is not configured. Ask a platform administrator to set it before launching GPT.");
-    }
 
     return { launchCode: raw, gptUrl: gptBaseUrl, expiresInMinutes: TOKEN_TTL.gptLaunchTokenMinutes };
   }
