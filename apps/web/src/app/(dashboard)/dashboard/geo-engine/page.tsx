@@ -190,11 +190,11 @@ export default function GeoEnginePage() {
   const isPermissionDenied = queryResult.error instanceof ApiError && queryResult.error.status === 403;
 
   return (
-    <div className="relative space-y-6">
+    <div className="relative space-y-3 sm:space-y-4 sm:space-y-6">
       <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
       <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
 
-      <div className="rise-in flex flex-wrap items-center justify-between gap-4">
+      <div className="rise-in flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="flex items-center gap-2">
           <span className="crystal-badge h-11 w-11 bg-cyan-600/15 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-400">
             <Globe2 className="h-5 w-5" />
@@ -207,7 +207,7 @@ export default function GeoEnginePage() {
         <ExecutiveTools targetRef={workspaceRef} onReset={handleReset} />
       </div>
 
-      <div ref={workspaceRef} className="space-y-6 bg-background p-1">
+      <div ref={workspaceRef} className="space-y-4 bg-background p-0 sm:space-y-6 sm:p-1">
         <div className="glass-card rise-in flex items-start gap-2.5 rounded-lg border border-border p-3 text-sm text-muted-foreground">
           <Info className="mt-0.5 h-4 w-4 shrink-0" />
           <p>{t("geoEngine.phase3Notice")}</p>
@@ -282,7 +282,7 @@ export default function GeoEnginePage() {
                       <TerritoryMapMode points={result.points} onPointClick={handlePointClick} />
                     ) : (
                       <>
-                        <GeoMapCanvas ref={canvasRef} onReady={() => setMapReadyTick((n) => n + 1)} className="h-[560px] min-w-0 rounded-lg border border-border" />
+                        <GeoMapCanvas ref={canvasRef} onReady={() => setMapReadyTick((n) => n + 1)} className="h-[360px] sm:h-[560px] min-w-0 rounded-lg border border-border" />
                         {state.mode === "heat" && <HeatMapMode canvasRef={canvasRef} points={result.points} ready={mapReadyTick} onPointClick={handlePointClick} />}
                         {state.mode === "bubble" && <BubbleMapMode canvasRef={canvasRef} points={result.points} ready={mapReadyTick} onPointClick={handlePointClick} />}
                         {state.mode === "cluster" && <ClusterMapMode canvasRef={canvasRef} points={result.points} ready={mapReadyTick} onPointClick={handlePointClick} />}

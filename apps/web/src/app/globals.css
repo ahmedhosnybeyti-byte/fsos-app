@@ -391,3 +391,18 @@
   .glass-card[class~="p-5"], .glass-hero[class~="p-5"] { padding: 0.75rem; }
   [class~="gap-4"] { gap: 0.625rem; }
 }
+
+
+/* Mobile density pass: compact touch targets and preserve room for fixed navigation. */
+@media (max-width: 767px) {
+  html, body { min-height: 100dvh; overflow-x: hidden; }
+  main { min-height: 100dvh; padding-bottom: calc(4.5rem + env(safe-area-inset-bottom) + 1rem) !important; }
+  button, input, select, textarea { min-height: 44px; }
+  .mobile-density-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+  .mobile-density-actions > * { width: 100%; min-width: 0; }
+}
+@media (max-width: 430px) {
+  h1[class~="text-2xl"] { font-size: 1.625rem; line-height: 2rem; }
+  h1[class~="text-3xl"] { font-size: 1.75rem; line-height: 2.125rem; }
+  .mobile-density-actions { grid-template-columns: 1fr; }
+}

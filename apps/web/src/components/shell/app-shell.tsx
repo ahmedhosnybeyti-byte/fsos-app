@@ -61,7 +61,7 @@ export function AppShell({
     // per the CSS spec, so the sidebar renders on the correct side with
     // zero JSX reordering here. Spacing/border utilities use Tailwind's
     // logical-property variants (border-e/-s, ps-/pe-) so they flip too.
-    <div className="flex min-h-screen bg-app-gradient">
+    <div className="flex min-h-[100dvh] bg-app-gradient">
       <aside className="glass-panel hidden w-64 shrink-0 flex-col border-e border-border md:flex">
         <div className="flex items-center gap-2 border-b border-border px-6 py-4">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm">
@@ -107,7 +107,7 @@ export function AppShell({
             البيانات" was actually reporting — every dashboard page with a
             wide table was affected, not just Visit Efficiency/Team
             Performance. */}
-        <main className="min-w-0 flex-1 overflow-y-auto p-3 pb-24 sm:p-6 sm:pb-24 md:p-8 md:pb-8">{children}</main>
+        <main className="min-w-0 flex-1 overflow-y-auto p-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:p-6 sm:pb-24 md:p-8 md:pb-8">{children}</main>
         <MobileBottomNav navItems={navItems} pathname={pathname} onMore={() => setMobileNavOpen((value) => !value)} />
       </div>
     </div>
@@ -118,7 +118,7 @@ function MobileBottomNav({ navItems, pathname, onMore }: { navItems: NavItem[]; 
   const { t } = useTranslation();
   const primary = navItems.slice(0, 4);
   const active = (href: string) => pathname === href || pathname.startsWith(`${href}/`);
-  return <nav className="fixed inset-x-0 bottom-0 z-40 flex h-16 items-stretch border-t border-border bg-background/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-lg backdrop-blur md:hidden" aria-label="Mobile navigation">
+  return <nav className="fixed inset-x-0 bottom-0 z-40 flex h-[calc(4rem+env(safe-area-inset-bottom))] items-stretch border-t border-border bg-background/95 px-1 pb-[env(safe-area-inset-bottom)] shadow-lg backdrop-blur md:hidden" aria-label="Mobile navigation">
     {primary.map((item) => <Link key={item.href} href={item.href} className={cn("flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] font-medium", item.locked ? "text-muted-foreground/60" : active(item.href) ? "text-primary" : "text-muted-foreground")}>{item.locked ? <LockKeyhole className="h-5 w-5" /> : <item.icon className="h-5 w-5" />}<span className="max-w-full truncate px-1">{item.label}</span></Link>)}
     {navItems.length > primary.length && <button type="button" onClick={onMore} className="flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] font-medium text-muted-foreground" aria-label="More navigation"><MoreHorizontal className="h-5 w-5" /><span>{t("shell.more")}</span></button>}
   </nav>;
@@ -217,7 +217,7 @@ function DashboardHeader({
     .toUpperCase();
 
   return (
-    <header className="glass-panel z-30 flex h-16 items-center gap-3 border-b border-border px-4 md:px-6" ref={containerRef}>
+    <header className="glass-panel z-30 flex h-14 items-center gap-2 border-b border-border px-3 md:h-16 md:gap-3 md:px-6" ref={containerRef}>
       <Button variant="ghost" size="icon" className="shrink-0 md:hidden" onClick={onToggleMobileNav} aria-label="فتح القائمة">
         {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
       </Button>
@@ -233,7 +233,7 @@ function DashboardHeader({
           }}
           onFocus={() => setResultsOpen(true)}
           placeholder={t("shell.searchPlaceholder")}
-          className="h-10 w-full rounded-full border border-border bg-background/60 ps-9 pe-12 text-sm outline-none ring-primary/40 placeholder:text-muted-foreground focus:ring-2"
+          className="h-11 w-full md:h-10 rounded-full border border-border bg-background/60 ps-9 pe-12 text-sm outline-none ring-primary/40 placeholder:text-muted-foreground focus:ring-2"
         />
         <kbd className="pointer-events-none absolute end-3 top-1/2 hidden -translate-y-1/2 rounded border border-border bg-secondary px-1.5 py-0.5 text-[10px] text-muted-foreground sm:block">
           ⌘K

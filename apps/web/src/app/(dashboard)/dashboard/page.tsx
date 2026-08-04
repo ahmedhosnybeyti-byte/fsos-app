@@ -61,7 +61,7 @@ export default function DashboardOverviewPage() {
   const featuredKpi: "subscription" | "trial" | "files" = isBlocked ? "subscription" : trialDaysLeft !== null && trialDaysLeft <= 5 ? "trial" : "files";
 
   return (
-    <div className="relative space-y-6">
+    <div className="relative space-y-4 sm:space-y-6">
       {/* Constitution §4.1 Cinematic Background — follow-up: fixed to the
           viewport (not just a band behind the Hero) so it reads as a real
           backdrop while scrolling, not a static strip. Still page-scoped
@@ -78,13 +78,13 @@ export default function DashboardOverviewPage() {
           the right-hand whitespace reads as considered negative space
           around a "hero," not an empty gap — no new content/data (kept
           intentionally out of scope; see the redesign follow-up thread). */}
-      <div className="glass-hero rise-in flex flex-col gap-6 p-7 sm:flex-row sm:items-center sm:justify-between md:p-10">
+      <div className="glass-hero rise-in flex flex-col gap-4 p-4 sm:gap-6 sm:p-7 sm:flex-row sm:items-center sm:justify-between md:p-10">
         <div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" />
         <Zap
           aria-hidden
           className="pointer-events-none absolute -end-6 -top-10 hidden h-56 w-56 rotate-12 text-primary/[0.05] sm:block dark:text-primary/[0.08]"
         />
-        <div className="relative flex items-center gap-5">
+        <div className="relative flex items-center gap-3 sm:gap-5">
           <span className="crystal-badge relative hidden h-20 w-20 shrink-0 bg-primary/15 text-primary drop-shadow-[0_0_36px_hsl(var(--primary)/0.45)] sm:flex">
             <Zap className="h-9 w-9" />
           </span>
@@ -98,7 +98,7 @@ export default function DashboardOverviewPage() {
         <Button
           asChild
           size="lg"
-          className="relative h-12 w-fit shrink-0 px-8 text-base shadow-[0_0_32px_-6px_hsl(var(--primary)/0.55)] hover:shadow-[0_0_44px_-6px_hsl(var(--primary)/0.7)] motion-safe:hover:-translate-y-0.5"
+          className="relative h-11 w-fit shrink-0 px-5 text-sm sm:h-12 sm:px-8 sm:text-base shadow-[0_0_32px_-6px_hsl(var(--primary)/0.55)] hover:shadow-[0_0_44px_-6px_hsl(var(--primary)/0.7)] motion-safe:hover:-translate-y-0.5"
         >
           <Link href="/dashboard/assistant">{t("dashboard.heroCta")}</Link>
         </Button>
@@ -158,7 +158,7 @@ export default function DashboardOverviewPage() {
           الشاشة" — AssistantEntryCard now takes 2/3 of the row's width
           (md:col-span-2 of 3) instead of an even 50/50 split, so it wins
           visual weight without moving out of its existing section/order. */}
-      <div className="rise-in rise-d2 grid gap-6 md:grid-cols-3">
+      <div className="rise-in rise-d2 grid gap-4 sm:gap-6 md:grid-cols-3">
         <div className="md:col-span-2">
           <AssistantEntryCard />
         </div>
@@ -168,7 +168,7 @@ export default function DashboardOverviewPage() {
       {/* Files — §5.11 Empty States: message + reason + action + visual.
           Passive tier in the card hierarchy: no glow, no lift, slightly
           quieter than the primary cards above it. */}
-      <div className="glass-card rise-in rise-d3 p-6">
+      <div className="glass-card rise-in rise-d3 p-4 sm:p-6">
         <div className="flex items-center justify-between">
           <h3 className="flex items-center gap-2.5 text-base font-semibold leading-none tracking-tight">
             <span className="crystal-badge h-9 w-9 bg-primary/15 text-primary">
