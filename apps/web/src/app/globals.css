@@ -412,3 +412,9 @@
   h1[class~="text-3xl"] { font-size: 1.75rem; line-height: 2.125rem; }
   .mobile-density-actions { grid-template-columns: 1fr; }
 }
+
+@media (max-width: 767px) {
+  html {
+    font-size: 14px;
+  }
+}
