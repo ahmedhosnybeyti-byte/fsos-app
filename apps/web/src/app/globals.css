@@ -398,6 +398,12 @@
   html, body { min-height: 100dvh; overflow-x: hidden; }
   main { min-height: 100dvh; padding-bottom: calc(4.5rem + env(safe-area-inset-bottom) + 1rem) !important; }
   button, input, select, textarea { min-height: 44px; }
+  [class~="p-8"] { padding: 1rem; }
+  [class~="py-8"] { padding-top: 1rem; padding-bottom: 1rem; }
+  [class~="gap-8"] { gap: 1rem; }
+  [class~="space-y-8"] > :not([hidden]) ~ :not([hidden]) { margin-top: 1rem; }
+  [class~="text-4xl"] { font-size: 1.875rem; line-height: 2.25rem; }
+  [class~="text-5xl"] { font-size: 2rem; line-height: 2.5rem; }
   .mobile-density-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
   .mobile-density-actions > * { width: 100%; min-width: 0; }
 }

@@ -95,7 +95,7 @@ export function KpiCard({
 
   return (
     <div
-      className={cn("glass-card card-lift", glowClass, featured ? "p-4 sm:col-span-2 sm:p-6" : "p-3 opacity-90 sm:p-5")}
+      className={cn("glass-card card-lift", glowClass, featured ? "p-3 sm:col-span-2 sm:p-6" : "p-3 opacity-90 sm:p-5")}
     >
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-medium text-muted-foreground">{label}</p>
@@ -112,7 +112,7 @@ export function KpiCard({
           {tagLabel}
         </span>
       )}
-      <p className={cn("mt-2 font-semibold tracking-tight text-foreground", featured ? "text-3xl sm:text-4xl" : "text-xl sm:text-2xl")}>{displayValue}</p>
+      <p className={cn("mt-2 font-semibold tracking-tight text-foreground", featured ? "text-2xl sm:text-4xl" : "text-lg sm:text-2xl")}>{displayValue}</p>
       {trend && (
         <p
           className={cn(
