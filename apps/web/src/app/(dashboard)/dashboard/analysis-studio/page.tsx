@@ -22,7 +22,7 @@ export default function AnalysisStudioPage() {
   const [viewStartTime, setViewStartTime] = useState<number>(0);
   const feedEndRef = useRef<HTMLDivElement>(null);
 
-  const { data: events } = useQuery({
+  const { data: events, isError: eventsUnavailable } = useQuery({
     queryKey: ["analysis-studio", "events"],
     queryFn: analysisStudioApi.listEvents,
     refetchInterval: POLL_INTERVAL_MS,
@@ -65,6 +65,8 @@ export default function AnalysisStudioPage() {
       <div className="rise-in rise-d1">
         <LaunchGptCard />
       </div>
+
+      {eventsUnavailable && <p className="text-sm text-muted-foreground">سجل التحليلات غير متاح مؤقتًا. يمكنك الاستمرار في تشغيل GPT.</p>}
 
       {visibleEvents.length === 0 ? (
         <Card className="glass-card rise-in rise-d2">

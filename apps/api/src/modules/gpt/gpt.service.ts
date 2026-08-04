@@ -218,7 +218,14 @@ export class GptService {
     // Always the platform's configured base URL — never a conversation URL.
     // ChatGPT appends /c/<id> to the address bar once a chat starts; that's
     // the browser's doing, not something we construct or persist here.
-    const { gptBaseUrl } = await this.platformSettingsService.get();
+    let gptBaseUrl: string;
+    try {
+      ({ gptBaseUrl } = await this.platformSettingsService.get());
+      const url = new URL(gptBaseUrl);
+      if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("unsupported protocol");
+    } catch {
+      throw new BadRequestException("Custom GPT URL is not configured. Ask a platform administrator to set it before launching GPT.");
+    }
 
     return { launchCode: raw, gptUrl: gptBaseUrl, expiresInMinutes: TOKEN_TTL.gptLaunchTokenMinutes };
   }
