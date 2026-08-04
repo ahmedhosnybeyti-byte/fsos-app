@@ -29,7 +29,7 @@ const ibmPlexSansArabic = IBM_Plex_Sans_Arabic({
 export const viewport: Viewport = {
   width: "device-width",
   initialScale: 0.9,
-  minimumScale: 0.5,
+  minimumScale: 0.25,
   maximumScale: 5,
   userScalable: true,
 };
