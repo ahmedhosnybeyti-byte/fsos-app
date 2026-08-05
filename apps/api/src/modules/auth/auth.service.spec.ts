@@ -165,3 +165,43 @@ test("prevents a company admin from resetting a user in another company", async 
   assert.deepEqual(revoked, []);
   assert.deepEqual(audits, []);
 });
+test("creates trial companies with files enabled while retaining the four locked screens", async () => {
+  const companyUpdates: Array<{ where: { id: string }; data: { status: string; featureAccess: Record<string, string> } }> = [];
+  const service = new AuthService(
+    {
+      $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
+        company: {
+          update: async (input: { where: { id: string }; data: { status: string; featureAccess: Record<string, string> } }) => {
+            companyUpdates.push(input);
+            return { id: COMPANY_ID, ...input.data };
+          },
+        },
+      }),
+    } as never,
+    { provisionCompany: async () => ({ company: { id: COMPANY_ID } }) } as never,
+    {
+      findByEmail: async () => null,
+      createCompanyAdmin: async () => ({ id: USER_ID }),
+      findById: async () => ({ id: USER_ID }),
+    } as never,
+    { createInitialSubscription: async () => ({ status: "TRIAL" }) } as never,
+    {
+      signAccessToken: () => "access-token",
+      issueRefreshToken: async () => "refresh-token",
+    } as never,
+    { record: async () => undefined } as never,
+  );
+
+  await service.register(
+    { companyName: "Trial Files Co", fullName: "Trial Admin", email: "trial-files@example.test", password: "Password1!", whatsapp: "+966500000000", accountType: "COMPANY" },
+    { ip: "127.0.0.1", userAgent: "test" },
+  );
+
+  assert.deepEqual(companyUpdates, [{
+    where: { id: COMPANY_ID },
+    data: {
+      status: "ACTIVE",
+      featureAccess: { files: "ENABLED", assistant: "LOCKED", "fsos-360": "LOCKED", settings: "LOCKED", account: "LOCKED" },
+    },
+  }]);
+});

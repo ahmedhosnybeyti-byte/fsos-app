@@ -43,7 +43,7 @@ export class AuthService {
         data: {
           status: "ACTIVE",
           ...(subscription.status === "TRIAL" && {
-            featureAccess: { assistant: "LOCKED", "fsos-360": "LOCKED", settings: "LOCKED", account: "LOCKED" },
+            featureAccess: { files: "ENABLED", assistant: "LOCKED", "fsos-360": "LOCKED", settings: "LOCKED", account: "LOCKED" },
           }),
         },
       });
