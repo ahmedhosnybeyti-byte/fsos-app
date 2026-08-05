@@ -6,7 +6,9 @@ const envSchema = z.object({
   API_URL: z.string().url(),
   WEB_URL: z.string().url(),
   CORS_ORIGINS: z.string().min(1),
-  COOKIE_DOMAIN: z.string().min(1),
+  // Leave unset when the web app and API use separate Railway hosts: auth
+  // cookies must then be host-only on the API origin.
+  COOKIE_DOMAIN: z.string().min(1).optional(),
 
   DATABASE_URL: z.string().min(1),
 
