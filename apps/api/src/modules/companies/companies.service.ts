@@ -81,7 +81,7 @@ function writeDiscoveryCredentials(
 
 const STATUS_TRANSITIONS: Record<CompanyLifecycleEvent, { from: CompanyStatus[]; to: CompanyStatus }> = {
   CREATE: { from: [], to: "DRAFT" },
-  ACTIVATE: { from: ["DRAFT", "CONFIGURING", "SUSPENDED"], to: "ACTIVE" },
+  ACTIVATE: { from: ["DRAFT", "CONFIGURING", "SUSPENDED", "ARCHIVED"], to: "ACTIVE" },
   SUSPEND: { from: ["ACTIVE"], to: "SUSPENDED" },
   REACTIVATE: { from: ["SUSPENDED"], to: "ACTIVE" },
   ARCHIVE: { from: ["ACTIVE", "SUSPENDED", "DRAFT", "CONFIGURING"], to: "ARCHIVED" },
@@ -218,7 +218,7 @@ export class CompaniesService {
     }
 
     const updated = await tx.company.update({ where: { id: companyId }, data: { status: transition.to } });
-    if (transition.to === "SUSPENDED") {
+    if (transition.to === "SUSPENDED" || transition.to === "ARCHIVED") {
       await tx.refreshToken.updateMany({ where: { user: { companyId }, revokedAt: null }, data: { revokedAt: new Date() } });
     }
 
