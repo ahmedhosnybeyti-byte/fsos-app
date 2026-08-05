@@ -37,8 +37,17 @@ export class AuthService {
         { companyId: company.id, email: dto.email, fullName: dto.fullName, password: dto.password, whatsapp: dto.whatsapp },
         tx,
       );
-      await this.subscriptionsService.createInitialSubscription(company.id, tx);
-      return { user, company };
+      const subscription = await this.subscriptionsService.createInitialSubscription(company.id, tx);
+      const readyCompany = await tx.company.update({
+        where: { id: company.id },
+        data: {
+          status: "ACTIVE",
+          ...(subscription.status === "TRIAL" && {
+            featureAccess: { assistant: "LOCKED", "fsos-360": "LOCKED", settings: "LOCKED", account: "LOCKED" },
+          }),
+        },
+      });
+      return { user, company: readyCompany };
     });
 
     await this.auditLogService.record({

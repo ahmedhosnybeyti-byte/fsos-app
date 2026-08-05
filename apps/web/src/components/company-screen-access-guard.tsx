@@ -30,6 +30,6 @@ export function CompanyScreenAccessGuard({ user, children }: { user: User; child
   }, [allowsMandatoryPasswordChange, state]);
 
   if (state === "HIDDEN" && !allowsMandatoryPasswordChange) return <div className="flex min-h-[50vh] items-center justify-center"><Spinner className="h-6 w-6" /></div>;
-  if (state === "LOCKED" && !allowsMandatoryPasswordChange) return <div className="space-y-4"><div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-foreground"><LockKeyhole className="h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" />هذه الشاشة متاحة للعرض فقط ضمن إعدادات شركتك الحالية.</div><div inert aria-disabled="true" className="pointer-events-none select-none opacity-85">{children}</div></div>;
+  if (state === "LOCKED" && !allowsMandatoryPasswordChange) return <div className="space-y-4"><div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-foreground"><LockKeyhole className="h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" />هذه الميزة غير متاحة خلال الفترة التجريبية.</div><div inert aria-disabled="true" className="pointer-events-none select-none opacity-85">{children}</div></div>;
   return <>{children}</>;
 }
