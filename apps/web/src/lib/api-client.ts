@@ -1,4 +1,10 @@
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
+// Browser requests stay same-origin so HttpOnly cookies are issued by and
+// returned to the web host. The Next rewrite proxies /api/v1 to the API.
+const API_URL = typeof window === "undefined" ? (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1") : "/api/v1";
+
+function apiUrl(path: string): string {
+  return new URL(`${API_URL}${path}`, typeof window === "undefined" ? "http://localhost:3000" : window.location.origin).toString();
+}
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number, public readonly errors?: unknown, public readonly code?: string, public readonly messageAr?: string) {
@@ -23,7 +29,7 @@ let refreshInFlight: Promise<boolean> | null = null;
 
 async function refreshSession(): Promise<boolean> {
   if (!refreshInFlight) {
-    refreshInFlight = fetch(`${API_URL}/auth/refresh`, { method: "POST", credentials: "include" })
+    refreshInFlight = fetch(apiUrl("/auth/refresh"), { method: "POST", credentials: "include" })
       .then((response) => response.ok)
       .catch(() => false)
       .finally(() => { refreshInFlight = null; });
@@ -45,7 +51,7 @@ async function request(url: string, options: RequestOptions): Promise<{ response
 }
 
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const url = new URL(`${API_URL}${path}`);
+  const url = new URL(apiUrl(path));
   if (options.query) for (const [key, value] of Object.entries(options.query)) if (value !== undefined) url.searchParams.set(key, String(value));
 
   let result = await request(url.toString(), options);

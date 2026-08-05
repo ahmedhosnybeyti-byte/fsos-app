@@ -6,17 +6,10 @@ const REFRESH_COOKIE_PATH = `/api/${API_VERSION_PREFIX}/auth`;
 
 function baseCookieOptions(config: AppConfigService) {
   const isProd = config.values.app.nodeEnv === "production";
-  // Always omit Domain. Railway web and API deployments use separate hosts;
-  // setting Domain to either host makes the browser reject the API response's
-  // Set-Cookie. Omitting it creates a host-only cookie on the API origin.
-  // Cross-origin (web app and API on different hosts, e.g. localhost:3000
-  // talking to a *.railway.app API) requires SameSite=None, which in turn
-  // requires Secure — fine in prod (Railway is HTTPS). Local dev, where
-  // both sides are on localhost, keeps "lax" since SameSite=None without
-  // Secure is rejected by browsers over plain http. (`as const` can't be
-  // applied directly to a ternary — TS1355 — so the union is annotated on
-  // this intermediate variable instead.)
-  const sameSite: "none" | "lax" = isProd ? "none" : "lax";
+  // Auth traffic is proxied through the web host at /api/v1. Omitting Domain
+  // makes the cookies host-only on that same origin; Lax keeps them secure
+  // without cross-site cookie behavior.
+  const sameSite: "lax" = "lax";
   return {
     httpOnly: true,
     secure: isProd,

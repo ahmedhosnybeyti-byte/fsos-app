@@ -10,6 +10,12 @@ const nextConfig = {
   // Internal workspace packages ship TS source directly (no build step) —
   // Next transpiles them itself rather than expecting compiled JS.
   transpilePackages: ["@field-sales-os/schemas"],
+  // Keep browser authentication same-origin. The API's Set-Cookie response is
+  // relayed through the web host, so host-only Lax cookies work on Railway.
+  async rewrites() {
+    const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000/api/v1";
+    return [{ source: "/api/v1/:path*", destination: `${apiBaseUrl}/:path*` }];
+  },
   // July 2026: user reported navigation between dashboard pages feeling very
   // slow in `pnpm dev`. lucide-react and the Radix packages each re-export
   // hundreds of modules from one barrel file; without this, every route that
