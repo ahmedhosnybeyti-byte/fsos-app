@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -40,6 +40,7 @@ import { Switch } from "@/components/ui/switch";
 import { Daily360SummaryModal } from "@/components/visit-copilot/daily-360-summary-modal";
 import type {
   VisitCopilotChatMessage,
+  VisitCopilotDiscoveryCustomer,
   VisitCopilotPeriod,
   VisitCopilotPlanMode,
   VisitCopilotPlanResult,
@@ -180,9 +181,31 @@ function VisitCopilotScreen() {
   // "cancel/ignore any previous request when the date changes."
   const briefQuery = useQuery({
     queryKey: ["visit-copilot", "daily-brief", period, from, to, vanStock, planDate],
-    queryFn: () => visitCopilotApi.dailyBrief({ ...periodParams, date: planDate }),
+    queryFn: ({ signal }) => visitCopilotApi.dailyBrief({ ...periodParams, date: planDate }, signal),
     enabled: customPeriodReady,
   });
+
+  // The map is driven only by the freshly resolved daily route, never by
+  // customer data retained from a previous date.
+  const dailyRouteCustomers = briefQuery.data?.date === planDate ? briefQuery.data.customers : undefined;
+  const dailyRouteCustomerCodes = useMemo(
+    () => dailyRouteCustomers?.map((customer) => customer.customerCode) ?? [],
+    [dailyRouteCustomers],
+  );
+  const mapCustomers = useMemo<VisitCopilotDiscoveryCustomer[]>(
+    () =>
+      (dailyRouteCustomers ?? [])
+        .filter((customer) => customer.lat !== null && customer.lon !== null)
+        .map((customer) => ({
+          customerCode: customer.customerCode,
+          name: customer.customerName,
+          lat: customer.lat!,
+          lon: customer.lon!,
+          channel: customer.channel ?? "",
+          status: "existing",
+        })),
+    [dailyRouteCustomers],
+  );
 
   const planMutation = useMutation({
     mutationFn: visitCopilotApi.plan,
@@ -224,9 +247,12 @@ function VisitCopilotScreen() {
     // Keep the Discovery map on the same selected daily route as the brief.
     // Including planDate in both the key and request discards stale markers
     // when the rep switches dates.
-    queryKey: ["visit-copilot", "discovery", period, from, to, planDate],
-    queryFn: () => visitCopilotApi.discovery({ ...periodParams, date: planDate }),
-    enabled: showDiscovery && customPeriodReady,
+    queryKey: ["visit-copilot", "discovery", period, from, to, planDate, dailyRouteCustomerCodes],
+    queryFn: ({ signal }) => visitCopilotApi.discovery({ ...periodParams, date: planDate }, signal),
+    // Wait for daily-brief for this date before fetching map data. React
+    // Query aborts either request through the forwarded signal on fast date
+    // changes, so an old route cannot repopulate the map.
+    enabled: showDiscovery && customPeriodReady && dailyRouteCustomers !== undefined && dailyRouteCustomers.length > 0,
   });
 
   // Fetched once a plan exists; renders as a suggestion card only and
@@ -525,7 +551,9 @@ function VisitCopilotScreen() {
                 </Button>
               </div>
 
-              {discoveryQuery.isLoading ? (
+              {dailyRouteCustomers?.length === 0 ? (
+                <p className="text-sm text-muted-foreground">{t("copilot.noCustomersForDate", { weekday: briefQuery.data?.weekday ?? "" })}</p>
+              ) : discoveryQuery.isLoading ? (
                 <Skeleton className="h-[60vh]" />
               ) : discoveryQuery.isError ? (
                 <p className="text-sm text-destructive">
@@ -544,7 +572,7 @@ function VisitCopilotScreen() {
                     </div>
                   )}
                   <DiscoveryMap
-                    customers={discoveryQuery.data.customers}
+                    customers={mapCustomers}
                     prospects={discoveryQuery.data.prospects}
                     onStartVisit={openProspectVisit}
                     onIgnore={(id) => statusMutation.mutate({ id, status: "IGNORED" })}

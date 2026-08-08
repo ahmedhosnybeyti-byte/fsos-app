@@ -33,9 +33,10 @@ interface PlanDateParams {
 }
 
 export const visitCopilotApi = {
-  dailyBrief: (params: PeriodParams & PlanDateParams) =>
+  dailyBrief: (params: PeriodParams & PlanDateParams, signal?: AbortSignal) =>
     apiFetch<VisitCopilotDailyBrief>("/visit-copilot/daily-brief", {
       query: { period: params.period, from: params.from, to: params.to, date: params.date },
+      signal,
     }),
 
   plan: (body: VisitCopilotPlanRequest) => apiFetch<VisitCopilotPlanResult>("/visit-copilot/plan", { method: "POST", body }),
@@ -49,9 +50,10 @@ export const visitCopilotApi = {
   chat: (body: VisitCopilotChatRequest) => apiFetch<VisitCopilotChatResponse>("/visit-copilot/chat", { method: "POST", body }),
 
   // ——— Phase 2: Customer Discovery ———
-  discovery: (params: PeriodParams & PlanDateParams) =>
+  discovery: (params: PeriodParams & PlanDateParams, signal?: AbortSignal) =>
     apiFetch<VisitCopilotDiscoveryResult>("/visit-copilot/discovery", {
-      query: { period: params.period, from: params.from, to: params.to },
+      query: { period: params.period, from: params.from, to: params.to, date: params.date },
+      signal,
     }),
 
   googleSearch: (body: VisitCopilotGoogleSearchRequest) =>
