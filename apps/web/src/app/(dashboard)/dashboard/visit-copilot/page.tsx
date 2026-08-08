@@ -221,8 +221,11 @@ function VisitCopilotScreen() {
 
   // ——— Phase 2: Discovery queries/mutations ———
   const discoveryQuery = useQuery({
-    queryKey: ["visit-copilot", "discovery", period, from, to],
-    queryFn: () => visitCopilotApi.discovery(periodParams),
+    // Keep the Discovery map on the same selected daily route as the brief.
+    // Including planDate in both the key and request discards stale markers
+    // when the rep switches dates.
+    queryKey: ["visit-copilot", "discovery", period, from, to, planDate],
+    queryFn: () => visitCopilotApi.discovery({ ...periodParams, date: planDate }),
     enabled: showDiscovery && customPeriodReady,
   });
 

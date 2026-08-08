@@ -1519,7 +1519,13 @@ export class VisitCopilotService {
 
   async discovery(user: AuthenticatedUser, query: VisitCopilotDiscoveryQuery): Promise<DiscoveryResult> {
     const warnings: string[] = [];
-    const stats = await this.buildDiscoveryStats(user, query, warnings);
+    // The existing-customer layer must use the exact same daily route scope
+    // as the plan/list above it.  Do not reconstruct this from Customers in
+    // Discovery: daily-brief is the single server-side authority for the
+    // selected date, rep hierarchy, and recurring VisitDay route.
+    const dailyRoute = await this.buildDailyBrief(user, query);
+    const routeCustomerCodes = new Set(dailyRoute.customers.map((customer) => customer.customerCode));
+    const stats = await this.buildDiscoveryStats(user, query, warnings, routeCustomerCodes);
     const rows = await this.prisma.prospect.findMany({ where: { companyId: user.companyId! }, orderBy: { createdAt: "desc" } });
     const prospects = this.scoreProspects(rows, stats).sort((a, b) => b.priorityScore - a.priorityScore);
     // Map layer of existing customers — only ones with usable coordinates.
@@ -1801,7 +1807,12 @@ export class VisitCopilotService {
   // per-customer avgOrderValue, the rep's dominant channel, and the
   // geographic centroid of the rep's customers (the prospect-distance
   // anchor). Same RIE scoping and join shape as the Phase 1 builders.
-  private async buildDiscoveryStats(user: AuthenticatedUser, periodInput: PeriodInput, warnings: string[]): Promise<DiscoveryStats> {
+  private async buildDiscoveryStats(
+    user: AuthenticatedUser,
+    periodInput: PeriodInput,
+    warnings: string[],
+    customerCodes?: ReadonlySet<string>,
+  ): Promise<DiscoveryStats> {
     const ctx = this.rieContext(user);
     const range = resolveVisitCopilotPeriod(periodInput);
     const [customerRows, invoices, items] = await Promise.all([
@@ -1844,7 +1855,7 @@ export class VisitCopilotService {
           avgOrderValue: invoiceCount > 0 ? round2((salesByCustomer.get(code) ?? 0) / invoiceCount) : 0,
         };
       })
-      .filter((c) => c.customerCode !== "");
+      .filter((c) => c.customerCode !== "" && (!customerCodes || customerCodes.has(c.customerCode)));
 
     // repChannel = most frequent non-empty Channel (case-insensitive
     // grouping, first-seen label kept for display).

@@ -49,7 +49,7 @@ export const visitCopilotApi = {
   chat: (body: VisitCopilotChatRequest) => apiFetch<VisitCopilotChatResponse>("/visit-copilot/chat", { method: "POST", body }),
 
   // ——— Phase 2: Customer Discovery ———
-  discovery: (params: PeriodParams) =>
+  discovery: (params: PeriodParams & PlanDateParams) =>
     apiFetch<VisitCopilotDiscoveryResult>("/visit-copilot/discovery", {
       query: { period: params.period, from: params.from, to: params.to },
     }),
