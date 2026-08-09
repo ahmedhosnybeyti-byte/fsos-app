@@ -1,8 +1,9 @@
 import { BadRequestException, Injectable } from "@nestjs/common";
-import type { Fsos360Availability, Fsos360FilterOptionsQuery, Fsos360Kpi, Fsos360Query } from "@field-sales-os/schemas";
+import type { Fsos360Availability, Fsos360FilterOptionsQuery, Fsos360Kpi, Fsos360Query, SgiSituation } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { assignmentMatchesAt, Fsos360ContextService, type Fsos360ResolvedContext } from "./fsos-360-context.service";
 import { UserActivityService } from "../user-activity/user-activity.service";
+import { SgiService } from "../sgi/sgi.service";
 
 interface SalesRow { invoiceNo: string; customerCode: string; productCode: string; routeId: string; time: number | null; amount: number }
 interface OperationRow { customerCode: string; routeId: string; time: number | null; amount: number }
@@ -63,7 +64,7 @@ function metric(id: Fsos360Kpi["id"], currentValue: number | null, previousValue
 
 @Injectable()
 export class Fsos360WorkspaceService {
-  constructor(private readonly contextService: Fsos360ContextService, private readonly userActivity?: UserActivityService) {}
+  constructor(private readonly contextService: Fsos360ContextService, private readonly sgiService?: SgiService, private readonly userActivity?: UserActivityService) {}
 
   async query(user: AuthenticatedUser, input: Fsos360Query) {
     await this.userActivity?.record({ type: "BIZ_360_VIEW", category: "BUSINESS", actorUserId: user.userId, subjectUserId: user.userId, actorRole: user.roleCode, companyId: user.companyId, source: "fsos-360.query", metadata: { scopeType: input.analysisFocus ?? "COMPANY" } });
@@ -73,7 +74,9 @@ export class Fsos360WorkspaceService {
     const analysisAvailability = this.analysisAvailability(context, windows, salesRows);
     const currentRows = analysisAvailability.availability === "available" ? salesRows.filter((row) => this.inWindow(row.time, windows.current) && this.matches(row, context)) : [];
     const previousRows = analysisAvailability.availability === "available" ? salesRows.filter((row) => this.inWindow(row.time, windows.comparison) && this.matches(row, context)) : [];
-    const kpis = this.kpis(context, currentRows, previousRows, windows, analysisAvailability);
+    const sgi = await this.sgiService?.getLatest(user);
+    const sgiSituations = sgi ? this.scopedSgiSituations(context, sgi.situations) : null;
+    const kpis = this.kpis(context, currentRows, previousRows, windows, analysisAvailability, sgiSituations);
     const target = this.target(context, currentRows, input.currentPeriod);
     const timeline = this.timeline(currentRows, previousRows, input.currentPeriod, input.comparisonPeriod);
     const visualization = this.visualization(context, currentRows, previousRows, windows, input.visualization, analysisAvailability);
@@ -98,14 +101,14 @@ export class Fsos360WorkspaceService {
       timeline,
       target,
       visualization,
-      opportunities: { availability: "unavailable", reason: "pending-business-approval", items: [] },
-      recommendations: { availability: "unavailable", reason: "pending-business-approval", items: [] },
+      opportunities: sgiSituations === null ? { availability: "unavailable", reason: "sgi-data-unavailable", items: [] } : { availability: "available", reason: null, items: sgiSituations.filter((item) => item.type === "GROWTH_OPPORTUNITY").slice(0, 5).map((item) => item.title) },
+      recommendations: sgiSituations === null ? { availability: "unavailable", reason: "sgi-data-unavailable", items: [] } : { availability: "available", reason: null, items: sgiSituations.map((item) => item.recommendation).filter((item): item is string => Boolean(item)).slice(0, 5) },
       capabilities: {
         ...context.capabilities,
         datasets: Object.fromEntries(Object.entries(context.datasets).map(([name, result]) => [name, availability(result.available)])),
         analysis: analysisAvailability,
         sgi: { availability: "unavailable", reason: "sgi-filter-scope-not-supported" },
-        lostSales: { availability: "pending-business-approval", reason: "lost-sales-aggregation-and-deduplication-unapproved" },
+        lostSales: { availability: sgiSituations === null ? "unavailable" : "available", reason: sgiSituations === null ? "sgi-data-unavailable" : null },
       },
       generatedAt: new Date().toISOString(),
     };
@@ -239,7 +242,8 @@ export class Fsos360WorkspaceService {
     const customer = context.customers.get(row.customerCode);
     const includes = (values: string[] | undefined, value: string) => !values?.length || values.includes(value);
     if (!customer) return false;
-    return includes(filters.cityValues, customer.city)
+    return includes(filters.regionIds, context.branches.get(customer.branchId)?.regionId ?? "")
+      && includes(filters.cityValues, customer.city)
       && includes(filters.branchIds, customer.branchId)
       && includes(filters.routeIds, row.routeId || customer.routeId)
       && includes(filters.customerCodes, customer.code);
@@ -263,13 +267,19 @@ export class Fsos360WorkspaceService {
     if (!customer) return false;
     const filters = context.filters;
     const includes = (values: string[] | undefined, value: string) => !values?.length || values.includes(value);
-    return includes(filters.cityValues, customer.city)
+    return includes(filters.regionIds, context.branches.get(customer.branchId)?.regionId ?? "")
+      && includes(filters.cityValues, customer.city)
       && includes(filters.branchIds, customer.branchId)
       && includes(filters.routeIds, customer.routeId)
       && includes(filters.customerCodes, customer.code);
   }
 
-  private kpis(context: Fsos360ResolvedContext, currentRows: SalesRow[], previousRows: SalesRow[], windows: { current: Window; comparison: Window }, analysis: { availability: Fsos360Availability; reason: string | null }): Fsos360Kpi[] {
+  private scopedSgiSituations(context: Fsos360ResolvedContext, situations: SgiSituation[]): SgiSituation[] {
+    const productFiltered = Boolean(context.filters.productCodes?.length || context.filters.brandValues?.length || context.filters.categoryValues?.length);
+    return situations.filter((item) => item.entityType === "customer" && !productFiltered && this.customerMatches(item.entityKey.trim(), context));
+  }
+
+  private kpis(context: Fsos360ResolvedContext, currentRows: SalesRow[], previousRows: SalesRow[], windows: { current: Window; comparison: Window }, analysis: { availability: Fsos360Availability; reason: string | null }, sgiSituations: SgiSituation[] | null): Fsos360Kpi[] {
     const invoicesAvailable = context.datasets.Invoices.available && context.datasets["Invoice Items"].available;
     const sales = (rows: SalesRow[]) => rows.reduce((sum, row) => sum + row.amount, 0);
     const currentSales = invoicesAvailable && analysis.availability === "available" ? sales(currentRows) : null;
@@ -312,11 +322,14 @@ export class Fsos360WorkspaceService {
     const collectionsAvailability = productFiltered ? "not-applicable" : (context.datasets.Collections.available ? analysis.availability : "unavailable");
     const returnsAvailability = productFiltered ? "not-applicable" : (context.datasets.Returns.available ? analysis.availability : "unavailable");
     const visitsAvailability = productFiltered ? "not-applicable" : (context.datasets.Visits.available ? analysis.availability : "unavailable");
+    const lostSales = sgiSituations?.filter((item) => item.type === "LOST_SALES") ?? [];
+    const lostSalesCurrent = sgiSituations === null ? null : lostSales.reduce((sum, item) => sum + item.metricValue, 0);
+    const lostSalesPrevious = sgiSituations === null ? null : lostSales.reduce((sum, item) => sum + (item.metricValuePrior ?? 0), 0);
     return [
       metric("sales", currentSales, previousSales, invoicesAvailable ? analysis.availability : "unavailable", invoicesAvailable ? analysis.reason : "invoices-dataset-unavailable", "favorable", "fsos360.kpi.sales.change"),
       metric("collections", collectionCurrent, collectionPrevious, collectionsAvailability, productFiltered ? "filter-not-supported" : analysis.reason, "favorable", "fsos360.kpi.collections.change"),
       metric("returns", returnsCurrent, returnsPrevious, returnsAvailability, productFiltered ? "filter-not-supported" : analysis.reason, "unfavorable", "fsos360.kpi.returns.change"),
-      metric("lost-sales", null, null, "pending-business-approval", "lost-sales-aggregation-and-deduplication-unapproved", "unknown"),
+      metric("lost-sales", lostSalesCurrent, lostSalesPrevious, sgiSituations === null ? "unavailable" : "available", sgiSituations === null ? "sgi-data-unavailable" : null, "unknown"),
       metric("orders", currentOrders, previousOrders, invoicesAvailable ? analysis.availability : "unavailable", invoicesAvailable ? analysis.reason : "invoices-dataset-unavailable", "favorable", "fsos360.kpi.orders.change"),
       metric("coverage", currentVisits?.coverage ?? null, previousVisits?.coverage ?? null, visitsAvailability, productFiltered ? "filter-not-supported" : analysis.reason, "favorable", "fsos360.kpi.coverage.change"),
       metric("strike-rate", currentVisits?.strike ?? null, previousVisits?.strike ?? null, visitsAvailability, productFiltered ? "filter-not-supported" : analysis.reason, "favorable", "fsos360.kpi.strikeRate.change"),
@@ -356,8 +369,6 @@ export class Fsos360WorkspaceService {
     if (!supported) return { availability: "not-applicable", reason: "analysis-level-does-not-own-target" };
     const start = new Date(`${period.from}T00:00:00Z`);
     const end = new Date(`${period.to}T00:00:00Z`);
-    const completeMonths = start.getUTCDate() === 1 && end.getUTCDate() === new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).getUTCDate();
-    if (!completeMonths) return { availability: "partial", reason: "partial-period" };
     if (!context.datasets.Targets.available) return { availability: "unavailable", reason: "targets-dataset-unavailable" };
     if (context.activeAnalysisLevel === "sales-rep" && !context.capabilities.routeAssignments!.available) return { availability: "unavailable", reason: "route-assignment-history-unavailable" };
     const months: { key: string; start: number; end: number }[] = [];
