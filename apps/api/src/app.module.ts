@@ -45,6 +45,7 @@ import { TerritoryIntelligenceModule } from "./modules/territory-intelligence/te
 import { DecisionAnalyticsStudioModule } from "./modules/decision-analytics-studio/decision-analytics-studio.module";
 import { GeoEngineModule } from "./modules/geo-engine/geo-engine.module";
 import { SmartLoadingModule } from "./modules/smart-loading/smart-loading.module";
+import { UserActivityModule } from "./modules/user-activity/user-activity.module";
 
 @Module({
   imports: [
@@ -93,6 +94,7 @@ import { SmartLoadingModule } from "./modules/smart-loading/smart-loading.module
     DecisionAnalyticsStudioModule,
     GeoEngineModule,
     SmartLoadingModule,
+    UserActivityModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

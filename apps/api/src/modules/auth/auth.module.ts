@@ -5,6 +5,7 @@ import { CompaniesModule } from "../companies/companies.module";
 import { UsersModule } from "../users/users.module";
 import { SubscriptionsModule } from "../subscriptions/subscriptions.module";
 import { AuditLogModule } from "../audit-log/audit-log.module";
+import { UserActivityModule } from "../user-activity/user-activity.module";
 import { RolesModule } from "../roles/roles.module";
 import { AuthService } from "./auth.service";
 import { AuthController } from "./auth.controller";
@@ -19,6 +20,7 @@ import { JwtAccessStrategy } from "./strategies/jwt-access.strategy";
     UsersModule,
     SubscriptionsModule,
     AuditLogModule,
+    UserActivityModule,
     RolesModule,
   ],
   providers: [AuthService, TokensService, JwtAccessStrategy],

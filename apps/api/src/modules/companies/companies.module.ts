@@ -9,9 +9,10 @@ import { OrgUnitTypesService } from "./org-unit-types.service";
 import { OrgUnitTypesController } from "./org-unit-types.controller";
 import { OrgUnitsService } from "./org-units.service";
 import { OrgUnitsController } from "./org-units.controller";
+import { UserActivityModule } from "../user-activity/user-activity.module";
 
 @Module({
-  imports: [AuditLogModule, GovernanceModule, SubscriptionsModule],
+  imports: [AuditLogModule, GovernanceModule, SubscriptionsModule, UserActivityModule],
   providers: [CompaniesService, OrgUnitTypesService, OrgUnitsService],
   controllers: [CompaniesController, BranchesController, OrgUnitTypesController, OrgUnitsController],
   exports: [CompaniesService, OrgUnitsService, OrgUnitTypesService],

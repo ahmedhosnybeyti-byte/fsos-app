@@ -3,6 +3,7 @@ import type { RoleCode } from "@field-sales-os/schemas";
 import { PrismaService } from "../../common/prisma";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { AuditLogService } from "../audit-log/audit-log.service";
+import { UserActivityService } from "../user-activity/user-activity.service";
 
 const EDITABLE_ROLE_CODES: RoleCode[] = ["COMPANY_ADMIN", "MANAGER", "SUPERVISOR", "SALES_REP"];
 const PLATFORM_ONLY_PERMISSIONS = new Set([
@@ -12,7 +13,7 @@ const PLATFORM_ONLY_PERMISSIONS = new Set([
 
 @Injectable()
 export class RolesService {
-  constructor(private readonly prisma: PrismaService, private readonly auditLogService: AuditLogService) {}
+  constructor(private readonly prisma: PrismaService, private readonly auditLogService: AuditLogService, private readonly userActivity: UserActivityService) {}
 
   findByCode(code: RoleCode) { return this.prisma.role.findUniqueOrThrow({ where: { code } }); }
 
@@ -41,6 +42,7 @@ export class RolesService {
       if (permissions.length) await tx.rolePermission.createMany({ data: permissions.map((permission) => ({ roleId: role.id, permissionId: permission.id })) });
       await this.auditLogService.record({ userId: actor.userId, action: "access_control.permissions_updated", entityType: "Role", entityId: role.id, metadata: { roleCode, before, after: uniqueCodes.sort() } }, tx);
     });
+    await this.userActivity.record({ type: "ADMIN_PERMISSION_CHANGE", category: "ADMIN", actorUserId: actor.userId, subjectUserId: actor.userId, actorRole: actor.roleCode, source: "roles.update-permissions", targetType: "Role", targetId: role.id, metadata: { roleCode, before, after: uniqueCodes.sort() } });
     return this.listWithPermissions().then((roles) => roles.find((item) => item.code === roleCode));
   }
 }

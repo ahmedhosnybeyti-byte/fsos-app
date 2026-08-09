@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from "@nestjs/common";
 import type { Fsos360Availability, Fsos360FilterOptionsQuery, Fsos360Kpi, Fsos360Query } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { assignmentMatchesAt, Fsos360ContextService, type Fsos360ResolvedContext } from "./fsos-360-context.service";
+import { UserActivityService } from "../user-activity/user-activity.service";
 
 interface SalesRow { invoiceNo: string; customerCode: string; productCode: string; routeId: string; time: number | null; amount: number }
 interface OperationRow { customerCode: string; routeId: string; time: number | null; amount: number }
@@ -62,9 +63,10 @@ function metric(id: Fsos360Kpi["id"], currentValue: number | null, previousValue
 
 @Injectable()
 export class Fsos360WorkspaceService {
-  constructor(private readonly contextService: Fsos360ContextService) {}
+  constructor(private readonly contextService: Fsos360ContextService, private readonly userActivity?: UserActivityService) {}
 
   async query(user: AuthenticatedUser, input: Fsos360Query) {
+    await this.userActivity?.record({ type: "BIZ_360_VIEW", category: "BUSINESS", actorUserId: user.userId, subjectUserId: user.userId, actorRole: user.roleCode, companyId: user.companyId, source: "fsos-360.query", metadata: { scopeType: input.analysisFocus ?? "COMPANY" } });
     const context = await this.contextService.resolve(user, input.filters, input.analysisFocus);
     const windows = { current: this.window(input.currentPeriod), comparison: this.window(input.comparisonPeriod) };
     const salesRows = this.salesRows(context);

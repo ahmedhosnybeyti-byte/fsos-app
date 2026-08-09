@@ -10,6 +10,7 @@ import { encryptCredentials, decryptCredentials } from "../data-sources/credenti
 import { OrgUnitsService } from "./org-units.service";
 import { SubscriptionsService } from "../subscriptions/subscriptions.service";
 import { generateTemporaryPassword } from "../auth/temporary-password";
+import { UserActivityService } from "../user-activity/user-activity.service";
 
 function slugify(name: string): string {
   return (
@@ -96,6 +97,7 @@ export class CompaniesService {
     private readonly platformEventsService: PlatformEventsService,
     private readonly appConfig: AppConfigService,
     private readonly subscriptionsService: SubscriptionsService,
+    private readonly userActivity?: UserActivityService,
   ) {}
 
   async createCompany(name: string, tx: PrismaTx = this.prisma, accountType?: CompanyAccountType) {
@@ -268,12 +270,16 @@ export class CompaniesService {
     return { items, total, page, pageSize };
   }
 
-  async update(id: string, data: { name?: string; slug?: string; status?: CompanyStatus }, actorUserId?: string) {
+  async update(id: string, data: { name?: string; slug?: string; status?: CompanyStatus; maxExcelUploadSizeMb?: number | null }, actorUserId?: string) {
     const existing = await this.prisma.company.findUnique({ where: { id } });
     if (!existing) throw new NotFoundException("Company not found");
     const updated = await this.prisma.company.update({ where: { id }, data });
     if (existing.name !== updated.name || existing.slug !== updated.slug || existing.status !== updated.status) {
       await this.auditLogService.record({ companyId: id, userId: actorUserId ?? null, action: "company.update", entityType: "Company", entityId: id, metadata: { before: { name: existing.name, slug: existing.slug, status: existing.status }, after: { name: updated.name, slug: updated.slug, status: updated.status } } });
+      await this.userActivity?.record({ type: "ADMIN_COMPANY_MODIFY", category: "ADMIN", actorUserId: actorUserId ?? null, subjectUserId: actorUserId ?? null, companyId: id, targetType: "Company", targetId: id, source: "companies.update", metadata: { changedFields: Object.keys(data) } });
+    }
+    if (existing.maxExcelUploadSizeMb !== updated.maxExcelUploadSizeMb) {
+      await this.userActivity?.record({ type: "ADMIN_EXCEL_LIMIT_CHANGE", category: "ADMIN", actorUserId: actorUserId ?? null, subjectUserId: actorUserId ?? null, companyId: id, targetType: "Company", targetId: id, source: "companies.update", metadata: { beforeMb: existing.maxExcelUploadSizeMb, afterMb: updated.maxExcelUploadSizeMb } });
     }
     await this.platformEventsService.emit("CompanyUpdated", { companyId: id, entityType: "Company", entityId: id });
     return updated;

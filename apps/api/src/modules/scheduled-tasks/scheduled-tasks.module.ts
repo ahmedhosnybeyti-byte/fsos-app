@@ -4,10 +4,11 @@ import { AuthModule } from "../auth/auth.module";
 import { GptModule } from "../gpt/gpt.module";
 import { AuditLogModule } from "../audit-log/audit-log.module";
 import { SgiModule } from "../sgi/sgi.module";
+import { UserActivityModule } from "../user-activity/user-activity.module";
 import { ScheduledTasksService } from "./scheduled-tasks.service";
 
 @Module({
-  imports: [SubscriptionsModule, AuthModule, GptModule, AuditLogModule, SgiModule],
+  imports: [SubscriptionsModule, AuthModule, GptModule, AuditLogModule, SgiModule, UserActivityModule],
   providers: [ScheduledTasksService],
 })
 export class ScheduledTasksModule {}

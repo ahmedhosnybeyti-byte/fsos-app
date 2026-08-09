@@ -12,6 +12,7 @@ import {
   BarChart3,
   Settings,
   CircleUserRound,
+  Activity,
 } from "lucide-react";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { AppShell, type NavItem } from "@/components/shell/app-shell";
@@ -27,13 +28,15 @@ const adminNavItems = (t: (key: any) => string): NavItem[] => [
   { href: "/admin/access-control", label: t("admin.nav.accessControl"), icon: ShieldCheck },
   { href: "/admin/usage", label: t("admin.nav.usage"), icon: BarChart3 },
   { href: "/admin/settings", label: t("admin.nav.settings"), icon: Settings },
+  { href: "/admin/user-activity", label: "User Activity", icon: Activity },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const { user, isLoading } = useRequireAuth(["SUPER_ADMIN"]);
+  const { user, isLoading } = useRequireAuth();
   const router = useRouter();
   const { t } = useTranslation();
-  const navItems: NavItem[] = [...adminNavItems(t), { href: "/admin/account", label: t("nav.account"), icon: CircleUserRound }];
+  const canUseActivity = user?.role?.code === "SUPER_ADMIN" || user?.permissions?.includes("user_activity.view");
+  const navItems: NavItem[] = user?.role?.code === "SUPER_ADMIN" ? [...adminNavItems(t), { href: "/admin/account", label: t("nav.account"), icon: CircleUserRound }] : canUseActivity ? [{ href: "/admin/user-activity", label: "User Activity", icon: Activity }, { href: "/admin/account", label: t("nav.account"), icon: CircleUserRound }] : [];
   const mustChangePassword = user?.mustChangePassword === true;
 
   useEffect(() => {

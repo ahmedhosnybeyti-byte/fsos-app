@@ -10,11 +10,12 @@ import { PlatformSettingsModule } from "../platform-settings/platform-settings.m
 // Routes/Employees Datasets, not a per-file manual config). GptService still
 // reads dataset bytes through FilesModule directly, unchanged.
 import { RieModule } from "../rie/rie.module";
+import { UserActivityModule } from "../user-activity/user-activity.module";
 import { GptService } from "./gpt.service";
 import { GptController } from "./gpt.controller";
 
 @Module({
-  imports: [SubscriptionsModule, FilesModule, UsageAnalyticsModule, AuditLogModule, AnalysisStudioModule, PlatformSettingsModule, RieModule],
+  imports: [SubscriptionsModule, FilesModule, UsageAnalyticsModule, AuditLogModule, AnalysisStudioModule, PlatformSettingsModule, RieModule, UserActivityModule],
   providers: [GptService],
   controllers: [GptController],
   exports: [GptService],

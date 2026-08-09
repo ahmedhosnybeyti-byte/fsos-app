@@ -5,6 +5,7 @@ import { TokensService } from "../auth/tokens.service";
 import { GptService } from "../gpt/gpt.service";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { SgiService } from "../sgi/sgi.service";
+import { UserActivityService } from "../user-activity/user-activity.service";
 
 // Authoritative enforcement of "trial users are automatically blocked after
 // the trial expires" / "expired subscriptions are automatically blocked":
@@ -22,6 +23,7 @@ export class ScheduledTasksService {
     private readonly gptService: GptService,
     private readonly auditLogService: AuditLogService,
     private readonly sgiService: SgiService,
+    private readonly userActivity: UserActivityService,
   ) {}
 
   @Cron(CronExpression.EVERY_HOUR)
@@ -57,5 +59,20 @@ export class ScheduledTasksService {
     for (const f of failures) {
       this.logger.warn(`SGI recompute failed for company ${f.companyId}: ${f.error}`);
     }
+  }
+
+  // Recalculation is idempotent: a late event or timezone correction can be
+  // repaired by calling UserActivityService.recalculateDailySummaries(date).
+  @Cron("10 1 * * *")
+  async aggregateUserActivityDaily() {
+    const yesterdayUtc = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const counts = await this.userActivity.recalculateDailySummaries(yesterdayUtc);
+    this.logger.log(`User Activity daily summaries: ${counts.reduce((sum, count) => sum + count, 0)} user(s)`);
+  }
+
+  @Cron("10 2 * * *")
+  async cleanupUserActivityRetention() {
+    const result = await this.userActivity.cleanupRetention();
+    this.logger.log(`User Activity retention: ${result.rawEvents} events, ${result.alerts} alerts, ${result.summaries} summaries removed`);
   }
 }

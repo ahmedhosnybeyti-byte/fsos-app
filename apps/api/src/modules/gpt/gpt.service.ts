@@ -12,6 +12,7 @@ import { AuditLogService } from "../audit-log/audit-log.service";
 import { AnalysisEventService } from "../analysis-studio/analysis-event.service";
 import { PlatformSettingsService } from "../platform-settings/platform-settings.service";
 import { CanonicalHierarchyResolverService } from "../rie/canonical-hierarchy-resolver.service";
+import { UserActivityService } from "../user-activity/user-activity.service";
 import {
   type DatasetRow,
   type DatasetSummary,
@@ -129,6 +130,7 @@ export class GptService {
     private readonly analysisEventService: AnalysisEventService,
     private readonly platformSettingsService: PlatformSettingsService,
     private readonly hierarchyResolver: CanonicalHierarchyResolverService,
+    private readonly userActivity: UserActivityService,
   ) {}
 
   // ---- Company-admin session-auth management -----------------------------
@@ -257,6 +259,7 @@ export class GptService {
     });
 
     await this.usageAnalyticsService.recordEvent({ companyId, userId, gptId: gpt.id, eventType: "LAUNCH_TOKEN_ISSUED" });
+    await this.userActivity.record({ type: "GPT_LAUNCH_CODE_CREATED", category: "ACCESS", actorUserId: userId, subjectUserId: userId, companyId, targetType: "GptLaunchToken", source: "gpt.launch" });
 
     return { launchCode: raw, gptUrl: gptBaseUrl, expiresInMinutes: TOKEN_TTL.gptLaunchTokenMinutes };
   }
@@ -470,6 +473,7 @@ export class GptService {
       // used ran out its (session-length) window — either way the fix is
       // the same (a brand new code from the dashboard), but the wording
       // should match what actually happened.
+      await this.userActivity.record({ type: "GPT_LAUNCH_CODE_REJECTED", category: "ACCESS", actorUserId: launchToken.userId, subjectUserId: launchToken.userId, actorRole: launchToken.user.role.code, companyId: gpt.companyId, targetType: "GptLaunchToken", targetId: launchToken.id, outcome: "FAILURE", source: "gpt.verify-access", metadata: { reason: launchToken.usedAt ? "consumed_or_session_expired" : "expired" } });
       throw new UnauthorizedException("Invalid access code");
     }
 
@@ -505,6 +509,7 @@ export class GptService {
         gptId: gpt.id,
         eventType: "VERIFY_ACCESS",
       });
+      await this.userActivity.record({ type: "GPT_LAUNCH_CODE_CONSUMED", category: "ACCESS", actorUserId: launchToken.userId, subjectUserId: launchToken.userId, actorRole: launchToken.user.role.code, companyId: gpt.companyId, targetType: "GptLaunchToken", targetId: launchToken.id, source: "gpt.verify-access" });
     }
 
     // Architecture pivot (2026-07-27): verifyAccess is now a pure access
@@ -570,6 +575,7 @@ export class GptService {
     if (!user?.companyId) throw new NotFoundException("Company user not found");
     const resetAt = new Date();
     await this.prisma.user.update({ where: { id: user.id }, data: { gptLaunchCodeQuotaDay: startOfTodayUtc(), gptLaunchCodeIssuedToday: 0 } });
+    await this.userActivity.record({ type: "ADMIN_GPT_QUOTA_RESET", category: "ADMIN", actorUserId, subjectUserId: userId, companyId: user.companyId, targetType: "User", targetId: userId, source: "gpt.reset-daily-launch-codes" });
     await this.auditLogService.record({ companyId: user.companyId, userId: actorUserId, action: "gpt.daily_launch_codes.reset", entityType: "User", entityId: user.id });
     return { success: true, resetAt };
   }

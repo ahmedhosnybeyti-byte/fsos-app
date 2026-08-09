@@ -6,6 +6,7 @@ import { RolesService } from "../roles/roles.service";
 import { OrgUnitsService } from "../companies/org-units.service";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { CanonicalHierarchyResolverService } from "../rie/canonical-hierarchy-resolver.service";
+import { UserActivityService } from "../user-activity/user-activity.service";
 
 // Explicit field selection (never `include`) for anything that can flow back
 // into an HTTP response â€” passwordHash must never leave this service.
@@ -33,6 +34,7 @@ export class UsersService {
     private readonly orgUnitsService: OrgUnitsService,
     private readonly auditLogService: AuditLogService,
     private readonly hierarchyResolver: CanonicalHierarchyResolverService,
+    private readonly userActivity?: UserActivityService,
   ) {}
 
   // Internal use only (login/change-password verification) â€” includes
@@ -90,6 +92,7 @@ export class UsersService {
       entityId: user.id,
       metadata: { roleCode: role.code, status: user.status, mustChangePassword: true },
     });
+    await this.userActivity?.record({ type: "ADMIN_USER_CREATE", category: "ADMIN", actorUserId, subjectUserId: user.id, companyId, targetType: "User", targetId: user.id, source: "users.create", metadata: { roleCode: role.code, status: user.status } });
     return user;
   }
 
@@ -198,6 +201,7 @@ export class UsersService {
         entityId: id,
         metadata: { before: { status: existing.status }, after: { status: dto.status } },
       });
+      await this.userActivity?.record({ type: "ADMIN_USER_STATUS_CHANGE", category: "ADMIN", actorUserId: actorUserId ?? null, subjectUserId: id, companyId, targetType: "User", targetId: id, source: "users.update", metadata: { beforeStatus: existing.status, afterStatus: dto.status } });
     }
     const before = { fullName: existing.fullName, status: existing.status, roleCode: existing.role.code };
     const after = { fullName: updated.fullName, status: updated.status, roleCode: updated.role.code };
@@ -225,6 +229,7 @@ export class UsersService {
         entityId: id,
         metadata: { previousRoleCode: existing.role.code, newRoleCode: newRole.code },
       });
+      await this.userActivity?.record({ type: "ADMIN_ROLE_CHANGE", category: "ADMIN", actorUserId: actorUserId ?? null, subjectUserId: id, companyId, targetType: "User", targetId: id, source: "users.update", metadata: { previousRoleCode: existing.role.code, newRoleCode: newRole.code } });
     }
 
     return updated;

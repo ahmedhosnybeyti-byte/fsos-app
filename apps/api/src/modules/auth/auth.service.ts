@@ -9,6 +9,7 @@ import { UsersService } from "../users/users.service";
 import { SubscriptionsService } from "../subscriptions/subscriptions.service";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { TokensService, type RefreshTokenMeta } from "./tokens.service";
+import { UserActivityService } from "../user-activity/user-activity.service";
 
 @Injectable()
 export class AuthService {
@@ -19,6 +20,7 @@ export class AuthService {
     private readonly subscriptionsService: SubscriptionsService,
     private readonly tokensService: TokensService,
     private readonly auditLogService: AuditLogService,
+    private readonly userActivity?: UserActivityService,
   ) {}
 
   // Self-serve signup always creates a brand-new Company + its first
@@ -76,6 +78,7 @@ export class AuthService {
         action: "identity.login_failed",
         metadata: { email: dto.email, reason: user ? "inactive_account" : "unknown_email" },
       });
+      await this.userActivity?.record({ type: "AUTH_LOGIN_FAILED", category: "ACCESS", actorType: "SYSTEM", subjectUserId: user?.id ?? null, companyId: user?.companyId ?? null, outcome: "FAILURE", source: "auth.login", metadata: { reason: user ? "inactive_account" : "unknown_email" } });
       throw new UnauthorizedException("Invalid email or password");
     }
 
@@ -87,11 +90,13 @@ export class AuthService {
         action: "identity.login_failed",
         metadata: { email: dto.email, reason: "invalid_password" },
       });
+      await this.userActivity?.record({ type: "AUTH_LOGIN_FAILED", category: "ACCESS", actorUserId: user.id, subjectUserId: user.id, actorRole: user.role.code, companyId: user.companyId, outcome: "FAILURE", source: "auth.login", metadata: { reason: "invalid_password" } });
       throw new UnauthorizedException("Invalid email or password");
     }
 
     await this.prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
     await this.auditLogService.record({ companyId: user.companyId, userId: user.id, action: "auth.login" });
+    await this.userActivity?.record({ type: "AUTH_LOGIN_SUCCESS", category: "ACCESS", actorUserId: user.id, subjectUserId: user.id, actorRole: user.role.code, companyId: user.companyId, source: "auth.login" });
 
     return this.issueSession(user.id, meta);
   }
@@ -205,6 +210,8 @@ export class AuthService {
     }
     if (userId) {
       await this.auditLogService.record({ userId, action: "auth.logout" });
+      const user = await this.usersService.findById(userId);
+      await this.userActivity?.record({ type: "AUTH_LOGOUT", category: "ACCESS", actorUserId: userId, subjectUserId: userId, actorRole: user?.role.code, companyId: user?.companyId, source: "auth.logout" });
     }
   }
 

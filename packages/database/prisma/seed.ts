@@ -22,6 +22,7 @@ const PERMISSIONS = [
   { code: "gpt.manage", description: "Configure the company's Custom GPT" },
   { code: "usage.view", description: "View usage statistics" },
   { code: "audit.view", description: "View audit logs" },
+  { code: "user_activity.view", description: "View scoped User Activity Center" },
 ] as const;
 
 const ROLES: Record<string, { name: string; permissions: string[] }> = {
@@ -47,15 +48,16 @@ const ROLES: Record<string, { name: string; permissions: string[] }> = {
       "gpt.manage",
       "usage.view",
       "audit.view",
+      "user_activity.view",
     ],
   },
   MANAGER: {
     name: "Manager",
-    permissions: ["files.upload.manager", "files.view", "gpt.launch", "usage.view"],
+    permissions: ["files.upload.manager", "files.view", "gpt.launch", "usage.view", "user_activity.view"],
   },
   SUPERVISOR: {
     name: "Supervisor",
-    permissions: ["files.upload.supervisor", "files.view", "gpt.launch"],
+    permissions: ["files.upload.supervisor", "files.view", "gpt.launch", "user_activity.view"],
   },
   SALES_REP: {
     name: "Sales Rep",

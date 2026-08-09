@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from "@nestjs/common";
 import type { UpdatePlatformSettingsInput } from "@field-sales-os/schemas";
 import { PrismaService } from "../../common/prisma";
 import { AuditLogService } from "../audit-log/audit-log.service";
+import { UserActivityService } from "../user-activity/user-activity.service";
 
 const SETTINGS_ID = "platform_settings";
 
@@ -14,6 +15,7 @@ export class PlatformSettingsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly auditLogService: AuditLogService,
+    private readonly userActivity: UserActivityService,
   ) {}
 
   // Upsert-on-read: guarantees the singleton row exists (Prisma defaults
@@ -46,6 +48,7 @@ export class PlatformSettingsService {
       entityId: SETTINGS_ID,
       metadata: dto,
     });
+    await this.userActivity.record({ type: "ADMIN_SETTINGS_CHANGE", category: "ADMIN", actorUserId: updatedByUserId, subjectUserId: updatedByUserId, source: "platform-settings.update", targetType: "PlatformSettings", targetId: SETTINGS_ID, metadata: { changedFields: Object.keys(dto) } });
 
     return updated;
   }

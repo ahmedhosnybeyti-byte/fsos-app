@@ -17,6 +17,7 @@ import { ImportValidationRejectedException } from "../import-validation/import-v
 import type { ImportTemplate, ValidationReport } from "../import-validation/import-validation.types";
 import { SubscriptionsService } from "../subscriptions/subscriptions.service";
 import { PlatformSettingsService } from "../platform-settings/platform-settings.service";
+import { UserActivityService } from "../user-activity/user-activity.service";
 
 const SALES_CALENDAR_ENTITY = "Sales Calendar";
 const EMPLOYEES_ENTITY = "Employees";
@@ -250,6 +251,7 @@ export class FilesService {
     private readonly importValidation: ImportValidationService,
     private readonly subscriptionsService: SubscriptionsService,
     private readonly platformSettingsService: PlatformSettingsService,
+    private readonly userActivity: UserActivityService,
   ) {}
 
   private validateUpload(file: Express.Multer.File, maxUploadSizeMb: number) {
@@ -317,6 +319,7 @@ export class FilesService {
     }
 
     const result = await this.processWorkbook({ companyId, uploadedByUserId, file, viaSuperAdmin, canProvisionEmployeeAccounts });
+    await this.userActivity.record({ type: "BIZ_FILE_UPLOAD", category: "BUSINESS", actorUserId: uploadedByUserId, subjectUserId: uploadedByUserId, companyId, targetType: "FileBatch", targetId: result.batchId, source: "files.upload", metadata: { acceptedSheets: result.accepted.length, rejectedSheets: result.rejected.length, viaSuperAdmin: Boolean(viaSuperAdmin) } });
 
     // Preserve the pre-existing single-file-reject contract (HTTP 422 +
     // full ValidationReport body — see ImportValidationRejectedException)

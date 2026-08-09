@@ -1,0 +1,20 @@
+"use client";
+import { useQuery } from "@tanstack/react-query";
+import { Activity, AlertTriangle, Search, ShieldCheck, UserRound } from "lucide-react";
+import { useMemo, useState } from "react";
+import { userActivityApi } from "@/lib/api";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+
+export default function UserActivityCenterPage() {
+  const [query, setQuery] = useState(""); const [selected, setSelected] = useState<string>();
+  const [from, setFrom] = useState(""); const [to, setTo] = useState("");
+  const tree = useQuery({ queryKey: ["user-activity", "tree"], queryFn: userActivityApi.tree });
+  const search = useQuery({ queryKey: ["user-activity", "search", query], queryFn: () => userActivityApi.search(query), enabled: query.trim().length > 1 });
+  const timeline = useQuery({ queryKey: ["user-activity", "timeline", selected, from, to], queryFn: () => userActivityApi.timeline(selected!, from || undefined, to || undefined), enabled: !!selected });
+  const people = useMemo(() => query.trim().length > 1 ? search.data ?? [] : tree.data ?? [], [query, search.data, tree.data]);
+  return <div className="space-y-5"><div><h1 className="text-2xl font-semibold">User Activity Center</h1><p className="text-muted-foreground">Operational and security activity, scoped to your organizational tree.</p></div>
+    <div className="grid gap-5 lg:grid-cols-[360px_1fr]"><Card><CardHeader><CardTitle className="flex items-center gap-2"><UserRound className="h-5 w-5" />Group Tree</CardTitle><div className="relative"><Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground"/><Input className="pl-9" value={query} onChange={e => setQuery(e.target.value)} placeholder="Name or email"/></div></CardHeader><CardContent className="max-h-[65vh] space-y-1 overflow-auto">{people.map(user => <Button key={user.id} variant={selected === user.id ? "secondary" : "ghost"} className="h-auto w-full justify-start py-2 text-left" onClick={() => { setSelected(user.id); setQuery(""); }}><span><span className="block font-medium">{user.fullName}</span><span className="block text-xs text-muted-foreground">{user.email} · {user.company?.name ?? "Platform"} · {user.orgUnit?.name ?? "Unassigned"} · {user.role?.code}</span></span></Button>)}</CardContent></Card>
+      <div className="space-y-4">{selected ? <><div className="flex gap-2"><Input type="date" value={from} onChange={e => setFrom(e.target.value)}/><Input type="date" value={to} onChange={e => setTo(e.target.value)}/></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{[["Total Events", timeline.data?.summary.totalEvents, Activity], ["Business", timeline.data?.summary.businessEvents, Activity], ["Denied", timeline.data?.summary.deniedEvents, AlertTriangle], ["Security Alerts", timeline.data?.summary.securityAlerts, ShieldCheck], ["Risk Level", timeline.data?.summary.riskLevel, ShieldCheck]].map(([label, value, Icon]: any) => <Card key={label}><CardContent className="flex items-center justify-between p-4"><span className="text-sm text-muted-foreground">{label}</span><span className="flex items-center gap-1 font-semibold"><Icon className="h-4 w-4"/>{value ?? "—"}</span></CardContent></Card>)}</div><Card><CardHeader><CardTitle>Timeline</CardTitle></CardHeader><CardContent className="space-y-3">{timeline.data?.items?.map((event: any) => <div key={event.id} className="border-l-2 pl-3"><div className="flex justify-between gap-3"><span className="font-medium">{event.type}</span><time className="text-xs text-muted-foreground">{new Date(event.timestamp).toLocaleString()}</time></div><p className="text-sm text-muted-foreground">{event.category} · {event.outcome} · {event.source}</p></div>)}{timeline.data?.items?.length === 0 && <p className="text-muted-foreground">No activity in this date range.</p>}</CardContent></Card></> : <Card><CardContent className="p-10 text-center text-muted-foreground">Choose a user from the Group Tree to view their timeline.</CardContent></Card>}</div></div></div>;
+}

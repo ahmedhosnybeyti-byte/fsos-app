@@ -1,0 +1,41 @@
+import assert from "node:assert/strict";
+import { PrismaClient } from "@field-sales-os/database";
+import { UserActivityService } from "../src/modules/user-activity/user-activity.service";
+
+const prisma = new PrismaClient();
+const roleCodes = ["SUPER_ADMIN", "COMPANY_ADMIN", "MANAGER", "SUPERVISOR", "SALES_REP"] as const;
+async function main() {
+  await prisma.userActivityDailySummary.deleteMany(); await prisma.userActivitySecurityAlert.deleteMany(); await prisma.userActivityEvent.deleteMany();
+  await prisma.employee.deleteMany(); await prisma.user.deleteMany(); await prisma.companyProfile.deleteMany(); await prisma.company.deleteMany();
+  for (const code of roleCodes) await prisma.role.upsert({ where: { code }, update: {}, create: { code, name: code } });
+  const roles = Object.fromEntries((await prisma.role.findMany({ where: { code: { in: [...roleCodes] } } })).map(r => [r.code, r.id]));
+  const one = await prisma.company.create({ data: { name: "One", slug: "one", profile: { create: { timeZone: "Asia/Riyadh" } } } });
+  const two = await prisma.company.create({ data: { name: "Two", slug: "two", profile: { create: { timeZone: "UTC" } } } });
+  const superUser = await prisma.user.create({ data: { companyId: null, roleId: roles.SUPER_ADMIN!, email: "super@test", fullName: "Super", passwordHash: "x" } });
+  const manager = await prisma.user.create({ data: { companyId: one.id, roleId: roles.MANAGER!, email: "manager@test", fullName: "Manager", passwordHash: "x" } });
+  const rep = await prisma.user.create({ data: { companyId: one.id, roleId: roles.SALES_REP!, email: "rep@test", fullName: "Rep", passwordHash: "x" } });
+  const outsider = await prisma.user.create({ data: { companyId: two.id, roleId: roles.SALES_REP!, email: "outsider@test", fullName: "Outsider", passwordHash: "x" } });
+  const managerEmployee = await prisma.employee.create({ data: { companyId: one.id, employeeCode: "M", fullName: "Manager", contactEmail: manager.email, userId: manager.id } });
+  await prisma.employee.create({ data: { companyId: one.id, employeeCode: "R", fullName: "Rep", contactEmail: rep.email, userId: rep.id, managerId: managerEmployee.id } });
+  const service = new UserActivityService(prisma as never);
+  const superViewer = { userId: superUser.id, companyId: null, email: superUser.email, roleCode: "SUPER_ADMIN" as const, permissions: [], mustChangePassword: false, orgUnitId: null };
+  const managerViewer = { userId: manager.id, companyId: one.id, email: manager.email, roleCode: "MANAGER" as const, permissions: [], mustChangePassword: false, orgUnitId: null };
+  await service.record({ type: "BIZ_FILE_UPLOAD", category: "BUSINESS", actorUserId: rep.id, companyId: one.id, source: "test", metadata: { safe: "ok", password: "no", authorization: "no" } });
+  await service.record({ type: "GPT_LAUNCH_CODE_REJECTED", category: "ACCESS", actorUserId: rep.id, companyId: one.id, source: "test", outcome: "FAILURE" });
+  await service.record({ type: "ADMIN_EXCEL_LIMIT_CHANGE", category: "ADMIN", actorUserId: superUser.id, subjectUserId: manager.id, companyId: one.id, source: "test" });
+  const event = await prisma.userActivityEvent.findFirstOrThrow({ where: { type: "BIZ_FILE_UPLOAD" } });
+  assert.equal((event.metadata as any).password, undefined); assert.equal((event.metadata as any).authorization, undefined); assert.equal((event.metadata as any).safe, "ok");
+  assert.equal(typeof (service as any).update, "undefined"); assert.equal(typeof (service as any).delete, "undefined");
+  assert((await service.tree(managerViewer)).some(u => u.id === rep.id)); assert(!(await service.tree(managerViewer)).some(u => u.id === outsider.id));
+  await assert.rejects(() => service.timeline(managerViewer, outsider.id));
+  await prisma.userActivityEvent.create({ data: { eventVersion: 1, category: "SECURITY", type: "SEC_REPLAY_ATTEMPT", actorType: "SYSTEM", subjectUserId: rep.id, companyId: one.id, source: "test" } });
+  const memberTimeline = await service.timeline(managerViewer, rep.id); assert.equal(memberTimeline.summary.riskLevel, undefined); assert(!memberTimeline.items.some(x => x.category === "SECURITY"));
+  const rootTimeline = await service.timeline(superViewer, rep.id); assert(rootTimeline.items.some(x => x.category === "SECURITY"));
+  await service.recalculateDailySummary(one.id, new Date().toISOString().slice(0, 10));
+  assert((await prisma.userActivityDailySummary.count({ where: { companyId: one.id, userId: rep.id } })) > 0);
+  await prisma.userActivityEvent.update({ where: { id: event.id }, data: { timestamp: new Date("2000-01-01") } }); await service.cleanupRetention(new Date("2026-08-09"));
+  assert.equal(await prisma.userActivityEvent.count({ where: { id: event.id } }), 0);
+  assert((await prisma.userActivityEvent.count({ where: { type: "GPT_LAUNCH_CODE_REJECTED" } })) === 1);
+  console.log("PASS user-activity integration");
+}
+main().finally(() => prisma.$disconnect());

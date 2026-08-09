@@ -8,9 +8,10 @@ import { DatasetClassifierService } from "./classification/dataset-classifier.se
 import { ImportValidationModule } from "../import-validation/import-validation.module";
 import { SubscriptionsModule } from "../subscriptions/subscriptions.module";
 import { PlatformSettingsModule } from "../platform-settings/platform-settings.module";
+import { UserActivityModule } from "../user-activity/user-activity.module";
 
 @Module({
-  imports: [AuditLogModule, ImportValidationModule, SubscriptionsModule, PlatformSettingsModule],
+  imports: [AuditLogModule, ImportValidationModule, SubscriptionsModule, PlatformSettingsModule, UserActivityModule],
   providers: [
     FilesService,
     DatasetClassifierService,

@@ -198,6 +198,25 @@ enum GptUsageEventType {
   ANALYSIS_RUN
 }
 
+// User Activity Center is deliberately separate from the legacy generic audit
+// trail. Events are append-only operational/security facts; alerts are derived
+// facts and risk state is the current persisted assessment.
+enum UserActivityActorType {
+  USER
+  SYSTEM
+}
+enum UserActivityOutcome {
+  SUCCESS
+  FAILURE
+  DENIED
+}
+enum UserRiskLevel {
+  NORMAL
+  WATCH
+  SUSPICIOUS
+  HIGH_RISK
+}
+
 // ---------------------------------------------------------------------------
 // Tenant root
 // ---------------------------------------------------------------------------
@@ -235,6 +254,8 @@ model Company {
   prospects     Prospect[]
   lostOpportunityExclusions LostOpportunityExclusion[]
   routeAssignments UserRouteAssignment[]
+  activityEvents UserActivityEvent[]
+  activityDailySummaries UserActivityDailySummary[]
 
   @@map("companies")
 }
@@ -446,6 +467,10 @@ model User {
   revokedLostOpportunityExclusions LostOpportunityExclusion[] @relation("LostOpportunityExclusionRevokedBy")
   routeAssignments UserRouteAssignment[] @relation("UserRouteAssignments")
   routeAssignmentsMade UserRouteAssignment[] @relation("UserRouteAssignmentsMade")
+  activityEvents UserActivityEvent[] @relation("UserActivityActor")
+  activitySubjectEvents UserActivityEvent[] @relation("UserActivitySubject")
+  activityRiskState UserRiskState?
+  activityDailySummaries UserActivityDailySummary[]
 
   @@index([companyId])
   @@index([orgUnitId])
@@ -1125,6 +1150,81 @@ model AuditLog {
   @@index([userId])
   @@index([action])
   @@map("audit_logs")
+}
+
+model UserActivityEvent {
+  id String @id @default(cuid())
+  eventVersion Int @default(1) @map("event_version")
+  category String
+  type String
+  timestamp DateTime @default(now())
+  actorType UserActivityActorType @map("actor_type")
+  actorUserId String? @map("actor_user_id")
+  subjectUserId String? @map("subject_user_id")
+  actorRole String? @map("actor_role")
+  companyId String? @map("company_id")
+  branchId String? @map("branch_id")
+  orgPath Json? @map("org_path")
+  targetType String? @map("target_type")
+  targetId String? @map("target_id")
+  outcome UserActivityOutcome @default(SUCCESS)
+  source String
+  sessionId String? @map("session_id")
+  requestId String? @map("request_id")
+  ipAddress String? @map("ip_address")
+  userAgent String? @map("user_agent")
+  metadata Json?
+  company Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  actorUser User? @relation("UserActivityActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  subjectUser User? @relation("UserActivitySubject", fields: [subjectUserId], references: [id], onDelete: SetNull)
+  sourceAlerts UserActivitySecurityAlert[] @relation("AlertSourceEvents")
+  emittedAlerts UserActivitySecurityAlert[] @relation("AlertEvent")
+  @@index([companyId, timestamp])
+  @@index([subjectUserId, timestamp])
+  @@index([actorUserId, timestamp])
+  @@index([type, timestamp])
+  @@map("user_activity_events")
+}
+
+model UserActivitySecurityAlert {
+  id String @id @default(cuid())
+  type String
+  companyId String? @map("company_id")
+  subjectUserId String? @map("subject_user_id")
+  eventId String @unique @map("event_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  event UserActivityEvent @relation("AlertEvent", fields: [eventId], references: [id], onDelete: Restrict)
+  sourceEvents UserActivityEvent[] @relation("AlertSourceEvents")
+  @@index([companyId, createdAt])
+  @@index([subjectUserId, createdAt])
+  @@map("user_activity_security_alerts")
+}
+
+model UserRiskState {
+  userId String @id @map("user_id")
+  companyId String? @map("company_id")
+  level UserRiskLevel @default(NORMAL)
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([companyId, level])
+  @@map("user_risk_states")
+}
+
+model UserActivityDailySummary {
+  id String @id @default(cuid())
+  userId String @map("user_id")
+  companyId String @map("company_id")
+  activityDate DateTime @db.Date @map("activity_date")
+  totalEvents Int @default(0) @map("total_events")
+  businessEvents Int @default(0) @map("business_events")
+  deniedEvents Int @default(0) @map("denied_events")
+  securityAlerts Int @default(0) @map("security_alerts")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  @@unique([userId, activityDate])
+  @@index([companyId, activityDate])
+  @@map("user_activity_daily_summaries")
 }
 
 model GptUsageEvent {
