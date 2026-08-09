@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { FileSpreadsheet, Bot, Flame, Target, Zap, Clock, type LucideIcon } from "lucide-react";
+import { FileSpreadsheet, Bot, Flame, Target, Zap, Clock, BarChart3, CircleDollarSign, ClipboardCheck, Package, ReceiptText, RefreshCw, RotateCcw, TrendingDown, TrendingUp, Users, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { filesApi, subscriptionsApi } from "@/lib/api";
 import { useAuth } from "@/hooks/use-auth";
@@ -15,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useTranslation } from "@/components/translation-provider";
 import { MODULE_BADGE_CLASSES } from "@/lib/module-colors";
 import { formatDate } from "@/lib/utils";
+import { dashboardPerformanceApi, type DashboardBenchmark, type DashboardMetric, type DashboardTarget } from "@/lib/api";
 
 // FSOS Design Constitution §15.2 (Dashboard Pattern) — this screen must
 // answer, within seconds: what's happening now, the most important
@@ -27,6 +29,28 @@ import { formatDate } from "@/lib/utils";
 // SubscriptionStatusCard under the same query key — React Query dedupes
 // the two calls into one network request, so this adds no new API usage).
 export default function DashboardOverviewPage() {
+  const [benchmark, setBenchmark] = useState<DashboardBenchmark>("previous-month");
+  const performanceQuery = useQuery({ queryKey: ["dashboard-performance", benchmark], queryFn: () => dashboardPerformanceApi.get(benchmark) });
+  const performance = performanceQuery.data;
+  const cards = performance
+    ? [["المبيعات بالقيمة", performance.metrics.sales, "currency", CircleDollarSign, "text-emerald-400", false], ["التحصيل", performance.metrics.collections, "currency", ClipboardCheck, "text-violet-400", false], ["عدد الفواتير", performance.metrics.invoices, "count", ReceiptText, "text-blue-400", false], ["العملاء المشترون", performance.metrics.customers, "count", Users, "text-orange-400", false], ["الأصناف المباعة", performance.metrics.skus, "count", Package, "text-cyan-400", false], ["المرتجعات بالقيمة", performance.metrics.returns, "currency", RotateCcw, "text-red-400", true]] as const
+    : [];
+  if (performanceQuery.isLoading) return <DashboardPerformanceLoading />;
+  if (performanceQuery.isError || !performance) return <div className="glass-card p-8 text-center text-sm text-destructive">تعذر تحميل بيانات الأداء. حاول التحديث.</div>;
+  const primaryTargets = performance.targets.filter((target) => target.primary);
+  const secondaryTargets = performance.targets.filter((target) => !target.primary);
+  return (
+    <div dir="rtl" className="relative space-y-6">
+      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
+      <div className="glass-hero relative overflow-hidden p-5 sm:p-7"><div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" /><div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between"><div><h1 className="flex items-center gap-2 text-2xl font-bold sm:text-3xl"><BarChart3 className="text-primary" />لوحة الأداء والنمو</h1><p className="mt-1 text-sm text-muted-foreground">متابعة الأداء الفعلي مقابل المقارنة والأهداف المرحلية</p></div><div className="flex flex-wrap items-center gap-3"><Badge variant="outline" className="h-9 px-3 text-sm">أيام البيع: {performance.sellingDays.elapsed} / {performance.sellingDays.total}</Badge><div className="flex rounded-lg border border-border bg-background/30 p-1"><Button size="sm" variant={benchmark === "previous-month" ? "default" : "ghost"} onClick={() => setBenchmark("previous-month")}>الشهر الماضي</Button><Button size="sm" variant={benchmark === "previous-quarter-average" ? "default" : "ghost"} onClick={() => setBenchmark("previous-quarter-average")}>متوسط الكوارتر السابق</Button></div><Button size="icon" variant="outline" onClick={() => performanceQuery.refetch()} disabled={performanceQuery.isFetching}><RefreshCw className={performanceQuery.isFetching ? "animate-spin" : ""} /></Button></div></div></div>
+      {performance.warnings.map((warning) => <div key={warning} className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">{warning}</div>)}
+      <section><div className="mb-3 flex items-center justify-between"><div><h2 className="text-xl font-semibold">معدلات النمو (MTD)</h2><p className="text-sm text-muted-foreground">المقارنة حسب أول {performance.sellingDays.elapsed} أيام بيع فعلية</p></div><span className="text-xs text-muted-foreground">{benchmark === "previous-month" ? "مقابل الشهر الماضي" : "مقابل متوسط الكوارتر السابق"}</span></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">{cards.map(([label, metric, unit, Icon, color, lowerBetter]) => <DashboardGrowthCard key={label} label={label} metric={metric} unit={unit} Icon={Icon} color={color} lowerBetter={lowerBetter} />)}</div></section>
+      {primaryTargets.length > 0 && <DashboardTargetSection title="الأداء مقابل الهدف (حتى اليوم)" targets={primaryTargets} />}
+      {secondaryTargets.length > 0 && <DashboardTargetSection title="أهداف إضافية" targets={secondaryTargets} />}
+    </div>
+  );
+
+  /* Legacy overview content replaced by the performance dashboard.
   const { t } = useTranslation();
   const { user } = useAuth();
   // Wrapped in an arrow function (not passed directly) — filesApi.list takes
@@ -66,7 +90,7 @@ export default function DashboardOverviewPage() {
           viewport (not just a band behind the Hero) so it reads as a real
           backdrop while scrolling, not a static strip. Still page-scoped
           (rendered by this component only) and still behind every card's
-          own opaque glass fill. */}
+          own opaque glass fill. * /}
       <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
       <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
 
@@ -77,7 +101,7 @@ export default function DashboardOverviewPage() {
           badge/type scale and a large, very-low-opacity watermark icon so
           the right-hand whitespace reads as considered negative space
           around a "hero," not an empty gap — no new content/data (kept
-          intentionally out of scope; see the redesign follow-up thread). */}
+          intentionally out of scope; see the redesign follow-up thread). * /}
       <div className="glass-hero rise-in flex flex-col gap-4 p-4 sm:gap-6 sm:p-7 sm:flex-row sm:items-center sm:justify-between md:p-10">
         <div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" />
         <Zap
@@ -105,7 +129,7 @@ export default function DashboardOverviewPage() {
       </div>
 
       {/* KPI Row — §5.4: name, value, readable in two seconds. Trend/% change
-          is intentionally omitted — see kpi-card.tsx's comment for why. */}
+          is intentionally omitted — see kpi-card.tsx's comment for why. * /}
       <div className="rise-in rise-d1 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {filesLoading ? (
           <>
@@ -157,7 +181,7 @@ export default function DashboardOverviewPage() {
           screen, not a separate window. Follow-up: "مرشدك يستحق يكون بطل
           الشاشة" — AssistantEntryCard now takes 2/3 of the row's width
           (md:col-span-2 of 3) instead of an even 50/50 split, so it wins
-          visual weight without moving out of its existing section/order. */}
+          visual weight without moving out of its existing section/order. * /}
       <div className="rise-in rise-d2 grid gap-4 sm:gap-6 md:grid-cols-3">
         <div className="md:col-span-2">
           <AssistantEntryCard />
@@ -167,7 +191,7 @@ export default function DashboardOverviewPage() {
 
       {/* Files — §5.11 Empty States: message + reason + action + visual.
           Passive tier in the card hierarchy: no glow, no lift, slightly
-          quieter than the primary cards above it. */}
+          quieter than the primary cards above it. * /}
       <div className="glass-card rise-in rise-d3 p-4 sm:p-6">
         <div className="flex items-center justify-between">
           <h3 className="flex items-center gap-2.5 text-base font-semibold leading-none tracking-tight">
@@ -204,7 +228,7 @@ export default function DashboardOverviewPage() {
       </div>
 
       {/* Quick Actions — §15.2's "first action to take", as direct shortcuts
-          to real, existing routes (same hrefs as the sidebar). */}
+          to real, existing routes (same hrefs as the sidebar). * /}
       <div className="rise-in rise-d4 space-y-3">
         <h2 className="text-sm font-semibold text-muted-foreground">{t("dashboard.quickActionsTitle")}</h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -216,6 +240,8 @@ export default function DashboardOverviewPage() {
       </div>
     </div>
   );
+}
+  */
 }
 
 function QuickActionTile({
@@ -238,3 +264,30 @@ function QuickActionTile({
     </Link>
   );
 }
+
+function dashboardFormat(value: number | null, unit = "count") {
+  if (value === null) return "—";
+  return unit === "currency" ? `${Math.round(value).toLocaleString("ar-SA")} ر.س` : Math.round(value).toLocaleString("ar-SA");
+}
+
+function DashboardGrowthCard({ label, metric, unit, Icon, color, lowerBetter }: { label: string; metric: DashboardMetric; unit: string; Icon: LucideIcon; color: string; lowerBetter: boolean }) {
+  const positive = metric.growthPct !== null && (lowerBetter ? metric.growthPct <= 0 : metric.growthPct >= 0);
+  const Trend = positive ? TrendingUp : TrendingDown;
+  const values = metric.sparkline;
+  const max = Math.max(...values, 1);
+  const points = values.map((value, index) => `${(index / Math.max(values.length - 1, 1)) * 100},${30 - (value / max) * 26}`).join(" ");
+  return <div className="glass-card min-h-48 p-4"><div className="flex items-center justify-between"><span className={`flex h-9 w-9 items-center justify-center rounded-lg bg-background/50 ${color}`}><Icon className="h-4 w-4" /></span>{metric.growthPct !== null && <Badge variant={positive ? "success" : "destructive"} className="gap-1"><Trend className="h-3 w-3" />{Math.abs(metric.growthPct).toFixed(1)}%</Badge>}</div><p className="mt-4 text-sm text-muted-foreground">{label}</p><p className="mt-1 text-xl font-bold tabular-nums">{dashboardFormat(metric.current, unit)}</p><p className="mt-1 text-xs text-muted-foreground">{metric.benchmark === null ? "لا توجد مقارنة متاحة" : "مقابل الفترة المرجعية"}</p>{values.length > 0 ? <svg viewBox="0 0 100 32" preserveAspectRatio="none" className={`mt-5 h-8 w-full ${color}`}><polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" /></svg> : <div className="mt-5 h-8" />}</div>;
+}
+
+function DashboardTargetSection({ title, targets }: { title: string; targets: DashboardTarget[] }) {
+  return <section><h2 className="mb-3 flex items-center gap-2 text-xl font-semibold"><Target className="h-5 w-5 text-primary" />{title}</h2><div className="grid gap-4 xl:grid-cols-2">{targets.map((target) => <DashboardTargetCard key={target.key} target={target} />)}</div></section>;
+}
+
+function DashboardTargetCard({ target }: { target: DashboardTarget }) {
+  const ahead = target.aheadBehind !== null && target.aheadBehind >= 0;
+  const progress = Math.min(100, Math.max(0, target.progressPct ?? 0));
+  return <div className="glass-card border-primary/20 p-5"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">{target.label}</h3><p className="mt-1 text-sm text-muted-foreground">الهدف الشهري: {dashboardFormat(target.monthlyTarget, target.unit)}</p></div><Badge variant={ahead ? "success" : "destructive"}>{target.aheadBehind === null ? "الفعلي غير متاح" : ahead ? "متقدم عن المسار" : "متأخر عن المسار"}</Badge></div><div className="mt-5 grid grid-cols-3 divide-x divide-x-reverse divide-border"><DashboardStat label="المحقق الفعلي" value={dashboardFormat(target.actualMtd, target.unit)} /><DashboardStat label="الهدف المرحلي" value={dashboardFormat(target.targetMtd, target.unit)} /><DashboardStat label="الفرق" value={target.aheadBehind === null ? "—" : `${ahead ? "+" : ""}${dashboardFormat(target.aheadBehind, target.unit)}`} highlight={ahead} /></div><div className="mt-5"><div className="mb-2 flex justify-between text-xs text-muted-foreground"><span>نسبة الإنجاز المرحلي</span><span>{target.progressPct === null ? "—" : `${target.progressPct.toFixed(0)}%`}</span></div><div className="h-3 overflow-hidden rounded-full bg-secondary"><div className={ahead ? "h-full rounded-full bg-emerald-500" : "h-full rounded-full bg-amber-500"} style={{ width: `${progress}%` }} /></div></div><div className="mt-5 grid gap-2 sm:grid-cols-3"><DashboardMini label="المتبقي من الهدف" value={dashboardFormat(target.remainingMonthlyTarget, target.unit)} /><DashboardMini label="المطلوب يوميًا" value={dashboardFormat(target.requiredDailyVelocity, target.unit)} /><DashboardMini label="توقع نهاية الشهر" value={dashboardFormat(target.runRateForecast, target.unit)} /></div></div>;
+}
+function DashboardStat({ label, value, highlight }: { label: string; value: string; highlight?: boolean }) { return <div className="px-3 first:pr-0 last:pl-0"><p className="text-xs text-muted-foreground">{label}</p><p className={`mt-2 text-lg font-bold tabular-nums ${highlight ? "text-emerald-400" : ""}`}>{value}</p></div>; }
+function DashboardMini({ label, value }: { label: string; value: string }) { return <div className="rounded-lg border border-border bg-background/25 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-sm font-semibold tabular-nums">{value}</p></div>; }
+function DashboardPerformanceLoading() { return <div className="space-y-6"><Skeleton className="h-36" /><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">{Array.from({ length: 6 }, (_, index) => <Skeleton key={index} className="h-48" />)}</div><div className="grid gap-4 xl:grid-cols-2"><Skeleton className="h-80" /><Skeleton className="h-80" /></div></div>; }

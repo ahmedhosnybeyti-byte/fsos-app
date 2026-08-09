@@ -29,4 +29,5 @@ export * from "./territory-intelligence";
 export * from "./decision-analytics-studio";
 export * from "./geo-engine";
 export * from "./fsos-360";
+export * from "./dashboard-performance";
 export * from "./user-activity";

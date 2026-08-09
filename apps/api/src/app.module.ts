@@ -47,6 +47,7 @@ import { DecisionAnalyticsStudioModule } from "./modules/decision-analytics-stud
 import { GeoEngineModule } from "./modules/geo-engine/geo-engine.module";
 import { SmartLoadingModule } from "./modules/smart-loading/smart-loading.module";
 import { UserActivityModule } from "./modules/user-activity/user-activity.module";
+import { DashboardPerformanceModule } from "./modules/dashboard-performance/dashboard-performance.module";
 
 @Module({
   imports: [
@@ -96,6 +97,7 @@ import { UserActivityModule } from "./modules/user-activity/user-activity.module
     GeoEngineModule,
     SmartLoadingModule,
     UserActivityModule,
+    DashboardPerformanceModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
