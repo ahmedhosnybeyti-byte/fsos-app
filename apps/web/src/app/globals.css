@@ -121,8 +121,12 @@
      inset highlight along the top edge (visible mainly in dark mode, where
      it reads as light catching a glass surface) layered under the drop
      shadow. Depth comes from stacking both, not from either alone. */
+  .glass-surface,
   .glass-card {
-    @apply relative rounded-2xl border border-border/60 bg-card/80 shadow-[inset_0_1px_0_0_rgb(255,255,255,0.4),0_2px_6px_rgb(0,0,0,0.03),0_12px_32px_rgb(0,0,0,0.05)] backdrop-blur-lg transition-colors dark:border-white/[0.08] dark:bg-white/[0.045] dark:shadow-[inset_0_1px_0_0_rgb(255,255,255,0.07),0_2px_8px_rgb(0,0,0,0.25),0_16px_40px_rgb(0,0,0,0.35)];
+    @apply rounded-2xl border border-border/60 bg-card/80 shadow-[inset_0_1px_0_0_rgb(255,255,255,0.4),0_2px_6px_rgb(0,0,0,0.03),0_12px_32px_rgb(0,0,0,0.05)] backdrop-blur-lg dark:border-white/[0.08] dark:bg-white/[0.045] dark:shadow-[inset_0_1px_0_0_rgb(255,255,255,0.07),0_2px_8px_rgb(0,0,0,0.25),0_16px_40px_rgb(0,0,0,0.35)];
+  }
+  .glass-card {
+    @apply relative transition-colors;
   }
   .bg-app-gradient {
     @apply bg-gradient-to-br from-sky-50 via-white to-blue-50 dark:from-[#0b1220] dark:via-[#0d1526] dark:to-[#0a1120];
