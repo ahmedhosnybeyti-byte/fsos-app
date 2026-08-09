@@ -19,3 +19,8 @@ test("company screen routes resolve the most specific registered screen", () => 
   assert.equal(getCompanyScreenForRoute("/dashboard/smart-loading/session-1")?.featureKey, "smart-loading");
   assert.equal(getCompanyScreenForRoute("/account"), undefined);
 });
+
+test("User Activity is an enabled-by-default company screen", () => {
+  assert.equal(getCompanyScreenForRoute("/admin/user-activity")?.featureKey, "user_activity");
+  assert.equal(getCompanyFeatureAccessState({}, "user_activity"), "ENABLED");
+});

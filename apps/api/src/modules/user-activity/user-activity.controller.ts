@@ -1,10 +1,12 @@
 import { Controller, Get, Param, Query } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { Auth } from "../../common/decorators/auth.decorator";
+import { Permissions } from "../../common/decorators/permissions.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { UserActivityService } from "./user-activity.service";
-@ApiTags("user-activity") @Controller("admin/user-activity")
+import { CompanyScreen } from "../../common/decorators/company-screen.decorator";
+@ApiTags("user-activity") @CompanyScreen("user_activity") @Permissions("user_activity.view") @Controller("admin/user-activity")
 export class UserActivityController {
   constructor(private readonly service: UserActivityService) {}
   @Get("tree") @Auth("SUPER_ADMIN", "COMPANY_ADMIN", "MANAGER", "SUPERVISOR") tree(@CurrentUser() user: AuthenticatedUser) { return this.service.tree(user); }

@@ -8,6 +8,7 @@ import { HealthModule } from "./modules/health/health.module";
 import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
 import { PermissionsGuard } from "./common/guards/permissions.guard";
+import { CompanyScreenAccessGuard } from "./common/guards/company-screen-access.guard";
 import { SubscriptionActiveGuard } from "./common/guards/subscription-active.guard";
 import { RequiresPaidPlanGuard } from "./common/guards/requires-paid-plan.guard";
 import { AuthModule } from "./modules/auth/auth.module";
@@ -104,6 +105,7 @@ import { UserActivityModule } from "./modules/user-activity/user-activity.module
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    { provide: APP_GUARD, useClass: CompanyScreenAccessGuard },
     { provide: APP_GUARD, useClass: SubscriptionActiveGuard },
     // Opt-in: only routes marked @RequiresPaidPlan() are affected — narrows
     // "TRIAL or ACTIVE" (above) to "ACTIVE only" for spend-triggering or
