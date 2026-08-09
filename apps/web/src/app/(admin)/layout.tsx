@@ -28,7 +28,7 @@ const adminNavItems = (t: (key: any) => string): NavItem[] => [
   { href: "/admin/access-control", label: t("admin.nav.accessControl"), icon: ShieldCheck },
   { href: "/admin/usage", label: t("admin.nav.usage"), icon: BarChart3 },
   { href: "/admin/settings", label: t("admin.nav.settings"), icon: Settings },
-  { href: "/admin/user-activity", label: "نشاط المستخدمين", icon: Activity },
+  { href: "/admin/user-activity", label: t("admin.nav.userActivity"), icon: Activity },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -36,7 +36,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const router = useRouter();
   const { t } = useTranslation();
   const canUseActivity = user?.role?.code === "SUPER_ADMIN" || user?.permissions?.includes("user_activity.view");
-  const navItems: NavItem[] = user?.role?.code === "SUPER_ADMIN" ? [...adminNavItems(t), { href: "/admin/account", label: t("nav.account"), icon: CircleUserRound }] : canUseActivity ? [{ href: "/admin/user-activity", label: "نشاط المستخدمين", icon: Activity }, { href: "/admin/account", label: t("nav.account"), icon: CircleUserRound }] : [];
+  const navItems: NavItem[] = user?.role?.code === "SUPER_ADMIN" ? [...adminNavItems(t), { href: "/admin/account", label: t("nav.account"), icon: CircleUserRound }] : canUseActivity ? [{ href: "/admin/user-activity", label: t("admin.nav.userActivity"), icon: Activity }, { href: "/admin/account", label: t("nav.account"), icon: CircleUserRound }] : [];
   const mustChangePassword = user?.mustChangePassword === true;
 
   useEffect(() => {
