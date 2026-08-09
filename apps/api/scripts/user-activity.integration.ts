@@ -28,6 +28,7 @@ async function main() {
   await service.record({ type: "BIZ_FILE_UPLOAD", category: "BUSINESS", actorUserId: rep.id, companyId: one.id, source: "test", metadata: { safe: "ok", password: "no", authorization: "no" } });
   await service.record({ type: "GPT_LAUNCH_CODE_REJECTED", category: "ACCESS", actorUserId: rep.id, companyId: one.id, source: "test", outcome: "FAILURE" });
   await service.record({ type: "ADMIN_EXCEL_LIMIT_CHANGE", category: "ADMIN", actorUserId: superUser.id, subjectUserId: manager.id, companyId: one.id, source: "test" });
+  const overview = await service.overview(superViewer); assert(overview.denied.total >= 1); assert(overview.affected.some((item) => item.id === rep.id));
   const event = await prisma.userActivityEvent.findFirstOrThrow({ where: { type: "BIZ_FILE_UPLOAD" } });
   assert.equal((event.metadata as any).password, undefined); assert.equal((event.metadata as any).authorization, undefined); assert.equal((event.metadata as any).safe, "ok");
   assert.equal(typeof (service as any).update, "undefined"); assert.equal(typeof (service as any).delete, "undefined");

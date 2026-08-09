@@ -70,9 +70,20 @@ export class UserActivityService {
     const scope = await this.visibleUserIds(viewer);
     return this.prisma.user.findMany({ where: { id: { in: scope }, OR: [{ fullName: { contains: q, mode: "insensitive" } }, { email: { contains: q, mode: "insensitive" } }] }, include: { company: true, orgUnit: true, role: true }, take: 50 });
   }
+  async overview(viewer: AuthenticatedUser, from?: string, to?: string) {
+    const ids = await this.visibleUserIds(viewer); const timestamp: Prisma.DateTimeFilter = {};
+    if (from) timestamp.gte = new Date(`${from}T00:00:00.000Z`); if (to) timestamp.lte = new Date(`${to}T23:59:59.999Z`);
+    const eventWhere: Prisma.UserActivityEventWhereInput = { subjectUserId: { in: ids }, ...(from || to ? { timestamp } : {}) };
+    const users = await this.prisma.user.findMany({ where: { id: { in: ids } }, include: { company: true, orgUnit: true, role: true } });
+    const events = await this.prisma.userActivityEvent.findMany({ where: { ...eventWhere, OR: [{ outcome: "DENIED" }, { category: "SECURITY" }] }, select: { subjectUserId: true, outcome: true, category: true } });
+    const risks = viewer.roleCode === "SUPER_ADMIN" ? await this.prisma.userRiskState.findMany({ where: { userId: { in: ids } } }) : [];
+    const counts = new Map<string, { denied: number; alerts: number }>(); for (const e of events) { if (!e.subjectUserId) continue; const x=counts.get(e.subjectUserId) ?? { denied:0,alerts:0 }; if(e.outcome==="DENIED")x.denied++; if(e.category==="SECURITY")x.alerts++; counts.set(e.subjectUserId,x); }
+    const affected = users.map(u => ({ id:u.id,name:u.fullName,email:u.email,company:u.company?.name??"Platform",branch:u.orgUnit?.name??"Unassigned",role:u.role.code,count:(counts.get(u.id)?.denied??0)+(counts.get(u.id)?.alerts??0),denied:counts.get(u.id)?.denied??0,alerts:counts.get(u.id)?.alerts??0,risk:risks.find(r=>r.userId===u.id)?.level??"NORMAL" })).filter(u=>u.count>0||u.risk!=="NORMAL").sort((a,b)=>b.count-a.count);
+    return { denied:{accounts:affected.filter(x=>x.denied>0).length,total:events.filter(x=>x.outcome==="DENIED").length}, securityAlerts:{accounts:affected.filter(x=>x.alerts>0).length,total:events.filter(x=>x.category==="SECURITY").length}, risk:{WATCH:risks.filter(x=>x.level==="WATCH").length,SUSPICIOUS:risks.filter(x=>x.level==="SUSPICIOUS").length,HIGH_RISK:risks.filter(x=>x.level==="HIGH_RISK").length}, affected };
+  }
   async tree(viewer: AuthenticatedUser) {
     const ids = await this.visibleUserIds(viewer);
-    return this.prisma.user.findMany({ where: { id: { in: ids } }, include: { company: true, orgUnit: true, role: true, employee: { select: { managerId: true } } }, orderBy: [{ companyId: "asc" }, { fullName: "asc" }] });
+    return this.prisma.user.findMany({ where: { id: { in: ids } }, include: { company: true, orgUnit: true, role: true, employee: { select: { id: true, managerId: true } } }, orderBy: [{ companyId: "asc" }, { fullName: "asc" }] });
   }
   private sanitizeMetadata(metadata?: Record<string, unknown>): Prisma.InputJsonValue | undefined {
     if (!metadata) return undefined;
