@@ -45,10 +45,19 @@ function routePlanningTranslations(t: ReturnType<typeof useTranslation>["t"]) {
 function useLocalizedText(ref: React.RefObject<HTMLElement | null>, translations: Map<string, string>, dependencies: readonly unknown[] = []) {
   useEffect(() => {
     if (!ref.current) return;
-    const walker = document.createTreeWalker(ref.current, NodeFilter.SHOW_TEXT);
-    const nodes: Text[] = [];
-    while (walker.nextNode()) nodes.push(walker.currentNode as Text);
-    for (const node of nodes) for (const [source, translated] of translations) node.nodeValue = node.nodeValue?.replaceAll(source, translated) ?? null;
+    const translate = (root: Node) => {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const nodes: Text[] = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+      for (const node of nodes) for (const [source, translated] of translations) node.nodeValue = node.nodeValue?.replaceAll(source, translated) ?? null;
+    };
+    translate(ref.current);
+    const observer = new MutationObserver((mutations) => mutations.forEach((mutation) => {
+      if (mutation.type === "characterData") translate(mutation.target);
+      mutation.addedNodes.forEach((node) => translate(node));
+    }));
+    observer.observe(document.body, { childList: true, characterData: true, subtree: true });
+    return () => observer.disconnect();
   }, [ref, translations, ...dependencies]);
 }
 
