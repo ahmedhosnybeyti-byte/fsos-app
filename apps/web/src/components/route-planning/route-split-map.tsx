@@ -9,6 +9,7 @@ import type { Map as LeafletMap, CircleMarker } from "leaflet";
 // top-level code touches `window` and would throw during SSR.
 import "leaflet/dist/leaflet.css";
 import type { RoutePlanningSplitResult } from "@/lib/types";
+import { useTranslation } from "@/components/translation-provider";
 
 // Exported so pages that render a color legend next to this map (e.g.
 // Customer Similarity) use the exact same palette/order instead of
@@ -42,6 +43,7 @@ export function RouteSplitMap({
   colorBy?: "group" | "performance";
   heightClassName?: string;
 }) {
+  const { t, locale } = useTranslation();
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const markersRef = useRef<CircleMarker[]>([]);
@@ -91,13 +93,13 @@ export function RouteSplitMap({
       const bounds: [number, number][] = [];
       result.records.forEach((r) => {
         const groupIndex = mode === "after" ? r.after : r.before;
-        const groupLabel = labels?.[groupIndex] ?? `مجموعة ${groupIndex + 1}`;
+        const groupLabel = labels?.[groupIndex] ?? t("routePlanning.group", { count: groupIndex + 1 });
         let color = GROUP_COLORS[groupIndex % GROUP_COLORS.length];
         let perfNote = "";
         if (colorBy === "performance") {
           const tier = performanceTier(totals[groupIndex] ?? 0, result.target);
           color = PERFORMANCE_COLORS[tier];
-          perfNote = `<br>الأداء: ${tier === "good" ? "جيد" : tier === "ok" ? "متوسط" : "ضعيف"}`;
+          perfNote = `<br>${t("routePlanning.performance")}: ${tier === "good" ? t("routePlanning.good") : tier === "ok" ? t("routePlanning.average") : t("routePlanning.weak")}`;
         }
         const marker = L.circleMarker([r.lat, r.lon], {
           radius: 6,
@@ -106,7 +108,7 @@ export function RouteSplitMap({
           weight: 1.5,
           fillOpacity: 0.9,
         })
-          .bindPopup(`<b>${r.label}</b> (${r.id})<br>مبيعات: ${r.sales.toLocaleString("en-US")}<br>الخط: ${groupLabel}${perfNote}`)
+          .bindPopup(`<b>${r.label}</b> (${r.id})<br>${t("routePlanning.sales")}: ${r.sales.toLocaleString(locale)}<br>${t("routePlanning.routeName")}: ${groupLabel}${perfNote}`)
           .addTo(mapRef.current!);
         markersRef.current.push(marker);
         bounds.push([r.lat, r.lon]);
@@ -118,7 +120,7 @@ export function RouteSplitMap({
     return () => {
       cancelled = true;
     };
-  }, [result, mode, labels, colorBy]);
+  }, [result, mode, labels, colorBy, t, locale]);
 
   return <div ref={containerRef} className={`${heightClassName} w-full rounded-lg border border-border`} />;
 }

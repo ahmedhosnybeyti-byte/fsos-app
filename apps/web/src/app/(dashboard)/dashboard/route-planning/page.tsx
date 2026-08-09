@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Download, Gauge, Map as MapIcon, Wand2 } from "lucide-react";
 import { toast } from "sonner";
@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { RouteSplitMap } from "@/components/route-planning/route-split-map";
 import type { RoutePlanningScopeField, RoutePlanningSplitResult } from "@/lib/types";
+import { useTranslation } from "@/components/translation-provider";
 
 // Balanced Route/Territory Split — dashboard-only feature (chosen over a
 // GPT Action so it's a one-click, always-visible dashboard tool rather than
@@ -34,7 +35,27 @@ const SCOPE_FIELDS: { value: RoutePlanningScopeField; label: string }[] = [
   { value: "Channel", label: "القناة" },
 ];
 
+function routePlanningTranslations(t: ReturnType<typeof useTranslation>["t"]) {
+  return new Map<string, string>([
+    ["Route Planning", t("routePlanning.title")], ["إعادة تقسيم قطاع أو خط سير إلى مجموعات متوازنة في المبيعات ومتماسكة جغرافيًا — تماسك جغرافي أولًا، ثم توازن مبيعات عن طريق نمو تدريجي من الجيران المباشرين فقط.", t("routePlanning.subtitle")], ["الإعدادات", t("routePlanning.settings")], ["عمود النطاق (مندوب/منطقة)", t("routePlanning.scopeField")], ["اختر عمود…", t("routePlanning.selectField")], ["عدد المجموعات", t("routePlanning.groupCount")], ["بيتزامن تلقائيًا مع عدد القيم المحددة تحت. عدّله يدويًا لو عايز تدمج (رقم أقل) أو تضيف خط جديد (رقم أكتر).", t("routePlanning.groupCountHint")], ["رجّعه للتزامن التلقائي", t("routePlanning.restoreAuto")], ["جاري التقسيم…", t("routePlanning.splitting")], ["قسّم الآن", t("routePlanning.splitNow")], ["قيم النطاق (اختار واحدة أو أكتر — بتتجمع مع بعض قبل التقسيم)", t("routePlanning.scopeValues")], ["تحديد الكل", t("routePlanning.selectAll")], ["إلغاء الكل", t("routePlanning.clearAll")], ["اختر عمود النطاق الأول", t("routePlanning.chooseScopeFirst")], ["جاري التحميل…", t("routePlanning.loading")], ["مفيش قيم في العمود ده", t("routePlanning.noValues")], ["النتيجة", t("routePlanning.result")], ["قبل (جغرافي فقط)", t("routePlanning.before")], ["بعد (متوازن)", t("routePlanning.after")], ["عرض الأداء", t("routePlanning.showPerformance")], ["تصدير Excel", t("routePlanning.export")], ["اسم الخط", t("routePlanning.routeName")], ["عملاء", t("routePlanning.customers")], ["إجمالي المبيعات", t("routePlanning.sales")], ["متوسط/عميل", t("routePlanning.averageCustomer")], ["الانحراف", t("routePlanning.deviation")], ["الأداء", t("routePlanning.performance")], ["جيد", t("routePlanning.good")], ["متوسط", t("routePlanning.average")], ["ضعيف", t("routePlanning.weak")], ["الخط (Route)", t("routePlanning.scopeRoute")], ["المدينة", t("routePlanning.scopeCity")], ["فئة العميل", t("routePlanning.scopeCustomerClass")], ["القناة", t("routePlanning.scopeChannel")],
+    ["تم التقسيم — ", t("routePlanning.splitComplete")], [" عميل على ", t("routePlanning.customersAcross")], [" مجموعات", t("routePlanning.groups")], ["تعذر إتمام التقسيم", t("routePlanning.splitError")], [" قيمة محددة", t("routePlanning.selectedValues")], [" عميل مستخدم", t("routePlanning.customersUsed")], ["نسبة التغطية: ", t("routePlanning.coverage")], ["المتوسط المستهدف: ", t("routePlanning.targetAverage")], ["أقصى انحراف: ", t("routePlanning.maxDeviation")], [" صف مستبعد (إحداثيات غير صالحة)", t("routePlanning.invalidCoordinates")], ["خط جديد ", t("routePlanning.newRoute")], ["مجموعة ", t("routePlanning.groupPrefix")],
+  ]);
+}
+
+function useLocalizedText(ref: React.RefObject<HTMLElement | null>, translations: Map<string, string>, dependencies: readonly unknown[] = []) {
+  useEffect(() => {
+    if (!ref.current) return;
+    const walker = document.createTreeWalker(ref.current, NodeFilter.SHOW_TEXT);
+    const nodes: Text[] = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode as Text);
+    for (const node of nodes) for (const [source, translated] of translations) node.nodeValue = node.nodeValue?.replaceAll(source, translated) ?? null;
+  }, [ref, translations, ...dependencies]);
+}
+
 export default function RoutePlanningPage() {
+  const { t, locale } = useTranslation();
+  const pageRef = useRef<HTMLDivElement>(null);
+  const translations = useMemo(() => routePlanningTranslations(t), [t]);
   const [scopeField, setScopeField] = useState<RoutePlanningScopeField | "">("");
   // Multi-select — a supervisor pools one or more existing scope values
   // (e.g. several reps) into one customer set before re-splitting into
@@ -56,6 +77,7 @@ export default function RoutePlanningPage() {
   });
 
   const [result, setResult] = useState<RoutePlanningSplitResult | null>(null);
+  useLocalizedText(pageRef, translations, [result, scopeValuesQuery.data]);
   const [mode, setMode] = useState<"before" | "after">("after");
   // Route Performance Map: color markers by performance tier (green/amber/
   // red vs. target) instead of an arbitrary per-group color.
@@ -105,7 +127,7 @@ export default function RoutePlanningPage() {
   }
 
   return (
-    <div className="relative space-y-6">
+    <div key={locale} ref={pageRef} className="relative space-y-6">
       <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
       <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
 
@@ -329,6 +351,7 @@ function ResultView({
   colorBy: "group" | "performance";
   onColorByChange: (v: "group" | "performance") => void;
 }) {
+  const { locale } = useTranslation();
   const totals = mode === "after" ? result.afterTotals : result.beforeTotals;
   const counts = mode === "after" ? result.afterCounts : result.beforeCounts;
   const maxDevPct = (Math.max(...totals.map((t) => Math.abs(t - result.target))) / result.target) * 100;
@@ -367,7 +390,7 @@ function ResultView({
           <Badge variant={coveragePct >= 95 ? "success" : coveragePct >= 80 ? "warning" : "destructive"}>
             نسبة التغطية: {coveragePct.toFixed(1)}%
           </Badge>
-          <Badge variant="secondary">المتوسط المستهدف: {Math.round(result.target).toLocaleString("en-US")}</Badge>
+          <Badge variant="secondary">المتوسط المستهدف: {Math.round(result.target).toLocaleString(locale)}</Badge>
           <Badge variant={maxDevPct <= 10 ? "success" : "warning"}>أقصى انحراف: {maxDevPct.toFixed(1)}%</Badge>
           {result.excludedBadCoordinates > 0 && (
             <Badge variant="warning">{result.excludedBadCoordinates} صف مستبعد (إحداثيات غير صالحة)</Badge>
@@ -405,8 +428,8 @@ function ResultView({
                     />
                   </TableCell>
                   <TableCell>{count}</TableCell>
-                  <TableCell>{Math.round(t).toLocaleString("en-US")}</TableCell>
-                  <TableCell>{Math.round(avgPerCustomer).toLocaleString("en-US")}</TableCell>
+                  <TableCell>{Math.round(t).toLocaleString(locale)}</TableCell>
+                  <TableCell>{Math.round(avgPerCustomer).toLocaleString(locale)}</TableCell>
                   <TableCell className={Math.abs(dev) <= 10 ? "text-success" : "text-destructive"}>
                     {dev >= 0 ? "+" : ""}
                     {dev.toFixed(1)}%
