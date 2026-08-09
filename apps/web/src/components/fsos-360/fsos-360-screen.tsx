@@ -18,7 +18,7 @@ import { applyRemovedSelections, buildFsos360QueryRequest, cityOptions, nextHier
 const focusValues: Fsos360AnalysisFocus[] = ["company", "region", "branch", "manager", "supervisor", "route", "sales-rep", "customer", "brand", "category", "product"];
 const smallFields: { key: keyof Fsos360Filters; optionKey: string; labelKey: string; hierarchyLevel?: "region" | "city"; disabled?: boolean }[] = [
   { key: "companyId", optionKey: "company", labelKey: "fsos360.company" }, { key: "regionIds", optionKey: "regionCity", labelKey: "fsos360.region", hierarchyLevel: "region" }, { key: "cityValues", optionKey: "regionCity", labelKey: "fsos360.city", hierarchyLevel: "city" }, { key: "branchIds", optionKey: "branch", labelKey: "fsos360.branch" },
-  { key: "managerIds", optionKey: "manager", labelKey: "fsos360.manager", disabled: true }, { key: "supervisorIds", optionKey: "supervisor", labelKey: "fsos360.supervisor", disabled: true }, { key: "routeIds", optionKey: "route", labelKey: "fsos360.route" },
+  { key: "managerIds", optionKey: "manager", labelKey: "fsos360.manager" }, { key: "supervisorIds", optionKey: "supervisor", labelKey: "fsos360.supervisor" }, { key: "routeIds", optionKey: "route", labelKey: "fsos360.route" },
 ];
 const smartFields: { field: SmartField; key: keyof Fsos360Filters; labelKey: string }[] = [{ field: "sales-rep", key: "salesRepIds", labelKey: "fsos360.salesRep" }, { field: "customer", key: "customerCodes", labelKey: "fsos360.customer" }, { field: "brand", key: "brandValues", labelKey: "fsos360.brand" }, { field: "category", key: "categoryValues", labelKey: "fsos360.category" }, { field: "product", key: "productCodes", labelKey: "fsos360.product" }];
 
@@ -43,7 +43,7 @@ export function Fsos360Screen() {
   useEffect(() => { if (!query.data) return; setLastResult(query.data); setUserFilters((previous) => applyRemovedSelections(previous, query.data!.removedSelections)); }, [query.data]);
   const data = query.data ?? lastResult; const removed = data ? Object.values(data.removedSelections).flat() : [];
   const update = (change: Partial<Fsos360QueryInput>) => setContext((previous) => ({ ...previous, ...change }));
-  const setFilter = (key: keyof Fsos360Filters, values: string[], label?: string) => { const dependent: Partial<Record<keyof Fsos360Filters, (keyof Fsos360Filters)[]>> = { companyId: ["regionIds", "cityValues", "branchIds", "routeIds", "salesRepIds"], regionIds: ["cityValues", "branchIds", "routeIds", "salesRepIds"], cityValues: ["branchIds", "routeIds", "salesRepIds"], branchIds: ["routeIds", "salesRepIds"], routeIds: ["salesRepIds"] }; setUserFilters((previous) => { const next = { ...previous, [key]: key === "companyId" ? values[0] : values.length ? values : undefined } as Fsos360Filters; for (const child of dependent[key] ?? []) next[child] = undefined; return next; }); setSelectedLabels((previous) => { const next = { ...previous }; if (values[0] && label) next[key] = { ...next[key], [values[0]]: label }; else delete next[key]; for (const child of dependent[key] ?? []) delete next[child]; return next; }); };  const setHierarchyFilter = (key: keyof Fsos360Filters, selectedValue: string, label?: string) => {
+  const setFilter = (key: keyof Fsos360Filters, values: string[], label?: string) => { const dependent: Partial<Record<keyof Fsos360Filters, (keyof Fsos360Filters)[]>> = { companyId: ["regionIds", "cityValues", "branchIds", "managerIds", "supervisorIds", "routeIds", "salesRepIds"], regionIds: ["cityValues", "branchIds", "managerIds", "supervisorIds", "routeIds", "salesRepIds"], cityValues: ["branchIds", "managerIds", "supervisorIds", "routeIds", "salesRepIds"], branchIds: ["managerIds", "supervisorIds", "routeIds", "salesRepIds"], managerIds: ["supervisorIds", "routeIds", "salesRepIds"], supervisorIds: ["routeIds", "salesRepIds"], routeIds: ["salesRepIds"] }; setUserFilters((previous) => { const next = { ...previous, [key]: key === "companyId" ? values[0] : values.length ? values : undefined } as Fsos360Filters; for (const child of dependent[key] ?? []) next[child] = undefined; return next; }); setSelectedLabels((previous) => { const next = { ...previous }; if (values[0] && label) next[key] = { ...next[key], [values[0]]: label }; else delete next[key]; for (const child of dependent[key] ?? []) delete next[child]; return next; }); };  const setHierarchyFilter = (key: keyof Fsos360Filters, selectedValue: string, label?: string) => {
     if (key === "regionIds") {
       setUserFilters((previous) => nextHierarchyFilters(previous, key, selectedValue));
 
@@ -52,6 +52,8 @@ export function Fsos360Screen() {
         regionIds: selectedValue && label ? { [selectedValue]: label } : {},
         cityValues: {},
         branchIds: {},
+        managerIds: {},
+        supervisorIds: {},
         routeIds: {},
         salesRepIds: {},
       }));
@@ -65,6 +67,8 @@ export function Fsos360Screen() {
         ...previous,
         cityValues: selectedValue && label ? { [selectedValue]: label } : {},
         branchIds: {},
+        managerIds: {},
+        supervisorIds: {},
         routeIds: {},
         salesRepIds: {},
       }));
@@ -77,6 +81,8 @@ export function Fsos360Screen() {
       setSelectedLabels((previous) => ({
         ...previous,
         branchIds: selectedValue && label ? { [selectedValue]: label } : {},
+        managerIds: {},
+        supervisorIds: {},
         routeIds: {},
         salesRepIds: {},
       }));

@@ -10,9 +10,9 @@ export function cityOptions(options: Fsos360RegionCityOption[], regionId: string
 }
 
 export function nextHierarchyFilters(previous: Fsos360Filters, key: keyof Fsos360Filters, selectedValue: string): Fsos360Filters {
-  if (key === "regionIds") return { ...previous, regionIds: selectedValue ? [selectedValue] : [], cityValues: [], branchIds: [], routeIds: [], salesRepIds: [] };
-  if (key === "cityValues") return { ...previous, cityValues: selectedValue ? [selectedValue] : [], branchIds: [], routeIds: [], salesRepIds: [] };
-  if (key === "branchIds") return { ...previous, branchIds: selectedValue ? [selectedValue] : [], routeIds: [], salesRepIds: [] };
+  if (key === "regionIds") return { ...previous, regionIds: selectedValue ? [selectedValue] : [], cityValues: [], branchIds: [], managerIds: [], supervisorIds: [], routeIds: [], salesRepIds: [] };
+  if (key === "cityValues") return { ...previous, cityValues: selectedValue ? [selectedValue] : [], branchIds: [], managerIds: [], supervisorIds: [], routeIds: [], salesRepIds: [] };
+  if (key === "branchIds") return { ...previous, branchIds: selectedValue ? [selectedValue] : [], managerIds: [], supervisorIds: [], routeIds: [], salesRepIds: [] };
   return { ...previous, [key]: selectedValue ? [selectedValue] : [] };
 }
 

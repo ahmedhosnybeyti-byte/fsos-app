@@ -212,18 +212,38 @@ export class Fsos360ContextService {
     filters.branchIds = clean(input.branchIds, branchAllowed, removedSelections, "branchIds");
     const branchSet = setOf(filters.branchIds);
 
-    // Employee role semantics are not trustworthy enough to expose manager/supervisor as separate filters.
-    if (input.managerIds?.length) removedSelections.managerIds = input.managerIds;
-    if (input.supervisorIds?.length) removedSelections.supervisorIds = input.supervisorIds;
-
     const routeAllowed = new Set<string>();
     for (const route of routes.values()) if (!branchSet || branchSet.has(route.branchId)) routeAllowed.add(route.id);
+    const hierarchyAssignments = routeAssignments.filter((assignment) => assignment.role === "SalesRep" && assignment.startAt !== null && routeAllowed.has(assignment.routeId));
+    const supervisorOf = (employeeId: string) => employees.get(employeeId)?.managerId ?? null;
+    const managerOf = (employeeId: string) => {
+      const supervisorId = supervisorOf(employeeId);
+      return supervisorId ? supervisorOf(supervisorId) : null;
+    };
+    const managerAllowed = new Set(hierarchyAssignments.map((assignment) => managerOf(assignment.employeeId)).filter((id): id is string => Boolean(id)));
+    filters.managerIds = clean(input.managerIds, managerAllowed, removedSelections, "managerIds");
+    const managerSet = setOf(filters.managerIds);
+    const supervisorAllowed = new Set(hierarchyAssignments
+      .filter((assignment) => !managerSet || (managerOf(assignment.employeeId) !== null && managerSet.has(managerOf(assignment.employeeId)!)))
+      .map((assignment) => supervisorOf(assignment.employeeId)).filter((id): id is string => Boolean(id)));
+    filters.supervisorIds = clean(input.supervisorIds, supervisorAllowed, removedSelections, "supervisorIds");
+    const supervisorSet = setOf(filters.supervisorIds);
+    if (managerSet || supervisorSet) {
+      for (const routeId of Array.from(routeAllowed)) {
+        const matchesHierarchy = hierarchyAssignments.some((assignment) => assignment.routeId === routeId
+          && (!managerSet || (managerOf(assignment.employeeId) !== null && managerSet.has(managerOf(assignment.employeeId)!)))
+          && (!supervisorSet || (supervisorOf(assignment.employeeId) !== null && supervisorSet.has(supervisorOf(assignment.employeeId)!))));
+        if (!matchesHierarchy) routeAllowed.delete(routeId);
+      }
+    }
     filters.routeIds = clean(input.routeIds, routeAllowed, removedSelections, "routeIds");
     const routeSet = setOf(filters.routeIds);
 
     const repAllowed = new Set<string>();
     for (const assignment of routeAssignments) {
-      if (assignment.role === "SalesRep" && assignment.startAt !== null && (!routeSet || routeSet.has(assignment.routeId))) repAllowed.add(assignment.employeeId);
+      if (assignment.role === "SalesRep" && assignment.startAt !== null && (!routeSet || routeSet.has(assignment.routeId))
+        && (!managerSet || (managerOf(assignment.employeeId) !== null && managerSet.has(managerOf(assignment.employeeId)!)))
+        && (!supervisorSet || (supervisorOf(assignment.employeeId) !== null && supervisorSet.has(supervisorOf(assignment.employeeId)!)))) repAllowed.add(assignment.employeeId);
     }
     filters.salesRepIds = clean(input.salesRepIds, repAllowed, removedSelections, "salesRepIds");
 
@@ -252,7 +272,7 @@ export class Fsos360ContextService {
       if (route) routeOptions.set(route.id, route.name);
     }
 
-    const managerSupervisorReason = datasets.Employees.available ? "manager-supervisor-role-ambiguous" : "employees-dataset-unavailable";
+    const managerSupervisorAvailable = datasets.Employees.available && managerAllowed.size > 0 && supervisorAllowed.size > 0;
     const routeAssignmentAvailable = datasets["Route Assignments"].available && routeAssignments.some((assignment) => assignment.role === "SalesRep" && assignment.startAt !== null);
 
     return {
@@ -271,16 +291,16 @@ export class Fsos360ContextService {
         company: [{ value: user.companyId!, label: "Company" }],
         regionCity: regionCityOptions(regions, customers, branches, regionSet),
         branch: optionsFrom(Array.from(branchAllowed, (id) => [id, branches.get(id)?.name ?? id])),
-        manager: [],
-        supervisor: [],
+        manager: optionsFrom(Array.from(managerAllowed, (id) => [id, employees.get(id)?.name ?? id])),
+        supervisor: optionsFrom(Array.from(supervisorAllowed, (id) => [id, employees.get(id)?.name ?? id])),
         route: optionsFrom(routeOptions.entries()),
       },
       capabilities: {
         companies: { availability: datasets.Companies.available ? "available" : "partial", available: true, reason: datasets.Companies.available ? null : "authenticated-company-only" },
         regions: { availability: datasets.Regions.available ? "available" : "unavailable", available: datasets.Regions.available, reason: datasets.Regions.available ? null : "regions-dataset-unavailable" },
         routeAssignments: { availability: routeAssignmentAvailable ? "available" : "unavailable", available: routeAssignmentAvailable, reason: routeAssignmentAvailable ? null : "route-assignment-history-unavailable" },
-        manager: { availability: "unavailable", available: false, reason: managerSupervisorReason },
-        supervisor: { availability: "unavailable", available: false, reason: managerSupervisorReason },
+        manager: { availability: managerSupervisorAvailable ? "available" : "unavailable", available: managerSupervisorAvailable, reason: managerSupervisorAvailable ? null : "employee-hierarchy-unavailable" },
+        supervisor: { availability: managerSupervisorAvailable ? "available" : "unavailable", available: managerSupervisorAvailable, reason: managerSupervisorAvailable ? null : "employee-hierarchy-unavailable" },
       },
     };
   }
@@ -296,6 +316,8 @@ export class Fsos360ContextService {
     if (filters.brandValues?.length) candidates.push("brand");
     if (candidates.length > 1) return "mixed";
     if (candidates.length === 1) return candidates[0]!;
+    if (filters.supervisorIds?.length) return "supervisor";
+    if (filters.managerIds?.length) return "manager";
     if (filters.branchIds?.length) return "branch";
     if (filters.regionIds?.length || filters.cityValues?.length) return "region";
     return "company";

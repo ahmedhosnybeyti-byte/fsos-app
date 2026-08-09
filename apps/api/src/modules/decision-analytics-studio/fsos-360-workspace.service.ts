@@ -172,8 +172,7 @@ export class Fsos360WorkspaceService {
 
   private analysisAvailability(context: Fsos360ResolvedContext, windows: { current: Window; comparison: Window }, salesRows: SalesRow[]) {
     if (context.activeAnalysisLevel === "mixed") return { availability: "unavailable" as const, reason: "ambiguous-analysis-focus" };
-    if (context.activeAnalysisLevel === "manager" || context.activeAnalysisLevel === "supervisor") return { availability: "unavailable" as const, reason: "manager-supervisor-role-ambiguous" };
-    const needsSalesRepHistory = context.activeAnalysisLevel === "sales-rep" || Boolean(context.filters.salesRepIds?.length);
+    const needsSalesRepHistory = ["manager", "supervisor", "sales-rep"].includes(context.activeAnalysisLevel) || Boolean(context.filters.managerIds?.length || context.filters.supervisorIds?.length || context.filters.salesRepIds?.length);
     if (!needsSalesRepHistory) return { availability: "available" as const, reason: null };
     if (!context.capabilities.routeAssignments!.available) return { availability: "unavailable" as const, reason: "route-assignment-history-unavailable" };
     const operationRows = [
@@ -233,8 +232,15 @@ export class Fsos360WorkspaceService {
 
   private historicalSalesRepMatches(routeId: string, time: number | null, context: Fsos360ResolvedContext): boolean {
     const selected = context.filters.salesRepIds?.length ? new Set(context.filters.salesRepIds) : null;
-    if (!selected && context.activeAnalysisLevel !== "sales-rep") return true;
-    return time !== null && context.routeAssignments.some((assignment) => assignmentMatchesAt(assignment, routeId, time, selected));
+    const managers = context.filters.managerIds?.length ? new Set(context.filters.managerIds) : null;
+    const supervisors = context.filters.supervisorIds?.length ? new Set(context.filters.supervisorIds) : null;
+    if (!selected && !managers && !supervisors && context.activeAnalysisLevel !== "sales-rep") return true;
+    return time !== null && context.routeAssignments.some((assignment) => {
+      if (!assignmentMatchesAt(assignment, routeId, time, selected)) return false;
+      const supervisorId = context.employees.get(assignment.employeeId)?.managerId ?? null;
+      const managerId = supervisorId ? context.employees.get(supervisorId)?.managerId ?? null : null;
+      return (!supervisors || (supervisorId !== null && supervisors.has(supervisorId))) && (!managers || (managerId !== null && managers.has(managerId)));
+    });
   }
 
   private baseMatches(row: OperationRow, context: Fsos360ResolvedContext): boolean {
@@ -323,8 +329,8 @@ export class Fsos360WorkspaceService {
     const returnsAvailability = productFiltered ? "not-applicable" : (context.datasets.Returns.available ? analysis.availability : "unavailable");
     const visitsAvailability = productFiltered ? "not-applicable" : (context.datasets.Visits.available ? analysis.availability : "unavailable");
     const lostSales = sgiSituations?.filter((item) => item.type === "LOST_SALES") ?? [];
-    const lostSalesCurrent = sgiSituations === null ? null : lostSales.reduce((sum, item) => sum + item.metricValue, 0);
-    const lostSalesPrevious = sgiSituations === null ? null : lostSales.reduce((sum, item) => sum + (item.metricValuePrior ?? 0), 0);
+    const lostSalesCurrent = sgiSituations === null ? null : lostSales.reduce((sum, item) => sum + (item.metricValuePrior ?? 0), 0);
+    const lostSalesPrevious = sgiSituations === null ? null : lostSales.reduce((sum, item) => sum + item.metricValue, 0);
     return [
       metric("sales", currentSales, previousSales, invoicesAvailable ? analysis.availability : "unavailable", invoicesAvailable ? analysis.reason : "invoices-dataset-unavailable", "favorable", "fsos360.kpi.sales.change"),
       metric("collections", collectionCurrent, collectionPrevious, collectionsAvailability, productFiltered ? "filter-not-supported" : analysis.reason, "favorable", "fsos360.kpi.collections.change"),
