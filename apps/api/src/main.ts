@@ -43,6 +43,7 @@ async function bootstrap() {
   const requestTraceLogger = new Logger("RequestTrace");
   app.use((req: import("express").Request, res: import("express").Response, next: () => void) => {
     const requestId = randomUUID();
+    (req as import("express").Request & { requestId?: string }).requestId = requestId;
     res.setHeader("X-Request-Id", requestId);
     const start = Date.now();
 

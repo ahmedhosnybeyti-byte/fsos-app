@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { PrismaClient } from "@field-sales-os/database";
 import { UserActivityService } from "../src/modules/user-activity/user-activity.service";
+import { RolesGuard } from "../src/common/guards/roles.guard";
 
 const prisma = new PrismaClient();
 const roleCodes = ["SUPER_ADMIN", "COMPANY_ADMIN", "MANAGER", "SUPERVISOR", "SALES_REP"] as const;
@@ -20,6 +21,10 @@ async function main() {
   const service = new UserActivityService(prisma as never);
   const superViewer = { userId: superUser.id, companyId: null, email: superUser.email, roleCode: "SUPER_ADMIN" as const, permissions: [], mustChangePassword: false, orgUnitId: null };
   const managerViewer = { userId: manager.id, companyId: one.id, email: manager.email, roleCode: "MANAGER" as const, permissions: [], mustChangePassword: false, orgUnitId: null };
+  const salesRepViewer = { userId: rep.id, companyId: one.id, email: rep.email, roleCode: "SALES_REP" as const, permissions: [], mustChangePassword: false, orgUnitId: null };
+  const deniedGuard = new RolesGuard({ getAllAndOverride: () => ["MANAGER"] } as never, service);
+  await assert.rejects(() => deniedGuard.canActivate({ getHandler: () => null, getClass: () => null, switchToHttp: () => ({ getRequest: () => ({ user: salesRepViewer, originalUrl: "/api/v1/admin/user-activity/tree", method: "GET", requestId: "test-request" }) }) } as never));
+  assert.equal(await prisma.userActivityEvent.count({ where: { subjectUserId: rep.id, type: "AUTH_PERMISSION_DENIED", outcome: "DENIED" } }), 1);
   await service.record({ type: "BIZ_FILE_UPLOAD", category: "BUSINESS", actorUserId: rep.id, companyId: one.id, source: "test", metadata: { safe: "ok", password: "no", authorization: "no" } });
   await service.record({ type: "GPT_LAUNCH_CODE_REJECTED", category: "ACCESS", actorUserId: rep.id, companyId: one.id, source: "test", outcome: "FAILURE" });
   await service.record({ type: "ADMIN_EXCEL_LIMIT_CHANGE", category: "ADMIN", actorUserId: superUser.id, subjectUserId: manager.id, companyId: one.id, source: "test" });
