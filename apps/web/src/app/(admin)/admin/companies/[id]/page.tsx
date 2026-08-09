@@ -27,6 +27,7 @@ export default function AdminCompanyDetailsPage() {
   const featureQuery = useQuery({ queryKey: ["admin", "company", params.id, "feature-access"], queryFn: () => companiesApi.featureAccess(params.id), enabled: Boolean(params.id) });
   const [form, setForm] = useState<{ name: string; slug: string; status: CompanyStatus; maxExcelUploadSizeMb: number }>({ name: "", slug: "", status: "ACTIVE", maxExcelUploadSizeMb: 100 });
   const [featureAccess, setFeatureAccess] = useState<CompanyFeatureAccess>({});
+  const [launchCodeSearch, setLaunchCodeSearch] = useState("");
   useEffect(() => { if (data) setForm({ name: data.name, slug: data.slug, status: data.status, maxExcelUploadSizeMb: data.maxExcelUploadSizeMb ?? 100 }); }, [data]);
   useEffect(() => { if (featureQuery.data) setFeatureAccess(featureQuery.data.featureAccess); }, [featureQuery.data]);
   const updateMutation = useMutation({ mutationFn: () => companiesApi.update(params.id, { name: form.name, slug: form.slug.trim().toLowerCase(), status: form.status, maxExcelUploadSizeMb: form.maxExcelUploadSizeMb }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["admin", "company", params.id] }); await queryClient.invalidateQueries({ queryKey: ["admin", "companies"] }); } });
@@ -44,6 +45,7 @@ export default function AdminCompanyDetailsPage() {
   const viewState = getCompanyDetailsViewState({ isLoading, isError, hasData: Boolean(data) });
   if (viewState === "loading") return <div className="flex min-h-[50vh] items-center justify-center"><Spinner className="h-6 w-6" /></div>;
   if (viewState === "error" || !data) return <p className="text-destructive">Could not load company details.</p>;
+  const filteredLaunchCodeUsers = data.users.filter((user) => `${user.fullName} ${user.email}`.toLowerCase().includes(launchCodeSearch.trim().toLowerCase()));
   return <div className="space-y-6">
     <section className="glass-card space-y-3 p-4">
       <h2 className="font-semibold">Security limits</h2>
@@ -52,7 +54,8 @@ export default function AdminCompanyDetailsPage() {
     </section>
     <section className="glass-card space-y-3 p-4">
       <h2 className="font-semibold">Daily GPT code reset</h2>
-      {data.users.map((user) => <div key={user.id} className="flex items-center justify-between gap-3 border-b py-2 last:border-0"><span>{user.fullName} ({user.email})</span><Button variant="outline" size="sm" disabled={resetLaunchCodesMutation.isPending} onClick={() => resetLaunchCodesMutation.mutate(user.id)}>Reset daily GPT codes</Button></div>)}
+      <Input value={launchCodeSearch} onChange={(event) => setLaunchCodeSearch(event.target.value)} placeholder="Search by name or email" aria-label="Search company users" />
+      {filteredLaunchCodeUsers.map((user) => <div key={user.id} className="flex items-center justify-between gap-3 border-b py-2 last:border-0"><span>{user.fullName} ({user.email})</span><Button variant="outline" size="sm" disabled={resetLaunchCodesMutation.isPending} onClick={() => resetLaunchCodesMutation.mutate(user.id)}>Reset daily GPT codes</Button></div>)}
     </section>
     <div><Link href="/admin/companies" className="text-sm text-primary hover:underline">← Companies</Link><div className="mt-2 flex items-center gap-2"><h1 className="text-2xl font-semibold">{data.name}</h1><Badge variant={data.status === "ARCHIVED" ? "destructive" : "outline"}>{data.status === "ARCHIVED" ? "Archived / Cancelled" : data.status}</Badge></div><p className="text-muted-foreground">Created {formatDate(data.createdAt)} · Updated {formatDate(data.updatedAt)}</p></div>
     <section className="glass-card space-y-3 p-4"><h2 className="font-semibold">Edit company</h2><Label>Name<Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Label><Label>Slug<Input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} /></Label><Label>Status<Select value={form.status} onValueChange={(value) => setForm({ ...form, status: value as CompanyStatus })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ACTIVE">Active</SelectItem><SelectItem value="SUSPENDED">Suspended</SelectItem><SelectItem value="DRAFT">Draft</SelectItem><SelectItem value="CONFIGURING">Configuring</SelectItem><SelectItem value="ARCHIVED">Archived</SelectItem></SelectContent></Select></Label>{updateMutation.isError && <p className="text-sm text-destructive">{updateMutation.error instanceof ApiError ? updateMutation.error.message : "Could not update company."}</p>}<Button disabled={!canSubmitCompanyDetails(updateMutation.isPending)} onClick={() => updateMutation.mutate()}>{updateMutation.isPending ? "Saving…" : "Save changes"}</Button></section>
