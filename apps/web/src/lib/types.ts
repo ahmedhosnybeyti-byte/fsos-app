@@ -41,6 +41,7 @@ export interface User {
   createdAt: string;
   updatedAt: string;
   role: Role;
+  company?: Pick<Company, "id" | "name"> | null;
   currentRouteAssignment?: { routeId: string; startedAt: string } | null;
   permissions?: string[];
   featureAccess?: import("@field-sales-os/schemas").CompanyFeatureAccess;

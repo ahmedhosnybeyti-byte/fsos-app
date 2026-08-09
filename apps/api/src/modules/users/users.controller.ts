@@ -53,6 +53,9 @@ export class UsersController {
     @Query("companyId") companyId: string | undefined,
     @Query(new ZodValidationPipe(listUsersQuerySchema)) query: ListUsersQueryInput,
   ) {
+    if (user.roleCode === "SUPER_ADMIN" && !companyId) {
+      return this.usersService.listByCompany(undefined, query);
+    }
     const scopedCompanyId = this.resolveCompanyScope(user, companyId);
     return this.usersService.listByCompany(scopedCompanyId, query);
   }

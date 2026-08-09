@@ -22,6 +22,7 @@ const publicUserSelect = {
   createdAt: true,
   updatedAt: true,
   role: true,
+  company: { select: { id: true, name: true } },
 } as const;
 
 @Injectable()
@@ -132,12 +133,12 @@ export class UsersService {
     }
   }
 
-  async listByCompany(companyId: string, query: ListUsersQueryInput) {
+  async listByCompany(companyId: string | undefined, query: ListUsersQueryInput) {
     const { page, pageSize, search, roleCode, status } = query;
     // ARCHIVED = soft-deleted (see archiveUser) â€” hidden from the Team list
     // entirely, unlike DISABLED which stays visible with a re-enable action.
     const where = {
-      companyId,
+      ...(companyId ? { companyId } : {}),
       status: status ?? { not: "ARCHIVED" as const },
       ...(roleCode ? { role: { code: roleCode } } : {}),
       ...(search
@@ -154,7 +155,7 @@ export class UsersService {
       }),
       this.prisma.user.count({ where }),
     ]);
-    const assignments = items.length === 0 ? [] : await this.prisma.userRouteAssignment.findMany({ where: { companyId, userId: { in: items.map((item) => item.id) }, endedAt: null }, select: { userId: true, routeId: true, startedAt: true } });
+    const assignments = items.length === 0 ? [] : await this.prisma.userRouteAssignment.findMany({ where: { ...(companyId ? { companyId } : {}), userId: { in: items.map((item) => item.id) }, endedAt: null }, select: { userId: true, routeId: true, startedAt: true } });
     const assignmentByUserId = new Map(assignments.map((assignment) => [assignment.userId, assignment]));
     return { items: items.map((item) => ({ ...item, currentRouteAssignment: assignmentByUserId.get(item.id) ?? null })), total, page, pageSize };
   }
