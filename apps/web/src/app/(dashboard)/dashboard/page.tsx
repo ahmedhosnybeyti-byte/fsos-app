@@ -266,13 +266,14 @@ function QuickActionTile({
   );
 }
 
-function dashboardFormat(value: number | null, unit = "count") {
-  if (value === null) return "غير متاح";
-  return unit === "currency" ? `${Math.round(value).toLocaleString("ar-SA")} ر.س` : Math.round(value).toLocaleString("ar-SA");
+function dashboardFormat(value: number | null, unit = "count", locale: "ar" | "en" = "ar", unavailable = "غير متاح") {
+  if (value === null) return unavailable;
+  const number = new Intl.NumberFormat(locale === "ar" ? "ar-SA" : "en-US").format(Math.round(value));
+  return unit === "currency" ? new Intl.NumberFormat(locale === "ar" ? "ar-SA" : "en-US", { style: "currency", currency: "SAR", maximumFractionDigits: 0 }).format(Math.round(value)) : number;
 }
 
 function DashboardGrowthCard({ label, metric, unit, Icon, color, lowerBetter, benchmarkType }: { label: string; metric: DashboardMetric; unit: string; Icon: LucideIcon; color: string; lowerBetter: boolean; benchmarkType: DashboardBenchmark }) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const positive = metric.growthPct !== null && (lowerBetter ? metric.growthPct <= 0 : metric.growthPct >= 0);
   const Trend = positive ? TrendingUp : TrendingDown;
   const values = metric.sparkline;
@@ -283,7 +284,7 @@ function DashboardGrowthCard({ label, metric, unit, Icon, color, lowerBetter, be
   const performance = ratio === null ? "flat" : lowerBetter ? ratio <= 1 ? "good" : ratio <= 1.1 ? "near" : "bad" : ratio >= 1 ? "good" : ratio >= 0.9 ? "near" : "bad";
   const sparkColor = performance === "good" ? "text-emerald-400" : performance === "near" ? "text-amber-400" : performance === "bad" ? "text-destructive" : "text-muted-foreground";
   const badgeVariant = performance === "good" ? "success" as const : performance === "near" ? "warning" as const : performance === "bad" ? "destructive" as const : "secondary" as const;
-  return <div className="glass-card min-h-48 p-4"><div className="flex items-center justify-between"><span className={`flex h-9 w-9 items-center justify-center rounded-lg bg-background/50 ${color}`}><Icon className="h-4 w-4" /></span><Badge variant={badgeVariant} className="gap-1">{metric.growthPct === null ? t("performance.noChange") : <><Trend className="h-3 w-3" />{Math.abs(metric.growthPct).toFixed(1)}%</>}</Badge></div><p className="mt-4 text-sm text-muted-foreground">{label}</p><p className="mt-1 text-xl font-bold tabular-nums">{dashboardFormat(metric.current, unit)}</p><p className="mt-1 text-xs text-muted-foreground">{benchmarkLabel}: <span className="font-medium text-foreground">{dashboardFormat(metric.benchmark, unit)}</span></p>{values.length > 0 ? <svg viewBox="0 0 100 32" preserveAspectRatio="none" className={`mt-5 h-8 w-full drop-shadow-[0_0_3px_currentColor] ${sparkColor}`}><polyline points={points} fill="none" stroke="currentColor" strokeWidth="2.25" vectorEffect="non-scaling-stroke" /></svg> : <div className="mt-5 h-8" />}</div>;
+  return <div className="glass-card min-h-48 p-4"><div className="flex items-center justify-between"><span className={`flex h-9 w-9 items-center justify-center rounded-lg bg-background/50 ${color}`}><Icon className="h-4 w-4" /></span><Badge variant={badgeVariant} className="gap-1">{metric.growthPct === null ? t("performance.noChange") : <><Trend className="h-3 w-3" />{Math.abs(metric.growthPct).toFixed(1)}%</>}</Badge></div><p className="mt-4 text-sm text-muted-foreground">{label}</p><p className="mt-1 text-xl font-bold tabular-nums">{dashboardFormat(metric.current, unit, locale, t("performance.unavailable"))}</p><p className="mt-1 text-xs text-muted-foreground">{benchmarkLabel}: <span className="font-medium text-foreground">{dashboardFormat(metric.benchmark, unit, locale, t("performance.unavailable"))}</span></p>{values.length > 0 ? <svg viewBox="0 0 100 32" preserveAspectRatio="none" className={`mt-5 h-8 w-full drop-shadow-[0_0_3px_currentColor] ${sparkColor}`}><polyline points={points} fill="none" stroke="currentColor" strokeWidth="2.25" vectorEffect="non-scaling-stroke" /></svg> : <div className="mt-5 h-8" />}</div>;
 }
 
 function DashboardTargetSection({ title, targets }: { title: string; targets: DashboardTarget[] }) {
