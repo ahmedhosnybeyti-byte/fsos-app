@@ -201,7 +201,7 @@ test("creates trial companies with files enabled while retaining the four locked
     where: { id: COMPANY_ID },
     data: {
       status: "ACTIVE",
-      featureAccess: { files: "ENABLED", assistant: "LOCKED", "fsos-360": "LOCKED", settings: "LOCKED", account: "LOCKED" },
+      featureAccess: { files: "ENABLED", assistant: "LOCKED", "fsos-360": "LOCKED", settings: "LOCKED", account: "LOCKED", user_activity: "HIDDEN" },
     },
   }]);
 });

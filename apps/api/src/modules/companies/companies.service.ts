@@ -12,6 +12,8 @@ import { SubscriptionsService } from "../subscriptions/subscriptions.service";
 import { generateTemporaryPassword } from "../auth/temporary-password";
 import { UserActivityService } from "../user-activity/user-activity.service";
 
+const NEW_COMPANY_FEATURE_ACCESS: CompanyFeatureAccess = { user_activity: "HIDDEN" };
+
 function slugify(name: string): string {
   return (
     name
@@ -109,7 +111,7 @@ export class CompaniesService {
         // status (defaulted at the DB level). Phase 2 makes the lifecycle
         // explicit: a brand-new company starts life as DRAFT, not ACTIVE —
         // see provisionCompany() for the full Create -> Configuring flow.
-        return await tx.company.create({ data: { name, slug, status: "DRAFT", accountType, maxExcelUploadSizeMb: 100 } });
+        return await tx.company.create({ data: { name, slug, status: "DRAFT", accountType, maxExcelUploadSizeMb: 100, featureAccess: NEW_COMPANY_FEATURE_ACCESS } });
       } catch (err) {
         if (isUniqueConstraintError(err, "slug") && attempt < 4) continue;
         throw err;
@@ -160,7 +162,7 @@ export class CompaniesService {
     const temporaryPassword = generateTemporaryPassword();
     try {
       const result = await this.prisma.$transaction(async (tx) => {
-        const company = await tx.company.create({ data: { name: input.name, slug: input.slug, status: input.initialStatus, maxExcelUploadSizeMb: 100 } });
+        const company = await tx.company.create({ data: { name: input.name, slug: input.slug, status: input.initialStatus, maxExcelUploadSizeMb: 100, featureAccess: NEW_COMPANY_FEATURE_ACCESS } });
         await tx.companyProfile.create({ data: { companyId: company.id } });
         const region = await this.orgUnitsService.ensureDefaultRegion(company.id, tx);
         await this.orgUnitsService.create(company.id, { type: "BRANCH", code: "MAIN", name: "Main Branch", parentId: region.id }, tx);
