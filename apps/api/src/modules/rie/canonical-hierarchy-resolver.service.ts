@@ -82,15 +82,28 @@ export class CanonicalHierarchyResolverService {
   async resolveAllowedRouteIds(companyId: string, user: HierarchyFilterUser): Promise<Set<string> | null> {
     if (!ROUTE_SCOPED_ROLES.has(user.roleCode)) return null;
 
-    // Sales representatives are scoped exclusively by their active operational
-    // assignment. No assignment is fail-closed: never fall back to all company data.
+    // An explicit operational assignment wins. Accounts provisioned from an
+    // Employees upload predate UserRouteAssignment in existing companies,
+    // though, so fall back to the same canonical Employees -> Routes mapping
+    // used for every other scoped role. This remains fail-closed: an absent or
+    // unmatched employee/route mapping still grants no data.
     if (user.roleCode === "SALES_REP") {
       const identity = await this.prisma.user.findFirst({ where: { companyId, email: user.email.trim().toLowerCase() }, select: { id: true } });
       const assignment = identity ? await this.prisma.userRouteAssignment.findFirst({ where: { companyId, userId: identity.id, endedAt: null }, select: { routeId: true } }) : null;
-      if (!assignment) {
-        throw new ForbiddenException({ code: "SALES_REP_ROUTE_NOT_ASSIGNED", message: "Sales representative route is not assigned", messageAr: "\u0644\u0645 \u064a\u062a\u0645 \u062a\u0639\u064a\u064a\u0646 \u062e\u0637 \u0633\u064a\u0631 \u0644\u062d\u0633\u0627\u0628\u0643 \u062d\u062a\u0649 \u0627\u0644\u0622\u0646. \u062a\u0648\u0627\u0635\u0644 \u0645\u0639 \u0645\u0633\u0624\u0648\u0644 \u0627\u0644\u0634\u0631\u0643\u0629." });
+      if (assignment) return new Set([assignment.routeId.trim().toLowerCase()]);
+
+      const [routes, employees] = await Promise.all([this.fetchRawEntityRows("Routes", companyId), this.fetchRawEntityRows("Employees", companyId)]);
+      const routeIdCol = routes ? findHeader(routes.headers, "RouteID") : undefined;
+      const salesRepCol = routes ? findHeader(routes.headers, "SalesRepID") : undefined;
+      const employeeIdCol = employees ? findHeader(employees.headers, "EmployeeID") : undefined;
+      const employeeEmailCol = employees ? findHeader(employees.headers, "Email") : undefined;
+      if (routes && employees && routeIdCol && salesRepCol && employeeIdCol && employeeEmailCol) {
+        const email = user.email.trim().toLowerCase();
+        const employeeIds = new Set(employees.rows.filter((row) => cell(row[employeeEmailCol]) === email).map((row) => cell(row[employeeIdCol])).filter(Boolean));
+        const allowed = new Set(routes.rows.filter((row) => employeeIds.has(cell(row[salesRepCol])) || cell(row[salesRepCol]) === email).map((row) => cell(row[routeIdCol])).filter((id): id is string => !!id));
+        if (allowed.size > 0) return allowed;
       }
-      return new Set([assignment.routeId.trim().toLowerCase()]);
+      throw new ForbiddenException({ code: "SALES_REP_ROUTE_NOT_ASSIGNED", message: "Sales representative route is not assigned", messageAr: "\u0644\u0645 \u064a\u062a\u0645 \u062a\u0639\u064a\u064a\u0646 \u062e\u0637 \u0633\u064a\u0631 \u0644\u062d\u0633\u0627\u0628\u0643 \u062d\u062a\u0649 \u0627\u0644\u0622\u0646. \u062a\u0648\u0627\u0635\u0644 \u0645\u0639 \u0645\u0633\u0624\u0648\u0644 \u0627\u0644\u0634\u0631\u0643\u0629." });
     }
 
     const routes = await this.fetchRawEntityRows("Routes", companyId);
