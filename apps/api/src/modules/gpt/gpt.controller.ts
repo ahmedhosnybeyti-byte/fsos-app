@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Headers, Post, Query, UnauthorizedException } from "@nestjs/common";
+import { Body, Controller, ForbiddenException, Get, Headers, Param, Post, Query, UnauthorizedException } from "@nestjs/common";
 import { ApiBearerAuth, ApiBody, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
 import {
   configureGptSchema,
@@ -130,6 +130,12 @@ export class GptController {
     return this.gptService.mintLaunchCode(user.userId, user.companyId);
   }
 
+  @Post("users/:id/reset-daily-launch-codes")
+  @Auth("SUPER_ADMIN")
+  resetDailyLaunchCodes(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.gptService.resetDailyLaunchCodes(id, user.userId);
+  }
+
   // ---- ChatGPT Action entry points (company API-key auth) -----------------
   // @Public() bypasses the cookie-based JwtAuthGuard — these authenticate via
   // the company's static Bearer API key instead, verified inside GptService.
@@ -167,6 +173,7 @@ export class GptController {
         verified: { type: "boolean" },
         companyName: { type: ["string", "null"] },
         role: { type: ["string", "null"], description: "The requesting user's role code, if available." },
+        sessionToken: { type: "string", description: "Eight-hour session token for subsequent GPT Action requests." },
       },
     }),
   })

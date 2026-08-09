@@ -1,5 +1,6 @@
-import { BadRequestException, Injectable, Logger, NotFoundException, Inject } from "@nestjs/common";
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, Inject } from "@nestjs/common";
 import { createHash, randomBytes } from "node:crypto";
+import { extname } from "node:path";
 import * as argon2 from "argon2";
 import * as XLSX from "xlsx";
 import type { Prisma, File as FileRow } from "@field-sales-os/database";
@@ -251,13 +252,19 @@ export class FilesService {
     private readonly platformSettingsService: PlatformSettingsService,
   ) {}
 
-  private validateUpload(file: Express.Multer.File) {
-    if (!FILE_UPLOAD_LIMITS.allowedMimeTypes.includes(file.mimetype as (typeof FILE_UPLOAD_LIMITS.allowedMimeTypes)[number])) {
-      throw new BadRequestException("Only .xlsx or .xls files are allowed");
+  private validateUpload(file: Express.Multer.File, maxUploadSizeMb: number) {
+    if (extname(file.originalname).toLowerCase() !== ".xlsx" || file.mimetype !== "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") {
+      throw new BadRequestException("Only .xlsx files are allowed");
     }
-    if (file.size > FILE_UPLOAD_LIMITS.maxFileSizeBytes) {
-      throw new BadRequestException(`File exceeds the ${FILE_UPLOAD_LIMITS.maxFileSizeBytes / (1024 * 1024)}MB limit`);
+    if (file.size > maxUploadSizeMb * 1024 * 1024) {
+      throw new BadRequestException(`File exceeds this company's ${maxUploadSizeMb}MB upload limit`);
     }
+  }
+
+  private async getUploadSizeLimitMb(companyId: string): Promise<number> {
+    const company = await this.prisma.company.findUnique({ where: { id: companyId }, select: { maxExcelUploadSizeMb: true } });
+    if (!company) throw new NotFoundException("Company not found");
+    return company.maxExcelUploadSizeMb ?? 100;
   }
 
   // The active-upload gate counts BATCHES (distinct physical uploads), not
@@ -291,10 +298,16 @@ export class FilesService {
     if (!company) throw new BadRequestException("The selected target company does not exist.");
   }
 
-  async uploadFile(params: { companyId: string; uploadedByUserId: string; file: Express.Multer.File; viaSuperAdmin?: boolean }): Promise<BatchUploadResult> {
-    const { companyId, uploadedByUserId, file, viaSuperAdmin } = params;
+  async uploadFile(params: {
+    companyId: string;
+    uploadedByUserId: string;
+    file: Express.Multer.File;
+    viaSuperAdmin?: boolean;
+    canProvisionEmployeeAccounts: boolean;
+  }): Promise<BatchUploadResult> {
+    const { companyId, uploadedByUserId, file, viaSuperAdmin, canProvisionEmployeeAccounts } = params;
 
-    this.validateUpload(file);
+    this.validateUpload(file, await this.getUploadSizeLimitMb(companyId));
 
     const activeBatchCount = await this.countActiveBatches(companyId);
     if (activeBatchCount >= FILE_UPLOAD_LIMITS.maxActiveFilesPerCompany) {
@@ -303,7 +316,7 @@ export class FilesService {
       );
     }
 
-    const result = await this.processWorkbook({ companyId, uploadedByUserId, file, viaSuperAdmin });
+    const result = await this.processWorkbook({ companyId, uploadedByUserId, file, viaSuperAdmin, canProvisionEmployeeAccounts });
 
     // Preserve the pre-existing single-file-reject contract (HTTP 422 +
     // full ValidationReport body — see ImportValidationRejectedException)
@@ -393,8 +406,14 @@ export class FilesService {
   // sheets are silently ignored. Split out of uploadFile so replaceFile
   // (below) can reuse it without going through the active-batch-count gate
   // — a replace is refreshing existing data, not growing the count.
-  private async processWorkbook(params: { companyId: string; uploadedByUserId: string; file: Express.Multer.File; viaSuperAdmin?: boolean }): Promise<BatchUploadResult> {
-    const { companyId, uploadedByUserId, file, viaSuperAdmin } = params;
+  private async processWorkbook(params: {
+    companyId: string;
+    uploadedByUserId: string;
+    file: Express.Multer.File;
+    viaSuperAdmin?: boolean;
+    canProvisionEmployeeAccounts: boolean;
+  }): Promise<BatchUploadResult> {
+    const { companyId, uploadedByUserId, file, viaSuperAdmin, canProvisionEmployeeAccounts } = params;
 
     // 2026-07-26 — Smart Merge: this used to be a whole-file guard here
     // (reject the entire upload outright if these exact bytes were already
@@ -432,6 +451,13 @@ export class FilesService {
     }
 
     const { toValidate, ignored, ambiguous } = this.resolveSheetsAndTemplates(classification.sheets);
+
+    // An accepted Employees sheet provisions accounts and updates roles. This
+    // server-side check runs before storage or processing, so a hand-crafted
+    // multipart request cannot elevate a rep, supervisor, or manager.
+    if (!canProvisionEmployeeAccounts && toValidate.some(({ template }) => template.entity === EMPLOYEES_ENTITY)) {
+      throw new ForbiddenException("Only a company administrator can upload an Employees sheet.");
+    }
 
     if (toValidate.length === 0 && ambiguous.length === 0 && classification.sheets.length > 1) {
       const officialNames = this.importTemplateMatcher
@@ -947,15 +973,21 @@ export class FilesService {
   // existing `deactivate` method) — never deleted, so nothing here is data
   // loss. No active-batch-count gate: replacing/refreshing existing data
   // is an explicit admin action, not growth in how many uploads exist.
-  async replaceFile(params: { companyId: string; uploadedByUserId: string; file: Express.Multer.File; oldFileId: string }): Promise<ReplaceFileOutcome> {
-    const { companyId, uploadedByUserId, file, oldFileId } = params;
-    this.validateUpload(file);
+  async replaceFile(params: {
+    companyId: string;
+    uploadedByUserId: string;
+    file: Express.Multer.File;
+    oldFileId: string;
+    canProvisionEmployeeAccounts: boolean;
+  }): Promise<ReplaceFileOutcome> {
+    const { companyId, uploadedByUserId, file, oldFileId, canProvisionEmployeeAccounts } = params;
+    this.validateUpload(file, await this.getUploadSizeLimitMb(companyId));
 
     const oldFile = await this.prisma.file.findUnique({ where: { id: oldFileId } });
     if (!oldFile || oldFile.companyId !== companyId) throw new NotFoundException("File not found");
     if (!oldFile.isActive) throw new BadRequestException("This file is already inactive — nothing to replace.");
 
-    const result = await this.processWorkbook({ companyId, uploadedByUserId, file });
+    const result = await this.processWorkbook({ companyId, uploadedByUserId, file, canProvisionEmployeeAccounts });
 
     const replacement = result.accepted.find((f) => f.datasetType === oldFile.datasetType);
     if (!replacement) {

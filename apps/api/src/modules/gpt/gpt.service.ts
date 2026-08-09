@@ -35,6 +35,13 @@ function hashLaunchCode(raw: string): string {
   return createHash("sha256").update(raw).digest("hex");
 }
 
+const DAILY_LAUNCH_CODE_LIMIT = 2;
+
+function startOfTodayUtc(): Date {
+  const now = new Date();
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
 // TODO(legacy-cleanup, 2026-07-27): SESSION_RECOVERY_MESSAGE and everything
 // that depends on it (assertValidSession, sessionToken, WorkspaceSummary,
 // buildWorkspaceSummary, and the listDatasets/getDataset/renderAnalysis/
@@ -65,10 +72,13 @@ function hashLaunchCode(raw: string): string {
 // rejected; this only closes the gap for when the token isn't sent at all,
 // so recovery guidance is consistent no matter which of the two ways the
 // model manages to arrive at "I don't have a good session right now."
-export const SESSION_RECOVERY_MESSAGE =
+const LEGACY_SESSION_RECOVERY_MESSAGE =
   "Invalid or missing session. Automatically call verify-access again using the same launchCode already provided earlier in this conversation — do not ask the user for a new code unless re-verification with that same code also fails.";
 
 // Workspace Summary v1 response shape — see buildWorkspaceSummary below.
+export const SESSION_RECOVERY_MESSAGE =
+  "Invalid or missing session. Ask the user to generate a new Launch Code from the dashboard, then call verify-access with the new code.";
+
 interface WorkspaceSummary {
   windowFrom: string; // "YYYY-MM-01", first day of the 6-month window
   windowTo: string; // "YYYY-MM", last completed month (inclusive)
@@ -211,6 +221,28 @@ export class GptService {
     } catch {
       throw new BadRequestException("Custom GPT URL is not configured. Ask a platform administrator to set it before launching GPT.");
     }
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { companyId: true, status: true } });
+    if (!user || user.companyId !== companyId || user.status !== "ACTIVE") throw new ForbiddenException("Account is not active");
+
+    const today = startOfTodayUtc();
+    let quotaReserved = false;
+    for (let attempt = 0; attempt < 3 && !quotaReserved; attempt++) {
+      const incremented = await this.prisma.user.updateMany({
+        where: { id: userId, gptLaunchCodeQuotaDay: today, gptLaunchCodeIssuedToday: { lt: DAILY_LAUNCH_CODE_LIMIT } },
+        data: { gptLaunchCodeIssuedToday: { increment: 1 } },
+      });
+      if (incremented.count === 1) {
+        quotaReserved = true;
+        break;
+      }
+      const initialized = await this.prisma.user.updateMany({
+        where: { id: userId, OR: [{ gptLaunchCodeQuotaDay: null }, { gptLaunchCodeQuotaDay: { not: today } }] },
+        data: { gptLaunchCodeQuotaDay: today, gptLaunchCodeIssuedToday: 1 },
+      });
+      quotaReserved = initialized.count === 1;
+    }
+    if (!quotaReserved) throw new ForbiddenException("You can create at most two Launch Codes per day");
+
     const raw = randomBytes(24).toString("base64url");
     const expiresAt = new Date(Date.now() + TOKEN_TTL.gptLaunchTokenMinutes * 60 * 1000);
 
@@ -427,20 +459,18 @@ export class GptService {
     }
 
     const tokenHash = hashLaunchCode(rawLaunchCode);
-    const launchToken = await this.prisma.gptLaunchToken.findUnique({ where: { tokenHash } });
+    const launchToken = await this.prisma.gptLaunchToken.findUnique({ where: { tokenHash }, include: { user: { select: { companyId: true, status: true, role: true } } } });
 
-    if (!launchToken || launchToken.companyId !== gpt.companyId) {
+    if (!launchToken || launchToken.companyId !== gpt.companyId || launchToken.user.companyId !== gpt.companyId || launchToken.user.status !== "ACTIVE") {
       throw new UnauthorizedException("Invalid access code");
     }
-    if (launchToken.expiresAt < new Date()) {
+    if (launchToken.usedAt || launchToken.expiresAt < new Date()) {
       // Distinguish the two expiry cases in the message: a code that was
       // never used ran out its 10-minute paste window; a code that WAS
       // used ran out its (session-length) window — either way the fix is
       // the same (a brand new code from the dashboard), but the wording
       // should match what actually happened.
-      throw new UnauthorizedException(
-        launchToken.usedAt ? "This session has expired. Please generate a new Launch Code." : "This access code has expired",
-      );
+      throw new UnauthorizedException("Invalid access code");
     }
 
     // 2026-07-26 — re-verifying an ALREADY-active session (same code,
@@ -457,15 +487,17 @@ export class GptService {
     // OTHER session, never grants access beyond what the original
     // verifyAccess already did, and a genuinely expired code is still
     // rejected above exactly as before.
+    const sessionToken = randomBytes(32).toString("base64url");
     if (!launchToken.usedAt) {
       // First-time verification: promote the one-time code into a session
       // token valid for the rest of the conversation — the model is
       // instructed to pass it back on every subsequent /gpt/dataset call.
       const sessionExpiresAt = new Date(Date.now() + TOKEN_TTL.gptSessionHours * 60 * 60 * 1000);
-      await this.prisma.gptLaunchToken.update({
-        where: { id: launchToken.id },
-        data: { usedAt: new Date(), expiresAt: sessionExpiresAt },
+      const consumed = await this.prisma.gptLaunchToken.updateMany({
+        where: { id: launchToken.id, usedAt: null, expiresAt: { gt: new Date() } },
+        data: { usedAt: new Date(), sessionStartedAt: new Date(), sessionTokenHash: hashLaunchCode(sessionToken), expiresAt: sessionExpiresAt },
       });
+      if (consumed.count !== 1) throw new UnauthorizedException("Invalid access code");
 
       await this.usageAnalyticsService.recordEvent({
         companyId: gpt.companyId,
@@ -488,12 +520,11 @@ export class GptService {
     // (listConfirmedActiveForCompany/toDatasetSummary and
     // buildWorkspaceSummary are left defined and unused, in case a
     // non-GPT/dashboard surface wants them later — nothing else called them.)
-    const requestingUser = await this.prisma.user.findUnique({ where: { id: launchToken.userId }, include: { role: true } });
-
     return {
       verified: true,
       companyName: (await this.prisma.company.findUnique({ where: { id: gpt.companyId } }))?.name ?? null,
-      role: requestingUser?.role?.code ?? null,
+      role: launchToken.user.role.code,
+      sessionToken,
     };
   }
 
@@ -525,14 +556,22 @@ export class GptService {
       throw new ForbiddenException("This company's subscription is not active. Access denied.");
     }
 
-    const tokenHash = hashLaunchCode(sessionToken);
-    const session = await this.prisma.gptLaunchToken.findUnique({ where: { tokenHash } });
+    const session = await this.prisma.gptLaunchToken.findUnique({ where: { sessionTokenHash: hashLaunchCode(sessionToken) }, include: { user: { select: { companyId: true, status: true } } } });
 
-    if (!session || session.companyId !== gpt.companyId || !session.usedAt || session.expiresAt < new Date()) {
+    if (!session || session.companyId !== gpt.companyId || session.user.companyId !== gpt.companyId || session.user.status !== "ACTIVE" || !session.usedAt || session.expiresAt < new Date()) {
       throw new UnauthorizedException(SESSION_RECOVERY_MESSAGE);
     }
 
     return { gpt, session };
+  }
+
+  async resetDailyLaunchCodes(userId: string, actorUserId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { id: true, companyId: true } });
+    if (!user?.companyId) throw new NotFoundException("Company user not found");
+    const resetAt = new Date();
+    await this.prisma.user.update({ where: { id: user.id }, data: { gptLaunchCodeQuotaDay: startOfTodayUtc(), gptLaunchCodeIssuedToday: 0 } });
+    await this.auditLogService.record({ companyId: user.companyId, userId: actorUserId, action: "gpt.daily_launch_codes.reset", entityType: "User", entityId: user.id });
+    return { success: true, resetAt };
   }
 
   // Returns a filtered, paginated slice of one dataset — never the whole

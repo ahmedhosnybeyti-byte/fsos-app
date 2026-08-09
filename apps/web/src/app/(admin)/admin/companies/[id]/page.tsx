@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { companyScreenRegistry, getCompanyFeatureAccessState, type CompanyFeatureAccess, type CompanyScreenAccessState, type CompanyStatus } from "@field-sales-os/schemas";
-import { companiesApi } from "@/lib/api";
+import { companiesApi, gptApi } from "@/lib/api";
 import { ApiError } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,11 +25,12 @@ export default function AdminCompanyDetailsPage() {
   const { locale } = useTranslation();
   const { data, isLoading, isError } = useQuery({ queryKey: ["admin", "company", params.id], queryFn: () => companiesApi.details(params.id), enabled: Boolean(params.id) });
   const featureQuery = useQuery({ queryKey: ["admin", "company", params.id, "feature-access"], queryFn: () => companiesApi.featureAccess(params.id), enabled: Boolean(params.id) });
-  const [form, setForm] = useState<{ name: string; slug: string; status: CompanyStatus }>({ name: "", slug: "", status: "ACTIVE" });
+  const [form, setForm] = useState<{ name: string; slug: string; status: CompanyStatus; maxExcelUploadSizeMb: number }>({ name: "", slug: "", status: "ACTIVE", maxExcelUploadSizeMb: 100 });
   const [featureAccess, setFeatureAccess] = useState<CompanyFeatureAccess>({});
-  useEffect(() => { if (data) setForm({ name: data.name, slug: data.slug, status: data.status }); }, [data]);
+  useEffect(() => { if (data) setForm({ name: data.name, slug: data.slug, status: data.status, maxExcelUploadSizeMb: data.maxExcelUploadSizeMb ?? 100 }); }, [data]);
   useEffect(() => { if (featureQuery.data) setFeatureAccess(featureQuery.data.featureAccess); }, [featureQuery.data]);
-  const updateMutation = useMutation({ mutationFn: () => companiesApi.update(params.id, { name: form.name, slug: form.slug.trim().toLowerCase(), status: form.status }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["admin", "company", params.id] }); await queryClient.invalidateQueries({ queryKey: ["admin", "companies"] }); } });
+  const updateMutation = useMutation({ mutationFn: () => companiesApi.update(params.id, { name: form.name, slug: form.slug.trim().toLowerCase(), status: form.status, maxExcelUploadSizeMb: form.maxExcelUploadSizeMb }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["admin", "company", params.id] }); await queryClient.invalidateQueries({ queryKey: ["admin", "companies"] }); } });
+  const resetLaunchCodesMutation = useMutation({ mutationFn: (userId: string) => gptApi.resetDailyLaunchCodes(userId) });
   const featureMutation = useMutation({ mutationFn: () => companiesApi.updateFeatureAccess(params.id, featureAccess), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["admin", "company", params.id, "feature-access"] }); } });
   const lifecycleMutation = useMutation({
     mutationFn: (event: "ARCHIVE" | "ACTIVATE") => companiesApi.lifecycle(params.id, event),
@@ -44,6 +45,15 @@ export default function AdminCompanyDetailsPage() {
   if (viewState === "loading") return <div className="flex min-h-[50vh] items-center justify-center"><Spinner className="h-6 w-6" /></div>;
   if (viewState === "error" || !data) return <p className="text-destructive">Could not load company details.</p>;
   return <div className="space-y-6">
+    <section className="glass-card space-y-3 p-4">
+      <h2 className="font-semibold">Security limits</h2>
+      <Label>Maximum Excel Upload Size (MB)<Input type="number" min={1} value={form.maxExcelUploadSizeMb} onChange={(e) => setForm({ ...form, maxExcelUploadSizeMb: Number(e.target.value) })} /></Label>
+      <Button disabled={!canSubmitCompanyDetails(updateMutation.isPending)} onClick={() => updateMutation.mutate()}>{updateMutation.isPending ? "Saving..." : "Save upload limit"}</Button>
+    </section>
+    <section className="glass-card space-y-3 p-4">
+      <h2 className="font-semibold">Daily GPT code reset</h2>
+      {data.users.map((user) => <div key={user.id} className="flex items-center justify-between gap-3 border-b py-2 last:border-0"><span>{user.fullName} ({user.email})</span><Button variant="outline" size="sm" disabled={resetLaunchCodesMutation.isPending} onClick={() => resetLaunchCodesMutation.mutate(user.id)}>Reset daily GPT codes</Button></div>)}
+    </section>
     <div><Link href="/admin/companies" className="text-sm text-primary hover:underline">← Companies</Link><div className="mt-2 flex items-center gap-2"><h1 className="text-2xl font-semibold">{data.name}</h1><Badge variant={data.status === "ARCHIVED" ? "destructive" : "outline"}>{data.status === "ARCHIVED" ? "Archived / Cancelled" : data.status}</Badge></div><p className="text-muted-foreground">Created {formatDate(data.createdAt)} · Updated {formatDate(data.updatedAt)}</p></div>
     <section className="glass-card space-y-3 p-4"><h2 className="font-semibold">Edit company</h2><Label>Name<Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Label><Label>Slug<Input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} /></Label><Label>Status<Select value={form.status} onValueChange={(value) => setForm({ ...form, status: value as CompanyStatus })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ACTIVE">Active</SelectItem><SelectItem value="SUSPENDED">Suspended</SelectItem><SelectItem value="DRAFT">Draft</SelectItem><SelectItem value="CONFIGURING">Configuring</SelectItem><SelectItem value="ARCHIVED">Archived</SelectItem></SelectContent></Select></Label>{updateMutation.isError && <p className="text-sm text-destructive">{updateMutation.error instanceof ApiError ? updateMutation.error.message : "Could not update company."}</p>}<Button disabled={!canSubmitCompanyDetails(updateMutation.isPending)} onClick={() => updateMutation.mutate()}>{updateMutation.isPending ? "Saving…" : "Save changes"}</Button></section>
     <section className="glass-card space-y-3 p-4"><h2 className="font-semibold">Account status</h2><p className="text-sm text-muted-foreground">Archiving cancels access without deleting company data. Archived companies can be activated again later.</p>{lifecycleMutation.isError && <p className="text-sm text-destructive">{lifecycleMutation.error instanceof ApiError ? lifecycleMutation.error.message : "Could not update company status."}</p>}{data.status === "ARCHIVED" ? <Button disabled={lifecycleMutation.isPending} onClick={() => lifecycleMutation.mutate("ACTIVATE")}>{lifecycleMutation.isPending ? "Activating…" : "Reactivate company"}</Button> : <Button disabled={lifecycleMutation.isPending} variant="destructive" onClick={() => { if (window.confirm("Cancel this company account? This archives the company and blocks access, but does not delete any data.")) lifecycleMutation.mutate("ARCHIVE"); }}>{lifecycleMutation.isPending ? "Cancelling…" : "Cancel company account"}</Button>}</section>

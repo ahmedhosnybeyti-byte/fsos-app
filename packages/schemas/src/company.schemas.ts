@@ -14,6 +14,7 @@ export const updateCompanySchema = z.object({
   name: z.string().min(2).max(120).optional(),
   status: companyStatusSchema.optional(),
   slug: z.string().trim().min(2).max(120).transform((value) => value.toLowerCase()).pipe(z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)).optional(),
+  maxExcelUploadSizeMb: z.coerce.number().int().positive().optional().nullable(),
 });
 export type UpdateCompanyInput = z.infer<typeof updateCompanySchema>;
 

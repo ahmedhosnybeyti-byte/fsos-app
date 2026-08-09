@@ -4,9 +4,14 @@ import type { Request, Response } from "express";
 // Normalizes every thrown error (HttpException or otherwise) into one JSON
 // shape so both the web app and the ChatGPT Action caller can rely on a
 // stable error contract.
-function safeRequestBody(body: unknown): string {
-  if (body && typeof body === "object" && Object.keys(body as Record<string, unknown>).some((key) => key.toLowerCase().includes("password"))) return "[REDACTED]";
-  return JSON.stringify(body);
+function safeRequestSummary(request: Request): string {
+  // Never log request values or credentials. Validation failures often occur
+  // while a client submits an API key, password, or nested connection secret,
+  // so field-name redaction is not sufficient.
+  const contentType = request.headers["content-type"] ?? "unknown";
+  const contentLength = request.headers["content-length"] ?? "unknown";
+  const bodyKind = request.body === undefined ? "absent" : Array.isArray(request.body) ? "array" : typeof request.body;
+  return `contentType=${contentType} contentLength=${contentLength} bodyKind=${bodyKind}`;
 }
 
 @Catch()
@@ -34,13 +39,11 @@ export class HttpExceptionFilter implements ExceptionFilter {
     // made exactly this class of failure impossible to diagnose from logs.
     // Widened to log every non-2xx; the response body sent to the client is
     // unchanged either way.
-    const authHeader = request.headers.authorization;
-    const authSummary = authHeader ? `${authHeader.slice(0, 14)}... (len ${authHeader.length})` : "MISSING";
-    const logLine = `${request.method} ${request.url} -> ${status} | auth=${authSummary} | body=${safeRequestBody(request.body)}`;
+    const logLine = `${request.method} ${request.url} -> ${status} | ${safeRequestSummary(request)}`;
     if (status >= 500) {
       this.logger.error(logLine, exception instanceof Error ? exception.stack : undefined);
     } else if (status >= 400) {
-      this.logger.warn(`${logLine} | message=${JSON.stringify(message)}`);
+      this.logger.warn(logLine);
     }
 
     response.status(status).json({

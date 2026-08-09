@@ -9,4 +9,5 @@ export const gptApi = {
   regenerateKey: () => apiFetch<{ apiKey: string; note: string }>("/gpt/regenerate-key", { method: "POST" }),
   launch: () =>
     apiFetch<{ launchCode: string; gptUrl: string; expiresInMinutes: number }>("/gpt/launch", { method: "POST" }),
+  resetDailyLaunchCodes: (userId: string) => apiFetch<{ success: true; resetAt: string }>(`/gpt/users/${userId}/reset-daily-launch-codes`, { method: "POST" }),
 };

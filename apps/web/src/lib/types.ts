@@ -56,6 +56,7 @@ export interface Company {
   name: string;
   slug: string;
   status: CompanyStatus;
+  maxExcelUploadSizeMb: number | null;
   createdAt: string;
   updatedAt: string;
 }

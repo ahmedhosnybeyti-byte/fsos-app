@@ -107,7 +107,7 @@ export class CompaniesService {
         // status (defaulted at the DB level). Phase 2 makes the lifecycle
         // explicit: a brand-new company starts life as DRAFT, not ACTIVE —
         // see provisionCompany() for the full Create -> Configuring flow.
-        return await tx.company.create({ data: { name, slug, status: "DRAFT", accountType } });
+        return await tx.company.create({ data: { name, slug, status: "DRAFT", accountType, maxExcelUploadSizeMb: 100 } });
       } catch (err) {
         if (isUniqueConstraintError(err, "slug") && attempt < 4) continue;
         throw err;
@@ -158,7 +158,7 @@ export class CompaniesService {
     const temporaryPassword = generateTemporaryPassword();
     try {
       const result = await this.prisma.$transaction(async (tx) => {
-        const company = await tx.company.create({ data: { name: input.name, slug: input.slug, status: input.initialStatus } });
+        const company = await tx.company.create({ data: { name: input.name, slug: input.slug, status: input.initialStatus, maxExcelUploadSizeMb: 100 } });
         await tx.companyProfile.create({ data: { companyId: company.id } });
         const region = await this.orgUnitsService.ensureDefaultRegion(company.id, tx);
         await this.orgUnitsService.create(company.id, { type: "BRANCH", code: "MAIN", name: "Main Branch", parentId: region.id }, tx);

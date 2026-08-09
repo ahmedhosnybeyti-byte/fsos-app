@@ -208,6 +208,7 @@ model Company {
   slug      String        @unique
   status    CompanyStatus @default(ACTIVE)
   featureAccess Json? @map("feature_access")
+  maxExcelUploadSizeMb Int? @map("max_excel_upload_size_mb")
   // Captured at signup — see CompanyAccountType. Nullable for pre-existing
   // companies created before this field was added.
   accountType CompanyAccountType? @map("account_type")
@@ -417,6 +418,8 @@ model User {
   // Phase 4: Force Change Password — set on admin-issued temporary
   // passwords, cleared once the user sets their own password.
   mustChangePassword Boolean   @default(false) @map("must_change_password")
+  gptLaunchCodeQuotaDay DateTime? @map("gpt_launch_code_quota_day")
+  gptLaunchCodeIssuedToday Int @default(0) @map("gpt_launch_code_issued_today")
   lastLoginAt        DateTime? @map("last_login_at")
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
@@ -1086,6 +1089,7 @@ model GptLaunchToken {
   tokenHash String    @unique @map("token_hash")
   expiresAt DateTime  @map("expires_at")
   sessionStartedAt DateTime? @map("session_started_at")
+  sessionTokenHash String? @unique @map("session_token_hash")
   usedAt    DateTime? @map("used_at")
   createdAt DateTime  @default(now()) @map("created_at")
 

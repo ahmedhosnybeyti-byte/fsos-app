@@ -60,6 +60,7 @@ export class FilesController {
       uploadedByUserId: user.userId,
       file,
       viaSuperAdmin: user.roleCode === "SUPER_ADMIN",
+      canProvisionEmployeeAccounts: user.roleCode === "COMPANY_ADMIN" || user.roleCode === "SUPER_ADMIN",
     });
   }
 
@@ -80,6 +81,7 @@ export class FilesController {
       uploadedByUserId: user.userId,
       file,
       oldFileId: id,
+      canProvisionEmployeeAccounts: user.roleCode === "COMPANY_ADMIN" || user.roleCode === "SUPER_ADMIN",
     });
   }
 

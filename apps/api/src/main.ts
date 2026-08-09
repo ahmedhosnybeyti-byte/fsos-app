@@ -1,6 +1,6 @@
 import "dotenv/config";
 import "reflect-metadata";
-import { randomUUID, createHash } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
@@ -44,13 +44,9 @@ async function bootstrap() {
   app.use((req: import("express").Request, res: import("express").Response, next: () => void) => {
     const requestId = randomUUID();
     res.setHeader("X-Request-Id", requestId);
-    const auth = req.headers.authorization;
-    const authHash = auth ? createHash("sha256").update(auth).digest("hex").slice(0, 12) : "none";
     const start = Date.now();
 
-    requestTraceLogger.log(
-      `IN  id=${requestId} ${req.method} ${req.originalUrl} authHash=${authHash} at=${new Date().toISOString()}`,
-    );
+    requestTraceLogger.log(`IN  id=${requestId} ${req.method} ${req.originalUrl} at=${new Date().toISOString()}`);
     res.on("finish", () => {
       requestTraceLogger.log(`OUT id=${requestId} ${req.method} ${req.originalUrl} status=${res.statusCode} ${Date.now() - start}ms`);
     });
@@ -64,6 +60,7 @@ async function bootstrap() {
   app.useGlobalFilters(new HttpExceptionFilter());
 
   // Full internal API reference — every module, cookie + bearer auth shown.
+  if (config.app.nodeEnv !== "production") {
   const swaggerConfig = new DocumentBuilder()
     .setTitle("Field Sales OS API")
     .setDescription("Access-control and data API backing the Field Sales OS platform and its Custom GPT Actions")
@@ -114,14 +111,17 @@ async function bootstrap() {
     },
   };
   SwaggerModule.setup("docs/gpt-actions", app, gptActionsDocument);
+  }
 
   await app.listen(config.app.port);
   // eslint-disable-next-line no-console
   console.log(`Field Sales OS API listening on ${config.app.apiUrl}`);
-  // eslint-disable-next-line no-console
-  console.log(`Full API docs:        ${config.app.apiUrl}/docs`);
-  // eslint-disable-next-line no-console
-  console.log(`GPT Action schema:    ${config.app.apiUrl}/docs/gpt-actions-json`);
+  if (config.app.nodeEnv !== "production") {
+    // eslint-disable-next-line no-console
+    console.log(`Full API docs:        ${config.app.apiUrl}/docs`);
+    // eslint-disable-next-line no-console
+    console.log(`GPT Action schema:    ${config.app.apiUrl}/docs/gpt-actions-json`);
+  }
 }
 
 bootstrap();
