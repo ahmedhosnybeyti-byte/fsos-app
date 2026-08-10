@@ -1563,7 +1563,9 @@ export class VisitCopilotService {
     const rows = taxonomy
       ? await this.prisma.prospect.findMany({ where: { companyId: user.companyId!, marketSegment: taxonomy.segment, ...(query.minimumScore === undefined ? {} : { scoreTotal: { gte: query.minimumScore } }) }, include: { intelligenceProfile: { select: { businessClassification: true, productFitInsights: true } } }, orderBy: { createdAt: "desc" } })
       : [];
-    const prospects = this.scoreProspects(rows, stats).sort((a, b) => b.priorityScore - a.priorityScore);
+    await this.buildMissingProductFit(user, rows, warnings);
+    const enrichedRows = rows.length === 0 ? rows : await this.prisma.prospect.findMany({ where: { id: { in: rows.map((prospect) => prospect.id) } }, include: { intelligenceProfile: { select: { businessClassification: true, productFitInsights: true } } }, orderBy: { createdAt: "desc" } });
+    const prospects = this.scoreProspects(enrichedRows, stats).sort((a, b) => b.priorityScore - a.priorityScore);
     // Map layer of existing customers — only ones with usable coordinates.
     const customers: DiscoveryCustomer[] = stats.customers
       .filter((c) => c.lat !== null && c.lon !== null)
@@ -1644,7 +1646,7 @@ export class VisitCopilotService {
         if (url) photoUrls.set(place.externalKey, { url, attribution: place.photo!.attribution });
       }));
     }
-    await Promise.all(materialized.prospects.map((prospect) => this.productFit.build(user, prospect.id).catch(() => null)));
+    await this.buildMissingProductFit(user, materialized.prospects, warnings);
     const enriched = await this.prisma.prospect.findMany({ where: { id: { in: materialized.prospects.map((prospect) => prospect.id) } }, include: { intelligenceProfile: { select: { businessClassification: true, productFitInsights: true } } } });
     return { found: materialized.found, newCount: materialized.newCount, prospects: this.scoreProspects(enriched, stats, photoUrls).sort((a, b) => b.priorityScore - a.priorityScore), warnings };
     const found = places.length;
@@ -1689,6 +1691,20 @@ export class VisitCopilotService {
 
     const prospects = this.scoreProspects(saved, stats).sort((a, b) => b.priorityScore - a.priorityScore);
     return { found, newCount: keys.filter((key) => !existingKeys.has(key)).length, prospects, warnings };
+  }
+
+  private async buildMissingProductFit(user: AuthenticatedUser, prospects: readonly (Prospect & { intelligenceProfile?: { productFitInsights: unknown } | null })[], warnings: string[]) {
+    for (const prospect of prospects) {
+      const fit = prospect.intelligenceProfile?.productFitInsights;
+      if (fit && typeof fit === "object" && !Array.isArray(fit)) continue;
+      try {
+        await this.productFit.build(user, prospect.id);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        this.logger.error(`Product Fit failed for prospect=${prospect.id} company=${user.companyId}: ${reason}`);
+        warnings.push(`Product Fit unavailable for prospect ${prospect.id}: ${reason}`);
+      }
+    }
   }
 
   // ------------------------------------------------------------------
