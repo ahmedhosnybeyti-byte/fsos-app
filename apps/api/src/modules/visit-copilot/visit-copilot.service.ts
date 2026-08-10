@@ -195,6 +195,9 @@ export interface ScoredProspect {
   catalogFitConfidence: number | null;
   commercialTier: "PREMIUM" | "MID_MARKET" | "VALUE" | null;
   productFit: { productCode: string; productName: string; reasons: string[] }[];
+  address: string | null;
+  phone: string | null;
+  externalKey: string;
 }
 
 export interface DiscoveryResult {
@@ -1978,6 +1981,9 @@ export class VisitCopilotService {
         id: b.p.id,
         source: b.p.source,
         name: b.p.name,
+        address: b.p.address,
+        phone: b.p.phone,
+        externalKey: b.p.externalKey,
         lat: b.lat,
         lon: b.lon,
         channel: b.p.channel,

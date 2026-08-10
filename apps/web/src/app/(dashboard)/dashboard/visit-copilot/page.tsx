@@ -130,7 +130,7 @@ function VisitCopilotScreen() {
   const scanLat = Number(searchParams.get("scanLat"));
   const scanLon = Number(searchParams.get("scanLon"));
   const isProspectScanMode = searchParams.get("mapMode") === "prospect-scan" && Number.isFinite(scanLat) && Number.isFinite(scanLon);
-  const showProspectCardsOnly = !process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  const hasGoogleMapsUiKey = Boolean(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY);
 
   // Flexible plan date (2026-07-30, explicit product request): defaults to
   // today on every fresh entry, but if the screen was opened from a link
@@ -607,9 +607,7 @@ function VisitCopilotScreen() {
                       ))}
                     </div>
                   )}
-                  {showProspectCardsOnly ? (
-                    <p className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">نتائج العملاء المحتملين تظهر كقائمة؛ خريطة العملاء الحالية لا تمثل نتائج Google scan.</p>
-                  ) : isProspectScanMode ? (
+                  {isProspectScanMode && hasGoogleMapsUiKey ? (
                     <GoogleProspectScanMap
                       scanCenter={{ lat: scanLat, lng: scanLon }}
                       prospects={discoveryQuery.data.prospects.filter((prospect) => prospect.source === "GOOGLE")}
@@ -617,7 +615,7 @@ function VisitCopilotScreen() {
                   ) : (
                     <DiscoveryMap
                       customers={mapCustomers}
-                      prospects={discoveryQuery.data.prospects}
+                      prospects={discoveryQuery.data.prospects.filter((prospect) => prospect.source !== "GOOGLE")}
                       onStartVisit={openProspectVisit}
                       onIgnore={(id) => statusMutation.mutate({ id, status: "IGNORED" })}
                     />
@@ -632,7 +630,10 @@ function VisitCopilotScreen() {
                           <SelectItem value="CATALOG_FIT">ترتيب: Catalog Fit</SelectItem>
                         </SelectContent>
                       </Select>
+                      <Button size="sm" variant="outline" onClick={() => setCollapsedProspectGroups(new Set(prospectGroups.map((group) => group.key)))}>Collapse All</Button>
+                      <Button size="sm" variant="outline" onClick={() => setCollapsedProspectGroups(new Set())}>Expand All</Button>
                     </div>
+                    {discoveryProspects.some((prospect) => prospect.source === "GOOGLE") && <p className="text-xs text-muted-foreground">Google Places data</p>}
                     {prospectGroups.map((group) => (
                       <div key={group.key} className="space-y-2">
                         <button className="w-full text-left text-sm font-semibold" onClick={() => setCollapsedProspectGroups((current) => { const next = new Set(current); if (next.has(group.key)) next.delete(group.key); else next.add(group.key); return next; })}>{group.label} ({group.prospects.length})</button>
@@ -644,6 +645,8 @@ function VisitCopilotScreen() {
                             <div>
                               <p className="font-semibold">{prospect.name}</p>
                               <p className="text-xs text-muted-foreground">{prospect.businessType ?? "نوع النشاط غير متاح"}</p>
+                              {prospect.address && <p className="text-xs text-muted-foreground">{prospect.address}</p>}
+                              {prospect.distanceKm !== null && prospect.distanceKm !== undefined && <p className="text-xs text-muted-foreground">{prospect.distanceKm.toFixed(1)} km</p>}
                             </div>
                             <div className="flex flex-wrap gap-1">
                               <Badge>Prospect {prospect.priorityScore.toFixed(0)} / ثقة {prospect.scoreConfidence?.toFixed(0) ?? "—"}</Badge>
@@ -652,13 +655,16 @@ function VisitCopilotScreen() {
                               {prospect.commercialTier && <Badge variant="outline">{prospect.commercialTier}</Badge>}
                             </div>
                           </div>
-                          <p className="mt-2 text-xs text-muted-foreground">Google rating / reviews / hours: غير متاح حاليًا</p>
+                          <p className="mt-2 text-xs text-muted-foreground">{prospect.reason}</p>
                           {prospect.productFit && prospect.productFit.length > 0 && (
                             <div className="mt-2 space-y-1 text-xs">
                               {prospect.productFit.map((product) => <p key={product.productCode}><span className="font-medium">{product.productName}</span>{product.reasons.length ? ` — ${product.reasons.join("، ")}` : ""}</p>)}
                             </div>
                           )}
                           <div className="mt-3 flex flex-wrap gap-2">
+                            <Button size="sm" variant="outline" onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${prospect.lat},${prospect.lon}`)}${prospect.source === "GOOGLE" && prospect.externalKey ? `&query_place_id=${encodeURIComponent(prospect.externalKey)}` : ""}`, "_blank", "noopener,noreferrer")}>Directions</Button>
+                            {prospect.phone && <Button size="sm" variant="outline" onClick={() => window.location.href = `tel:${prospect.phone}`}>Call</Button>}
+                            <Button size="sm" variant="outline" onClick={() => openProspectVisit(prospect.id)}>Details</Button>
                             <Button size="sm" onClick={() => createProspectVisit(prospect.id, todayIsoDate())} disabled={prospectVisitMutation.isPending}>Add to Today</Button>
                             <Input className="w-40" type="date" min={todayIsoDate()} value={scheduledFor} onChange={(event) => setScheduledProspectDates((current) => ({ ...current, [prospect.id]: event.target.value }))} />
                             <Button size="sm" variant="secondary" onClick={() => createProspectVisit(prospect.id, scheduledFor)} disabled={!scheduledFor || prospectVisitMutation.isPending}>Schedule Later</Button>
