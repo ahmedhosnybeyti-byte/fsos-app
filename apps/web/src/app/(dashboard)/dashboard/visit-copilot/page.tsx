@@ -130,6 +130,7 @@ function VisitCopilotScreen() {
   const scanLat = Number(searchParams.get("scanLat"));
   const scanLon = Number(searchParams.get("scanLon"));
   const isProspectScanMode = searchParams.get("mapMode") === "prospect-scan" && Number.isFinite(scanLat) && Number.isFinite(scanLon);
+  const showProspectCardsOnly = !process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
   // Flexible plan date (2026-07-30, explicit product request): defaults to
   // today on every fresh entry, but if the screen was opened from a link
@@ -600,7 +601,9 @@ function VisitCopilotScreen() {
                       ))}
                     </div>
                   )}
-                  {isProspectScanMode ? (
+                  {showProspectCardsOnly ? (
+                    <p className="rounded-lg border bg-muted/30 p-3 text-xs text-muted-foreground">نتائج العملاء المحتملين تظهر كقائمة؛ خريطة العملاء الحالية لا تمثل نتائج Google scan.</p>
+                  ) : isProspectScanMode ? (
                     <GoogleProspectScanMap
                       scanCenter={{ lat: scanLat, lng: scanLon }}
                       prospects={discoveryQuery.data.prospects.filter((prospect) => prospect.source === "GOOGLE")}
