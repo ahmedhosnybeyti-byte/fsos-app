@@ -14,7 +14,7 @@ import { businessTypeFromGooglePrimaryType } from "../../prospects/prospect-taxo
 // a platform-wide env var — each company carries its own Google billing.
 const GOOGLE_PLACES_URL = "https://places.googleapis.com/v1/places:searchNearby";
 const GOOGLE_PLACE_DETAILS_URL = "https://places.googleapis.com/v1/";
-const GOOGLE_PLACES_FIELD_MASK = "places.id,places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.primaryType,places.rating,places.userRatingCount,places.regularOpeningHours";
+const GOOGLE_PLACES_FIELD_MASK = "places.id,places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.primaryType,places.rating,places.userRatingCount,places.regularOpeningHours,places.photos";
 const GOOGLE_MAX_RESULT_COUNT = 20;
 const GOOGLE_INTELLIGENCE_FIELD_MASK = "primaryType,types,priceLevel,priceRange,rating,userRatingCount,regularOpeningHours,servesBreakfast,servesLunch,servesDinner,servesBrunch,servesCoffee,servesDessert,servesVegetarianFood,delivery,dineIn,takeout";
 
@@ -38,6 +38,7 @@ type PlacesSearchResponse = {
     rating?: number;
     userRatingCount?: number;
     regularOpeningHours?: OpeningHours;
+    photos?: { name?: string; authorAttributions?: { displayName?: string }[] }[];
   }[];
 };
 
@@ -98,9 +99,20 @@ export class GooglePlacesProvider implements ProspectDiscoveryProvider {
         businessType: businessTypeFromGooglePrimaryType(pl.primaryType),
         sizeBand: null,
         activity: { rating: typeof pl.rating === "number" ? pl.rating : null, userRatingCount: typeof pl.userRatingCount === "number" ? pl.userRatingCount : null, weeklyOpenHours: weeklyOpenHours(pl.regularOpeningHours) },
+        photo: pl.photos?.[0]?.name ? { resourceName: pl.photos[0].name, attribution: pl.photos[0].authorAttributions?.map((author) => author.displayName).filter(Boolean).join(", ") || null } : null,
       });
     }
     return { places, warnings: [] };
+  }
+
+  async photoUrl(resourceName: string): Promise<string | null> {
+    if (!/^places\/[^/]+\/photos\/[^/]+$/.test(resourceName)) return null;
+    try {
+      const response = await fetch(`${GOOGLE_PLACE_DETAILS_URL}${resourceName}/media?maxHeightPx=160&skipHttpRedirect=true`, { headers: { "X-Goog-Api-Key": this.apiKey } });
+      if (!response.ok) return null;
+      const body = await response.json() as { photoUri?: string };
+      return typeof body.photoUri === "string" ? body.photoUri : null;
+    } catch { return null; }
   }
 
   // Deliberately separate from search: callers invoke this only for one

@@ -1565,6 +1565,7 @@ export interface VisitCopilotProspect {
   address?: string | null;
   phone?: string | null;
   externalKey?: string;
+  photo?: { url: string; attribution: string | null } | null;
 }
 
 export interface VisitCopilotDiscoveryResult {

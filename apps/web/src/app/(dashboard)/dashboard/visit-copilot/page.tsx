@@ -44,6 +44,7 @@ import type {
   VisitCopilotPeriod,
   VisitCopilotPlanMode,
   VisitCopilotPlanResult,
+  VisitCopilotProspect,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -170,6 +171,7 @@ function VisitCopilotScreen() {
   const [prospectSort, setProspectSort] = useState<"PROSPECT_SCORE" | "CATALOG_FIT">("PROSPECT_SCORE");
   const [scheduledProspectDates, setScheduledProspectDates] = useState<Record<string, string>>({});
   const [collapsedProspectGroups, setCollapsedProspectGroups] = useState<Set<string>>(new Set());
+  const [latestGoogleProspects, setLatestGoogleProspects] = useState<VisitCopilotProspect[]>([]);
 
   const [chatMessages, setChatMessages] = useState<VisitCopilotChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -307,6 +309,7 @@ function VisitCopilotScreen() {
         toast.warning(data.message || t("copilot.googleSearchDisabled"));
         return;
       }
+      setLatestGoogleProspects(data.prospects.filter((prospect) => prospect.source === "GOOGLE"));
       toast.success(t("copilot.googleSearchResult", { found: data.found, newCount: data.newCount }));
       queryClient.invalidateQueries({ queryKey: ["visit-copilot", "discovery"] });
     },
@@ -436,11 +439,12 @@ function VisitCopilotScreen() {
   const routeOpp = routeOppQuery.data;
   const showOppCard = !!plan && !!routeOpp && !routeOpp.disabled && routeOpp.highCount + routeOpp.mediumCount > 0;
   const discoveryProspects = useMemo(() => {
-    const rows = discoveryQuery.data?.prospects ?? [];
-    return [...rows].sort((a, b) => prospectSort === "CATALOG_FIT"
+    const rows = new Map((discoveryQuery.data?.prospects ?? []).map((prospect) => [prospect.id, prospect]));
+    latestGoogleProspects.forEach((prospect) => rows.set(prospect.id, prospect));
+    return [...rows.values()].sort((a, b) => prospectSort === "CATALOG_FIT"
       ? (b.catalogFitScore ?? -1) - (a.catalogFitScore ?? -1)
       : b.priorityScore - a.priorityScore);
-  }, [discoveryQuery.data?.prospects, prospectSort]);
+  }, [discoveryQuery.data?.prospects, latestGoogleProspects, prospectSort]);
   const prospectGroups = useMemo(() => {
     const groups = [{ key: "HOTELS", label: "Hotels", prospects: [] as typeof discoveryProspects }, { key: "RESTAURANTS", label: "Restaurants", prospects: [] as typeof discoveryProspects }, { key: "CAFES", label: "Cafes / Coffee Shops", prospects: [] as typeof discoveryProspects }, { key: "OTHER", label: "Other", prospects: [] as typeof discoveryProspects }];
     for (const prospect of discoveryProspects) groups[prospect.businessType === "hotel" ? 0 : prospect.businessType === "restaurant" ? 1 : prospect.businessType === "cafe" || prospect.businessType === "coffee_shop" ? 2 : 3]!.prospects.push(prospect);
@@ -642,6 +646,7 @@ function VisitCopilotScreen() {
                       return (
                         <div key={prospect.id} className="rounded-lg border p-3 text-sm">
                           <div className="flex flex-wrap items-start justify-between gap-2">
+                            {prospect.photo?.url && <div className="w-16 shrink-0"><img src={prospect.photo.url} alt={prospect.name} loading="lazy" className="h-16 w-16 rounded-md object-cover" />{prospect.photo.attribution && <p className="mt-1 text-[10px] text-muted-foreground">Photo: {prospect.photo.attribution}</p>}</div>}
                             <div>
                               <p className="font-semibold">{prospect.name}</p>
                               <p className="text-xs text-muted-foreground">{prospect.businessType ?? "نوع النشاط غير متاح"}</p>

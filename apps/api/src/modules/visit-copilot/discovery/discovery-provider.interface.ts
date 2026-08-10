@@ -19,6 +19,7 @@ export interface DiscoveredPlace {
   businessType: string | null;
   sizeBand: string | null;
   activity: { rating: number | null; userRatingCount: number | null; weeklyOpenHours: number | null } | null;
+  photo?: { resourceName: string; attribution: string | null } | null;
 }
 
 export interface DiscoverySearchParams {

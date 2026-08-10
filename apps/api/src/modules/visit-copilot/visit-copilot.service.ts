@@ -198,6 +198,7 @@ export interface ScoredProspect {
   address: string | null;
   phone: string | null;
   externalKey: string;
+  photo: { url: string; attribution: string | null } | null;
 }
 
 export interface DiscoveryResult {
@@ -1634,7 +1635,14 @@ export class VisitCopilotService {
       companyId: user.companyId!, userId: user.userId, source: provider.id, canonicalChannel: stats.repChannel,
       marketSegment: taxonomy.segment, places, customerPoints: allCustomerPoints, minimumScore: body.minimumScore,
     });
-    return { found: materialized.found, newCount: materialized.newCount, prospects: this.scoreProspects(materialized.prospects, stats).sort((a, b) => b.priorityScore - a.priorityScore), warnings };
+    const photoUrls = new Map<string, { url: string; attribution: string | null }>();
+    if (provider instanceof GooglePlacesProvider) {
+      await Promise.all(places.filter((place) => place.photo).map(async (place) => {
+        const url = await provider.photoUrl(place.photo!.resourceName);
+        if (url) photoUrls.set(place.externalKey, { url, attribution: place.photo!.attribution });
+      }));
+    }
+    return { found: materialized.found, newCount: materialized.newCount, prospects: this.scoreProspects(materialized.prospects, stats, photoUrls).sort((a, b) => b.priorityScore - a.priorityScore), warnings };
     const found = places.length;
 
     // A place within ~100m of an existing customer IS that customer — skip.
@@ -1945,7 +1953,7 @@ export class VisitCopilotService {
   //     rep-customer centroid;
   //   priorityScore 0-100 = 50% min-max-normalized expectedOrderValue +
   //     50% successProbability.
-  private scoreProspects(prospects: Array<Prospect & { intelligenceProfile?: { businessClassification: unknown; productFitInsights: unknown } | null }>, stats: DiscoveryStats): ScoredProspect[] {
+  private scoreProspects(prospects: Array<Prospect & { intelligenceProfile?: { businessClassification: unknown; productFitInsights: unknown } | null }>, stats: DiscoveryStats, photoUrls = new Map<string, { url: string; attribution: string | null }>()): ScoredProspect[] {
     const base = prospects.map((p) => {
       const hasCoords = p.lat !== null && p.lon !== null && isSaneCoordinate(p.lat, p.lon);
       const distanceKm = hasCoords && stats.centroid ? round2(haversineKm({ lat: p.lat!, lon: p.lon! }, stats.centroid)) : null;
@@ -1984,6 +1992,7 @@ export class VisitCopilotService {
         address: b.p.address,
         phone: b.p.phone,
         externalKey: b.p.externalKey,
+        photo: photoUrls.get(b.p.externalKey) ?? null,
         lat: b.lat,
         lon: b.lon,
         channel: b.p.channel,
