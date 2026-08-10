@@ -25,7 +25,6 @@ import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
 import type { EntityRecord } from "../rie/entity-provider.interface";
 import { haversineKm, type LatLon } from "../route-planning/route-balancer.util";
-import { decryptCredentials } from "../data-sources/credential-cipher.util";
 import { categoryForChannel, type ProspectDiscoveryProvider } from "./discovery/discovery-provider.interface";
 import { GooglePlacesProvider } from "./discovery/google-places.provider";
 import { OverpassProvider } from "./discovery/overpass.provider";
@@ -1581,19 +1580,16 @@ export class VisitCopilotService {
 
     // Provider choice is a company-level setting; a missing profile row
     // (pre-Phase-2 edge case) behaves exactly like the default: OSM.
-    const profile = await this.prisma.companyProfile.findUnique({ where: { companyId: user.companyId! } });
+    const platformGoogleApiKey = this.appConfig.values.googlePlaces.apiKey;
     let provider: ProspectDiscoveryProvider;
-    if (profile?.discoveryProvider === "GOOGLE") {
+    if (platformGoogleApiKey) {
       // Missing credential is a product state, not an error — the frontend
       // shows a "feature off" card, so this is HTTP 200 with disabled:true.
       // This is the ONLY disabled case: OSM needs no key and always runs.
       // discoveryCredentialsEncrypted is a flat map of provider id -> that
       // provider's own JSON-stringified credentials (provider-agnostic
       // blob) — this reads only the "GOOGLE" entry, never anything else.
-      const byProvider = profile.discoveryCredentialsEncrypted
-        ? decryptCredentials(this.appConfig.values.jwt.accessSecret, profile.discoveryCredentialsEncrypted)
-        : null;
-      const googleCredentialJson = byProvider?.["GOOGLE"];
+      const googleCredentialJson = JSON.stringify({ apiKey: platformGoogleApiKey });
       if (!googleCredentialJson) {
         return {
           disabled: true,

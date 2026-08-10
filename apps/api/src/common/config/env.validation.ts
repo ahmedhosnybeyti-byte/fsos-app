@@ -33,9 +33,8 @@ const envSchema = z.object({
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().min(1).default("gemini-2.5-flash"),
 
-  // GOOGLE_PLACES_API_KEY (removed): Customer Discovery's Google key is now
-  // a per-company setting stored encrypted on CompanyProfile — see the
-  // provider-based discovery refactor in modules/visit-copilot/discovery.
+  // Optional platform fallback. A company's encrypted BYOK still takes priority.
+  GOOGLE_PLACES_API_KEY: z.string().trim().min(1).optional(),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

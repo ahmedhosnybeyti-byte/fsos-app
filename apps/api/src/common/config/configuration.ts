@@ -29,6 +29,9 @@ export function buildConfiguration(env: EnvConfig) {
       apiKey: env.GEMINI_API_KEY,
       model: env.GEMINI_MODEL,
     },
+    googlePlaces: {
+      apiKey: env.GOOGLE_PLACES_API_KEY,
+    },
   } as const;
 }
 

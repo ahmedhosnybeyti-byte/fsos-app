@@ -2,7 +2,6 @@ import { Injectable, NotFoundException } from "@nestjs/common";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { AppConfigService } from "../../common/config/app-config.service";
 import { PrismaService } from "../../common/prisma/prisma.service";
-import { decryptCredentials } from "../data-sources/credential-cipher.util";
 import { GooglePlacesProvider } from "../visit-copilot/discovery/google-places.provider";
 import { MurshidakIntelligenceService } from "./murshidak-intelligence.service";
 import { deriveGoogleNeedTags, GOOGLE_NEED_RULES_VERSION } from "./need-tag-rules";
@@ -21,11 +20,7 @@ export class GoogleRulesIntelligenceService {
     const fingerprint = `${prospect.source}:${prospect.externalKey}:${prospect.updatedAt.toISOString()}:${GOOGLE_NEED_RULES_VERSION}`;
     const lifecycle = await this.intelligence.resolve(companyId, prospectId, fingerprint);
     if (lifecycle.state === "CURRENT") return { state: "CURRENT" as const };
-    const profile = await this.prisma.companyProfile.findUnique({ where: { companyId } });
-    const encrypted = profile?.discoveryCredentialsEncrypted;
-    const googleCredential = encrypted ? decryptCredentials(this.config.values.jwt.accessSecret, encrypted)?.GOOGLE : null;
-    let apiKey: string | null = null;
-    try { apiKey = googleCredential ? (JSON.parse(googleCredential) as { apiKey?: string }).apiKey ?? null : null; } catch { return { state: "UNAVAILABLE" as const }; }
+    const apiKey = this.config.values.googlePlaces.apiKey;
     if (!apiKey) return { state: "UNAVAILABLE" as const };
     const facts = await new GooglePlacesProvider(apiKey).intelligenceFacts(prospect.externalKey);
     if (!facts) return { state: "UNAVAILABLE" as const };
