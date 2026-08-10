@@ -439,7 +439,7 @@ function VisitCopilotScreen() {
   const routeOpp = routeOppQuery.data;
   const showOppCard = !!plan && !!routeOpp && !routeOpp.disabled && routeOpp.highCount + routeOpp.mediumCount > 0;
   const discoveryProspects = useMemo(() => {
-    const rows = new Map((discoveryQuery.data?.prospects ?? []).map((prospect) => [prospect.id, prospect]));
+    const rows = new globalThis.Map<string, VisitCopilotProspect>((discoveryQuery.data?.prospects ?? []).map((prospect) => [prospect.id, prospect]));
     latestGoogleProspects.forEach((prospect) => rows.set(prospect.id, prospect));
     return [...rows.values()].sort((a, b) => prospectSort === "CATALOG_FIT"
       ? (b.catalogFitScore ?? -1) - (a.catalogFitScore ?? -1)
