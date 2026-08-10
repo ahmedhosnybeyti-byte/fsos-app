@@ -15,7 +15,7 @@ const hasTerm = (value: unknown, terms: readonly string[]) => terms.some((term) 
 @Injectable()
 export class ProductFitService {
   constructor(private readonly rie: RieFacade, private readonly intelligence: MurshidakIntelligenceService, private readonly catalogFit: CatalogFitService) {}
-  private readonly companyData = new Map<string, { until: number; value: Promise<EntityRecord[][]> }>();
+  private readonly companyData = new Map<string, { until: number; value: Promise<(readonly EntityRecord[])[]> }>();
 
   async build(user: AuthenticatedUser, prospectId: string) {
     const companyId = user.companyId!;
