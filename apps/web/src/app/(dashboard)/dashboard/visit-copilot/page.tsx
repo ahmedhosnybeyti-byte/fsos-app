@@ -443,7 +443,7 @@ function VisitCopilotScreen() {
   }, [discoveryQuery.data?.prospects, prospectSort]);
   const prospectGroups = useMemo(() => {
     const groups = [{ key: "HOTELS", label: "Hotels", prospects: [] as typeof discoveryProspects }, { key: "RESTAURANTS", label: "Restaurants", prospects: [] as typeof discoveryProspects }, { key: "CAFES", label: "Cafes / Coffee Shops", prospects: [] as typeof discoveryProspects }, { key: "OTHER", label: "Other", prospects: [] as typeof discoveryProspects }];
-    for (const prospect of discoveryProspects) groups[prospect.businessType === "hotel" ? 0 : prospect.businessType === "restaurant" ? 1 : prospect.businessType === "cafe" || prospect.businessType === "coffee_shop" ? 2 : 3].prospects.push(prospect);
+    for (const prospect of discoveryProspects) groups[prospect.businessType === "hotel" ? 0 : prospect.businessType === "restaurant" ? 1 : prospect.businessType === "cafe" || prospect.businessType === "coffee_shop" ? 2 : 3]!.prospects.push(prospect);
     return groups.filter((group) => group.prospects.length > 0);
   }, [discoveryProspects]);
 
