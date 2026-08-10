@@ -169,6 +169,7 @@ function VisitCopilotScreen() {
   const [minimumProspectScore, setMinimumProspectScore] = useState("");
   const [prospectSort, setProspectSort] = useState<"PROSPECT_SCORE" | "CATALOG_FIT">("PROSPECT_SCORE");
   const [scheduledProspectDates, setScheduledProspectDates] = useState<Record<string, string>>({});
+  const [collapsedProspectGroups, setCollapsedProspectGroups] = useState<Set<string>>(new Set());
 
   const [chatMessages, setChatMessages] = useState<VisitCopilotChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -440,6 +441,11 @@ function VisitCopilotScreen() {
       ? (b.catalogFitScore ?? -1) - (a.catalogFitScore ?? -1)
       : b.priorityScore - a.priorityScore);
   }, [discoveryQuery.data?.prospects, prospectSort]);
+  const prospectGroups = useMemo(() => {
+    const groups = [{ key: "HOTELS", label: "Hotels", prospects: [] as typeof discoveryProspects }, { key: "RESTAURANTS", label: "Restaurants", prospects: [] as typeof discoveryProspects }, { key: "CAFES", label: "Cafes / Coffee Shops", prospects: [] as typeof discoveryProspects }, { key: "OTHER", label: "Other", prospects: [] as typeof discoveryProspects }];
+    for (const prospect of discoveryProspects) groups[prospect.businessType === "hotel" ? 0 : prospect.businessType === "restaurant" ? 1 : prospect.businessType === "cafe" || prospect.businessType === "coffee_shop" ? 2 : 3].prospects.push(prospect);
+    return groups.filter((group) => group.prospects.length > 0);
+  }, [discoveryProspects]);
 
   function createProspectVisit(prospectId: string, scheduledFor: string) {
     if (!scheduledFor || prospectVisitMutation.isPending) return;
@@ -627,7 +633,10 @@ function VisitCopilotScreen() {
                         </SelectContent>
                       </Select>
                     </div>
-                    {discoveryProspects.map((prospect) => {
+                    {prospectGroups.map((group) => (
+                      <div key={group.key} className="space-y-2">
+                        <button className="w-full text-left text-sm font-semibold" onClick={() => setCollapsedProspectGroups((current) => { const next = new Set(current); if (next.has(group.key)) next.delete(group.key); else next.add(group.key); return next; })}>{group.label} ({group.prospects.length})</button>
+                        {!collapsedProspectGroups.has(group.key) && group.prospects.map((prospect) => {
                       const scheduledFor = scheduledProspectDates[prospect.id] ?? "";
                       return (
                         <div key={prospect.id} className="rounded-lg border p-3 text-sm">
@@ -638,6 +647,7 @@ function VisitCopilotScreen() {
                             </div>
                             <div className="flex flex-wrap gap-1">
                               <Badge>Prospect {prospect.priorityScore.toFixed(0)} / ثقة {prospect.scoreConfidence?.toFixed(0) ?? "—"}</Badge>
+                              <Badge variant="outline">{prospect.source}</Badge>
                               <Badge variant="secondary">Catalog {prospect.catalogFitScore === null || prospect.catalogFitScore === undefined ? "غير متاح" : `${prospect.catalogFitScore.toFixed(0)} / ثقة ${prospect.catalogFitConfidence?.toFixed(0) ?? "—"}`}</Badge>
                               {prospect.commercialTier && <Badge variant="outline">{prospect.commercialTier}</Badge>}
                             </div>
@@ -655,7 +665,9 @@ function VisitCopilotScreen() {
                           </div>
                         </div>
                       );
-                    })}
+                        })}
+                      </div>
+                    ))}
                   </div>
                 </>
               ) : null}
