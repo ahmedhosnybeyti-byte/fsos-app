@@ -252,6 +252,7 @@ model Company {
   policies      CompanyPolicy[]
   salesCalendarDays SalesCalendar[]
   prospects     Prospect[]
+  prospectVisitIntents ProspectVisitIntent[]
   lostOpportunityExclusions LostOpportunityExclusion[]
   routeAssignments UserRouteAssignment[]
   activityEvents UserActivityEvent[]
@@ -463,6 +464,8 @@ model User {
   // Phase 8: refresh runs this user triggered (Migration Readiness Review fix).
   triggeredRefreshRuns RefreshRun[]
   discoveredProspects  Prospect[]
+  assignedProspectVisitIntents ProspectVisitIntent[] @relation("ProspectVisitIntentAssignedTo")
+  createdProspectVisitIntents ProspectVisitIntent[] @relation("ProspectVisitIntentCreatedBy")
   createdLostOpportunityExclusions LostOpportunityExclusion[] @relation("LostOpportunityExclusionCreatedBy")
   revokedLostOpportunityExclusions LostOpportunityExclusion[] @relation("LostOpportunityExclusionRevokedBy")
   routeAssignments UserRouteAssignment[] @relation("UserRouteAssignments")
@@ -961,6 +964,17 @@ enum ProspectStatus {
   CONVERTED // became a real customer
 }
 
+enum ProspectMarketSegment {
+  RETAIL_FMCG
+  HORECA
+}
+
+enum ProspectVisitIntentStatus {
+  PLANNED
+  COMPLETED
+  CANCELLED
+}
+
 // Customer Discovery (AI Visit Copilot Phase 2) — potential customers, from
 // BOTH sources per the approved decision: uploaded Prospects sheets and
 // live discovery via whichever ProspectDiscoveryProvider the company has
@@ -980,6 +994,9 @@ model Prospect {
   externalKey        String         @map("external_key")
   name               String
   channel            String?
+  marketSegment      ProspectMarketSegment? @map("market_segment")
+  businessType       String?        @map("business_type")
+  sizeBand           String?        @map("size_band")
   lat                Float?
   lon                Float?
   city               String?
@@ -987,6 +1004,16 @@ model Prospect {
   phone              String?
   notes              String?
   status             ProspectStatus @default(NEW)
+  scoreVersion       String?        @map("score_version")
+  scoreTotal         Float?         @map("score_total")
+  scoreConfidence    Float?         @map("score_confidence")
+  businessTypeSizeScore Float?      @map("business_type_size_score")
+  commercialDensityScore Float?     @map("commercial_density_score")
+  activitySignalScore Float?        @map("activity_signal_score")
+  visionScore        Float?         @map("vision_score")
+  scoreComponents    Json?          @map("score_components")
+  scoreInputFingerprint String?     @map("score_input_fingerprint")
+  scoredAt           DateTime?      @map("scored_at")
   discoveredByUserId String?        @map("discovered_by_user_id")
   sourceFileId       String?        @map("source_file_id")
   createdAt          DateTime       @default(now()) @map("created_at")
@@ -995,11 +1022,58 @@ model Prospect {
   company      Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   discoveredBy User?   @relation(fields: [discoveredByUserId], references: [id], onDelete: SetNull)
   sourceFile   File?   @relation(fields: [sourceFileId], references: [id], onDelete: SetNull)
+  intelligenceProfile MurshidakIntelligenceProfile?
+  visitIntents       ProspectVisitIntent[]
 
   // Re-upload / re-discovery upserts the same prospect instead of duplicating.
   @@unique([companyId, source, externalKey])
   @@index([companyId, status])
+  @@index([companyId, marketSegment, scoreTotal])
   @@map("prospects")
+}
+
+model ProspectVisitIntent {
+  id               String                    @id @default(cuid())
+  companyId        String                    @map("company_id")
+  prospectId       String                    @map("prospect_id")
+  assignedToUserId String                    @map("assigned_to_user_id")
+  scheduledFor     DateTime                  @map("scheduled_for") @db.Date
+  status           ProspectVisitIntentStatus @default(PLANNED)
+  createdByUserId  String                    @map("created_by_user_id")
+  createdAt        DateTime                  @default(now()) @map("created_at")
+  updatedAt        DateTime                  @updatedAt @map("updated_at")
+
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  prospect   Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  assignedTo User     @relation("ProspectVisitIntentAssignedTo", fields: [assignedToUserId], references: [id], onDelete: Restrict)
+  createdBy  User     @relation("ProspectVisitIntentCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@unique([prospectId, assignedToUserId, scheduledFor])
+  @@index([companyId, assignedToUserId, scheduledFor])
+  @@index([companyId, scheduledFor, status])
+  @@map("prospect_visit_intents")
+}
+
+// Provider payloads (including Google) are deliberately excluded. This is
+// permanent, provider-independent Murshidak-derived intelligence only.
+model MurshidakIntelligenceProfile {
+  id                    String   @id @default(cuid())
+  prospectId            String   @unique @map("prospect_id")
+  businessClassification Json?   @map("business_classification")
+  menuServiceInsights   Json?   @map("menu_service_insights")
+  likelyNeedsCategories Json?   @map("likely_needs_categories")
+  productFitInsights    Json?   @map("product_fit_insights")
+  analysisVersion       String? @map("analysis_version")
+  inputFingerprint      String? @map("input_fingerprint")
+  analyzedAt            DateTime? @map("analyzed_at")
+  refreshAt             DateTime? @map("refresh_at")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  prospect Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([refreshAt])
+  @@map("murshidak_intelligence_profiles")
 }
 
 // Sales Calendar — the one Canonical Entity (of the 18, as of 2026-07-19)

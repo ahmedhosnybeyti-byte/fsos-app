@@ -96,6 +96,9 @@ export class OverpassProvider implements ProspectDiscoveryProvider {
         lon,
         address,
         phone: tags.phone ?? tags["contact:phone"] ?? null,
+        businessType: null,
+        sizeBand: null,
+        activity: null,
       });
     }
     return { places, warnings: [] };

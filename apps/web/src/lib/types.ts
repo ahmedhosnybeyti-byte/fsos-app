@@ -1556,6 +1556,12 @@ export interface VisitCopilotProspect {
   successProbability: number;
   reason: string;
   distanceKm: number;
+  businessType?: string | null;
+  scoreConfidence?: number | null;
+  catalogFitScore?: number | null;
+  catalogFitConfidence?: number | null;
+  commercialTier?: "PREMIUM" | "MID_MARKET" | "VALUE" | null;
+  productFit?: Array<{ productCode: string; productName: string; reasons: string[] }>;
 }
 
 export interface VisitCopilotDiscoveryResult {

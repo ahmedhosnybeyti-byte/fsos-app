@@ -25,6 +25,10 @@ export function buildConfiguration(env: EnvConfig) {
     anthropic: {
       apiKey: env.ANTHROPIC_API_KEY,
     },
+    gemini: {
+      apiKey: env.GEMINI_API_KEY,
+      model: env.GEMINI_MODEL,
+    },
   } as const;
 }
 

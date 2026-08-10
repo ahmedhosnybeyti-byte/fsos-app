@@ -48,6 +48,7 @@ import { GeoEngineModule } from "./modules/geo-engine/geo-engine.module";
 import { SmartLoadingModule } from "./modules/smart-loading/smart-loading.module";
 import { UserActivityModule } from "./modules/user-activity/user-activity.module";
 import { DashboardPerformanceModule } from "./modules/dashboard-performance/dashboard-performance.module";
+import { ProspectsModule } from "./modules/prospects/prospects.module";
 
 @Module({
   imports: [
@@ -98,6 +99,7 @@ import { DashboardPerformanceModule } from "./modules/dashboard-performance/dash
     SmartLoadingModule,
     UserActivityModule,
     DashboardPerformanceModule,
+    ProspectsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

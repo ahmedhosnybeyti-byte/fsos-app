@@ -30,6 +30,8 @@ const envSchema = z.object({
   // the Claude API). If unset, that one endpoint returns a clear error;
   // everything else in the app works without it.
   ANTHROPIC_API_KEY: z.string().optional(),
+  GEMINI_API_KEY: z.string().optional(),
+  GEMINI_MODEL: z.string().min(1).default("gemini-2.5-flash"),
 
   // GOOGLE_PLACES_API_KEY (removed): Customer Discovery's Google key is now
   // a per-company setting stored encrypted on CompanyProfile — see the

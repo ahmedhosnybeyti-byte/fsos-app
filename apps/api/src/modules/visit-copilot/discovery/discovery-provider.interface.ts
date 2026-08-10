@@ -4,6 +4,8 @@
 // company's own key) and all the FSOS post-processing (existing-customer
 // exclusion, Prospect upserts, scoring) stays provider-agnostic.
 
+import { taxonomyForCanonicalChannel } from "../../prospects/prospect-taxonomy";
+
 export interface DiscoveredPlace {
   // Provider-unique id, namespaced by construction: Google uses the raw
   // Places id, OSM uses "osm-{type}-{id}" — the prefix keeps the two
@@ -14,6 +16,9 @@ export interface DiscoveredPlace {
   lon: number;
   address: string | null;
   phone: string | null;
+  businessType: string | null;
+  sizeBand: string | null;
+  activity: { rating: number | null; userRatingCount: number | null; weeklyOpenHours: number | null } | null;
 }
 
 export interface DiscoverySearchParams {
@@ -46,11 +51,6 @@ const CHANNEL_CATEGORIES: { keywords: string[]; category: DiscoveryCategory }[] 
 ];
 
 export function categoryForChannel(repChannel: string | null): { category: DiscoveryCategory; matched: boolean } {
-  const channel = (repChannel ?? "").trim().toLowerCase();
-  if (channel !== "") {
-    for (const entry of CHANNEL_CATEGORIES) {
-      if (entry.keywords.some((k) => channel.includes(k))) return { category: entry.category, matched: true };
-    }
-  }
-  return { category: "traditional", matched: false };
+  const taxonomy = taxonomyForCanonicalChannel(repChannel);
+  return taxonomy ? { category: taxonomy.category, matched: true } : { category: "traditional", matched: false };
 }

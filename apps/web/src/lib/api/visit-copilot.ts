@@ -50,9 +50,9 @@ export const visitCopilotApi = {
   chat: (body: VisitCopilotChatRequest) => apiFetch<VisitCopilotChatResponse>("/visit-copilot/chat", { method: "POST", body }),
 
   // ——— Phase 2: Customer Discovery ———
-  discovery: (params: PeriodParams & PlanDateParams, signal?: AbortSignal) =>
+  discovery: (params: PeriodParams & PlanDateParams & { minimumScore?: number }, signal?: AbortSignal) =>
     apiFetch<VisitCopilotDiscoveryResult>("/visit-copilot/discovery", {
-      query: { period: params.period, from: params.from, to: params.to, date: params.date },
+      query: { period: params.period, from: params.from, to: params.to, date: params.date, minimumScore: params.minimumScore },
       signal,
     }),
 
@@ -64,6 +64,9 @@ export const visitCopilotApi = {
       method: "PATCH",
       body: { status: params.status },
     }),
+
+  createProspectVisit: (body: { prospectId: string; scheduledFor: string }) =>
+    apiFetch("/prospect-visits", { method: "POST", body }),
 
   routeOpportunities: (params: PeriodParams) =>
     apiFetch<VisitCopilotRouteOpportunities>("/visit-copilot/route-opportunities", {

@@ -55,7 +55,7 @@ const planDateField = { date: isoDateSchema.optional() };
 
 // GET /visit-copilot/daily-brief
 export const visitCopilotDailyBriefQuerySchema = z
-  .object({ ...periodFields, ...planDateField })
+  .object({ ...periodFields, ...planDateField, minimumScore: z.coerce.number().min(0).max(100).optional() })
   .refine(customPeriodRefinement.check, customPeriodRefinement.options);
 export type VisitCopilotDailyBriefQuery = z.infer<typeof visitCopilotDailyBriefQuerySchema>;
 
@@ -117,7 +117,7 @@ export type VisitCopilotChatRequest = z.infer<typeof visitCopilotChatRequestSche
 // GET /visit-copilot/discovery + GET /visit-copilot/route-opportunities —
 // period-only queries, same Analysis Scope semantics as daily-brief.
 export const visitCopilotDiscoveryQuerySchema = z
-  .object({ ...periodFields, ...planDateField })
+  .object({ ...periodFields, ...planDateField, minimumScore: z.coerce.number().min(0).max(100).optional() })
   .refine(customPeriodRefinement.check, customPeriodRefinement.options);
 export type VisitCopilotDiscoveryQuery = z.infer<typeof visitCopilotDiscoveryQuerySchema>;
 
@@ -136,6 +136,7 @@ export const visitCopilotGoogleSearchRequestSchema = z.object({
     .positive()
     .max(VISIT_COPILOT_DISCOVERY_LIMITS.maxRadiusMeters, `أقصى نصف قطر للبحث ${VISIT_COPILOT_DISCOVERY_LIMITS.maxRadiusMeters} متر`)
     .default(VISIT_COPILOT_DISCOVERY_LIMITS.defaultRadiusMeters),
+  minimumScore: z.coerce.number().min(0).max(100).optional(),
 });
 export type VisitCopilotGoogleSearchRequest = z.infer<typeof visitCopilotGoogleSearchRequestSchema>;
 

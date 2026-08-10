@@ -36,6 +36,8 @@ import { SgiService } from "../sgi/sgi.service";
 import { LostOpportunityService, type LostOpportunityResult } from "../lost-opportunity/lost-opportunity.service";
 import { buildLostOpportunityCoaching } from "./daily-360-recommendation-builder";
 import { AuditLogService } from "../audit-log/audit-log.service";
+import { ProspectService } from "../prospects/prospect.service";
+import { taxonomyForCanonicalChannel } from "../prospects/prospect-taxonomy";
 
 // AI Visit Copilot — Phase 1. Decision-support screen for the field rep:
 // today's visit plan + a per-customer pre-visit briefing that must be
@@ -188,6 +190,12 @@ export interface ScoredProspect {
   successProbability: number;
   reason: string;
   distanceKm: number | null;
+  businessType: string | null;
+  scoreConfidence: number | null;
+  catalogFitScore: number | null;
+  catalogFitConfidence: number | null;
+  commercialTier: "PREMIUM" | "MID_MARKET" | "VALUE" | null;
+  productFit: { productCode: string; productName: string; reasons: string[] }[];
 }
 
 export interface DiscoveryResult {
@@ -204,6 +212,24 @@ export interface GoogleSearchResult {
   warnings: string[];
   disabled?: boolean;
   message?: string;
+}
+
+function prospectIntelligence(profile: { businessClassification: unknown; productFitInsights: unknown } | null | undefined) {
+  const classification = profile?.businessClassification && typeof profile.businessClassification === "object" && !Array.isArray(profile.businessClassification) ? profile.businessClassification as Record<string, unknown> : {};
+  const fit = profile?.productFitInsights && typeof profile.productFitInsights === "object" && !Array.isArray(profile.productFitInsights) ? profile.productFitInsights as Record<string, unknown> : {};
+  const tier = classification.tier;
+  const candidates = Array.isArray(fit.candidates) ? fit.candidates : [];
+  return {
+    catalogFitScore: typeof fit.catalogFitScore === "number" ? fit.catalogFitScore : null,
+    catalogFitConfidence: typeof fit.catalogFitConfidence === "number" ? fit.catalogFitConfidence : null,
+    commercialTier: tier === "PREMIUM" || tier === "MID_MARKET" || tier === "VALUE" ? tier : null,
+    productFit: candidates.slice(0, 3).flatMap((candidate) => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
+      const value = candidate as Record<string, unknown>;
+      if (typeof value.productCode !== "string" || typeof value.productName !== "string") return [];
+      return [{ productCode: value.productCode, productName: value.productName, reasons: Array.isArray(value.reasons) ? value.reasons.filter((reason): reason is string => typeof reason === "string") : [] }];
+    }),
+  };
 }
 
 export interface RouteOpportunityBest {
@@ -372,6 +398,7 @@ export class VisitCopilotService {
     private readonly sgiService: SgiService,
     private readonly lostOpportunityService: LostOpportunityService,
     private readonly auditLogService: AuditLogService,
+    private readonly prospectService: ProspectService,
   ) {}
 
   // Every RIE read must pass requestingUser — Hierarchy Row-Level Filtering
@@ -1526,7 +1553,10 @@ export class VisitCopilotService {
     const dailyRoute = await this.buildDailyBrief(user, query);
     const routeCustomerCodes = new Set(dailyRoute.customers.map((customer) => customer.customerCode));
     const stats = await this.buildDiscoveryStats(user, query, warnings, routeCustomerCodes);
-    const rows = await this.prisma.prospect.findMany({ where: { companyId: user.companyId! }, orderBy: { createdAt: "desc" } });
+    const taxonomy = taxonomyForCanonicalChannel(stats.repChannel);
+    const rows = taxonomy
+      ? await this.prisma.prospect.findMany({ where: { companyId: user.companyId!, marketSegment: taxonomy.segment, ...(query.minimumScore === undefined ? {} : { scoreTotal: { gte: query.minimumScore } }) }, include: { intelligenceProfile: { select: { businessClassification: true, productFitInsights: true } } }, orderBy: { createdAt: "desc" } })
+      : [];
     const prospects = this.scoreProspects(rows, stats).sort((a, b) => b.priorityScore - a.priorityScore);
     // Map layer of existing customers — only ones with usable coordinates.
     const customers: DiscoveryCustomer[] = stats.customers
@@ -1594,6 +1624,17 @@ export class VisitCopilotService {
     const searchResult = await provider.search({ lat: body.lat, lon: body.lon, radiusMeters: body.radiusMeters, channel: stats.repChannel });
     warnings.push(...searchResult.warnings);
     const places = searchResult.places.filter((pl) => isSaneCoordinate(pl.lat, pl.lon));
+    const taxonomy = taxonomyForCanonicalChannel(stats.repChannel);
+    if (!taxonomy) {
+      warnings.push("لا توجد قناة معيارية معروفة للمندوب؛ لم يتم حفظ نتائج غير موجهة لقناة.");
+      return { found: places.length, newCount: 0, prospects: [], warnings };
+    }
+    const allCustomerPoints: LatLon[] = stats.customers.filter((c) => c.lat !== null && c.lon !== null).map((c) => ({ lat: c.lat!, lon: c.lon! }));
+    const materialized = await this.prospectService.materializeScan({
+      companyId: user.companyId!, userId: user.userId, source: provider.id, canonicalChannel: stats.repChannel,
+      marketSegment: taxonomy.segment, places, customerPoints: allCustomerPoints, minimumScore: body.minimumScore,
+    });
+    return { found: materialized.found, newCount: materialized.newCount, prospects: this.scoreProspects(materialized.prospects, stats).sort((a, b) => b.priorityScore - a.priorityScore), warnings };
     const found = places.length;
 
     // A place within ~100m of an existing customer IS that customer — skip.
@@ -1904,7 +1945,7 @@ export class VisitCopilotService {
   //     rep-customer centroid;
   //   priorityScore 0-100 = 50% min-max-normalized expectedOrderValue +
   //     50% successProbability.
-  private scoreProspects(prospects: Prospect[], stats: DiscoveryStats): ScoredProspect[] {
+  private scoreProspects(prospects: Array<Prospect & { intelligenceProfile?: { businessClassification: unknown; productFitInsights: unknown } | null }>, stats: DiscoveryStats): ScoredProspect[] {
     const base = prospects.map((p) => {
       const hasCoords = p.lat !== null && p.lon !== null && isSaneCoordinate(p.lat, p.lon);
       const distanceKm = hasCoords && stats.centroid ? round2(haversineKm({ lat: p.lat!, lon: p.lon! }, stats.centroid)) : null;
@@ -1944,11 +1985,14 @@ export class VisitCopilotService {
         lon: b.lon,
         channel: b.p.channel,
         status: b.p.status,
-        priorityScore: round2(100 * (0.5 * normalize(b.expectedOrderValue, eovMin, eovMax) + 0.5 * b.successProbability)),
+        priorityScore: b.p.scoreTotal ?? round2(100 * (0.5 * normalize(b.expectedOrderValue, eovMin, eovMax) + 0.5 * b.successProbability)),
         expectedOrderValue: b.expectedOrderValue,
         successProbability: b.successProbability,
         reason,
         distanceKm: b.distanceKm,
+        businessType: b.p.businessType,
+        scoreConfidence: b.p.scoreConfidence,
+        ...prospectIntelligence(b.p.intelligenceProfile),
       };
     });
   }

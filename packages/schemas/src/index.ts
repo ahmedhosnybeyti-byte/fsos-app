@@ -29,6 +29,7 @@ export * from "./sgi.schemas";
 export * from "./sgi-context.schemas";
 export * from "./customer-location.schemas";
 export * from "./visit-copilot.schemas";
+export * from "./prospect-visit-intent.schemas";
 export * from "./territory-intelligence.schemas";
 export * from "./decision-analytics-studio.schemas";
 export * from "./dashboard-performance.schemas";

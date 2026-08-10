@@ -1,0 +1,86 @@
+import { Injectable, NotFoundException } from "@nestjs/common";
+import type { AuthenticatedUser } from "../../common/types/authenticated-user";
+import { RieFacade } from "../rie/rie-facade.service";
+import type { EntityRecord } from "../rie/entity-provider.interface";
+import { MurshidakIntelligenceService } from "./murshidak-intelligence.service";
+import { NEED_TAXONOMY, NEED_TAXONOMY_VERSION, type NeedDefinition } from "./need-taxonomy";
+import { CatalogFitService } from "./catalog-fit.service";
+
+export type Candidate = { productCode: string; productName: string; brand: string | null; category: string | null; priority: number; confidence: number; likelyNeed: string; matchQuality: "CATEGORY" | "PRODUCT_TEXT"; productTier: "PREMIUM" | "MID_MARKET" | "VALUE" | null; reasons: string[]; peerSignals: { buyerCount: number; orderValue: number; peerScope: "CUSTOMER_TYPE" | "CHANNEL" | "NONE" }; availability: "UNKNOWN" };
+export type ProductFitOutput = { version: string; computedAt: string; inputFingerprint: string | null; confirmedNeedTags: string[]; candidates: Candidate[] };
+const norm = (value: unknown) => String(value ?? "").trim().toLowerCase();
+const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : Number(value) || 0;
+const hasTerm = (value: unknown, terms: readonly string[]) => terms.some((term) => norm(value).includes(term));
+
+@Injectable()
+export class ProductFitService {
+  constructor(private readonly rie: RieFacade, private readonly intelligence: MurshidakIntelligenceService, private readonly catalogFit: CatalogFitService) {}
+
+  async build(user: AuthenticatedUser, prospectId: string) {
+    const companyId = user.companyId!;
+    const [profile, prospect] = await Promise.all([
+      this.intelligence.profile(companyId, prospectId),
+      this.intelligence.prospectFacts(companyId, prospectId),
+    ]);
+    if (!profile || !prospect) throw new NotFoundException();
+    const needs = this.deriveNeeds(prospect.businessType, profile.menuServiceInsights);
+    const commercialTier = (profile.businessClassification as { tier?: unknown } | null)?.tier;
+    const ctx = { companyId, requestingUser: { roleCode: user.roleCode, email: user.email } };
+    const [customers, invoices, items, products] = await Promise.all(["Customers", "Invoices", "Invoice Items", "Products"].map(async (entity) => {
+      const result = await this.rie.getEntityRecords(entity, ctx);
+      return result.available ? result.records : [];
+    }));
+    const peer = this.peerSales(customers, invoices, items, prospect.businessType, prospect.channel);
+    const candidates = this.matchProducts(products, needs, peer, commercialTier === "PREMIUM" || commercialTier === "MID_MARKET" || commercialTier === "VALUE" ? commercialTier : null).slice(0, 10);
+    const productFit: ProductFitOutput = { version: NEED_TAXONOMY_VERSION, computedAt: new Date().toISOString(), inputFingerprint: profile.inputFingerprint, confirmedNeedTags: needs.map((need) => need.tag), candidates };
+    const output = { ...productFit, ...this.catalogFit.build({ productFit, products, businessType: prospect.businessType, businessClassification: profile.businessClassification }) };
+    await this.intelligence.storeProductFit(companyId, prospectId, output);
+    return output;
+  }
+
+  private deriveNeeds(businessType: string | null, insights: unknown): NeedDefinition[] {
+    const menuTags = Array.isArray((insights as { needTags?: unknown })?.needTags) ? (insights as { needTags: unknown[] }).needTags.map(norm) : [];
+    return NEED_TAXONOMY.filter((need) => need.businessTypes.includes(norm(businessType)) && (need.menuTags.length === 0 || need.menuTags.some((tag) => menuTags.includes(tag))));
+  }
+
+  private peerSales(customers: readonly EntityRecord[], invoices: readonly EntityRecord[], items: readonly EntityRecord[], businessType: string | null, channel: string | null) {
+    const typePeers = new Set(customers.filter((row) => norm(row.CustomerType) === norm(businessType) && norm(businessType) !== "").map((row) => norm(row.CustomerCode)));
+    const channelPeers = new Set(customers.filter((row) => norm(row.Channel) === norm(channel) && norm(channel) !== "").map((row) => norm(row.CustomerCode)));
+    const peers = typePeers.size > 0 ? typePeers : channelPeers;
+    const scope: Candidate["peerSignals"]["peerScope"] = typePeers.size > 0 ? "CUSTOMER_TYPE" : channelPeers.size > 0 ? "CHANNEL" : "NONE";
+    const invoiceCustomers = new Map(invoices.map((row) => [norm(row.InvoiceNo), norm(row.CustomerCode)]));
+    const sales = new Map<string, { customers: Set<string>; value: number }>();
+    for (const item of items) {
+      const customer = invoiceCustomers.get(norm(item.InvoiceNo)); const code = norm(item.ProductCode);
+      if (!customer || !code || !peers.has(customer)) continue;
+      const entry = sales.get(code) ?? { customers: new Set<string>(), value: 0 };
+      entry.customers.add(customer); entry.value += number(item.LineTotal); sales.set(code, entry);
+    }
+    return { sales, scope };
+  }
+
+  private matchProducts(products: readonly EntityRecord[], needs: readonly NeedDefinition[], peer: ReturnType<ProductFitService["peerSales"]>, commercialTier: "PREMIUM" | "MID_MARKET" | "VALUE" | null): Candidate[] {
+    const maxPeerValue = Math.max(0, ...[...peer.sales.values()].map((signal) => signal.value));
+    const candidates: Candidate[] = [];
+    for (const product of products) for (const need of needs) {
+      if (norm(product.ProductStatus) !== "active") continue;
+      const categoryMatch = hasTerm(product.Category, need.categoryTerms);
+      const productMatch = !categoryMatch && (hasTerm(product.ProductName, need.productTerms) || hasTerm(product.Brand, need.productTerms));
+      if (!categoryMatch && !productMatch) continue;
+      const productCode = norm(product.ProductCode); if (!productCode) continue;
+      const signal = peer.sales.get(productCode) ?? { customers: new Set<string>(), value: 0 };
+      const peerRank = maxPeerValue > 0 ? (signal.value / maxPeerValue) * 20 : 0;
+      const productTier = inferProductTier(product);
+      const tierBonus = commercialTier !== null && productTier === commercialTier ? 5 : 0;
+      candidates.push({ productCode, productName: String(product.ProductName ?? productCode), brand: product.Brand ? String(product.Brand) : null, category: product.Category ? String(product.Category) : null, priority: Math.min(100, Math.round((categoryMatch ? 80 : 60) + peerRank + tierBonus)), confidence: categoryMatch ? 80 : 60, likelyNeed: need.tag, matchQuality: categoryMatch ? "CATEGORY" : "PRODUCT_TEXT", productTier, reasons: [categoryMatch ? "فئة المنتج تطابق الاحتياج" : "اسم/علامة المنتج تطابق الاحتياج", ...(tierBonus ? ["يتوافق مع الشريحة التجارية"] : []), ...(signal.value > 0 ? ["مباع لدى عملاء مشابهين"] : [])], peerSignals: { buyerCount: signal.customers.size, orderValue: signal.value, peerScope: peer.scope }, availability: "UNKNOWN" });
+    }
+    return candidates.sort((a, b) => b.priority - a.priority || b.peerSignals.orderValue - a.peerSignals.orderValue);
+  }
+}
+
+function inferProductTier(product: EntityRecord): "PREMIUM" | "VALUE" | null {
+  const text = `${String(product.Category ?? "")} ${String(product.ProductName ?? "")} ${String(product.Brand ?? "")}`.toLowerCase();
+  if (/\bpremium\b|\bluxury\b/.test(text)) return "PREMIUM";
+  if (/\beconomy\b|\bvalue\b|\bbudget\b/.test(text)) return "VALUE";
+  return null;
+}
