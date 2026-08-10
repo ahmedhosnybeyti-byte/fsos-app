@@ -171,6 +171,7 @@ function VisitCopilotScreen() {
   const [prospectSort, setProspectSort] = useState<"PROSPECT_SCORE" | "CATALOG_FIT">("PROSPECT_SCORE");
   const [scheduledProspectDates, setScheduledProspectDates] = useState<Record<string, string>>({});
   const [collapsedProspectGroups, setCollapsedProspectGroups] = useState<Set<string>>(new Set());
+  const [expandedProspects, setExpandedProspects] = useState<Set<string>>(new Set());
   const [latestGoogleProspects, setLatestGoogleProspects] = useState<VisitCopilotProspect[]>([]);
 
   const [chatMessages, setChatMessages] = useState<VisitCopilotChatMessage[]>([]);
@@ -446,7 +447,7 @@ function VisitCopilotScreen() {
       : b.priorityScore - a.priorityScore);
   }, [discoveryQuery.data?.prospects, latestGoogleProspects, prospectSort]);
   const prospectGroups = useMemo(() => {
-    const groups = [{ key: "HOTELS", label: "Hotels", prospects: [] as typeof discoveryProspects }, { key: "RESTAURANTS", label: "Restaurants", prospects: [] as typeof discoveryProspects }, { key: "CAFES", label: "Cafes / Coffee Shops", prospects: [] as typeof discoveryProspects }, { key: "OTHER", label: "Other", prospects: [] as typeof discoveryProspects }];
+    const groups = [{ key: "HOTELS", label: "الفنادق", prospects: [] as typeof discoveryProspects }, { key: "RESTAURANTS", label: "المطاعم", prospects: [] as typeof discoveryProspects }, { key: "CAFES", label: "المقاهي", prospects: [] as typeof discoveryProspects }, { key: "OTHER", label: "أخرى", prospects: [] as typeof discoveryProspects }];
     for (const prospect of discoveryProspects) groups[prospect.businessType === "hotel" ? 0 : prospect.businessType === "restaurant" ? 1 : prospect.businessType === "cafe" || prospect.businessType === "coffee_shop" ? 2 : 3]!.prospects.push(prospect);
     return groups.filter((group) => group.prospects.length > 0);
   }, [discoveryProspects]);
@@ -637,12 +638,12 @@ function VisitCopilotScreen() {
                       <Button size="sm" variant="outline" onClick={() => setCollapsedProspectGroups(new Set(prospectGroups.map((group) => group.key)))}>Collapse All</Button>
                       <Button size="sm" variant="outline" onClick={() => setCollapsedProspectGroups(new Set())}>Expand All</Button>
                     </div>
-                    {discoveryProspects.some((prospect) => prospect.source === "GOOGLE") && <p className="text-xs text-muted-foreground">Google Places data</p>}
                     {prospectGroups.map((group) => (
                       <div key={group.key} className="space-y-2">
                         <button className="w-full text-left text-sm font-semibold" onClick={() => setCollapsedProspectGroups((current) => { const next = new Set(current); if (next.has(group.key)) next.delete(group.key); else next.add(group.key); return next; })}>{group.label} ({group.prospects.length})</button>
                         {!collapsedProspectGroups.has(group.key) && group.prospects.map((prospect) => {
-                      const scheduledFor = scheduledProspectDates[prospect.id] ?? "";
+                    const scheduledFor = scheduledProspectDates[prospect.id] ?? "";
+                    const expanded = expandedProspects.has(prospect.id);
                       return (
                         <div key={prospect.id} className="rounded-lg border p-3 text-sm">
                           <div className="flex flex-wrap items-start justify-between gap-2">
@@ -654,25 +655,27 @@ function VisitCopilotScreen() {
                               {prospect.distanceKm !== null && prospect.distanceKm !== undefined && <p className="text-xs text-muted-foreground">{prospect.distanceKm.toFixed(1)} km</p>}
                             </div>
                             <div className="flex flex-wrap gap-1">
-                              <Badge>Prospect {prospect.priorityScore.toFixed(0)} / ثقة {prospect.scoreConfidence?.toFixed(0) ?? "—"}</Badge>
-                              <Badge variant="outline">{prospect.source}</Badge>
-                              <Badge variant="secondary">Catalog {prospect.catalogFitScore === null || prospect.catalogFitScore === undefined ? "غير متاح" : `${prospect.catalogFitScore.toFixed(0)} / ثقة ${prospect.catalogFitConfidence?.toFixed(0) ?? "—"}`}</Badge>
+                              <Badge>درجة الفرصة {prospect.priorityScore.toFixed(0)}/100</Badge>
+                              <Badge variant="outline">ثقة التحليل {prospect.scoreConfidence?.toFixed(0) ?? "—"}%</Badge>
+                              <Badge variant="secondary">توافق منتجات الشركة: {prospect.catalogFitScore === null || prospect.catalogFitScore === undefined ? "غير محسوب بعد" : `${prospect.catalogFitScore.toFixed(0)}/100`}</Badge>
                               {prospect.commercialTier && <Badge variant="outline">{prospect.commercialTier}</Badge>}
                             </div>
                           </div>
                           <p className="mt-2 text-xs text-muted-foreground">{prospect.reason}</p>
                           {prospect.productFit && prospect.productFit.length > 0 && (
                             <div className="mt-2 space-y-1 text-xs">
-                              {prospect.productFit.map((product) => <p key={product.productCode}><span className="font-medium">{product.productName}</span>{product.reasons.length ? ` — ${product.reasons.join("، ")}` : ""}</p>)}
+                              <p className="font-medium">فرصة البيع</p>
+                              {prospect.productFit.slice(0, 3).map((product) => <p key={product.productCode}><span className="font-medium">{product.productName}</span>{product.reasons.length ? ` — ${product.reasons.join("، ")}` : ""}</p>)}
                             </div>
                           )}
+                          {expanded && <div className="mt-2 space-y-1 border-t pt-2 text-xs text-muted-foreground"><p>{prospect.address || "العنوان غير متاح"}</p><p>مصدر البيانات: {prospect.source === "GOOGLE" ? "Google" : "OpenStreetMap"}</p><p>لماذا هذا العميل؟ {prospect.reason}</p>{prospect.productFit?.flatMap((product) => product.reasons).slice(0, 3).map((reason, index) => <p key={`${reason}-${index}`}>• {reason}</p>)}</div>}
                           <div className="mt-3 flex flex-wrap gap-2">
-                            <Button size="sm" variant="outline" onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${prospect.lat},${prospect.lon}`)}${prospect.source === "GOOGLE" && prospect.externalKey ? `&query_place_id=${encodeURIComponent(prospect.externalKey)}` : ""}`, "_blank", "noopener,noreferrer")}>Directions</Button>
-                            {prospect.phone && <Button size="sm" variant="outline" onClick={() => window.location.href = `tel:${prospect.phone}`}>Call</Button>}
-                            <Button size="sm" variant="outline" onClick={() => openProspectVisit(prospect.id)}>Details</Button>
-                            <Button size="sm" onClick={() => createProspectVisit(prospect.id, todayIsoDate())} disabled={prospectVisitMutation.isPending}>Add to Today</Button>
+                            <Button size="sm" variant="outline" onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${prospect.lat},${prospect.lon}`)}${prospect.source === "GOOGLE" && prospect.externalKey ? `&query_place_id=${encodeURIComponent(prospect.externalKey)}` : ""}`, "_blank", "noopener,noreferrer")}>الاتجاهات</Button>
+                            {prospect.phone && <Button size="sm" variant="outline" onClick={() => window.location.href = `tel:${prospect.phone}`}>اتصال</Button>}
+                            <Button size="sm" variant="outline" onClick={() => setExpandedProspects((current) => { const next = new Set(current); if (next.has(prospect.id)) next.delete(prospect.id); else next.add(prospect.id); return next; })}>{expanded ? "إخفاء التفاصيل" : "التفاصيل"}</Button>
+                            <Button size="sm" onClick={() => createProspectVisit(prospect.id, todayIsoDate())} disabled={prospectVisitMutation.isPending}>أضف لليوم</Button>
                             <Input className="w-40" type="date" min={todayIsoDate()} value={scheduledFor} onChange={(event) => setScheduledProspectDates((current) => ({ ...current, [prospect.id]: event.target.value }))} />
-                            <Button size="sm" variant="secondary" onClick={() => createProspectVisit(prospect.id, scheduledFor)} disabled={!scheduledFor || prospectVisitMutation.isPending}>Schedule Later</Button>
+                            <Button size="sm" variant="secondary" onClick={() => createProspectVisit(prospect.id, scheduledFor)} disabled={!scheduledFor || prospectVisitMutation.isPending}>جدولة لاحقًا</Button>
                           </div>
                         </div>
                       );

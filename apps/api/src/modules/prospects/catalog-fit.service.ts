@@ -5,7 +5,7 @@ import type { ProductFitOutput } from "./product-fit.service";
 
 const norm = (value: unknown) => String(value ?? "").trim().toLowerCase();
 const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : Number(value) || 0;
-const isActive = (product: EntityRecord) => norm(product.ProductStatus) === "active";
+const isActive = (product: EntityRecord) => { const status = norm(product.ProductStatus ?? product.Status); return status === "" || status === "active"; };
 type Tier = "PREMIUM" | "MID_MARKET" | "VALUE";
 
 @Injectable()

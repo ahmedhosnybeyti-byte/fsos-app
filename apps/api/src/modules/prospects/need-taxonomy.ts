@@ -4,6 +4,7 @@ export type NeedDefinition = { tag: string; businessTypes: readonly string[]; me
 // Terms describe a business need, never an assumed company catalogue value.
 // They match only values actually present in the company's Products data.
 export const NEED_TAXONOMY: readonly NeedDefinition[] = [
+  { tag: "restaurant-food-service", businessTypes: ["restaurant"], menuTags: [], categoryTerms: ["food", "ingredient", "cooking"], productTerms: ["flour", "دقيق", "oil", "زيت", "rice", "أرز", "sauce", "صلصة", "cheese", "جبن"] },
   { tag: "restaurant-coffee", businessTypes: ["restaurant"], menuTags: ["restaurant-coffee"], categoryTerms: ["coffee", "beverage"], productTerms: ["coffee"] },
   { tag: "restaurant-dessert", businessTypes: ["restaurant"], menuTags: ["restaurant-dessert"], categoryTerms: ["dessert", "sweet"], productTerms: ["dessert", "chocolate"] },
   { tag: "restaurant-breakfast", businessTypes: ["restaurant"], menuTags: ["restaurant-breakfast"], categoryTerms: ["breakfast", "dairy"], productTerms: [] },
@@ -15,7 +16,7 @@ export const NEED_TAXONOMY: readonly NeedDefinition[] = [
   { tag: "hotel-beverages", businessTypes: ["hotel"], menuTags: ["hotel-beverages"], categoryTerms: ["beverage", "coffee", "tea"], productTerms: [] },
   { tag: "pizza-cheese", businessTypes: ["restaurant"], menuTags: ["pizza"], categoryTerms: ["cheese", "dairy"], productTerms: ["cheese", "mozzarella"] },
   { tag: "pizza-sauces", businessTypes: ["restaurant"], menuTags: ["pizza"], categoryTerms: ["sauce", "condiment"], productTerms: ["sauce", "tomato"] },
-  { tag: "cafe-hot-beverages", businessTypes: ["cafe", "coffee_shop"], menuTags: ["coffee", "hot-beverages"], categoryTerms: ["coffee", "beverage", "tea"], productTerms: ["coffee", "tea"] },
+  { tag: "cafe-hot-beverages", businessTypes: ["cafe", "coffee_shop"], menuTags: [], categoryTerms: ["coffee", "beverage", "tea"], productTerms: ["coffee", "قهوة", "tea", "شاي", "milk", "حليب"] },
   { tag: "bakery-ingredients", businessTypes: ["bakery"], menuTags: ["bakery", "pastry"], categoryTerms: ["baking", "ingredients"], productTerms: ["flour", "sugar", "chocolate"] },
   { tag: "retail-staples", businessTypes: ["grocery_store", "convenience_store", "supermarket", "hypermarket"], menuTags: [], categoryTerms: ["grocery", "food", "beverage"], productTerms: [] },
 ];

@@ -36,6 +36,7 @@ import { LostOpportunityService, type LostOpportunityResult } from "../lost-oppo
 import { buildLostOpportunityCoaching } from "./daily-360-recommendation-builder";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { ProspectService } from "../prospects/prospect.service";
+import { ProductFitService } from "../prospects/product-fit.service";
 import { taxonomyForCanonicalChannel } from "../prospects/prospect-taxonomy";
 
 // AI Visit Copilot — Phase 1. Decision-support screen for the field rep:
@@ -397,6 +398,7 @@ export class VisitCopilotService {
     // Prospects are materialized Postgres state (statuses are live field
     // data) — the one Visit Copilot read that does NOT go through RIE.
     private readonly prisma: PrismaService,
+    private readonly productFit: ProductFitService,
     // "ملخص اليوم 360°" (2026-07-28): sole facts/numbers source, already
     // hierarchy-scoped per viewer — see daily360Summary() below.
     private readonly sgiService: SgiService,
@@ -1642,7 +1644,9 @@ export class VisitCopilotService {
         if (url) photoUrls.set(place.externalKey, { url, attribution: place.photo!.attribution });
       }));
     }
-    return { found: materialized.found, newCount: materialized.newCount, prospects: this.scoreProspects(materialized.prospects, stats, photoUrls).sort((a, b) => b.priorityScore - a.priorityScore), warnings };
+    await Promise.all(materialized.prospects.map((prospect) => this.productFit.build(user, prospect.id).catch(() => null)));
+    const enriched = await this.prisma.prospect.findMany({ where: { id: { in: materialized.prospects.map((prospect) => prospect.id) } }, include: { intelligenceProfile: { select: { businessClassification: true, productFitInsights: true } } } });
+    return { found: materialized.found, newCount: materialized.newCount, prospects: this.scoreProspects(enriched, stats, photoUrls).sort((a, b) => b.priorityScore - a.priorityScore), warnings };
     const found = places.length;
 
     // A place within ~100m of an existing customer IS that customer — skip.
@@ -1977,13 +1981,13 @@ export class VisitCopilotService {
     return base.map((b) => {
       let reason: string;
       if (b.channelMatch && b.distanceKm !== null) {
-        reason = `قناته مطابقة لقناتك وعلى بعد ${b.distanceKm} كم من مركز عملائك — طلب أول متوقع بقيمة ${b.expectedOrderValue}.`;
+        reason = `قناته مطابقة لقناتك وعلى بعد ${b.distanceKm} كم من مركز عملائك.`;
       } else if (b.channelMatch) {
-        reason = `قناته مطابقة لقناتك — طلب أول متوقع بقيمة ${b.expectedOrderValue}.`;
+        reason = "قناته مطابقة لقناتك.";
       } else if (b.distanceKm !== null) {
-        reason = `قريب من مركز عملائك (${b.distanceKm} كم) — طلب أول متوقع بقيمة ${b.expectedOrderValue}.`;
+        reason = `قريب من مركز عملائك (${b.distanceKm} كم).`;
       } else {
-        reason = `عميل محتمل جديد — طلب أول متوقع بقيمة ${b.expectedOrderValue}.`;
+        reason = "عميل محتمل جديد.";
       }
       return {
         id: b.p.id,

@@ -15,6 +15,7 @@ const hasTerm = (value: unknown, terms: readonly string[]) => terms.some((term) 
 @Injectable()
 export class ProductFitService {
   constructor(private readonly rie: RieFacade, private readonly intelligence: MurshidakIntelligenceService, private readonly catalogFit: CatalogFitService) {}
+  private readonly companyData = new Map<string, { until: number; value: Promise<EntityRecord[][]> }>();
 
   async build(user: AuthenticatedUser, prospectId: string) {
     const companyId = user.companyId!;
@@ -22,25 +23,37 @@ export class ProductFitService {
       this.intelligence.profile(companyId, prospectId),
       this.intelligence.prospectFacts(companyId, prospectId),
     ]);
-    if (!profile || !prospect) throw new NotFoundException();
-    const needs = this.deriveNeeds(prospect.businessType, profile.menuServiceInsights);
-    const commercialTier = (profile.businessClassification as { tier?: unknown } | null)?.tier;
+    if (!prospect) throw new NotFoundException();
+    const baseNeeds = NEED_TAXONOMY.filter((need) => need.businessTypes.includes(norm(prospect.businessType)) && need.menuTags.length === 0).map((need) => need.tag);
+    if (!profile) await this.intelligence.storeRulesInsights({ companyId, prospectId, inputFingerprint: `base-rules-v1:${prospect.businessType ?? ""}`, refreshAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), businessClassification: { businessType: prospect.businessType, source: "base-rules" }, menuServiceInsights: { version: "base-rules-v1", needTags: baseNeeds, source: "base-rules" } });
+    const currentProfile = profile ?? await this.intelligence.profile(companyId, prospectId);
+    if (!currentProfile) throw new NotFoundException();
+    const needs = this.deriveNeeds(prospect.businessType, currentProfile.menuServiceInsights);
+    const commercialTier = (currentProfile.businessClassification as { tier?: unknown } | null)?.tier;
     const ctx = { companyId, requestingUser: { roleCode: user.roleCode, email: user.email } };
-    const [customers = [], invoices = [], items = [], products = []] = await Promise.all(["Customers", "Invoices", "Invoice Items", "Products"].map(async (entity) => {
-      const result = await this.rie.getEntityRecords(entity, ctx);
-      return result.available ? result.records : [];
-    }));
+    const [customers = [], invoices = [], items = [], products = []] = await this.companyRecords(companyId, ctx);
     const peer = this.peerSales(customers, invoices, items, prospect.businessType, prospect.channel);
     const candidates = this.matchProducts(products, needs, peer, commercialTier === "PREMIUM" || commercialTier === "MID_MARKET" || commercialTier === "VALUE" ? commercialTier : null).slice(0, 10);
-    const productFit: ProductFitOutput = { version: NEED_TAXONOMY_VERSION, computedAt: new Date().toISOString(), inputFingerprint: profile.inputFingerprint, confirmedNeedTags: needs.map((need) => need.tag), candidates };
-    const output = { ...productFit, ...this.catalogFit.build({ productFit, products, businessType: prospect.businessType, businessClassification: profile.businessClassification }) };
+    const productFit: ProductFitOutput = { version: NEED_TAXONOMY_VERSION, computedAt: new Date().toISOString(), inputFingerprint: currentProfile.inputFingerprint, confirmedNeedTags: needs.map((need) => need.tag), candidates };
+    const output = { ...productFit, ...this.catalogFit.build({ productFit, products, businessType: prospect.businessType, businessClassification: currentProfile.businessClassification }) };
     await this.intelligence.storeProductFit(companyId, prospectId, output);
     return output;
   }
 
+  private companyRecords(companyId: string, ctx: { companyId: string; requestingUser: { roleCode: string; email: string } }) {
+    const cached = this.companyData.get(companyId);
+    if (cached && cached.until > Date.now()) return cached.value;
+    const value = Promise.all(["Customers", "Invoices", "Invoice Items", "Products"].map(async (entity) => {
+      const result = await this.rie.getEntityRecords(entity, ctx);
+      return result.available ? result.records : [];
+    }));
+    this.companyData.set(companyId, { until: Date.now() + 5 * 60 * 1000, value });
+    return value;
+  }
+
   private deriveNeeds(businessType: string | null, insights: unknown): NeedDefinition[] {
     const menuTags = Array.isArray((insights as { needTags?: unknown })?.needTags) ? (insights as { needTags: unknown[] }).needTags.map(norm) : [];
-    return NEED_TAXONOMY.filter((need) => need.businessTypes.includes(norm(businessType)) && (need.menuTags.length === 0 || need.menuTags.some((tag) => menuTags.includes(tag))));
+    return NEED_TAXONOMY.filter((need) => need.businessTypes.includes(norm(businessType)) && (need.menuTags.length === 0 || menuTags.includes(need.tag) || need.menuTags.some((tag) => menuTags.includes(tag))));
   }
 
   private peerSales(customers: readonly EntityRecord[], invoices: readonly EntityRecord[], items: readonly EntityRecord[], businessType: string | null, channel: string | null) {
@@ -63,7 +76,8 @@ export class ProductFitService {
     const maxPeerValue = Math.max(0, ...[...peer.sales.values()].map((signal) => signal.value));
     const candidates: Candidate[] = [];
     for (const product of products) for (const need of needs) {
-      if (norm(product.ProductStatus) !== "active") continue;
+      const status = norm(product.ProductStatus ?? product.Status);
+      if (status !== "" && status !== "active") continue;
       const categoryMatch = hasTerm(product.Category, need.categoryTerms);
       const productMatch = !categoryMatch && (hasTerm(product.ProductName, need.productTerms) || hasTerm(product.Brand, need.productTerms));
       if (!categoryMatch && !productMatch) continue;
