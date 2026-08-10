@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import type { Prisma } from "@field-sales-os/database";
 import { AppConfigService } from "../../common/config/app-config.service";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { MurshidakIntelligenceService } from "./murshidak-intelligence.service";
@@ -23,7 +24,7 @@ export class GeminiIntelligenceService {
     if (!key) return { state: "FALLBACK" as const, reason: "GEMINI_API_KEY is not configured" };
     const output = await this.callGemini(key, input);
     if (!output) return { state: "FALLBACK" as const, reason: "Gemini enrichment unavailable" };
-    await this.intelligence.storeGeminiInsights({ companyId, prospectId: input.prospectId, inputFingerprint: fingerprint, refreshAt: input.refreshAt, businessClassification: output.businessClassification, menuServiceInsights: { ...output.menuServiceInsights, needTags: output.needTags, visionSignals: output.visionSignals, confidence: output.confidence, reasons: output.reasons, source: "gemini" }, needTags: output.needTags });
+    await this.intelligence.storeGeminiInsights({ companyId, prospectId: input.prospectId, inputFingerprint: fingerprint, refreshAt: input.refreshAt, businessClassification: output.businessClassification as Prisma.InputJsonValue, menuServiceInsights: { ...output.menuServiceInsights, needTags: output.needTags, visionSignals: output.visionSignals, confidence: output.confidence, reasons: output.reasons, source: "gemini" } as Prisma.InputJsonValue, needTags: output.needTags });
     return { state: "ENRICHED" as const, output };
   }
 

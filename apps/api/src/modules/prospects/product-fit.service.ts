@@ -26,7 +26,7 @@ export class ProductFitService {
     const needs = this.deriveNeeds(prospect.businessType, profile.menuServiceInsights);
     const commercialTier = (profile.businessClassification as { tier?: unknown } | null)?.tier;
     const ctx = { companyId, requestingUser: { roleCode: user.roleCode, email: user.email } };
-    const [customers, invoices, items, products] = await Promise.all(["Customers", "Invoices", "Invoice Items", "Products"].map(async (entity) => {
+    const [customers = [], invoices = [], items = [], products = []] = await Promise.all(["Customers", "Invoices", "Invoice Items", "Products"].map(async (entity) => {
       const result = await this.rie.getEntityRecords(entity, ctx);
       return result.available ? result.records : [];
     }));

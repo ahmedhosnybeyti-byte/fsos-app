@@ -218,11 +218,12 @@ function prospectIntelligence(profile: { businessClassification: unknown; produc
   const classification = profile?.businessClassification && typeof profile.businessClassification === "object" && !Array.isArray(profile.businessClassification) ? profile.businessClassification as Record<string, unknown> : {};
   const fit = profile?.productFitInsights && typeof profile.productFitInsights === "object" && !Array.isArray(profile.productFitInsights) ? profile.productFitInsights as Record<string, unknown> : {};
   const tier = classification.tier;
+  const commercialTier: ScoredProspect["commercialTier"] = tier === "PREMIUM" || tier === "MID_MARKET" || tier === "VALUE" ? tier : null;
   const candidates = Array.isArray(fit.candidates) ? fit.candidates : [];
   return {
     catalogFitScore: typeof fit.catalogFitScore === "number" ? fit.catalogFitScore : null,
     catalogFitConfidence: typeof fit.catalogFitConfidence === "number" ? fit.catalogFitConfidence : null,
-    commercialTier: tier === "PREMIUM" || tier === "MID_MARKET" || tier === "VALUE" ? tier : null,
+    commercialTier,
     productFit: candidates.slice(0, 3).flatMap((candidate) => {
       if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
       const value = candidate as Record<string, unknown>;
