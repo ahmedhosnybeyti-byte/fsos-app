@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Download, Gauge, Map as MapIcon, Wand2 } from "lucide-react";
 import { toast } from "sonner";
@@ -28,43 +28,15 @@ import { useTranslation } from "@/components/translation-provider";
 // automatically via RieFacade (sales value is always the RIE "sales"
 // aggregate) — only the business choices remain (scope field/values, group
 // count).
-const SCOPE_FIELDS: { value: RoutePlanningScopeField; label: string }[] = [
-  { value: "RouteID", label: "الخط (Route)" },
-  { value: "City", label: "المدينة" },
-  { value: "CustomerClass", label: "فئة العميل" },
-  { value: "Channel", label: "القناة" },
+const SCOPE_FIELDS: { value: RoutePlanningScopeField; labelKey: "routePlanning.scopeRoute" | "routePlanning.scopeCity" | "routePlanning.scopeCustomerClass" | "routePlanning.scopeChannel" }[] = [
+  { value: "RouteID", labelKey: "routePlanning.scopeRoute" },
+  { value: "City", labelKey: "routePlanning.scopeCity" },
+  { value: "CustomerClass", labelKey: "routePlanning.scopeCustomerClass" },
+  { value: "Channel", labelKey: "routePlanning.scopeChannel" },
 ];
-
-function routePlanningTranslations(t: ReturnType<typeof useTranslation>["t"]) {
-  return new Map<string, string>([
-    ["Route Planning", t("routePlanning.title")], ["إعادة تقسيم قطاع أو خط سير إلى مجموعات متوازنة في المبيعات ومتماسكة جغرافيًا — تماسك جغرافي أولًا، ثم توازن مبيعات عن طريق نمو تدريجي من الجيران المباشرين فقط.", t("routePlanning.subtitle")], ["الإعدادات", t("routePlanning.settings")], ["عمود النطاق (مندوب/منطقة)", t("routePlanning.scopeField")], ["اختر عمود…", t("routePlanning.selectField")], ["عدد المجموعات", t("routePlanning.groupCount")], ["بيتزامن تلقائيًا مع عدد القيم المحددة تحت. عدّله يدويًا لو عايز تدمج (رقم أقل) أو تضيف خط جديد (رقم أكتر).", t("routePlanning.groupCountHint")], ["رجّعه للتزامن التلقائي", t("routePlanning.restoreAuto")], ["جاري التقسيم…", t("routePlanning.splitting")], ["قسّم الآن", t("routePlanning.splitNow")], ["قيم النطاق (اختار واحدة أو أكتر — بتتجمع مع بعض قبل التقسيم)", t("routePlanning.scopeValues")], ["تحديد الكل", t("routePlanning.selectAll")], ["إلغاء الكل", t("routePlanning.clearAll")], ["اختر عمود النطاق الأول", t("routePlanning.chooseScopeFirst")], ["جاري التحميل…", t("routePlanning.loading")], ["مفيش قيم في العمود ده", t("routePlanning.noValues")], ["النتيجة", t("routePlanning.result")], ["قبل (جغرافي فقط)", t("routePlanning.before")], ["بعد (متوازن)", t("routePlanning.after")], ["عرض الأداء", t("routePlanning.showPerformance")], ["تصدير Excel", t("routePlanning.export")], ["اسم الخط", t("routePlanning.routeName")], ["عملاء", t("routePlanning.customers")], ["إجمالي المبيعات", t("routePlanning.sales")], ["متوسط/عميل", t("routePlanning.averageCustomer")], ["الانحراف", t("routePlanning.deviation")], ["الأداء", t("routePlanning.performance")], ["جيد", t("routePlanning.good")], ["متوسط", t("routePlanning.average")], ["ضعيف", t("routePlanning.weak")], ["الخط (Route)", t("routePlanning.scopeRoute")], ["المدينة", t("routePlanning.scopeCity")], ["فئة العميل", t("routePlanning.scopeCustomerClass")], ["القناة", t("routePlanning.scopeChannel")],
-    ["تم التقسيم — ", t("routePlanning.splitComplete")], [" عميل على ", t("routePlanning.customersAcross")], [" مجموعات", t("routePlanning.groups")], ["تعذر إتمام التقسيم", t("routePlanning.splitError")], [" قيمة محددة", t("routePlanning.selectedValues")], [" عميل مستخدم", t("routePlanning.customersUsed")], ["نسبة التغطية: ", t("routePlanning.coverage")], ["المتوسط المستهدف: ", t("routePlanning.targetAverage")], ["أقصى انحراف: ", t("routePlanning.maxDeviation")], [" صف مستبعد (إحداثيات غير صالحة)", t("routePlanning.invalidCoordinates")], ["خط جديد ", t("routePlanning.newRoute")], ["مجموعة ", t("routePlanning.groupPrefix")],
-  ]);
-}
-
-function useLocalizedText(ref: React.RefObject<HTMLElement | null>, translations: Map<string, string>, dependencies: readonly unknown[] = []) {
-  useEffect(() => {
-    if (!ref.current) return;
-    const translate = (root: Node) => {
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-      const nodes: Text[] = [];
-      while (walker.nextNode()) nodes.push(walker.currentNode as Text);
-      for (const node of nodes) for (const [source, translated] of translations) node.nodeValue = node.nodeValue?.replaceAll(source, translated) ?? null;
-    };
-    translate(ref.current);
-    const observer = new MutationObserver((mutations) => mutations.forEach((mutation) => {
-      if (mutation.type === "characterData") translate(mutation.target);
-      mutation.addedNodes.forEach((node) => translate(node));
-    }));
-    observer.observe(document.body, { childList: true, characterData: true, subtree: true });
-    return () => observer.disconnect();
-  }, [ref, translations, ...dependencies]);
-}
 
 export default function RoutePlanningPage() {
   const { t, locale } = useTranslation();
-  const pageRef = useRef<HTMLDivElement>(null);
-  const translations = useMemo(() => routePlanningTranslations(t), [t]);
   const [scopeField, setScopeField] = useState<RoutePlanningScopeField | "">("");
   // Multi-select — a supervisor pools one or more existing scope values
   // (e.g. several reps) into one customer set before re-splitting into
@@ -86,7 +58,6 @@ export default function RoutePlanningPage() {
   });
 
   const [result, setResult] = useState<RoutePlanningSplitResult | null>(null);
-  useLocalizedText(pageRef, translations, [result, scopeValuesQuery.data]);
   const [mode, setMode] = useState<"before" | "after">("after");
   // Route Performance Map: color markers by performance tier (green/amber/
   // red vs. target) instead of an arbitrary per-group color.
@@ -112,12 +83,12 @@ export default function RoutePlanningPage() {
           const v = orderedSelected[i];
           if (v !== undefined) return v;
           extra += 1;
-          return `خط جديد ${extra}`;
+          return `${t("routePlanning.newRoute")}${extra}`;
         }),
       );
-      toast.success(`تم التقسيم — ${data.usedRows} عميل على ${data.groupCount} مجموعات`);
+      toast.success(`${t("routePlanning.splitComplete")}${data.usedRows}${t("routePlanning.customersAcross")}${data.groupCount}${t("routePlanning.groups")}`);
     },
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : "تعذر إتمام التقسيم"),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t("routePlanning.splitError")),
   });
 
   const canSubmit = !!scopeField && selectedScopeValues.size > 0 && groupCount >= 2;
@@ -136,7 +107,7 @@ export default function RoutePlanningPage() {
   }
 
   return (
-    <div key={locale} ref={pageRef} className="relative space-y-6">
+    <div key={locale} className="relative space-y-6">
       <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
       <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
 
@@ -145,11 +116,8 @@ export default function RoutePlanningPage() {
           <MapIcon className="h-6 w-6" />
         </span>
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Route Planning</h1>
-          <p className="text-muted-foreground">
-            إعادة تقسيم قطاع أو خط سير إلى مجموعات متوازنة في المبيعات ومتماسكة جغرافيًا — تماسك جغرافي أولاً، ثم توازن مبيعات عن طريق
-            نمو تدريجي من الجيران المباشرين فقط.
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("routePlanning.title")}</h1>
+          <p className="text-muted-foreground">{t("routePlanning.subtitle")}</p>
         </div>
       </div>
 
@@ -159,13 +127,13 @@ export default function RoutePlanningPage() {
             <span className="crystal-badge h-9 w-9 bg-primary/15 text-primary">
               <MapIcon className="h-4 w-4" />
             </span>
-            الإعدادات
+            {t("routePlanning.settings")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
           <div className="grid gap-4 sm:grid-cols-2 sm:max-w-md">
             <div className="grid gap-2">
-              <Label>عمود النطاق (مندوب/منطقة)</Label>
+              <Label>{t("routePlanning.scopeField")}</Label>
               <Select
                 value={scopeField || "__none__"}
                 onValueChange={(v) => {
@@ -175,19 +143,19 @@ export default function RoutePlanningPage() {
                 }}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="اختر عمود…" />
+                  <SelectValue placeholder={t("routePlanning.selectField")} />
                 </SelectTrigger>
                 <SelectContent>
                   {SCOPE_FIELDS.map((f) => (
                     <SelectItem key={f.value} value={f.value}>
-                      {f.label}
+                      {t(f.labelKey)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="grid gap-2">
-              <Label>عدد المجموعات</Label>
+              <Label>{t("routePlanning.groupCount")}</Label>
               <Input
                 type="number"
                 min={2}
@@ -199,7 +167,7 @@ export default function RoutePlanningPage() {
                 }}
               />
               <p className="text-xs text-muted-foreground">
-                بيتزامن تلقائيًا مع عدد القيم المحددة تحت. عدّله يدويًا لو عايز تدمج (رقم أقل) أو تضيف خط جديد (رقم أكتر).{" "}
+                {t("routePlanning.groupCountHint")}{" "}
                 {groupCountTouched && selectedScopeValues.size >= 2 && (
                   <button
                     type="button"
@@ -209,7 +177,7 @@ export default function RoutePlanningPage() {
                       setGroupCount(selectedScopeValues.size);
                     }}
                   >
-                    رجّعه للتزامن التلقائي
+                    {t("routePlanning.restoreAuto")}
                   </button>
                 )}
               </p>
@@ -240,7 +208,7 @@ export default function RoutePlanningPage() {
 
           <Button disabled={!canSubmit || splitMutation.isPending} onClick={handleSubmit}>
             <Wand2 className="h-4 w-4" />
-            {splitMutation.isPending ? "جارٍ التقسيم…" : "قسّم الآن"}
+            {splitMutation.isPending ? t("routePlanning.splitting") : t("routePlanning.splitNow")}
           </Button>
         </CardContent>
       </Card>
@@ -277,28 +245,29 @@ function ScopeValueChecklist({
   onSelectAll: () => void;
   onClearAll: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="grid gap-2">
       <div className="flex items-center justify-between">
-        <Label>قيم النطاق (اختار واحدة أو أكتر — بتتجمع مع بعض قبل التقسيم)</Label>
+        <Label>{t("routePlanning.scopeValues")}</Label>
         {!disabled && values.length > 0 && (
           <div className="flex gap-3 text-xs">
             <button type="button" className="text-primary underline underline-offset-2" onClick={onSelectAll}>
-              تحديد الكل
+              {t("routePlanning.selectAll")}
             </button>
             <button type="button" className="text-muted-foreground underline underline-offset-2" onClick={onClearAll}>
-              إلغاء الكل
+              {t("routePlanning.clearAll")}
             </button>
           </div>
         )}
       </div>
       <div className="max-h-48 overflow-y-auto rounded-md border border-border p-2">
         {disabled ? (
-          <p className="p-1 text-sm text-muted-foreground">اختار عمود النطاق الأول</p>
+          <p className="p-1 text-sm text-muted-foreground">{t("routePlanning.chooseScopeFirst")}</p>
         ) : loading ? (
-          <p className="p-1 text-sm text-muted-foreground">جاري التحميل…</p>
+          <p className="p-1 text-sm text-muted-foreground">{t("routePlanning.loading")}</p>
         ) : values.length === 0 ? (
-          <p className="p-1 text-sm text-muted-foreground">مفيش قيم في العمود ده</p>
+          <p className="p-1 text-sm text-muted-foreground">{t("routePlanning.noValues")}</p>
         ) : (
           <div className="space-y-1">
             {values.map((v) => (
@@ -315,7 +284,7 @@ function ScopeValueChecklist({
           </div>
         )}
       </div>
-      <p className="text-xs text-muted-foreground">{selected.size} قيمة محددة</p>
+      <p className="text-xs text-muted-foreground">{selected.size}{t("routePlanning.selectedValues")}</p>
     </div>
   );
 }
@@ -324,23 +293,23 @@ function ScopeValueChecklist({
 // assignments) already lives in the browser after a successful split, so we
 // build the .xlsx directly here instead of round-tripping through the API.
 // xlsx is dynamically imported so it doesn't bloat the initial page bundle.
-async function exportResultToExcel(result: RoutePlanningSplitResult, labels: string[]) {
+async function exportResultToExcel(result: RoutePlanningSplitResult, labels: string[], t: ReturnType<typeof useTranslation>["t"]) {
   const XLSX = await import("xlsx");
-  const labelOf = (i: number) => labels[i] ?? `مجموعة ${i + 1}`;
+  const labelOf = (i: number) => labels[i] ?? t("routePlanning.group", { count: i + 1 });
   const rows = result.records.map((r) => ({
-    "رقم العميل": r.id,
-    الاسم: r.label,
-    "خط العرض": r.lat,
-    "خط الطول": r.lon,
-    المبيعات: r.sales,
-    "الخط (قبل)": labelOf(r.before),
-    "الخط (بعد)": labelOf(r.after),
+    [t("routePlanning.exportCustomerId")]: r.id,
+    [t("routePlanning.exportName")]: r.label,
+    [t("routePlanning.exportLatitude")]: r.lat,
+    [t("routePlanning.exportLongitude")]: r.lon,
+    [t("routePlanning.sales")]: r.sales,
+    [t("routePlanning.exportBeforeRoute")]: labelOf(r.before),
+    [t("routePlanning.exportAfterRoute")]: labelOf(r.after),
   }));
   const sheet = XLSX.utils.json_to_sheet(rows);
   const workbook = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(workbook, sheet, "التقسيم");
+  XLSX.utils.book_append_sheet(workbook, sheet, t("routePlanning.exportSheet"));
   const safeScope = result.scopeValues.join("-").replace(/[\\/:*?"<>|]/g, "-").slice(0, 100);
-  XLSX.writeFile(workbook, `تقسيم-${safeScope}.xlsx`);
+  XLSX.writeFile(workbook, `${t("routePlanning.exportFilePrefix")}-${safeScope}.xlsx`);
 }
 
 function ResultView({
@@ -360,7 +329,7 @@ function ResultView({
   colorBy: "group" | "performance";
   onColorByChange: (v: "group" | "performance") => void;
 }) {
-  const { locale } = useTranslation();
+  const { locale, t } = useTranslation();
   const totals = mode === "after" ? result.afterTotals : result.beforeTotals;
   const counts = mode === "after" ? result.afterCounts : result.beforeCounts;
   const maxDevPct = (Math.max(...totals.map((t) => Math.abs(t - result.target))) / result.target) * 100;
@@ -376,33 +345,33 @@ function ResultView({
           <span className="crystal-badge h-9 w-9 bg-primary/15 text-primary">
             <MapIcon className="h-4 w-4" />
           </span>
-          النتيجة
+          {t("routePlanning.result")}
         </CardTitle>
         <div className="flex flex-wrap gap-2">
           <Button variant={mode === "before" ? "default" : "outline"} size="sm" onClick={() => onModeChange("before")}>
-            قبل (جغرافي فقط)
+            {t("routePlanning.before")}
           </Button>
           <Button variant={mode === "after" ? "default" : "outline"} size="sm" onClick={() => onModeChange("after")}>
-            بعد (متوازن)
+            {t("routePlanning.after")}
           </Button>
           <Button variant={colorBy === "performance" ? "default" : "outline"} size="sm" onClick={() => onColorByChange(colorBy === "performance" ? "group" : "performance")}>
-            <Gauge className="h-4 w-4" /> عرض الأداء
+            <Gauge className="h-4 w-4" /> {t("routePlanning.showPerformance")}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => exportResultToExcel(result, labels)}>
-            <Download className="h-4 w-4" /> تصدير Excel
+          <Button variant="outline" size="sm" onClick={() => exportResultToExcel(result, labels, t)}>
+            <Download className="h-4 w-4" /> {t("routePlanning.export")}
           </Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="flex flex-wrap gap-2">
-          <Badge variant="secondary">{result.usedRows} عميل مستخدم</Badge>
+          <Badge variant="secondary">{result.usedRows}{t("routePlanning.customersUsed")}</Badge>
           <Badge variant={coveragePct >= 95 ? "success" : coveragePct >= 80 ? "warning" : "destructive"}>
-            نسبة التغطية: {coveragePct.toFixed(1)}%
+            {t("routePlanning.coverage")}{coveragePct.toFixed(1)}%
           </Badge>
-          <Badge variant="secondary">المتوسط المستهدف: {Math.round(result.target).toLocaleString(locale)}</Badge>
-          <Badge variant={maxDevPct <= 10 ? "success" : "warning"}>أقصى انحراف: {maxDevPct.toFixed(1)}%</Badge>
+          <Badge variant="secondary">{t("routePlanning.targetAverage")}{Math.round(result.target).toLocaleString(locale)}</Badge>
+          <Badge variant={maxDevPct <= 10 ? "success" : "warning"}>{t("routePlanning.maxDeviation")}{maxDevPct.toFixed(1)}%</Badge>
           {result.excludedBadCoordinates > 0 && (
-            <Badge variant="warning">{result.excludedBadCoordinates} صف مستبعد (إحداثيات غير صالحة)</Badge>
+            <Badge variant="warning">{result.excludedBadCoordinates}{t("routePlanning.invalidCoordinates")}</Badge>
           )}
         </div>
 
@@ -411,33 +380,33 @@ function ResultView({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>اسم الخط</TableHead>
-              <TableHead>عملاء</TableHead>
-              <TableHead>إجمالي المبيعات</TableHead>
-              <TableHead>متوسط/عميل</TableHead>
-              <TableHead>الانحراف</TableHead>
-              <TableHead>الأداء</TableHead>
+              <TableHead>{t("routePlanning.routeName")}</TableHead>
+              <TableHead>{t("routePlanning.customers")}</TableHead>
+              <TableHead>{t("routePlanning.sales")}</TableHead>
+              <TableHead>{t("routePlanning.averageCustomer")}</TableHead>
+              <TableHead>{t("routePlanning.deviation")}</TableHead>
+              <TableHead>{t("routePlanning.performance")}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {totals.map((t, i) => {
-              const dev = ((t - result.target) / result.target) * 100;
+            {totals.map((total, i) => {
+              const dev = ((total - result.target) / result.target) * 100;
               const count = counts[i] ?? 0;
-              const avgPerCustomer = count > 0 ? t / count : 0;
+              const avgPerCustomer = count > 0 ? total / count : 0;
               const tier = result.target > 0 ? (dev >= -10 ? "good" : dev >= -30 ? "ok" : "bad") : "ok";
-              const tierLabel = tier === "good" ? "جيد" : tier === "ok" ? "متوسط" : "ضعيف";
+              const tierLabel = tier === "good" ? t("routePlanning.good") : tier === "ok" ? t("routePlanning.average") : t("routePlanning.weak");
               const tierVariant = tier === "good" ? "success" : tier === "ok" ? "warning" : "destructive";
               return (
                 <TableRow key={i}>
                   <TableCell>
                     <Input
                       className="h-8 min-w-32"
-                      value={labels[i] ?? `مجموعة ${i + 1}`}
+                      value={labels[i] ?? t("routePlanning.group", { count: i + 1 })}
                       onChange={(e) => onLabelChange(i, e.target.value)}
                     />
                   </TableCell>
                   <TableCell>{count}</TableCell>
-                  <TableCell>{Math.round(t).toLocaleString(locale)}</TableCell>
+                  <TableCell>{Math.round(total).toLocaleString(locale)}</TableCell>
                   <TableCell>{Math.round(avgPerCustomer).toLocaleString(locale)}</TableCell>
                   <TableCell className={Math.abs(dev) <= 10 ? "text-success" : "text-destructive"}>
                     {dev >= 0 ? "+" : ""}

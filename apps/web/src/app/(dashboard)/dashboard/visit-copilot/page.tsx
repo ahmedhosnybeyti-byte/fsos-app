@@ -297,8 +297,8 @@ function VisitCopilotScreen() {
 
   const prospectVisitMutation = useMutation({
     mutationFn: visitCopilotApi.createProspectVisit,
-    onSuccess: () => toast.success("تمت إضافة الزيارة."),
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : "تعذر جدولة الزيارة."),
+    onSuccess: () => toast.success(t("copilot.prospectVisitAdded")),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t("copilot.prospectVisitError")),
   });
 
   const googleSearchMutation = useMutation({
@@ -447,10 +447,10 @@ function VisitCopilotScreen() {
       : b.priorityScore - a.priorityScore);
   }, [discoveryQuery.data?.prospects, latestGoogleProspects, prospectSort]);
   const prospectGroups = useMemo(() => {
-    const groups = [{ key: "HOTELS", label: "الفنادق", prospects: [] as typeof discoveryProspects }, { key: "RESTAURANTS", label: "المطاعم", prospects: [] as typeof discoveryProspects }, { key: "CAFES", label: "المقاهي", prospects: [] as typeof discoveryProspects }, { key: "OTHER", label: "أخرى", prospects: [] as typeof discoveryProspects }];
+    const groups = [{ key: "HOTELS", label: t("copilot.businessHotels"), prospects: [] as typeof discoveryProspects }, { key: "RESTAURANTS", label: t("copilot.businessRestaurants"), prospects: [] as typeof discoveryProspects }, { key: "CAFES", label: t("copilot.businessCafes"), prospects: [] as typeof discoveryProspects }, { key: "OTHER", label: t("copilot.businessOther"), prospects: [] as typeof discoveryProspects }];
     for (const prospect of discoveryProspects) groups[prospect.businessType === "hotel" ? 0 : prospect.businessType === "restaurant" ? 1 : prospect.businessType === "cafe" || prospect.businessType === "coffee_shop" ? 2 : 3]!.prospects.push(prospect);
     return groups.filter((group) => group.prospects.length > 0);
-  }, [discoveryProspects]);
+  }, [discoveryProspects, t]);
 
   function createProspectVisit(prospectId: string, scheduledFor: string) {
     if (!scheduledFor || prospectVisitMutation.isPending) return;
@@ -630,16 +630,16 @@ function VisitCopilotScreen() {
                   )}
                   <div className="space-y-3 border-t pt-3">
                     <div className="flex flex-wrap gap-2">
-                      <Input className="w-40" type="number" min="0" max="100" placeholder="أقل Prospect Score" value={minimumProspectScore} onChange={(event) => setMinimumProspectScore(event.target.value)} />
+                      <Input className="w-40" type="number" min="0" max="100" placeholder={t("copilot.minProspectScore")} value={minimumProspectScore} onChange={(event) => setMinimumProspectScore(event.target.value)} />
                       <Select value={prospectSort} onValueChange={(value) => setProspectSort(value as "PROSPECT_SCORE" | "CATALOG_FIT")}>
                         <SelectTrigger className="w-48"><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="PROSPECT_SCORE">ترتيب: Prospect Score</SelectItem>
-                          <SelectItem value="CATALOG_FIT">ترتيب: Catalog Fit</SelectItem>
+                          <SelectItem value="PROSPECT_SCORE">{t("copilot.sortProspectScore")}</SelectItem>
+                          <SelectItem value="CATALOG_FIT">{t("copilot.sortCatalogFit")}</SelectItem>
                         </SelectContent>
                       </Select>
-                      <Button size="sm" variant="outline" onClick={() => setCollapsedProspectGroups(new Set(prospectGroups.map((group) => group.key)))}>Collapse All</Button>
-                      <Button size="sm" variant="outline" onClick={() => setCollapsedProspectGroups(new Set())}>Expand All</Button>
+                      <Button size="sm" variant="outline" onClick={() => setCollapsedProspectGroups(new Set(prospectGroups.map((group) => group.key)))}>{t("copilot.collapseAll")}</Button>
+                      <Button size="sm" variant="outline" onClick={() => setCollapsedProspectGroups(new Set())}>{t("copilot.expandAll")}</Button>
                     </div>
                     {prospectGroups.map((group) => (
                       <div key={group.key} className="space-y-2">
@@ -650,41 +650,41 @@ function VisitCopilotScreen() {
                       return (
                         <div key={prospect.id} className="rounded-lg border p-3 text-sm">
                           <div className="flex flex-wrap items-start justify-between gap-2">
-                            {prospect.photo?.url && <div className="w-16 shrink-0"><img src={prospect.photo.url} alt={prospect.name} loading="lazy" className="h-16 w-16 rounded-md object-cover" />{prospect.photo.attribution && <p className="mt-1 text-[10px] text-muted-foreground">Photo: {prospect.photo.attribution}</p>}</div>}
+                            {prospect.photo?.url && <div className="w-16 shrink-0"><img src={prospect.photo.url} alt={prospect.name} loading="lazy" className="h-16 w-16 rounded-md object-cover" />{prospect.photo.attribution && <p className="mt-1 text-[10px] text-muted-foreground">{t("copilot.photoAttribution", { attribution: prospect.photo.attribution })}</p>}</div>}
                             <div>
                               <p className="font-semibold">{prospect.name}</p>
-                              <p className="text-xs text-muted-foreground">{prospect.businessType ?? "نوع النشاط غير متاح"}</p>
+                              <p className="text-xs text-muted-foreground">{prospect.businessType ?? t("copilot.businessTypeUnavailable")}</p>
                               {prospect.address && <p className="text-xs text-muted-foreground">{prospect.address}</p>}
                               {prospect.distanceKm !== null && prospect.distanceKm !== undefined && <p className="text-xs text-muted-foreground">{prospect.distanceKm.toFixed(1)} km</p>}
                             </div>
                             <div className="flex flex-wrap gap-1">
-                              <Badge>درجة الفرصة {prospect.priorityScore.toFixed(0)}/100</Badge>
-                              <Badge variant="outline">ثقة التحليل {prospect.scoreConfidence?.toFixed(0) ?? "—"}%</Badge>
-                              <Badge variant="secondary">توافق منتجات الشركة: {prospect.catalogFitScore === null || prospect.catalogFitScore === undefined ? "غير محسوب بعد" : `${prospect.catalogFitScore.toFixed(0)}/100`}</Badge>
+                              <Badge>{t("copilot.prospectScore", { value: prospect.priorityScore.toFixed(0) })}</Badge>
+                              <Badge variant="outline">{t("copilot.analysisConfidence", { value: prospect.scoreConfidence?.toFixed(0) ?? "—" })}</Badge>
+                              <Badge variant="secondary">{t("copilot.catalogFit", { value: prospect.catalogFitScore === null || prospect.catalogFitScore === undefined ? t("copilot.notCalculated") : `${prospect.catalogFitScore.toFixed(0)}/100` })}</Badge>
                               {prospect.commercialTier && <Badge variant="outline">{prospect.commercialTier}</Badge>}
                             </div>
                           </div>
                           <p className="mt-2 text-xs text-muted-foreground">{prospect.reason}</p>
                           {prospect.nearbyBestSellers !== undefined ? (
                             <div className="mt-2 space-y-1 text-xs">
-                              <p className="font-medium">الأصناف الأكثر نجاحًا حول العميل</p>
-                              {prospect.nearbyBestSellers.length > 0 ? prospect.nearbyBestSellers.map((product) => <p key={product.productCode}><span className="font-medium">{product.productName}</span>{` — يباع لدى ${product.nearbyCustomerCount} عميل قريب`}</p>) : <p>بيانات المنطقة غير كافية لاقتراح أصناف</p>}
-                              {prospect.nearbyBestSellers.length > 0 && <p className="text-muted-foreground">مبني على مبيعات {prospect.nearbySalesCustomerCount ?? 0} عميل قريب من نفس المنطقة</p>}
+                              <p className="font-medium">{t("copilot.topSellingNearby")}</p>
+                              {prospect.nearbyBestSellers.length > 0 ? prospect.nearbyBestSellers.map((product) => <p key={product.productCode}><span className="font-medium">{product.productName}</span>{` ${t("copilot.soldToNearbyCustomers", { count: product.nearbyCustomerCount })}`}</p>) : <p>{t("copilot.notEnoughLocalSalesData")}</p>}
+                              {prospect.nearbyBestSellers.length > 0 && <p className="text-muted-foreground">{t("copilot.basedOnNearbyCustomers", { count: prospect.nearbySalesCustomerCount ?? 0 })}</p>}
                             </div>
                           ) : prospect.productFit && prospect.productFit.length > 0 && (
                             <div className="mt-2 space-y-1 text-xs">
-                              <p className="font-medium">فرصة البيع</p>
+                              <p className="font-medium">{t("copilot.salesOpportunity")}</p>
                               {prospect.productFit.slice(0, 3).map((product) => <p key={product.productCode}><span className="font-medium">{product.productName}</span>{product.reasons.length ? ` — ${product.reasons.join("، ")}` : ""}</p>)}
                             </div>
                           )}
-                          {expanded && <div className="mt-2 space-y-1 border-t pt-2 text-xs text-muted-foreground"><p>{prospect.address || "العنوان غير متاح"}</p><p>مصدر البيانات: {prospect.source === "GOOGLE" ? "Google" : "OpenStreetMap"}</p><p>لماذا هذا العميل؟ {prospect.reason}</p>{prospect.productFit?.flatMap((product) => product.reasons).slice(0, 3).map((reason, index) => <p key={`${reason}-${index}`}>• {reason}</p>)}</div>}
+                          {expanded && <div className="mt-2 space-y-1 border-t pt-2 text-xs text-muted-foreground"><p>{prospect.address || t("copilot.addressUnavailable")}</p><p>{t("copilot.dataSource", { source: prospect.source === "GOOGLE" ? "Google" : "OpenStreetMap" })}</p><p>{t("copilot.whyThisProspect", { reason: prospect.reason })}</p>{prospect.productFit?.flatMap((product) => product.reasons).slice(0, 3).map((reason, index) => <p key={`${reason}-${index}`}>• {reason}</p>)}</div>}
                           <div className="mt-3 flex flex-wrap gap-2">
-                            <Button size="sm" variant="outline" onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${prospect.lat},${prospect.lon}`)}${prospect.source === "GOOGLE" && prospect.externalKey ? `&query_place_id=${encodeURIComponent(prospect.externalKey)}` : ""}`, "_blank", "noopener,noreferrer")}>الاتجاهات</Button>
-                            {prospect.phone && <Button size="sm" variant="outline" onClick={() => window.location.href = `tel:${prospect.phone}`}>اتصال</Button>}
-                            <Button size="sm" variant="outline" onClick={() => setExpandedProspects((current) => { const next = new Set(current); if (next.has(prospect.id)) next.delete(prospect.id); else next.add(prospect.id); return next; })}>{expanded ? "إخفاء التفاصيل" : "التفاصيل"}</Button>
-                            <Button size="sm" onClick={() => createProspectVisit(prospect.id, todayIsoDate())} disabled={prospectVisitMutation.isPending}>أضف لليوم</Button>
+                            <Button size="sm" variant="outline" onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${prospect.lat},${prospect.lon}`)}${prospect.source === "GOOGLE" && prospect.externalKey ? `&query_place_id=${encodeURIComponent(prospect.externalKey)}` : ""}`, "_blank", "noopener,noreferrer")}>{t("copilot.directions")}</Button>
+                            {prospect.phone && <Button size="sm" variant="outline" onClick={() => window.location.href = `tel:${prospect.phone}`}>{t("copilot.call")}</Button>}
+                            <Button size="sm" variant="outline" onClick={() => setExpandedProspects((current) => { const next = new Set(current); if (next.has(prospect.id)) next.delete(prospect.id); else next.add(prospect.id); return next; })}>{expanded ? t("copilot.hideDetails") : t("copilot.details")}</Button>
+                            <Button size="sm" onClick={() => createProspectVisit(prospect.id, todayIsoDate())} disabled={prospectVisitMutation.isPending}>{t("copilot.addToday")}</Button>
                             <Input className="w-40" type="date" min={todayIsoDate()} value={scheduledFor} onChange={(event) => setScheduledProspectDates((current) => ({ ...current, [prospect.id]: event.target.value }))} />
-                            <Button size="sm" variant="secondary" onClick={() => createProspectVisit(prospect.id, scheduledFor)} disabled={!scheduledFor || prospectVisitMutation.isPending}>جدولة لاحقًا</Button>
+                            <Button size="sm" variant="secondary" onClick={() => createProspectVisit(prospect.id, scheduledFor)} disabled={!scheduledFor || prospectVisitMutation.isPending}>{t("copilot.scheduleLater")}</Button>
                           </div>
                         </div>
                       );
