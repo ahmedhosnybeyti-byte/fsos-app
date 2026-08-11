@@ -20,6 +20,7 @@ import { LocationPickerMap } from "@/components/geo-intelligence/location-picker
 import { ResolvedCustomersMap } from "@/components/geo-intelligence/resolved-customers-map";
 import { HeatmapMap } from "@/components/heatmap/heatmap-map";
 import type { GeoIntelligenceAnalyzeResult, GeoIntelligenceExpansionResult, GeoIntelligenceScopeField, GeoIntelligenceTalkingPointsResult } from "@/lib/types";
+import { useTranslation } from "@/components/translation-provider";
 
 // New Customer — Geo Intelligence. Deliberately narrow scope (see
 // PROJECT_LOG.md): Step 1 captures a location by any of 3 methods, Step 2
@@ -32,11 +33,8 @@ import type { GeoIntelligenceAnalyzeResult, GeoIntelligenceExpansionResult, GeoI
 // column mapping anymore. Customers/Invoices/Invoice Items/Products are
 // resolved automatically via RieFacade — only the business choices remain.
 
-const SCOPE_FIELDS: { value: GeoIntelligenceScopeField; label: string }[] = [
-  { value: "RouteID", label: "الخط (Route)" },
-  { value: "City", label: "المدينة" },
-  { value: "CustomerClass", label: "فئة العميل" },
-  { value: "Channel", label: "القناة" },
+const SCOPE_FIELDS: { value: GeoIntelligenceScopeField; labelKey: "newCustomer.scopeRoute" | "newCustomer.scopeCity" | "newCustomer.scopeCustomerClass" | "newCustomer.scopeChannel" }[] = [
+  { value: "RouteID", labelKey: "newCustomer.scopeRoute" }, { value: "City", labelKey: "newCustomer.scopeCity" }, { value: "CustomerClass", labelKey: "newCustomer.scopeCustomerClass" }, { value: "Channel", labelKey: "newCustomer.scopeChannel" },
 ];
 
 // Top-level: point-scope wizard (single new-customer location, existing
@@ -44,6 +42,7 @@ const SCOPE_FIELDS: { value: GeoIntelligenceScopeField; label: string }[] = [
 // Expansion Map" territory-level upgrade — where in a whole territory is
 // under-served whitespace worth targeting, not just "near this one pin").
 export default function NewCustomerPage() {
+  const { t } = useTranslation();
   return (
     <div className="relative space-y-6">
       <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
@@ -54,19 +53,18 @@ export default function NewCustomerPage() {
           <MapPin className="h-6 w-6" />
         </span>
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">عميل جديد</h1>
-          <p className="text-muted-foreground">تحليل موقع عميل واحد جديد، أو مسح قطاع كامل لاكتشاف مناطق التوسع.</p>
+          <h1 className="text-2xl font-semibold tracking-tight">{t("newCustomer.title")}</h1><p className="text-muted-foreground">{t("newCustomer.subtitle")}</p>
         </div>
       </div>
       <Tabs defaultValue="point" className="rise-in rise-d1">
         <TabsList>
           <TabsTrigger value="point">
             <MapPin className="me-1.5 h-4 w-4" />
-            عميل واحد (موقع محدد)
+            {t("newCustomer.pointTab")}
           </TabsTrigger>
           <TabsTrigger value="territory">
             <LayoutGrid className="me-1.5 h-4 w-4" />
-            قطاع كامل (اكتشاف مناطق التوسع)
+            {t("newCustomer.territoryTab")}
           </TabsTrigger>
         </TabsList>
         <TabsContent value="point">
@@ -81,6 +79,7 @@ export default function NewCustomerPage() {
 }
 
 function PointWizard() {
+  const { t } = useTranslation();
   const [step, setStep] = useState<1 | 2>(1);
 
   // ---- Step 1: location ----
@@ -94,7 +93,7 @@ function PointWizard() {
   function requestGpsLocation() {
     if (!navigator.geolocation) {
       setGpsStatus("error");
-      toast.error("المتصفح ده مش بيدعم تحديد الموقع");
+      toast.error(t("newCustomer.gpsUnsupported"));
       return;
     }
     setGpsStatus("loading");
@@ -103,11 +102,11 @@ function PointWizard() {
         setLat(pos.coords.latitude);
         setLon(pos.coords.longitude);
         setGpsStatus("idle");
-        toast.success("تم تحديد الموقع");
+        toast.success(t("newCustomer.locationFound"));
       },
       () => {
         setGpsStatus("error");
-        toast.error("تعذر الوصول للموقع — جرب تحديد على الخريطة أو إدخال يدوي");
+        toast.error(t("newCustomer.locationError"));
       },
       { enableHighAccuracy: true, timeout: 10_000 },
     );
@@ -117,7 +116,7 @@ function PointWizard() {
     const la = Number(manualLatText);
     const lo = Number(manualLonText);
     if (!Number.isFinite(la) || la < -90 || la > 90 || !Number.isFinite(lo) || lo < -180 || lo > 180) {
-      toast.error("إحداثيات غير صحيحة");
+      toast.error(t("newCustomer.invalidCoordinates"));
       return;
     }
     setLat(la);
@@ -158,16 +157,16 @@ function PointWizard() {
     onSuccess: (data) => {
       setResult(data);
       setTalkingPoints(null);
-      toast.success(`تم التحليل — ${data.resolvedCustomers.length} عميل مرجعي، ${data.topProducts.length} صنف`);
+      toast.success(t("newCustomer.analysisComplete", { customers: data.resolvedCustomers.length, products: data.topProducts.length }));
     },
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : "تعذر إتمام التحليل"),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t("newCustomer.analysisError")),
   });
 
   const talkingPointsMutation = useMutation({
     mutationFn: geoIntelligenceApi.talkingPoints,
     onSuccess: (data) => setTalkingPoints(data),
     onError: (error) =>
-      toast.error(isTrialFeatureLocked(error) ? (error.messageAr ?? error.message) : error instanceof ApiError ? error.message : "تعذر توليد نقاط الحديث"),
+      toast.error(isTrialFeatureLocked(error) ? (error.messageAr ?? error.message) : error instanceof ApiError ? error.message : t("newCustomer.talkingPointsError")),
   });
 
   const canAnalyze = hasLocation && (mode === "auto" || manualSelectedIds.size > 0);
@@ -194,56 +193,55 @@ function PointWizard() {
   return (
     <div className="space-y-6 pt-4">
       <div className="flex gap-2">
-        <Badge variant={step === 1 ? "default" : "secondary"}>1. الموقع</Badge>
-        <Badge variant={step === 2 ? "default" : "secondary"}>2. العملاء والتحليل</Badge>
+        <Badge variant={step === 1 ? "default" : "secondary"}>1. {t("newCustomer.stepLocation")}</Badge><Badge variant={step === 2 ? "default" : "secondary"}>2. {t("newCustomer.stepCustomers")}</Badge>
       </div>
 
       {step === 1 && (
         <Card className="glass-card">
           <CardHeader>
-            <CardTitle>الخطوة 1 — موقع العميل</CardTitle>
+            <CardTitle>{t("newCustomer.step1Title")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             <Tabs value={locationMethod} onValueChange={(v) => setLocationMethod(v as typeof locationMethod)}>
               <TabsList>
                 <TabsTrigger value="gps">
                   <Navigation className="me-1.5 h-4 w-4" />
-                  لوكيشن (GPS)
+                  {t("newCustomer.gpsTab")}
                 </TabsTrigger>
                 <TabsTrigger value="map">
                   <MapPin className="me-1.5 h-4 w-4" />
-                  تحديد على الخريطة
+                  {t("newCustomer.mapTab")}
                 </TabsTrigger>
                 <TabsTrigger value="manual">
                   <Crosshair className="me-1.5 h-4 w-4" />
-                  إدخال يدوي
+                  {t("newCustomer.manualTab")}
                 </TabsTrigger>
               </TabsList>
 
               <TabsContent value="gps" className="space-y-3">
                 <Button onClick={requestGpsLocation} disabled={gpsStatus === "loading"}>
                   {gpsStatus === "loading" ? <Spinner className="h-4 w-4" /> : <Navigation className="h-4 w-4" />}
-                  حدد موقعي الحالي
+                  {t("newCustomer.useCurrentLocation")}
                 </Button>
               </TabsContent>
 
               <TabsContent value="map">
-                <p className="mb-2 text-xs text-muted-foreground">اضغط على الخريطة أو اسحب العلامة لتحديد موقع العميل بدقة.</p>
+                <p className="mb-2 text-xs text-muted-foreground">{t("newCustomer.mapHint")}</p>
               </TabsContent>
 
               <TabsContent value="manual" className="space-y-3">
                 <div className="grid gap-4 sm:max-w-md sm:grid-cols-2">
                   <div className="grid gap-2">
-                    <Label>Latitude</Label>
+                    <Label>{t("newCustomer.latitude")}</Label>
                     <Input value={manualLatText} onChange={(e) => setManualLatText(e.target.value)} placeholder="21.6" />
                   </div>
                   <div className="grid gap-2">
-                    <Label>Longitude</Label>
+                    <Label>{t("newCustomer.longitude")}</Label>
                     <Input value={manualLonText} onChange={(e) => setManualLonText(e.target.value)} placeholder="39.19" />
                   </div>
                 </div>
                 <Button variant="secondary" onClick={applyManualCoordinates}>
-                  استخدم هذه الإحداثيات
+                  {t("newCustomer.useCoordinates")}
                 </Button>
               </TabsContent>
             </Tabs>
@@ -264,12 +262,12 @@ function PointWizard() {
 
             {hasLocation && (
               <p className="text-sm text-muted-foreground">
-                الموقع المحدد: <span className="font-mono">{lat!.toFixed(5)}, {lon!.toFixed(5)}</span>
+                {t("newCustomer.selectedLocation")} <span className="font-mono">{lat!.toFixed(5)}, {lon!.toFixed(5)}</span>
               </p>
             )}
 
             <Button disabled={!hasLocation} onClick={() => setStep(2)}>
-              التالي — تحديد العملاء
+              {t("newCustomer.nextCustomers")}
             </Button>
           </CardContent>
         </Card>
@@ -279,25 +277,23 @@ function PointWizard() {
         <>
           <Card className="glass-card rise-in">
             <CardHeader>
-              <CardTitle>الخطوة 2 — تحديد العملاء المرجعيين والتحليل</CardTitle>
+              <CardTitle>{t("newCustomer.step2Title")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-5">
               <Button variant="ghost" size="sm" onClick={() => setStep(1)}>
-                ← رجوع لتعديل الموقع
+                ← {t("newCustomer.backToLocation")}
               </Button>
 
               <div className="space-y-3">
-                <Label>طريقة تحديد العملاء المرجعيين</Label>
+                <Label>{t("newCustomer.referenceMethod")}</Label>
                 <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
                   <TabsList>
-                    <TabsTrigger value="auto">تلقائي (أقرب عملاء)</TabsTrigger>
-                    <TabsTrigger value="manual">يدوي (بحث واختيار)</TabsTrigger>
-                    <TabsTrigger value="both">الاثنين معًا</TabsTrigger>
+                    <TabsTrigger value="auto">{t("newCustomer.automatic")}</TabsTrigger><TabsTrigger value="manual">{t("newCustomer.manual")}</TabsTrigger><TabsTrigger value="both">{t("newCustomer.both")}</TabsTrigger>
                   </TabsList>
 
                   <TabsContent value="auto" className="max-w-xs">
                     <div className="grid gap-2">
-                      <Label>عدد أقرب العملاء</Label>
+                      <Label>{t("newCustomer.nearestCustomers")}</Label>
                       <Input type="number" min={1} max={20} value={nearestCount} onChange={(e) => setNearestCount(Number(e.target.value) || 5)} />
                     </div>
                   </TabsContent>
@@ -322,7 +318,7 @@ function PointWizard() {
 
                   <TabsContent value="both" className="space-y-4">
                     <div className="grid gap-2 max-w-xs">
-                      <Label>عدد أقرب العملاء تلقائيًا</Label>
+                      <Label>{t("newCustomer.automaticNearestCustomers")}</Label>
                       <Input type="number" min={1} max={20} value={nearestCount} onChange={(e) => setNearestCount(Number(e.target.value) || 5)} />
                     </div>
                     <ManualCustomerPicker
@@ -346,7 +342,7 @@ function PointWizard() {
 
               <Button onClick={handleAnalyze} disabled={!canAnalyze || analyzeMutation.isPending}>
                 {analyzeMutation.isPending ? <Spinner className="h-4 w-4" /> : null}
-                نفّذ التحليل
+                {t("newCustomer.runAnalysis")}
               </Button>
             </CardContent>
           </Card>
@@ -358,33 +354,27 @@ function PointWizard() {
                   <span className="crystal-badge h-9 w-9 bg-primary/15 text-primary">
                     <MapPin className="h-4 w-4" />
                   </span>
-                  النتيجة
+                  {t("newCustomer.result")}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
-                  <Badge variant="secondary">{result.resolvedCustomers.length} عميل مرجعي</Badge>
-                  <Badge variant="secondary">{result.topProducts.length} صنف</Badge>
-                  {result.excludedBadCoordinates > 0 && <Badge variant="outline">{result.excludedBadCoordinates} صف تم تجاهله (إحداثيات غير صالحة)</Badge>}
+                  <Badge variant="secondary">{result.resolvedCustomers.length} {t("newCustomer.referenceCustomers")}</Badge><Badge variant="secondary">{result.topProducts.length} {t("newCustomer.products")}</Badge>{result.excludedBadCoordinates > 0 && <Badge variant="outline">{result.excludedBadCoordinates} {t("newCustomer.excludedInvalidCoordinates")}</Badge>}
                 </div>
 
                 <div>
-                  <h3 className="mb-2 text-sm font-medium">العملاء المرجعيون على الخريطة</h3>
+                  <h3 className="mb-2 text-sm font-medium">{t("newCustomer.referenceCustomersMap")}</h3>
                   {hasLocation && (
                     <ResolvedCustomersMap customers={result.resolvedCustomers} newCustomerLocation={{ lat: lat!, lon: lon! }} />
                   )}
                 </div>
 
                 <div>
-                  <h3 className="mb-2 text-sm font-medium">أفضل تشكيلة أصناف</h3>
+                  <h3 className="mb-2 text-sm font-medium">{t("newCustomer.topProductAssortment")}</h3>
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>الصنف</TableHead>
-                        <TableHead>التصنيف</TableHead>
-                        <TableHead>إجمالي الكمية</TableHead>
-                        <TableHead>إجمالي القيمة</TableHead>
-                        <TableHead>عدد العملاء</TableHead>
+                        <TableHead>{t("newCustomer.product")}</TableHead><TableHead>{t("newCustomer.category")}</TableHead><TableHead>{t("newCustomer.totalQuantity")}</TableHead><TableHead>{t("newCustomer.totalValue")}</TableHead><TableHead>{t("newCustomer.customerCount")}</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -403,20 +393,18 @@ function PointWizard() {
 
                 <div className="space-y-3 border-t border-border pt-5">
                   <div>
-                    <h3 className="text-sm font-medium">نقاط حديث بالذكاء الاصطناعي (اختياري)</h3>
+                    <h3 className="text-sm font-medium">{t("newCustomer.talkingPointsTitle")}</h3>
                     <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
-                      يحلل الذكاء الاصطناعي جدول &quot;أفضل تشكيلة أصناف&quot; اللي طلع فوق ويكتب للمندوب ملخص قصير + 3-6 جمل عملية يقدر
-                      يقولها فعليًا وهو قدام العميل الجديد (مش أرقام مجردة — كلام جاهز للاستخدام).
+                      {t("newCustomer.talkingPointsHint")}
                     </p>
                   </div>
                   <div className="flex flex-wrap items-end gap-3">
                     <div className="grid gap-2">
-                      <Label>اسم المنطقة (اختياري — لسياق أفضل)</Label>
-                      <Input className="sm:w-64" value={areaLabel} onChange={(e) => setAreaLabel(e.target.value)} placeholder="مثال: جدة جنوب" />
+                      <Label>{t("newCustomer.areaLabel")}</Label><Input className="sm:w-64" value={areaLabel} onChange={(e) => setAreaLabel(e.target.value)} placeholder={t("newCustomer.areaPlaceholder")} />
                     </div>
                     <Button variant="secondary" onClick={handleGenerateTalkingPoints} disabled={talkingPointsMutation.isPending}>
                       {talkingPointsMutation.isPending ? <Spinner className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-                      ولّد نقاط حديث بالذكاء الاصطناعي
+                      {t("newCustomer.generateTalkingPoints")}
                     </Button>
                   </div>
 
@@ -445,6 +433,7 @@ function PointWizard() {
 // HeatmapMap verbatim (the result is already {id,label,lat,lon,value}
 // points) instead of writing a new map component.
 function TerritoryExpansion() {
+  const { t } = useTranslation();
   const [scopeField, setScopeField] = useState<GeoIntelligenceScopeField | "">("");
   const [selectedScopeValues, setSelectedScopeValues] = useState<Set<string>>(new Set());
   const [gridSizeKm, setGridSizeKm] = useState(3);
@@ -460,9 +449,9 @@ function TerritoryExpansion() {
     mutationFn: geoIntelligenceApi.expansion,
     onSuccess: (data) => {
       setResult(data);
-      toast.success(`${data.emptyCellsScored} منطقة مرشحة للتوسع`);
+      toast.success(t("newCustomer.expansionComplete", { count: data.emptyCellsScored }));
     },
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : "تعذر تنفيذ التحليل"),
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : t("newCustomer.expansionError")),
   });
 
   function handleRun() {
@@ -480,18 +469,17 @@ function TerritoryExpansion() {
           <span className="crystal-badge h-9 w-9 bg-primary/15 text-primary">
             <LayoutGrid className="h-4 w-4" />
           </span>
-          مسح قطاع — اكتشاف مناطق التوسع
+          {t("newCustomer.territoryTitle")}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
         <p className="text-sm text-muted-foreground">
-          بيقسّم القطاع لشبكة خلايا، وبيحسب لكل خلية فاضية (مفيهاش عملاء) درجة فرصة بناءً على قد إيه العملاء والمبيعات حواليها —
-          يعني منطقة فاضية جنب تجمع عملاء قوي بتاخد درجة عالية، ومنطقة فاضية معزولة عن أي حد بتتجاهل.
+          {t("newCustomer.territoryHint")}
         </p>
 
         <div className="grid gap-4 sm:grid-cols-3 sm:max-w-2xl">
           <div className="grid gap-2">
-            <Label>عمود النطاق (اختياري — قطاع/منطقة)</Label>
+            <Label>{t("newCustomer.scopeField")}</Label>
             <Select
               value={scopeField || "__none__"}
               onValueChange={(v) => {
@@ -500,30 +488,30 @@ function TerritoryExpansion() {
               }}
             >
               <SelectTrigger>
-                <SelectValue placeholder="بلا (اختياري)" />
+                <SelectValue placeholder={t("newCustomer.noneOptional")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__none__">بلا (اختياري)</SelectItem>
+                <SelectItem value="__none__">{t("newCustomer.noneOptional")}</SelectItem>
                 {SCOPE_FIELDS.map((f) => (
                   <SelectItem key={f.value} value={f.value}>
-                    {f.label}
+                    {t(f.labelKey)}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="grid gap-2">
-            <Label>قيمة النطاق</Label>
+            <Label>{t("newCustomer.scopeValue")}</Label>
             <Select
               value={selectedScopeValues.size === 1 ? Array.from(selectedScopeValues)[0] : "__all__"}
               onValueChange={(v) => setSelectedScopeValues(v === "__all__" ? new Set() : new Set([v]))}
               disabled={!scopeField}
             >
               <SelectTrigger>
-                <SelectValue placeholder={scopeValuesQuery.isLoading ? "جاري التحميل…" : "الكل"} />
+                <SelectValue placeholder={scopeValuesQuery.isLoading ? t("newCustomer.loading") : t("newCustomer.all")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__all__">الكل</SelectItem>
+                <SelectItem value="__all__">{t("newCustomer.all")}</SelectItem>
                 {(scopeValuesQuery.data?.values ?? []).map((v) => (
                   <SelectItem key={v} value={v}>
                     {v}
@@ -533,22 +521,20 @@ function TerritoryExpansion() {
             </Select>
           </div>
           <div className="grid gap-2">
-            <Label>حجم الخلية (كم)</Label>
+            <Label>{t("newCustomer.gridSize")}</Label>
             <Input type="number" min={0.5} max={50} step={0.5} value={gridSizeKm} onChange={(e) => setGridSizeKm(Number(e.target.value) || 3)} />
           </div>
         </div>
 
         <Button disabled={expansionMutation.isPending} onClick={handleRun}>
           {expansionMutation.isPending ? <Spinner className="h-4 w-4" /> : <LayoutGrid className="h-4 w-4" />}
-          نفّذ المسح
+          {t("newCustomer.runScan")}
         </Button>
 
         {result && (
           <div className="space-y-4 border-t border-border pt-5">
             <div className="flex flex-wrap gap-2">
-              <Badge variant="secondary">{result.customerCount} عميل</Badge>
-              <Badge variant="secondary">{result.emptyCellsScored} منطقة مرشحة</Badge>
-              <Badge variant="secondary">حجم الخلية: {result.gridSizeKm} كم</Badge>
+              <Badge variant="secondary">{result.customerCount} {t("newCustomer.customerCount")}</Badge><Badge variant="secondary">{result.emptyCellsScored} {t("newCustomer.candidateAreas")}</Badge><Badge variant="secondary">{t("newCustomer.gridSize")}: {result.gridSizeKm} {t("newCustomer.km")}</Badge>
             </div>
             <HeatmapMap points={result.points} maxValue={result.maxScore} />
           </div>
@@ -573,15 +559,16 @@ function ManualCustomerPicker({
   selected: Set<string>;
   onToggle: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="grid gap-2">
-      <Input placeholder="دور بالاسم أو الكود…" value={search} onChange={(e) => onSearch(e.target.value)} className="max-w-sm" />
+      <Input placeholder={t("newCustomer.searchCustomers")} value={search} onChange={(e) => onSearch(e.target.value)} className="max-w-sm" />
       {loading ? (
         <Skeleton className="h-32" />
       ) : (
         <div className="max-h-64 max-w-md space-y-1 overflow-y-auto rounded-lg border border-border p-2">
           {customers.length === 0 ? (
-            <p className="p-2 text-sm text-muted-foreground">مفيش نتائج</p>
+            <p className="p-2 text-sm text-muted-foreground">{t("newCustomer.noResults")}</p>
           ) : (
             customers.map((c) => (
               <label key={c.id} className="flex items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted">
@@ -593,7 +580,7 @@ function ManualCustomerPicker({
           )}
         </div>
       )}
-      {selected.size > 0 && <p className="text-xs text-muted-foreground">{selected.size} عميل محدد</p>}
+      {selected.size > 0 && <p className="text-xs text-muted-foreground">{selected.size} {t("newCustomer.selectedCustomers")}</p>}
     </div>
   );
 }
