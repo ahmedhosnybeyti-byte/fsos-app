@@ -14,8 +14,9 @@ import { businessTypeFromGooglePrimaryType } from "../../prospects/prospect-taxo
 // a platform-wide env var — each company carries its own Google billing.
 const GOOGLE_PLACES_URL = "https://places.googleapis.com/v1/places:searchText";
 const GOOGLE_PLACE_DETAILS_URL = "https://places.googleapis.com/v1/";
-const GOOGLE_PLACES_FIELD_MASK = "places.id,places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.primaryType,places.rating,places.userRatingCount,places.regularOpeningHours,places.photos";
+const GOOGLE_PLACES_FIELD_MASK = "places.id,places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.primaryType,places.rating,places.userRatingCount,places.regularOpeningHours,places.photos,nextPageToken";
 const GOOGLE_MAX_RESULT_COUNT = 20;
+const GOOGLE_MAX_PAGES = 3;
 const GOOGLE_INTELLIGENCE_FIELD_MASK = "primaryType,types,priceLevel,priceRange,rating,userRatingCount,regularOpeningHours,servesBreakfast,servesLunch,servesDinner,servesBrunch,servesCoffee,servesDessert,servesVegetarianFood,delivery,dineIn,takeout";
 
 // Search Text carries the selling-channel intent directly to Google instead
@@ -35,6 +36,7 @@ const CATEGORY_ACCEPTED_TYPES: Record<DiscoveryCategory, readonly string[]> = {
 };
 
 type PlacesSearchResponse = {
+  nextPageToken?: string;
   places?: {
     id?: string;
     displayName?: { text?: string };
@@ -91,12 +93,45 @@ export class GooglePlacesProvider implements ProspectDiscoveryProvider {
       return { places: [], warnings: ["رد غير مفهوم من Google Places — حاول تاني."] };
     }
 
-    const places: DiscoveredPlace[] = [];
-    for (const pl of data.places ?? []) {
+    const searchRows = [...(data.places ?? [])];
+    let pageToken = data.nextPageToken;
+    for (let page = 1; page < GOOGLE_MAX_PAGES && pageToken; page++) {
+      let pageResponse: globalThis.Response;
+      try {
+        pageResponse = await fetch(GOOGLE_PLACES_URL, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            "X-Goog-Api-Key": this.apiKey,
+            "X-Goog-FieldMask": GOOGLE_PLACES_FIELD_MASK,
+          },
+          body: JSON.stringify({
+            textQuery: CATEGORY_SEARCH_TEXT[category],
+            maxResultCount: GOOGLE_MAX_RESULT_COUNT,
+            locationBias: { circle: { center: { latitude: params.lat, longitude: params.lon }, radius: params.radiusMeters } },
+            pageToken,
+          }),
+        });
+      } catch {
+        break;
+      }
+      if (!pageResponse.ok) break;
+      let pageData: PlacesSearchResponse;
+      try {
+        pageData = (await pageResponse.json()) as PlacesSearchResponse;
+      } catch {
+        break;
+      }
+      searchRows.push(...(pageData.places ?? []));
+      pageToken = pageData.nextPageToken;
+    }
+
+    const places = new Map<string, DiscoveredPlace>();
+    for (const pl of searchRows) {
       const lat = pl.location?.latitude;
       const lon = pl.location?.longitude;
       if (typeof pl.id !== "string" || pl.id === "" || typeof lat !== "number" || typeof lon !== "number" || !CATEGORY_ACCEPTED_TYPES[category].includes(pl.primaryType ?? "")) continue;
-      places.push({
+      places.set(pl.id, {
         externalKey: pl.id,
         name: pl.displayName?.text?.trim() || pl.primaryType || "غير معروف",
         lat,
@@ -109,7 +144,7 @@ export class GooglePlacesProvider implements ProspectDiscoveryProvider {
         photo: pl.photos?.[0]?.name ? { resourceName: pl.photos[0].name, attribution: pl.photos[0].authorAttributions?.map((author) => author.displayName).filter(Boolean).join(", ") || null } : null,
       });
     }
-    return { places, warnings: [] };
+    return { places: [...places.values()], warnings: [] };
   }
 
   async photoUrl(resourceName: string): Promise<string | null> {
