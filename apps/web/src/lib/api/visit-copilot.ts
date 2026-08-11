@@ -57,7 +57,7 @@ export const visitCopilotApi = {
     }),
 
   googleSearch: (body: VisitCopilotGoogleSearchRequest) =>
-    apiFetch<VisitCopilotGoogleSearchResult>("/visit-copilot/discovery/google-search", { method: "POST", body }),
+    apiFetch<VisitCopilotGoogleSearchResult>("/visit-copilot/discovery/search", { method: "POST", body }),
 
   prospectStatus: (params: { id: string; status: VisitCopilotProspectStatus }) =>
     apiFetch<VisitCopilotProspect>(`/visit-copilot/prospects/${encodeURIComponent(params.id)}/status`, {

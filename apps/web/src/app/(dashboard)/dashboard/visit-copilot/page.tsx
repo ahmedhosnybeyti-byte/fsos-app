@@ -502,7 +502,10 @@ function VisitCopilotScreen() {
           <Button
             variant={showDiscovery ? "default" : "secondary"}
             className="h-11 gap-2 max-md:h-10 max-md:flex-1 max-md:px-3 max-md:text-xs"
-            onClick={() => setShowDiscovery((v) => !v)}
+            onClick={() => {
+              setShowDiscovery(true);
+              searchGoogleAround();
+            }}
           >
             <Search className="h-4 w-4" />
             {t("copilot.discoverButton")}
