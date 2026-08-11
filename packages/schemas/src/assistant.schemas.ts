@@ -23,6 +23,7 @@ export type AssistantChatMessage = z.infer<typeof assistantChatMessageSchema>;
 export const assistantChatRequestSchema = z.object({
   message: z.string().min(1).max(ASSISTANT_LIMITS.maxMessageLength),
   history: z.array(assistantChatMessageSchema).max(ASSISTANT_LIMITS.maxHistoryMessages).default([]),
+  locale: z.enum(["ar", "en"]).optional(),
 });
 export type AssistantChatRequest = z.infer<typeof assistantChatRequestSchema>;
 

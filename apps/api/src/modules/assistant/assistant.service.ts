@@ -335,7 +335,8 @@ export class AssistantService {
       return { analysis: intentResult.clarificationMessage, advice: null, decision: null, blocks: [] };
     }
 
-    const systemPrompt = `${CORE_DNA_SYSTEM_PROMPT}\n\nتاريخ اليوم: ${today}.${scenarioBlock}${mentionedCustomerLine}`;
+    const localeInstruction = input.locale === "en" ? "\n\nRespond in English. Keep customer, product, company, and person names exactly as provided." : "";
+    const systemPrompt = `${CORE_DNA_SYSTEM_PROMPT}\n\nتاريخ اليوم: ${today}.${scenarioBlock}${mentionedCustomerLine}${localeInstruction}`;
 
     const messages: ClaudeMessage[] = [
       ...input.history.slice(-ASSISTANT_LIMITS.maxHistoryMessages).map((m): ClaudeMessage => ({ role: m.role, content: m.content })),

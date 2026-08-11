@@ -626,6 +626,7 @@ export interface AssistantChatMessage {
 export interface AssistantChatRequest {
   message: string;
   history: AssistantChatMessage[];
+  locale?: "ar" | "en";
 }
 
 export interface AssistantChatResponse {

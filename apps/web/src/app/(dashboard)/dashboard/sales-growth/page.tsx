@@ -80,7 +80,7 @@ function currentPeriodMonth(): string {
 }
 
 export default function SalesGrowthPage() {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const { user } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -264,7 +264,7 @@ export default function SalesGrowthPage() {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
               <Clock className="h-3.5 w-3.5" />
-              {t("sgi.lastUpdatedPrefix", { date: new Date(result.generatedAt).toLocaleString("ar-EG") })}
+              {t("sgi.lastUpdatedPrefix", { date: new Date(result.generatedAt).toLocaleString(locale === "en" ? "en-US" : "ar-EG") })}
               {result.scopedToOwnTeam && t("sgi.scopedToOwnTeamSuffix")}
             </p>
             <div className="flex items-center gap-2">

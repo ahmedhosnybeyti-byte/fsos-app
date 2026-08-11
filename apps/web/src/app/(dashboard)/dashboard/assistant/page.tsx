@@ -122,7 +122,7 @@ function AssistantChat() {
     const history: AssistantChatMessage[] = messages.slice(-MAX_HISTORY_SENT).map(({ role, content }) => ({ role, content }));
     setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
     setInput("");
-    mutation.mutate({ message: trimmed, history });
+    mutation.mutate({ message: trimmed, history, locale });
   }
 
   // Restyled per FSOS Design Constitution §4.1/§7.6 (Murshidak visual
