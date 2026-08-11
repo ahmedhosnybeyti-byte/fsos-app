@@ -12,18 +12,25 @@ import { businessTypeFromGooglePrimaryType } from "../../prospects/prospect-taxo
 // deliberate difference: the API key is now the COMPANY's own key (stored
 // encrypted on CompanyProfile, decrypted by the caller and passed in), not
 // a platform-wide env var — each company carries its own Google billing.
-const GOOGLE_PLACES_URL = "https://places.googleapis.com/v1/places:searchNearby";
+const GOOGLE_PLACES_URL = "https://places.googleapis.com/v1/places:searchText";
 const GOOGLE_PLACE_DETAILS_URL = "https://places.googleapis.com/v1/";
 const GOOGLE_PLACES_FIELD_MASK = "places.id,places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.primaryType,places.rating,places.userRatingCount,places.regularOpeningHours,places.photos";
 const GOOGLE_MAX_RESULT_COUNT = 20;
 const GOOGLE_INTELLIGENCE_FIELD_MASK = "primaryType,types,priceLevel,priceRange,rating,userRatingCount,regularOpeningHours,servesBreakfast,servesLunch,servesDinner,servesBrunch,servesCoffee,servesDessert,servesVegetarianFood,delivery,dineIn,takeout";
 
-// Abstract category → Places API (New) includedTypes (same lists as the
-// original CHANNEL_PLACE_TYPES map).
-const CATEGORY_INCLUDED_TYPES: Record<DiscoveryCategory, string[]> = {
+// Search Text carries the selling-channel intent directly to Google instead
+// of asking the same generic nearby query for every rep channel.
+const CATEGORY_SEARCH_TEXT: Record<DiscoveryCategory, string> = {
+  traditional: "متاجر البقالة grocery stores mini markets تموينات",
+  modern: "supermarkets hypermarkets",
+  horeca: "restaurants cafes hotels",
+  wholesale: "food wholesalers FMCG wholesalers",
+};
+
+const CATEGORY_ACCEPTED_TYPES: Record<DiscoveryCategory, readonly string[]> = {
   traditional: ["grocery_store", "convenience_store", "supermarket", "food_store"],
   horeca: ["restaurant", "cafe", "coffee_shop", "bakery", "hotel", "catering_service"],
-  modern: ["supermarket", "department_store", "shopping_mall"],
+  modern: ["supermarket", "hypermarket", "department_store", "shopping_mall"],
   wholesale: ["wholesaler", "warehouse_store"],
 };
 
@@ -65,9 +72,9 @@ export class GooglePlacesProvider implements ProspectDiscoveryProvider {
           "X-Goog-FieldMask": GOOGLE_PLACES_FIELD_MASK,
         },
         body: JSON.stringify({
-          includedTypes: CATEGORY_INCLUDED_TYPES[category],
+          textQuery: CATEGORY_SEARCH_TEXT[category],
           maxResultCount: GOOGLE_MAX_RESULT_COUNT,
-          locationRestriction: { circle: { center: { latitude: params.lat, longitude: params.lon }, radius: params.radiusMeters } },
+          locationBias: { circle: { center: { latitude: params.lat, longitude: params.lon }, radius: params.radiusMeters } },
         }),
       });
     } catch {
@@ -88,7 +95,7 @@ export class GooglePlacesProvider implements ProspectDiscoveryProvider {
     for (const pl of data.places ?? []) {
       const lat = pl.location?.latitude;
       const lon = pl.location?.longitude;
-      if (typeof pl.id !== "string" || pl.id === "" || typeof lat !== "number" || typeof lon !== "number") continue;
+      if (typeof pl.id !== "string" || pl.id === "" || typeof lat !== "number" || typeof lon !== "number" || !CATEGORY_ACCEPTED_TYPES[category].includes(pl.primaryType ?? "")) continue;
       places.push({
         externalKey: pl.id,
         name: pl.displayName?.text?.trim() || pl.primaryType || "غير معروف",
