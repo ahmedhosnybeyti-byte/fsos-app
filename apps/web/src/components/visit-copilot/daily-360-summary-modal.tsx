@@ -51,6 +51,13 @@ function priorityBadgeClass(priority: VisitCopilot360ExecutionStep["priority"]):
   return "bg-muted text-muted-foreground";
 }
 
+function withoutRepeatedCustomerName(customerName: string, reason: string): string {
+  const name = customerName.trim();
+  const text = reason.trim();
+  if (!name || !text.startsWith(name)) return reason;
+  return text.slice(name.length).replace(/^[\s—–:-]+/, "") || reason;
+}
+
 export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate, from, to }: Props) {
   const { t, locale } = useTranslation();
   const { user } = useAuth();
@@ -495,7 +502,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                             )}
                           />
                           <span>
-                            <span className="font-medium">{c.name}</span> — {c.reason}
+                            <span className="font-medium">{c.name}</span> — {withoutRepeatedCustomerName(c.name, c.reason)}
                           </span>
                         </li>
                       ))}
