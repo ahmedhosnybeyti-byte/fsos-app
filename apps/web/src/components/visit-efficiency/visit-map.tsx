@@ -24,10 +24,12 @@ export function VisitMap({
   points,
   reps,
   heightClassName = "h-[560px]",
+  popupLabels,
 }: {
   points: VisitEfficiencyPoint[];
   reps: string[];
   heightClassName?: string;
+  popupLabels?: { rep: string; date: string; distance: string };
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -86,6 +88,7 @@ export function VisitMap({
         })
           .bindPopup(`<b>${p.label}</b><br>المندوب: ${p.rep}<br>التاريخ: ${p.dateKey}<br>المسافة من الزيارة السابقة: ${p.value.toFixed(2)} كم`)
           .addTo(mapRef.current!);
+        if (popupLabels) marker.bindPopup(`<b>${p.label}</b><br>${popupLabels.rep}: ${p.rep}<br>${popupLabels.date}: ${p.dateKey}<br>${popupLabels.distance}: ${p.value.toFixed(2)}`);
         markersRef.current.push(marker);
         bounds.push([p.lat, p.lon]);
       });
@@ -96,7 +99,7 @@ export function VisitMap({
     return () => {
       cancelled = true;
     };
-  }, [points, reps]);
+  }, [points, reps, popupLabels]);
 
   return <div ref={containerRef} className={`${heightClassName} w-full rounded-lg border border-border`} />;
 }

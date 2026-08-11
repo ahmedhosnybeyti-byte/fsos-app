@@ -964,6 +964,51 @@ export type TranslationKey =
   | "newCustomer.__reserved"
   | "routePlanning.__reserved"
   | "visitEfficiency.__reserved"
+  | "visitEfficiency.title"
+  | "visitEfficiency.subtitle"
+  | "visitEfficiency.settings"
+  | "visitEfficiency.scopeField"
+  | "visitEfficiency.scopeRoute"
+  | "visitEfficiency.scopeCity"
+  | "visitEfficiency.scopeCustomerClass"
+  | "visitEfficiency.scopeChannel"
+  | "visitEfficiency.noFilter"
+  | "visitEfficiency.scopeValues"
+  | "visitEfficiency.selectAll"
+  | "visitEfficiency.clearAll"
+  | "visitEfficiency.loading"
+  | "visitEfficiency.noScopeValues"
+  | "visitEfficiency.selectedValues"
+  | "visitEfficiency.fromDate"
+  | "visitEfficiency.toDate"
+  | "visitEfficiency.analyze"
+  | "visitEfficiency.analyzing"
+  | "visitEfficiency.analysisComplete"
+  | "visitEfficiency.analysisError"
+  | "visitEfficiency.result"
+  | "visitEfficiency.visits"
+  | "visitEfficiency.excludedSingleVisitDays"
+  | "visitEfficiency.excludedNoCoordinates"
+  | "visitEfficiency.rowOrder"
+  | "visitEfficiency.exportExcel"
+  | "visitEfficiency.noMapPoints"
+  | "visitEfficiency.noMapPointsHint"
+  | "visitEfficiency.visibleReps"
+  | "visitEfficiency.all"
+  | "visitEfficiency.selectedOf"
+  | "visitEfficiency.rep"
+  | "visitEfficiency.visitDays"
+  | "visitEfficiency.visitCount"
+  | "visitEfficiency.totalDistance"
+  | "visitEfficiency.avgDistance"
+  | "visitEfficiency.noRepVisits"
+  | "visitEfficiency.date"
+  | "visitEfficiency.customer"
+  | "visitEfficiency.distanceFromPrevious"
+  | "visitEfficiency.total"
+  | "visitEfficiency.exportSummarySheet"
+  | "visitEfficiency.exportDetailsSheet"
+  | "visitEfficiency.exportFileName"
   | "teamPerformance.title"
   | "teamPerformance.descriptionSupervisor"
   | "teamPerformance.descriptionManager"
@@ -2363,6 +2408,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "newCustomer.km":"كم",
     "routePlanning.__reserved": "",
     "visitEfficiency.__reserved": "",
+    "visitEfficiency.title": "كفاءة الزيارات", "visitEfficiency.subtitle": "يقيس المسافة بين الزيارات المتتالية للمندوب في اليوم نفسه لاكتشاف المسارات غير الفعالة.", "visitEfficiency.settings": "الإعدادات", "visitEfficiency.scopeField": "نطاق التصفية (اختياري)", "visitEfficiency.scopeRoute": "الخط (Route)", "visitEfficiency.scopeCity": "المدينة", "visitEfficiency.scopeCustomerClass": "فئة العميل", "visitEfficiency.scopeChannel": "القناة", "visitEfficiency.noFilter": "بدون تصفية", "visitEfficiency.scopeValues": "قيم النطاق (اختياري — اتركه فارغًا لكل البيانات)", "visitEfficiency.selectAll": "تحديد الكل", "visitEfficiency.clearAll": "إلغاء الكل", "visitEfficiency.loading": "جارٍ التحميل…", "visitEfficiency.noScopeValues": "لا توجد قيم في هذا العمود", "visitEfficiency.selectedValues": "{count} قيمة محددة", "visitEfficiency.fromDate": "من تاريخ (اختياري)", "visitEfficiency.toDate": "إلى تاريخ (اختياري)", "visitEfficiency.analyze": "حلل الآن", "visitEfficiency.analyzing": "جارٍ التحليل…", "visitEfficiency.analysisComplete": "{visits} زيارة عبر {reps} مندوبين", "visitEfficiency.analysisError": "تعذر تنفيذ التحليل", "visitEfficiency.result": "النتيجة", "visitEfficiency.visits": "{count} زيارة", "visitEfficiency.excludedSingleVisitDays": "{count} يوم بزيارة واحدة (متجاهل)", "visitEfficiency.excludedNoCoordinates": "{count} زيارة بدون إحداثيات صالحة", "visitEfficiency.rowOrder": "الترتيب بترتيب الصفوف (بدون وقت تسجيل دخول)", "visitEfficiency.exportExcel": "تصدير Excel", "visitEfficiency.noMapPoints": "لا توجد مواقع لعرضها على الخريطة بهذه البيانات.", "visitEfficiency.noMapPointsHint": "قد تكون لكل مندوب زيارة واحدة فقط في اليوم، أو أن الإحداثيات مفقودة أو غير صالحة.", "visitEfficiency.visibleReps": "المندوبون الظاهرون على الخريطة: {summary}", "visitEfficiency.all": "الكل", "visitEfficiency.selectedOf": "{selected} من {total}", "visitEfficiency.rep": "المندوب", "visitEfficiency.visitDays": "أيام الزيارة", "visitEfficiency.visitCount": "عدد الزيارات", "visitEfficiency.totalDistance": "إجمالي المسافة (كم)", "visitEfficiency.avgDistance": "متوسط/زيارة (كم)", "visitEfficiency.noRepVisits": "لا توجد زيارات بإحداثيات صالحة لهذا المندوب.", "visitEfficiency.date": "التاريخ", "visitEfficiency.customer": "العميل", "visitEfficiency.distanceFromPrevious": "المسافة من الزيارة السابقة (كم)", "visitEfficiency.total": "الإجمالي", "visitEfficiency.exportSummarySheet": "ملخص المندوبين", "visitEfficiency.exportDetailsSheet": "تفاصيل الزيارات", "visitEfficiency.exportFileName": "كفاءة-الزيارات.xlsx",
     "teamPerformance.title": "أداء الفريق",
     "teamPerformance.descriptionSupervisor": "مبيعات وتحصيل ومرتجعات مناديبك في الفترة اللي تختارها.",
     "teamPerformance.descriptionManager": "مبيعات وتحصيل ومرتجعات الفريق، مجمّعة تحت كل مشرف.",
@@ -3776,6 +3822,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "newCustomer.km":"km",
     "routePlanning.__reserved": "",
     "visitEfficiency.__reserved": "",
+    "visitEfficiency.title": "Visit Efficiency", "visitEfficiency.subtitle": "Measures the distance between each representative's consecutive visits on the same day to identify inefficient routes.", "visitEfficiency.settings": "Settings", "visitEfficiency.scopeField": "Filter scope (optional)", "visitEfficiency.scopeRoute": "Route", "visitEfficiency.scopeCity": "City", "visitEfficiency.scopeCustomerClass": "Customer class", "visitEfficiency.scopeChannel": "Channel", "visitEfficiency.noFilter": "No filter", "visitEfficiency.scopeValues": "Scope values (optional — leave empty for all data)", "visitEfficiency.selectAll": "Select all", "visitEfficiency.clearAll": "Clear all", "visitEfficiency.loading": "Loading…", "visitEfficiency.noScopeValues": "No values in this column", "visitEfficiency.selectedValues": "{count} values selected", "visitEfficiency.fromDate": "From date (optional)", "visitEfficiency.toDate": "To date (optional)", "visitEfficiency.analyze": "Analyze now", "visitEfficiency.analyzing": "Analyzing…", "visitEfficiency.analysisComplete": "{visits} visits across {reps} representatives", "visitEfficiency.analysisError": "Could not run the analysis", "visitEfficiency.result": "Result", "visitEfficiency.visits": "{count} visits", "visitEfficiency.excludedSingleVisitDays": "{count} single-visit days excluded", "visitEfficiency.excludedNoCoordinates": "{count} visits without valid coordinates", "visitEfficiency.rowOrder": "Ordered by row order (no check-in time)", "visitEfficiency.exportExcel": "Export Excel", "visitEfficiency.noMapPoints": "There are no locations to display on the map for this data.", "visitEfficiency.noMapPointsHint": "Each representative may have only one visit per day, or coordinates may be missing or invalid.", "visitEfficiency.visibleReps": "Representatives visible on the map: {summary}", "visitEfficiency.all": "All", "visitEfficiency.selectedOf": "{selected} of {total}", "visitEfficiency.rep": "Representative", "visitEfficiency.visitDays": "Visit days", "visitEfficiency.visitCount": "Visits", "visitEfficiency.totalDistance": "Total distance (km)", "visitEfficiency.avgDistance": "Average/visit (km)", "visitEfficiency.noRepVisits": "This representative has no visits with valid coordinates.", "visitEfficiency.date": "Date", "visitEfficiency.customer": "Customer", "visitEfficiency.distanceFromPrevious": "Distance from previous visit (km)", "visitEfficiency.total": "Total", "visitEfficiency.exportSummarySheet": "Representative Summary", "visitEfficiency.exportDetailsSheet": "Visit Details", "visitEfficiency.exportFileName": "visit-efficiency.xlsx",
     "teamPerformance.title": "Team Performance",
     "teamPerformance.descriptionSupervisor": "Your reps' sales, collection, and returns for the period you choose.",
     "teamPerformance.descriptionManager": "The team's sales, collection, and returns, grouped under each supervisor.",
