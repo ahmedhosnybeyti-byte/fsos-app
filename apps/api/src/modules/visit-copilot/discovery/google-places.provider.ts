@@ -28,7 +28,7 @@ const CATEGORY_SEARCH_TEXT: Record<DiscoveryCategory, string> = {
 };
 
 const CATEGORY_ACCEPTED_TYPES: Record<DiscoveryCategory, readonly string[]> = {
-  traditional: ["grocery_store", "convenience_store", "supermarket", "food_store"],
+  traditional: ["grocery_store", "asian_grocery_store", "convenience_store", "supermarket", "food_store"],
   horeca: ["restaurant", "cafe", "coffee_shop", "bakery", "hotel", "catering_service"],
   modern: ["supermarket", "hypermarket", "department_store", "shopping_mall"],
   wholesale: ["wholesaler", "warehouse_store"],
