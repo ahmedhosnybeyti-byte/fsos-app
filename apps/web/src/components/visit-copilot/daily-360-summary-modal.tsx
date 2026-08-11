@@ -63,8 +63,8 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
 
   const daily360Query = daily360SummaryQuery({ period, from, to, selectedDate });
   const query = useQuery({
-    queryKey: daily360Query.queryKey,
-    queryFn: () => visitCopilotApi.daily360Summary(daily360Query.request),
+    queryKey: [...daily360Query.queryKey, locale],
+    queryFn: () => visitCopilotApi.daily360Summary({ ...daily360Query.request, locale }),
     enabled: open,
     // A rep might tap the button twice while the report is generating —
     // react-query already de-dupes concurrent identical requests, but keep

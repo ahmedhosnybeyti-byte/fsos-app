@@ -207,7 +207,7 @@ export function isFutureVisitCopilotPlanDate(dateIso: string, today: Date = new 
 // broader). Only `period` (the screen's existing Analysis Scope control) is
 // accepted, as the comparison reference for the report's numbers.
 export const visitCopilotDaily360SummaryQuerySchema = z
-  .object({ ...periodFields, ...planDateField })
+  .object({ ...periodFields, ...planDateField, locale: z.enum(["ar", "en"]).optional() })
   .refine(customPeriodRefinement.check, customPeriodRefinement.options);
 export type VisitCopilotDaily360SummaryQuery = z.infer<typeof visitCopilotDaily360SummaryQuerySchema>;
 

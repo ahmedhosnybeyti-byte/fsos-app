@@ -1217,6 +1217,7 @@ export class VisitCopilotService {
 
   async daily360Summary(user: AuthenticatedUser, query: VisitCopilotDaily360SummaryQuery): Promise<VisitCopilot360Summary> {
     const warnings: string[] = [];
+    const narrativeLocale = (query as VisitCopilotDaily360SummaryQuery & { locale?: "ar" | "en" }).locale ?? "ar";
 
     const [sgi, brief, dbUser] = await Promise.all([
       this.sgiService.getLatest(user),
@@ -1258,7 +1259,7 @@ export class VisitCopilotService {
       customerName: opportunity.customerName, declineValue: opportunity.baselineNetQuantity, valueBefore: opportunity.baselineNetQuantity, valueAfter: opportunity.recentNetQuantity,
       lastVisitDate: brief.customers.find((customer) => customer.customerCode === opportunity.customerCode)?.lastVisitDate ?? null,
       stoppedProducts: [{ productName: opportunity.productName, quantity: opportunity.baselineNetQuantity, unit: "", value: opportunity.suggestedQuantity }],
-      diagnosis: `توقف بيع ${opportunity.productName} خلال آخر 30 يومًا.`, visitDecision: `راجع احتياج العميل إلى ${opportunity.productName}.`, likelyReason: null, visitGoal: `اقتراح ${opportunity.suggestedQuantity} وحدة.`, extraProductCount: 0,
+      diagnosis: narrativeLocale === "en" ? `Sales of ${opportunity.productName} stopped during the last 30 days.` : `توقف بيع ${opportunity.productName} خلال آخر 30 يومًا.`, visitDecision: narrativeLocale === "en" ? `Review the customer's need for ${opportunity.productName}.` : `راجع احتياج العميل إلى ${opportunity.productName}.`, likelyReason: null, visitGoal: narrativeLocale === "en" ? `Propose ${opportunity.suggestedQuantity} units.` : `اقتراح ${opportunity.suggestedQuantity} وحدة.`, extraProductCount: 0,
       customerCode: opportunity.customerCode, productCode: opportunity.productCode, productName: opportunity.productName, category: opportunity.category, baselineNetQuantity: opportunity.baselineNetQuantity, recentNetQuantity: opportunity.recentNetQuantity, suggestedQuantity: opportunity.suggestedQuantity,
     }));
     // ---- Collections + priority debtors (COLLECTION_RISK situations for
@@ -1351,7 +1352,7 @@ export class VisitCopilotService {
       topIssueSituation,
     };
 
-    const narrative = await this.buildDaily360Narrative(baseFacts);
+    const narrative = await this.buildDaily360Narrative(baseFacts, narrativeLocale);
 
     return {
       generatedAt: baseFacts.generatedAt,
@@ -1468,16 +1469,44 @@ export class VisitCopilotService {
     };
   }
 
+  private buildEnglishTemplateNarrative(facts: Daily360Facts): Daily360Narrative {
+    const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 });
+    const goal = facts.goal.targetTotal === null
+      ? `No monthly goal is defined for this scope. Actual performance to date is ${number.format(facts.goal.actualTotal)}.`
+      : `${facts.goal.progressPct ?? 0}% of the monthly goal has been achieved (${number.format(facts.goal.actualTotal)} of ${number.format(facts.goal.targetTotal)}), leaving ${number.format(facts.goal.remainingGap ?? 0)}.`;
+    const opportunity = facts.lostOpportunities[0];
+    const lost = opportunity ? `${facts.lostOpportunities.length} lost opportunities were identified, led by ${opportunity.customerName} with a decline of ${number.format(opportunity.declineValue)}.` : "No material lost opportunities were identified in this scope.";
+    const collections = facts.collections.priorityDebtors.length > 0 ? `${facts.collections.priorityDebtors.length} priority debtors require follow-up, totaling ${number.format(facts.collections.pending)}.` : "There are no priority collection balances requiring immediate follow-up.";
+    const gaps = [
+      opportunity ? "Previously active customers have stopped purchasing products that require a field follow-up." : "Validate coverage and customer needs through focused field visits.",
+      facts.collections.priorityDebtors.length > 0 ? "Collection balances require a clear, prioritized follow-up plan." : "Maintain collection discipline across the route.",
+      facts.goal.targetTotal !== null && (facts.goal.progressPct ?? 0) < 70 ? "Monthly goal pacing is below the required rate." : "Continue monitoring execution against the route plan.",
+    ];
+    const executionPlan: VisitCopilot360Summary["executionPlan"] = opportunity ? [{ priority: "عالية", action: `Visit ${opportunity.customerName} and review the decline in purchasing.`, owner: facts.userName, successMetric: "Restore the order value to its previous level." }] : [{ priority: "منخفضة", action: "Continue the current visit plan and monitor performance.", owner: facts.userName, successMetric: "Maintain current performance." }];
+    return {
+      source: "template",
+      executiveSummary: [goal, lost, collections].join(" "),
+      topIssue: opportunity ? `Sales decline at ${opportunity.customerName}.` : null,
+      rootCauses: { narrative: "The most likely root causes based on the available facts are:", gaps },
+      executiveDecision: opportunity || facts.collections.priorityDebtors.length > 0 ? "Prioritize the highest-impact customer visits and collection follow-up today, then measure progress weekly." : "Continue the current plan while monitoring for material changes in performance.",
+      executionPlan,
+      closingPhrase: "The field is the source of truth; every decision should be grounded in real data.",
+    };
+  }
+
   // ONE bounded Claude call per report — reorders/phrases the sections
   // above; never allowed to introduce a fact not already in `facts`. Falls
   // back to the deterministic template on any failure, timeout, or missing
   // API key, per explicit product requirement.
-  private async buildDaily360Narrative(facts: Daily360Facts): Promise<Daily360Narrative> {
+  private async buildDaily360Narrative(facts: Daily360Facts, locale: "ar" | "en"): Promise<Daily360Narrative> {
     const apiKey = this.appConfig.values.anthropic.apiKey;
-    if (!apiKey) return this.buildTemplateNarrative(facts);
+    const fallback = () => locale === "en" ? this.buildEnglishTemplateNarrative(facts) : this.buildTemplateNarrative(facts);
+    if (!apiKey) return fallback();
 
     const systemPrompt = [
-      'أنت محرر تقارير تنفيذية داخل منصة FSOS. مهمتك الوحيدة إعادة صياغة وترتيب الحقائق التالية في تقرير عربي احترافي — لا تخترع أي رقم أو اسم عميل أو صنف غير موجود في البيانات المرفقة.',
+      locale === "en"
+        ? "You are an executive report editor in the FSOS platform. Write every narrative field in professional English only. Do not invent any number, customer name, or product not present in the supplied data."
+        : 'أنت محرر تقارير تنفيذية داخل منصة FSOS. مهمتك الوحيدة إعادة صياغة وترتيب الحقائق التالية في تقرير عربي احترافي — لا تخترع أي رقم أو اسم عميل أو صنف غير موجود في البيانات المرفقة.',
       "البيانات (JSON) هي مصدرك الوحيد:",
       JSON.stringify(facts),
       'أرجع JSON فقط بدون أي نص إضافي وبدون markdown، بالشكل الدقيق التالي:',
@@ -1509,9 +1538,9 @@ export class VisitCopilotService {
         clearTimeout(timeout);
       }
     } catch {
-      return this.buildTemplateNarrative(facts);
+      return fallback();
     }
-    if (!response.ok) return this.buildTemplateNarrative(facts);
+    if (!response.ok) return fallback();
 
     try {
       const data = (await response.json()) as { content?: ClaudeTextBlock[] };
@@ -1534,7 +1563,7 @@ export class VisitCopilotService {
         parsed.executionPlan.length === 0 ||
         !parsed.closingPhrase
       ) {
-        return this.buildTemplateNarrative(facts);
+        return fallback();
       }
       return {
         source: "ai",
@@ -1546,7 +1575,7 @@ export class VisitCopilotService {
         closingPhrase: parsed.closingPhrase,
       };
     } catch {
-      return this.buildTemplateNarrative(facts);
+      return fallback();
     }
   }
 
