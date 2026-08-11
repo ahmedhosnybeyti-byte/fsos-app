@@ -1560,9 +1560,10 @@ export class VisitCopilotService {
     const routeCustomerCodes = new Set(dailyRoute.customers.map((customer) => customer.customerCode));
     const stats = await this.buildDiscoveryStats(user, query, warnings, routeCustomerCodes);
     const taxonomy = taxonomyForCanonicalChannel(stats.repChannel);
-    const rows = taxonomy
+    const savedRows = taxonomy
       ? await this.prisma.prospect.findMany({ where: { companyId: user.companyId!, marketSegment: taxonomy.segment, ...(query.minimumScore === undefined ? {} : { scoreTotal: { gte: query.minimumScore } }) }, include: { intelligenceProfile: { select: { businessClassification: true, productFitInsights: true } } }, orderBy: { createdAt: "desc" } })
       : [];
+    const rows = savedRows.filter((prospect) => prospect.channel === null || channelsLooselyMatch(prospect.channel, stats.repChannel));
     await this.buildMissingProductFit(user, rows, warnings);
     const enrichedRows = rows.length === 0 ? rows : await this.prisma.prospect.findMany({ where: { id: { in: rows.map((prospect) => prospect.id) } }, include: { intelligenceProfile: { select: { businessClassification: true, productFitInsights: true } } }, orderBy: { createdAt: "desc" } });
     const prospects = this.scoreProspects(enrichedRows, stats).sort((a, b) => b.priorityScore - a.priorityScore);
