@@ -4,6 +4,7 @@
 
 @layer base {
   :root {
+    color-scheme: light;
     /* Field Sales OS / Murshidak — light theme (glassmorphism, blue accent).
        Values are HSL triplets (no hsl() wrapper) so Tailwind can compose
        them with opacity modifiers. Adopted July 2026 per the shared visual-
@@ -59,6 +60,7 @@
   }
 
   .dark {
+    color-scheme: dark;
     /* Dark variant — navy glass, same blue accent as light so the brand
        identity carries across both modes; only the base surfaces flip. */
     --background: 222 47% 7%;
