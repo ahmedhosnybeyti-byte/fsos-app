@@ -52,7 +52,7 @@ function priorityBadgeClass(priority: VisitCopilot360ExecutionStep["priority"]):
 }
 
 export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate, from, to }: Props) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [exporting, setExporting] = useState(false);
@@ -225,7 +225,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
             ) : !summary ? (
               <p className="py-16 text-center text-sm text-muted-foreground">{t("copilot.summary360Empty")}</p>
             ) : (
-              <div className="space-y-6 max-md:space-y-3" dir="rtl">
+              <div className="space-y-6 max-md:space-y-3" dir={locale === "ar" ? "rtl" : "ltr"}>
                 {/* Executive summary */}
                 <section className="glass-card space-y-2 p-4 max-md:space-y-1.5 max-md:p-3">
                   <h3 className="flex items-center gap-2 text-sm font-semibold">
@@ -241,11 +241,11 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                 <section className="glass-card space-y-1.5 p-4 max-md:space-y-1 max-md:p-3">
                   <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold">
                     <span aria-hidden>📊</span>
-                    نطاق التقرير
+                    {t("copilot.summary360ReportScope")}
                   </h3>
                   <ul className="space-y-1 text-sm max-md:text-[13px] max-md:leading-5">
                     <li>
-                      <span className="font-medium text-muted-foreground">النطاق: </span>
+                      <span className="font-medium text-muted-foreground">{t("copilot.summary360ScopeLabel")} </span>
                       {summary.scopeLabel}
                     </li>
                     <li>
@@ -253,12 +253,12 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                       {summary.userName}
                     </li>
                     <li>
-                      <span className="font-medium text-muted-foreground">التاريخ: </span>
+                      <span className="font-medium text-muted-foreground">{t("copilot.summary360ReportDate")} </span>
                       {summary.reportDate}
                     </li>
                     <li>
-                      <span className="font-medium text-muted-foreground">الفترة المقارنة: </span>
-                      {summary.period.from} إلى {summary.period.to}
+                      <span className="font-medium text-muted-foreground">{t("copilot.summary360ComparisonPeriod")} </span>
+                      {summary.period.from} {locale === "ar" ? "إلى" : "to"} {summary.period.to}
                     </li>
                   </ul>
                 </section>
