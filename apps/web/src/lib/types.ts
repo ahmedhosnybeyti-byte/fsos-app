@@ -1562,6 +1562,8 @@ export interface VisitCopilotProspect {
   catalogFitConfidence?: number | null;
   commercialTier?: "PREMIUM" | "MID_MARKET" | "VALUE" | null;
   productFit?: Array<{ productCode: string; productName: string; reasons: string[] }>;
+  nearbyBestSellers?: Array<{ productCode: string; productName: string; nearbyCustomerCount: number }>;
+  nearbySalesCustomerCount?: number;
   address?: string | null;
   phone?: string | null;
   externalKey?: string;

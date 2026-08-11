@@ -79,6 +79,8 @@ const PROXIMITY_DECAY_KM = 10;
 const ROUTE_OPPORTUNITY_HIGH_SCORE = 70;
 const ROUTE_OPPORTUNITY_MEDIUM_SCORE = 40;
 const BEST_OPPORTUNITIES_LIMIT = 2;
+const NEARBY_PRODUCT_RADIUS_KM = 3;
+const NEARBY_PRODUCT_MIN_CUSTOMERS = 2;
 
 // Loose channel equality — real data mixes labels ("TT" vs "Traditional
 // Trade"), so equal-or-substring either way, case-insensitive.
@@ -196,6 +198,8 @@ export interface ScoredProspect {
   catalogFitConfidence: number | null;
   commercialTier: "PREMIUM" | "MID_MARKET" | "VALUE" | null;
   productFit: { productCode: string; productName: string; reasons: string[] }[];
+  nearbyBestSellers?: { productCode: string; productName: string; nearbyCustomerCount: number }[];
+  nearbySalesCustomerCount?: number;
   address: string | null;
   phone: string | null;
   externalKey: string;
@@ -1564,9 +1568,10 @@ export class VisitCopilotService {
       ? await this.prisma.prospect.findMany({ where: { companyId: user.companyId!, marketSegment: taxonomy.segment, ...(query.minimumScore === undefined ? {} : { scoreTotal: { gte: query.minimumScore } }) }, include: { intelligenceProfile: { select: { businessClassification: true, productFitInsights: true } } }, orderBy: { createdAt: "desc" } })
       : [];
     const rows = savedRows.filter((prospect) => prospect.channel === null || (stats.repChannel !== null && channelsLooselyMatch(prospect.channel, stats.repChannel)));
-    await this.buildMissingProductFit(user, rows, warnings);
+    await this.buildMissingProductFit(user, rows, warnings, stats.repChannel);
     const enrichedRows = rows.length === 0 ? rows : await this.prisma.prospect.findMany({ where: { id: { in: rows.map((prospect) => prospect.id) } }, include: { intelligenceProfile: { select: { businessClassification: true, productFitInsights: true } } }, orderBy: { createdAt: "desc" } });
-    const prospects = this.scoreProspects(enrichedRows, stats).sort((a, b) => b.priorityScore - a.priorityScore);
+    const nearbyBestSellers = await this.buildNearbyBestSellers(user, stats.range, enrichedRows, stats.repChannel, warnings);
+    const prospects = this.scoreProspects(enrichedRows, stats, new Map(), nearbyBestSellers).sort((a, b) => b.priorityScore - a.priorityScore);
     // Map layer of existing customers — only ones with usable coordinates.
     const customers: DiscoveryCustomer[] = stats.customers
       .filter((c) => c.lat !== null && c.lon !== null)
@@ -1647,9 +1652,10 @@ export class VisitCopilotService {
         if (url) photoUrls.set(place.externalKey, { url, attribution: place.photo!.attribution });
       }));
     }
-    await this.buildMissingProductFit(user, materialized.prospects, warnings);
+    await this.buildMissingProductFit(user, materialized.prospects, warnings, stats.repChannel);
     const enriched = await this.prisma.prospect.findMany({ where: { id: { in: materialized.prospects.map((prospect) => prospect.id) } }, include: { intelligenceProfile: { select: { businessClassification: true, productFitInsights: true } } } });
-    return { found: materialized.found, newCount: materialized.newCount, prospects: this.scoreProspects(enriched, stats, photoUrls).sort((a, b) => b.priorityScore - a.priorityScore), warnings };
+    const nearbyBestSellers = await this.buildNearbyBestSellers(user, stats.range, enriched, stats.repChannel, warnings);
+    return { found: materialized.found, newCount: materialized.newCount, prospects: this.scoreProspects(enriched, stats, photoUrls, nearbyBestSellers).sort((a, b) => b.priorityScore - a.priorityScore), warnings };
     const found = places.length;
 
     // A place within ~100m of an existing customer IS that customer — skip.
@@ -1694,7 +1700,8 @@ export class VisitCopilotService {
     return { found, newCount: keys.filter((key) => !existingKeys.has(key)).length, prospects, warnings };
   }
 
-  private async buildMissingProductFit(user: AuthenticatedUser, prospects: readonly (Prospect & { intelligenceProfile?: { productFitInsights: unknown } | null })[], warnings: string[]) {
+  private async buildMissingProductFit(user: AuthenticatedUser, prospects: readonly (Prospect & { intelligenceProfile?: { productFitInsights: unknown } | null })[], warnings: string[], repChannel: string | null) {
+    if (taxonomyForCanonicalChannel(repChannel)?.category !== "horeca") return;
     for (const prospect of prospects) {
       const fit = prospect.intelligenceProfile?.productFitInsights;
       if (fit && typeof fit === "object" && !Array.isArray(fit)) continue;
@@ -1968,13 +1975,37 @@ export class VisitCopilotService {
     return round2(median(pool.map((c) => c.avgOrderValue)));
   }
 
+  private async buildNearbyBestSellers(user: AuthenticatedUser, range: VisitCopilotPeriodRange, prospects: readonly Prospect[], repChannel: string | null, warnings: string[]) {
+    const category = taxonomyForCanonicalChannel(repChannel)?.category;
+    if (category !== "traditional" && category !== "modern") return new Map<string, { products: ScoredProspect["nearbyBestSellers"]; customerCount: number }>();
+    const ctx = this.rieContext(user);
+    const [customers, invoices, items, products] = await Promise.all([this.requireCustomers(ctx), this.tryEntity(ctx, "Invoices", "الفواتير", warnings), this.tryEntity(ctx, "Invoice Items", "أصناف الفاتورة", warnings), this.tryEntity(ctx, "Products", "الأصناف", warnings)]);
+    const names = new Map(products.map((row) => [String(row.ProductCode ?? "").trim(), String(row.ProductName ?? row.ProductCode ?? "").trim()]));
+    const invoiceCustomers = new Map<string, string>();
+    for (const row of invoices) { const no = String(row.InvoiceNo ?? "").trim(); const code = String(row.CustomerCode ?? "").trim(); const date = isoDayOf(row.InvoiceDate); if (no && code && date && date >= range.from && date <= range.to) invoiceCustomers.set(no, code); }
+    const byCustomer = new Map<string, Map<string, { lines: number; qty: number }>>();
+    for (const row of items) { const customer = invoiceCustomers.get(String(row.InvoiceNo ?? "").trim()); const code = String(row.ProductCode ?? "").trim(); if (!customer || !code) continue; const product = byCustomer.get(customer) ?? new Map(); const agg = product.get(code) ?? { lines: 0, qty: 0 }; agg.lines++; agg.qty += toFiniteNumber(row.Quantity) ?? 0; product.set(code, agg); byCustomer.set(customer, product); }
+    const points = customers.map((row) => ({ code: String(row.CustomerCode ?? "").trim(), channel: String(row.Channel ?? "").trim(), lat: toFiniteNumber(row.Latitude), lon: toFiniteNumber(row.Longitude) })).filter((row) => row.code && row.lat !== null && row.lon !== null && byCustomer.has(row.code));
+    const result = new Map<string, { products: ScoredProspect["nearbyBestSellers"]; customerCount: number }>();
+    for (const prospect of prospects) {
+      if (prospect.lat === null || prospect.lon === null) { result.set(prospect.id, { products: [], customerCount: 0 }); continue; }
+      const near = points.filter((row) => haversineKm({ lat: prospect.lat!, lon: prospect.lon! }, { lat: row.lat!, lon: row.lon! }) <= NEARBY_PRODUCT_RADIUS_KM);
+      const same = near.filter((row) => row.channel && repChannel && channelsLooselyMatch(row.channel, repChannel)); const evidenceCustomers = same.length ? same : near;
+      const ranking = new Map<string, { customers: number; lines: number; qty: number }>();
+      for (const customer of evidenceCustomers) for (const [code, sales] of byCustomer.get(customer.code) ?? []) { const agg = ranking.get(code) ?? { customers: 0, lines: 0, qty: 0 }; agg.customers++; agg.lines += sales.lines; agg.qty += sales.qty; ranking.set(code, agg); }
+      const customerCount = evidenceCustomers.length;
+      result.set(prospect.id, { customerCount, products: customerCount < NEARBY_PRODUCT_MIN_CUSTOMERS ? [] : [...ranking.entries()].map(([productCode, sales]) => ({ productCode, productName: names.get(productCode) || productCode, nearbyCustomerCount: sales.customers, lines: sales.lines, qty: sales.qty })).sort((a, b) => b.nearbyCustomerCount - a.nearbyCustomerCount || b.lines - a.lines || b.qty - a.qty).slice(0, 3).map(({ productCode, productName, nearbyCustomerCount }) => ({ productCode, productName, nearbyCustomerCount })) });
+    }
+    return result;
+  }
+
   // Rule-based prospect scoring (no model call):
   //   successProbability = clamp(0.1..0.9, 0.5 + 0.2·channelMatch +
   //     0.3·proximity)  — proximity decays linearly to 0 at 10km from the
   //     rep-customer centroid;
   //   priorityScore 0-100 = 50% min-max-normalized expectedOrderValue +
   //     50% successProbability.
-  private scoreProspects(prospects: Array<Prospect & { intelligenceProfile?: { businessClassification: unknown; productFitInsights: unknown } | null }>, stats: DiscoveryStats, photoUrls = new Map<string, { url: string; attribution: string | null }>()): ScoredProspect[] {
+  private scoreProspects(prospects: Array<Prospect & { intelligenceProfile?: { businessClassification: unknown; productFitInsights: unknown } | null }>, stats: DiscoveryStats, photoUrls = new Map<string, { url: string; attribution: string | null }>(), nearbyBestSellers = new Map<string, { products: ScoredProspect["nearbyBestSellers"]; customerCount: number }>()): ScoredProspect[] {
     const base = prospects.map((p) => {
       const hasCoords = p.lat !== null && p.lon !== null && isSaneCoordinate(p.lat, p.lon);
       const distanceKm = hasCoords && stats.centroid ? round2(haversineKm({ lat: p.lat!, lon: p.lon! }, stats.centroid)) : null;
@@ -2026,6 +2057,7 @@ export class VisitCopilotService {
         businessType: b.p.businessType,
         scoreConfidence: b.p.scoreConfidence,
         ...prospectIntelligence(b.p.intelligenceProfile),
+        ...(nearbyBestSellers.has(b.p.id) ? { nearbyBestSellers: nearbyBestSellers.get(b.p.id)!.products, nearbySalesCustomerCount: nearbyBestSellers.get(b.p.id)!.customerCount } : {}),
       };
     });
   }

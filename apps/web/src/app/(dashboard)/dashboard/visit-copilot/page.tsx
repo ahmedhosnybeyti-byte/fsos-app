@@ -665,7 +665,13 @@ function VisitCopilotScreen() {
                             </div>
                           </div>
                           <p className="mt-2 text-xs text-muted-foreground">{prospect.reason}</p>
-                          {prospect.productFit && prospect.productFit.length > 0 && (
+                          {prospect.nearbyBestSellers !== undefined ? (
+                            <div className="mt-2 space-y-1 text-xs">
+                              <p className="font-medium">الأصناف الأكثر نجاحًا حول العميل</p>
+                              {prospect.nearbyBestSellers.length > 0 ? prospect.nearbyBestSellers.map((product) => <p key={product.productCode}><span className="font-medium">{product.productName}</span>{` — يباع لدى ${product.nearbyCustomerCount} عميل قريب`}</p>) : <p>بيانات المنطقة غير كافية لاقتراح أصناف</p>}
+                              {prospect.nearbyBestSellers.length > 0 && <p className="text-muted-foreground">مبني على مبيعات {prospect.nearbySalesCustomerCount ?? 0} عميل قريب من نفس المنطقة</p>}
+                            </div>
+                          ) : prospect.productFit && prospect.productFit.length > 0 && (
                             <div className="mt-2 space-y-1 text-xs">
                               <p className="font-medium">فرصة البيع</p>
                               {prospect.productFit.slice(0, 3).map((product) => <p key={product.productCode}><span className="font-medium">{product.productName}</span>{product.reasons.length ? ` — ${product.reasons.join("، ")}` : ""}</p>)}
