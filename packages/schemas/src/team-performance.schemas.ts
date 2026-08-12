@@ -33,6 +33,10 @@ export const teamPerformanceRieQuerySchema = z
     // compare against).
     priorDateFrom: z.string().min(1).max(50).optional(),
     priorDateTo: z.string().min(1).max(50).optional(),
+    // Route IDs are resolved from the caller's already RIE-scoped Routes
+    // dataset. They narrow a Team Performance workspace; they never expand
+    // the caller's company/role scope.
+    routeIds: z.array(z.string().min(1).max(200)).max(300).optional(),
   })
   .refine((v) => !(v.priorDateFrom && !v.priorDateTo) && !(v.priorDateTo && !v.priorDateFrom), {
     message: "priorDateFrom and priorDateTo must be provided together",
@@ -81,6 +85,15 @@ export const teamPerformanceResultSchema = z.object({
     collection: z.boolean(),
     returns: z.boolean(),
   }),
+  summary: z.object({
+    sales: z.number().nullable(),
+    collections: z.number().nullable(),
+    productiveCustomers: z.number().nullable(),
+    averageInvoice: z.number().nullable(),
+    skus: z.number().nullable(),
+    returns: z.number().nullable(),
+  }),
+  targets: z.array(z.object({ key: z.string(), label: z.string(), target: z.number(), actual: z.number().nullable(), progressPct: z.number().nullable(), primary: z.boolean() })),
 });
 export type TeamPerformanceResult = z.infer<typeof teamPerformanceResultSchema>;
 

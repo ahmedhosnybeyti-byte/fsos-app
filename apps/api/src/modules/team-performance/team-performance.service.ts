@@ -144,19 +144,23 @@ export class TeamPerformanceService {
 
   async query(user: AuthenticatedUser, input: TeamPerformanceRieQueryInput): Promise<TeamPerformanceResult> {
     const ctx = this.rieContext(user);
-    const [routesResult, employeesResult, invoicesResult, invoiceItemsResult, collectionsResult, returnsResult] = await Promise.all([
+    const [routesResult, employeesResult, invoicesResult, invoiceItemsResult, collectionsResult, returnsResult, targetsResult] = await Promise.all([
       this.rieFacade.getEntityRecords("Routes", ctx),
       this.rieFacade.getEntityRecords("Employees", ctx),
       this.rieFacade.getEntityRecords("Invoices", ctx),
       this.rieFacade.getEntityRecords("Invoice Items", ctx),
       this.rieFacade.getEntityRecords("Collections", ctx),
       this.rieFacade.getEntityRecords("Returns", ctx),
+      this.rieFacade.getEntityRecords("Targets", ctx),
     ]);
     // Routes/Employees are structural prerequisites for rep identity across
     // the whole platform (same as every migrated screen) — not one of the
     // three independent business categories, so this still hard-fails.
     this.assertEntityAvailable(routesResult, "المسارات");
 
+    const requestedRouteIds = input.routeIds?.length ? new Set(input.routeIds) : null;
+    const visibleRouteIds = new Set(routesResult.records.map((route) => String(route.RouteID ?? "").trim()).filter(Boolean));
+    const routeAllowed = (routeId: string) => visibleRouteIds.has(routeId) && (!requestedRouteIds || requestedRouteIds.has(routeId));
     const resolveRep = this.buildRepResolver(routesResult, employeesResult);
 
     // Sales needs both Invoices (RouteID + InvoiceDate) and Invoice Items
@@ -173,7 +177,11 @@ export class TeamPerformanceService {
     const priorToTime = input.priorDateTo ? Date.parse(input.priorDateTo) : null;
 
     const acc = new Map<string, RepAccumulator>();
+    const currentInvoiceNos = new Set<string>();
+    const currentCustomers = new Set<string>();
+    const currentSkus = new Set<string>();
     const getOrCreate = (routeId: string): RepAccumulator | null => {
+      if (!routeAllowed(routeId)) return null;
       const resolved = resolveRep(routeId);
       if (!resolved) return null;
       let entry = acc.get(resolved.repKey);
@@ -200,11 +208,11 @@ export class TeamPerformanceService {
       // join shape as Heat Map/Customer Comparison (REL-CU-002/REL-IN-003),
       // sourcing LineTotal rather than Invoices.TotalAfterVAT (product
       // decision #1).
-      const invoiceMeta = new Map<string, { routeId: string; time: number | null }>();
+      const invoiceMeta = new Map<string, { routeId: string; time: number | null; customerCode: string }>();
       for (const inv of invoicesResult.records) {
         const no = String(inv.InvoiceNo ?? "").trim();
         const routeId = String(inv.RouteID ?? "").trim();
-        if (no && routeId) invoiceMeta.set(no, { routeId, time: toEpochMs(inv.InvoiceDate) });
+        if (no && routeId) invoiceMeta.set(no, { routeId, time: toEpochMs(inv.InvoiceDate), customerCode: String(inv.CustomerCode ?? "").trim() });
       }
       for (const item of invoiceItemsResult.records) {
         const invoiceNo = String(item.InvoiceNo ?? "").trim();
@@ -213,7 +221,7 @@ export class TeamPerformanceService {
         const amount = toFiniteNumber(item.LineTotal) ?? 0;
         if (meta.time >= fromTime && meta.time <= toTime) {
           const entry = getOrCreate(meta.routeId);
-          if (entry) entry.sales += amount;
+          if (entry) { entry.sales += amount; currentInvoiceNos.add(invoiceNo); if (meta.customerCode) currentCustomers.add(meta.customerCode); const sku = String(item.ProductCode ?? "").trim(); if (sku) currentSkus.add(sku); }
         }
         if (hasPrior && priorFromTime !== null && priorToTime !== null && meta.time >= priorFromTime && meta.time <= priorToTime) {
           const entry = getOrCreate(meta.routeId);
@@ -225,7 +233,7 @@ export class TeamPerformanceService {
     if (collectionAvailable) {
       for (const row of collectionsResult.records) {
         const routeId = String(row.RouteID ?? "").trim();
-        if (!routeId) continue;
+        if (!routeId || !routeAllowed(routeId)) continue;
         const t = toEpochMs(row.CollectionDate);
         if (t === null) continue;
         const amount = toFiniteNumber(row.Amount) ?? 0;
@@ -243,7 +251,7 @@ export class TeamPerformanceService {
     if (returnsAvailable) {
       for (const row of returnsResult.records) {
         const routeId = String(row.RouteID ?? "").trim();
-        if (!routeId) continue;
+        if (!routeId || !routeAllowed(routeId)) continue;
         const t = toEpochMs(row.ReturnDate);
         if (t === null) continue;
         const amount = toFiniteNumber(row.TotalAmount) ?? 0;
@@ -272,10 +280,24 @@ export class TeamPerformanceService {
     }));
     reps.sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0));
 
+    const sum = (field: "sales" | "collection" | "returns") => reps.some((rep) => rep[field] !== null) ? reps.reduce((total, rep) => total + (rep[field] ?? 0), 0) : null;
+    const month = new Date(input.dateFrom).getUTCMonth() + 1;
+    const year = new Date(input.dateFrom).getUTCFullYear();
+    const targetRows = targetsResult.available ? targetsResult.records.filter((row) => Number(row.Year) === year && Number(row.Month) === month && (!requestedRouteIds || routeAllowed(String(row.RouteID ?? "").trim()))) : [];
+    const target = (field: string) => targetRows.reduce((total, row) => total + (toFiniteNumber(row[field]) ?? 0), 0);
+    const summary = { sales: sum("sales"), collections: sum("collection"), productiveCustomers: salesAvailable ? currentCustomers.size : null, averageInvoice: salesAvailable && currentInvoiceNos.size ? (sum("sales") ?? 0) / currentInvoiceNos.size : null, skus: salesAvailable ? currentSkus.size : null, returns: sum("returns") };
+    const targetDefinitions: Array<{ key: string; label: string; actual: number | null; primary: boolean }> = [
+      { key: "SalesTarget", label: "Sales target", actual: summary.sales, primary: true }, { key: "CollectionTarget", label: "Collection target", actual: summary.collections, primary: true },
+      { key: "ActiveCustomersTarget", label: "Productive customers target", actual: summary.productiveCustomers, primary: false }, { key: "SKUDistributionTarget", label: "SKU distribution target", actual: summary.skus, primary: false },
+    ];
+    const targets = targetDefinitions.map(({ key, label, actual, primary }) => { const value = target(key); return { key, label, target: value, actual, progressPct: value > 0 && actual !== null ? (actual / value) * 100 : null, primary }; }).filter((item) => item.target > 0);
+
     return {
       reps,
       scopedToOwnTeam: user.roleCode === "SUPERVISOR",
       categoriesAvailable: { sales: salesAvailable, collection: collectionAvailable, returns: returnsAvailable },
+      summary,
+      targets,
     };
   }
 

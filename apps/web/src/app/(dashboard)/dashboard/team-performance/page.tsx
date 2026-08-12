@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Download, TrendingDown, TrendingUp, Users, Wand2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, TrendingDown, TrendingUp, Users, Wand2, CircleDollarSign, ClipboardCheck, ReceiptText, Package, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { teamPerformanceApi } from "@/lib/api";
 import { ApiError } from "@/lib/api-client";
@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { KpiCard } from "@/components/dashboard/kpi-card";
 import { useTranslation } from "@/components/translation-provider";
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
 import type { TeamPerformanceCoachResult, TeamPerformanceRepRow, TeamPerformanceResult } from "@/lib/types";
@@ -40,11 +41,17 @@ export default function TeamPerformancePage() {
   const [priorDateTo, setPriorDateTo] = useState("");
 
   const [result, setResult] = useState<TeamPerformanceResult | null>(null);
+  const [mode, setMode] = useState<"focus" | "compare">("focus");
+  const [selectedSupervisor, setSelectedSupervisor] = useState("");
+  const [selectedReps, setSelectedReps] = useState<string[]>([]);
+  const [showAdditionalTargets, setShowAdditionalTargets] = useState(false);
+  const [diagnostic, setDiagnostic] = useState<string | null>(null);
 
   const queryMutation = useMutation({
     mutationFn: teamPerformanceApi.query,
     onSuccess: (data) => {
       setResult(data);
+      setSelectedSupervisor(""); setSelectedReps([]); setDiagnostic(null);
       toast.success(t("teamPerformance.repCount", { count: data.reps.length }));
     },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : t("teamPerformance.loadError")),
@@ -134,6 +141,19 @@ export default function TeamPerformancePage() {
             </Button>
           </div>
           {result.scopedToOwnTeam ? <FlatTeamView reps={result.reps} /> : <ManagerTreeView reps={result.reps} />}
+          <TeamPerformanceIntelligence
+            result={result}
+            mode={mode}
+            onModeChange={setMode}
+            selectedSupervisor={selectedSupervisor}
+            onSupervisorChange={setSelectedSupervisor}
+            selectedReps={selectedReps}
+            onSelectedRepsChange={setSelectedReps}
+            showAdditionalTargets={showAdditionalTargets}
+            onShowAdditionalTargets={setShowAdditionalTargets}
+            diagnostic={diagnostic}
+            onDiagnostic={setDiagnostic}
+          />
         </>
       )}
     </div>
@@ -163,6 +183,51 @@ function CategoryAvailabilityBadges({ categoriesAvailable }: { categoriesAvailab
     </div>
   );
 }
+
+function TeamPerformanceIntelligence(props: {
+  result: TeamPerformanceResult; mode: "focus" | "compare"; onModeChange: (mode: "focus" | "compare") => void;
+  selectedSupervisor: string; onSupervisorChange: (value: string) => void; selectedReps: string[]; onSelectedRepsChange: (value: string[]) => void;
+  showAdditionalTargets: boolean; onShowAdditionalTargets: (value: boolean) => void; diagnostic: string | null; onDiagnostic: (value: string | null) => void;
+}) {
+  const supervisors = useMemo(() => Array.from(new Map(props.result.reps.map((rep) => [rep.supervisorEmail ?? "__unassigned__", rep.supervisorName ?? "Unassigned"])).entries()), [props.result.reps]);
+  const availableReps = useMemo(() => props.result.reps.filter((rep) => !props.selectedSupervisor || (rep.supervisorEmail ?? "__unassigned__") === props.selectedSupervisor), [props.result.reps, props.selectedSupervisor]);
+  const focused = useMemo(() => props.selectedReps.length ? availableReps.filter((rep) => props.selectedReps.includes(rep.repEmail)) : availableReps, [availableReps, props.selectedReps]);
+  const totals = useMemo(() => {
+    const sum = (field: "sales" | "collection" | "returns") => focused.some((rep) => rep[field] !== null) ? focused.reduce((value, rep) => value + (rep[field] ?? 0), 0) : null;
+    const sales = sum("sales"); const collections = sum("collection"); const returns = sum("returns");
+    return { sales, collections, returns, productiveCustomers: props.selectedReps.length ? null : props.result.summary.productiveCustomers, averageInvoice: props.selectedReps.length ? null : props.result.summary.averageInvoice, skus: props.selectedReps.length ? null : props.result.summary.skus };
+  }, [focused, props.result.summary, props.selectedReps.length]);
+  const diagnosticText = useMemo(() => {
+    if (!props.diagnostic) return null;
+    const value = totals[props.diagnostic as keyof typeof totals];
+    if (value === null || value === undefined) return "Insufficient data";
+    const priorField = props.diagnostic === "sales" ? "salesPrior" : props.diagnostic === "collections" ? "collectionPrior" : props.diagnostic === "returns" ? "returnsPrior" : null;
+    const prior = priorField ? focused.reduce((sum, rep) => sum + (rep[priorField] ?? 0), 0) : null;
+    const declining = prior !== null && prior > 0 && value < prior;
+    const returnRate = totals.sales && totals.returns !== null ? totals.returns / totals.sales : null;
+    if (props.diagnostic === "returns" && returnRate !== null && returnRate > 0.1) return `Issue: elevated returns. Evidence: returns are ${(returnRate * 100).toFixed(1)}% of sales. Possible cause: possible over-loading; confidence: medium. Recommended action: review delivery quantities against sell-through.`;
+    if (declining) return `Issue: performance declined. Evidence: ${props.diagnostic} is below the comparison period. Possible cause: insufficient evidence to attribute a root cause; confidence: medium. Recommended action: review the selected team's execution plan.`;
+    return `Issue: no material adverse signal. Evidence: current ${props.diagnostic} is supported by the selected data. Possible cause: not applicable; confidence: high. Recommended action: continue monitoring.`;
+  }, [focused, props.diagnostic, totals]);
+  const cards = [
+    ["sales", "Sales", totals.sales, CircleDollarSign], ["collections", "Collections", totals.collections, ClipboardCheck], ["productiveCustomers", "Productive Customers", totals.productiveCustomers, Users],
+    ["averageInvoice", "Average Invoice", totals.averageInvoice, ReceiptText], ["skus", "Products / SKUs", totals.skus, Package], ["returns", "Returns", totals.returns, RotateCcw],
+  ] as const;
+  const targets = props.result.targets.filter((target) => target.primary);
+  const additionalTargets = props.result.targets.filter((target) => !target.primary);
+  const compared = props.selectedReps.length > 1 ? focused.slice().sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0)) : [];
+  return <section className="space-y-5"><Card className="glass-card"><CardHeader><CardTitle>Team Performance Intelligence</CardTitle></CardHeader><CardContent className="space-y-4">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Label>Region<select disabled className="mt-1 h-10 w-full rounded border bg-background px-2"><option>Company scope</option></select></Label><Label>Manager<select disabled className="mt-1 h-10 w-full rounded border bg-background px-2"><option>Available on managed hierarchy</option></select></Label><Label>Supervisor<select value={props.selectedSupervisor} onChange={(e) => { props.onSupervisorChange(e.target.value); props.onSelectedRepsChange([]); }} className="mt-1 h-10 w-full rounded border bg-background px-2"><option value="">All supervisors</option>{supervisors.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></Label><Label>Sales Rep<select value="" onChange={(e) => { if (e.target.value && !props.selectedReps.includes(e.target.value)) props.onSelectedRepsChange([...props.selectedReps, e.target.value]); }} className="mt-1 h-10 w-full rounded border bg-background px-2"><option value="">Choose rep</option>{availableReps.map((rep) => <option key={rep.repEmail} value={rep.repEmail}>{rep.repName}</option>)}</select></Label></div>
+    <div className="flex gap-2"><Button size="sm" variant={props.mode === "focus" ? "default" : "outline"} onClick={() => props.onModeChange("focus")}>Focus Mode</Button><Button size="sm" variant={props.mode === "compare" ? "default" : "outline"} onClick={() => props.onModeChange("compare")}>Compare Mode</Button></div>
+    {props.mode === "compare" && <div className="flex flex-wrap gap-2">{availableReps.map((rep) => <label key={rep.repEmail} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={props.selectedReps.includes(rep.repEmail)} onChange={() => props.onSelectedRepsChange(props.selectedReps.includes(rep.repEmail) ? props.selectedReps.filter((id) => id !== rep.repEmail) : [...props.selectedReps, rep.repEmail])} />{rep.repName}</label>)}</div>}
+  </CardContent></Card>
+  {props.mode === "focus" ? <><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">{cards.map(([key, label, value, Icon]) => <KpiCard key={key} icon={Icon} label={label} value={value === null ? "Insufficient data" : Math.round(value).toLocaleString()} hint="Click for evidence-based diagnostic" onClick={() => props.onDiagnostic(key)} />)}</div>{diagnosticText && <Card><CardContent className="p-4 text-sm"><strong>Diagnostic</strong><p className="mt-2">{diagnosticText}</p></CardContent></Card>}</> : <CompareSections reps={compared} />}
+  <TargetSection title="Performance vs target" targets={targets} /><Button variant="ghost" size="sm" onClick={() => props.onShowAdditionalTargets(!props.showAdditionalTargets)}>{props.showAdditionalTargets ? "Hide additional targets" : "Show additional targets"}</Button>{props.showAdditionalTargets && <TargetSection title="Additional targets" targets={additionalTargets} />}
+  </section>;
+}
+
+function TargetSection({ title, targets }: { title: string; targets: TeamPerformanceResult["targets"] }) { return <Card><CardHeader><CardTitle className="text-base">{title}</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2">{targets.length ? targets.map((target) => <div key={target.key} className="rounded border p-3 text-sm"><div className="flex justify-between"><span>{target.label}</span><strong>{target.progressPct === null ? "Insufficient data" : `${target.progressPct.toFixed(0)}%`}</strong></div><p className="mt-1 text-muted-foreground">{target.actual ?? "—"} / {target.target}</p></div>) : <p className="text-sm text-muted-foreground">Insufficient data</p>}</CardContent></Card>; }
+function CompareSections({ reps }: { reps: TeamPerformanceRepRow[] }) { return <div className="space-y-3">{["Growth rates", "Performance vs target", "Additional targets"].map((title) => <Card key={title}><CardHeader><CardTitle className="text-base">{title}</CardTitle></CardHeader><CardContent>{reps.length ? reps.map((rep) => <div key={rep.repEmail} className="border-b py-2 text-sm last:border-0">{rep.repName} — Sales: {rep.sales ?? "Insufficient data"}</div>) : <p className="text-sm text-muted-foreground">Select at least two Sales Reps.</p>}</CardContent></Card>)}</div>; }
 
 function FlatTeamView({ reps }: { reps: TeamPerformanceRepRow[] }) {
   const { t } = useTranslation();

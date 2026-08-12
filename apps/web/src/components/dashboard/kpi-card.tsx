@@ -78,6 +78,8 @@ export function KpiCard({
   trend,
   featured,
   tagLabel,
+  onClick,
+  hint,
 }: {
   icon: LucideIcon;
   label: string;
@@ -87,6 +89,8 @@ export function KpiCard({
   trend?: { direction: "up" | "down"; changeLabel: string };
   featured?: boolean;
   tagLabel?: string;
+  onClick?: () => void;
+  hint?: string;
 }) {
   const glowClass = glow ? `glow-${glow}` : undefined;
   const iconTint = glow ? GLOW_TEXT[glow] : "text-primary";
@@ -95,7 +99,12 @@ export function KpiCard({
 
   return (
     <div
-      className={cn("glass-card card-lift", glowClass, featured ? "p-3 sm:col-span-2 sm:p-6" : "p-3 opacity-90 sm:p-5")}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      title={hint}
+      onClick={onClick}
+      onKeyDown={onClick ? (event) => { if (event.key === "Enter" || event.key === " ") onClick(); } : undefined}
+      className={cn("glass-card card-lift", glowClass, featured ? "p-3 sm:col-span-2 sm:p-6" : "p-3 opacity-90 sm:p-5", onClick && "cursor-pointer")}
     >
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm font-medium text-muted-foreground">{label}</p>

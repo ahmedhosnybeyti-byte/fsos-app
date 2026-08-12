@@ -677,6 +677,7 @@ export interface TeamPerformanceQueryRequest {
   dateTo: string;
   priorDateFrom?: string;
   priorDateTo?: string;
+  routeIds?: string[];
 }
 
 // null on sales/collection/returns = that category's Dataset isn't
@@ -705,6 +706,8 @@ export interface TeamPerformanceResult {
     collection: boolean;
     returns: boolean;
   };
+  summary: { sales: number | null; collections: number | null; productiveCustomers: number | null; averageInvoice: number | null; skus: number | null; returns: number | null; };
+  targets: Array<{ key: string; label: string; target: number; actual: number | null; progressPct: number | null; primary: boolean }>;
 }
 
 export interface TeamPerformanceCoachRequest {
