@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { PASSWORD_POLICY } from "./constants";
-import { companyAccountTypeSchema } from "./enums";
+import { roleCodeSchema } from "./enums";
 
 // Loose on purpose — this only needs to be "clearly a phone/WhatsApp
 // number", not validated against a specific country format. Accepts
@@ -30,13 +30,27 @@ export const passwordSchema = z
 
 // Registration always creates a new Company + its first COMPANY_ADMIN user —
 // the platform never lets a self-serve signup pick a role for themselves.
+export const trialCountrySchema = z.enum(["EGYPT", "SAUDI_ARABIA"]);
+export type TrialCountry = z.infer<typeof trialCountrySchema>;
+
+export const trialRoleSchema = roleCodeSchema.extract(["COMPANY_ADMIN", "SALES_REP"]);
+export type TrialRole = z.infer<typeof trialRoleSchema>;
+export const trialChannelSchema = z.enum(["CASH_VAN", "HORECA"]);
+export const trialAreaSchema = z.enum(["ALEXANDRIA", "SHARQIA"]);
+
 export const registerSchema = z.object({
-  companyName: z.string().min(2).max(120),
   fullName: z.string().min(2).max(120),
   email: z.string().email().toLowerCase(),
   password: passwordSchema,
   whatsapp: whatsappSchema,
-  accountType: companyAccountTypeSchema,
+  country: trialCountrySchema,
+  trialRole: trialRoleSchema,
+  trialChannel: trialChannelSchema.optional(),
+  trialArea: trialAreaSchema.optional(),
+}).superRefine((value, ctx) => {
+  if (value.trialRole !== "SALES_REP") return;
+  if (!value.trialChannel) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["trialChannel"], message: "Channel is required for Sales Rep" });
+  if (value.country === "EGYPT" && !value.trialArea) ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["trialArea"], message: "Area is required for Egypt Sales Rep" });
 });
 export type RegisterInput = z.infer<typeof registerSchema>;
 

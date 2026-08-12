@@ -14,4 +14,6 @@ export interface AuthenticatedUser {
   // + Company Context + Organizational Context + Roles + Effective
   // Permissions) alongside companyId/roleCode/permissions above.
   orgUnitId: string | null;
+  trialStartsAt?: Date | null;
+  trialEndsAt?: Date | null;
 }

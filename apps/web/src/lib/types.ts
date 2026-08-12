@@ -34,6 +34,9 @@ export interface User {
   roleId: string;
   email: string;
   fullName: string;
+  whatsapp: string | null;
+  trialStartsAt: string | null;
+  trialEndsAt: string | null;
   status: UserStatus;
   orgUnitId: string | null;
   mustChangePassword: boolean;

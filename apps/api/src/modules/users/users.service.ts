@@ -22,6 +22,9 @@ const publicUserSelect = {
   lastLoginAt: true,
   createdAt: true,
   updatedAt: true,
+  whatsapp: true,
+  trialStartsAt: true,
+  trialEndsAt: true,
   role: true,
   company: { select: { id: true, name: true } },
 } as const;
@@ -73,6 +76,19 @@ export class UsersService {
     );
   }
 
+  async createSharedTrialUser(params: { companyId: string; email: string; fullName: string; password: string; whatsapp: string; roleCode: "COMPANY_ADMIN" | "SALES_REP"; routeId?: string; trialStartsAt: Date; trialEndsAt: Date }) {
+    if (params.roleCode === "SALES_REP") {
+      const routes = await this.hierarchyResolver.listCompanyRouteIds(params.companyId);
+      if (!params.routeId || !routes.some((route) => route.toLowerCase() === params.routeId!.trim().toLowerCase())) throw new BadRequestException("The configured shared-trial route is unavailable");
+    }
+    return this.prisma.$transaction(async (tx) => {
+      const role = await this.rolesService.findByCode(params.roleCode);
+      const user = await this.createUserInternal({ ...params, roleId: role.id }, tx);
+      if (params.roleCode === "SALES_REP" && params.routeId) await tx.userRouteAssignment.create({ data: { companyId: params.companyId, userId: user.id, routeId: params.routeId, assignedByUserId: user.id } });
+      return user;
+    });
+  }
+
   async createUser(companyId: string, dto: CreateUserInput, actorUserId: string) {
     await this.assertUnderSeatLimit(companyId);
     const role = await this.rolesService.findByCode(dto.roleCode);
@@ -97,7 +113,7 @@ export class UsersService {
   }
 
   private async createUserInternal(
-    params: { companyId: string; roleId: string; email: string; fullName: string; password: string; whatsapp?: string; mustChangePassword?: boolean },
+    params: { companyId: string; roleId: string; email: string; fullName: string; password: string; whatsapp?: string; mustChangePassword?: boolean; trialStartsAt?: Date; trialEndsAt?: Date },
     tx: PrismaTx = this.prisma,
   ) {
     try {
@@ -109,6 +125,8 @@ export class UsersService {
           fullName: params.fullName,
           passwordHash: await argon2.hash(params.password),
           whatsapp: params.whatsapp,
+          trialStartsAt: params.trialStartsAt,
+          trialEndsAt: params.trialEndsAt,
           mustChangePassword: params.mustChangePassword ?? false,
         },
         select: publicUserSelect,
@@ -232,6 +250,14 @@ export class UsersService {
       await this.userActivity?.record({ type: "ADMIN_ROLE_CHANGE", category: "ADMIN", actorUserId: actorUserId ?? null, subjectUserId: id, companyId, targetType: "User", targetId: id, source: "users.update", metadata: { previousRoleCode: existing.role.code, newRoleCode: newRole.code } });
     }
 
+    return updated;
+  }
+
+  async updateTrialEndsAt(id: string, trialEndsAt: Date, actorUserId: string) {
+    const user = await this.prisma.user.findUnique({ where: { id }, select: { id: true, trialEndsAt: true, companyId: true } });
+    if (!user?.trialEndsAt) throw new NotFoundException("Shared trial user not found");
+    const updated = await this.prisma.user.update({ where: { id }, data: { trialEndsAt }, select: publicUserSelect });
+    await this.auditLogService.record({ companyId: user.companyId, userId: actorUserId, action: "user.trial_end_update", entityType: "User", entityId: id, metadata: { trialEndsAt } });
     return updated;
   }
 

@@ -55,6 +55,8 @@ export class JwtAccessStrategy extends PassportStrategy(Strategy, "jwt") {
       featureAccess: user.company?.featureAccess ?? null,
       mustChangePassword: user.mustChangePassword,
       orgUnitId: user.orgUnitId,
+      trialStartsAt: user.trialStartsAt,
+      trialEndsAt: user.trialEndsAt,
     };
   }
 }

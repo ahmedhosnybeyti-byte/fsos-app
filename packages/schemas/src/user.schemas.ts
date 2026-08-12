@@ -43,3 +43,8 @@ export const adminUpdateEmailSchema = z.object({
   email: z.string().trim().email().toLowerCase(),
 });
 export type AdminUpdateEmailInput = z.infer<typeof adminUpdateEmailSchema>;
+
+export const updateTrialEndsAtSchema = z.object({
+  trialEndsAt: z.coerce.date(),
+});
+export type UpdateTrialEndsAtInput = z.infer<typeof updateTrialEndsAtSchema>;

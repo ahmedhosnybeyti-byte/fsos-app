@@ -431,6 +431,8 @@ model User {
   // signups. Nullable at the DB level for users created before this field
   // existed (Employees-sheet auto-provisioning, admin-created accounts).
   whatsapp     String?    @map("whatsapp")
+  trialStartsAt DateTime? @map("trial_starts_at")
+  trialEndsAt   DateTime? @map("trial_ends_at")
   status       UserStatus @default(ACTIVE)
   // Phase 4: "Organizational Unit" on the User Profile — a reference-only
   // link into Phase 3's structure (e.g. which Branch this user belongs to).

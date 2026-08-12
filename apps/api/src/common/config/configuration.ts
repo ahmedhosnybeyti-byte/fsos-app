@@ -32,6 +32,7 @@ export function buildConfiguration(env: EnvConfig) {
     googlePlaces: {
       apiKey: env.GOOGLE_PLACES_API_KEY,
     },
+    sharedTrial: { egypt: { companySlug: env.TRIAL_EGYPT_COMPANY_SLUG }, saudiArabia: { companySlug: env.TRIAL_SAUDI_ARABIA_COMPANY_SLUG } },
   } as const;
 }
 

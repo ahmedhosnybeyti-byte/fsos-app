@@ -193,7 +193,7 @@ test("creates trial companies with files enabled while retaining the four locked
   );
 
   await service.register(
-    { companyName: "Trial Files Co", fullName: "Trial Admin", email: "trial-files@example.test", password: "Password1!", whatsapp: "+966500000000", accountType: "COMPANY" },
+    { fullName: "Trial Admin", email: "trial-files@example.test", password: "Password1!", whatsapp: "+966500000000", country: "SAUDI_ARABIA", trialRole: "COMPANY_ADMIN" },
     { ip: "127.0.0.1", userAgent: "test" },
   );
 

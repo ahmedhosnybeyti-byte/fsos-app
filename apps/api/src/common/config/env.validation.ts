@@ -35,6 +35,8 @@ const envSchema = z.object({
 
   // Optional platform fallback. A company's encrypted BYOK still takes priority.
   GOOGLE_PLACES_API_KEY: z.string().trim().min(1).optional(),
+  TRIAL_EGYPT_COMPANY_SLUG: z.string().trim().min(1).optional(),
+  TRIAL_SAUDI_ARABIA_COMPANY_SLUG: z.string().trim().min(1).optional(),
 });
 
 export type EnvConfig = z.infer<typeof envSchema>;

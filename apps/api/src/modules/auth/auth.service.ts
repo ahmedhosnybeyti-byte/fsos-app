@@ -4,9 +4,8 @@ import { generateTemporaryPassword } from "./temporary-password";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import type { LoginInput, RegisterInput } from "@field-sales-os/schemas";
 import { PrismaService } from "../../common/prisma";
-import { CompaniesService } from "../companies/companies.service";
 import { UsersService } from "../users/users.service";
-import { SubscriptionsService } from "../subscriptions/subscriptions.service";
+import type { TrialCountry } from "@field-sales-os/schemas";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { TokensService, type RefreshTokenMeta } from "./tokens.service";
 import { UserActivityService } from "../user-activity/user-activity.service";
@@ -15,9 +14,8 @@ import { UserActivityService } from "../user-activity/user-activity.service";
 export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly companiesService: CompaniesService,
     private readonly usersService: UsersService,
-    private readonly subscriptionsService: SubscriptionsService,
+    private readonly config: import("../../common/config").AppConfigService,
     private readonly tokensService: TokensService,
     private readonly auditLogService: AuditLogService,
     private readonly userActivity?: UserActivityService,
@@ -30,7 +28,7 @@ export class AuthService {
     const existing = await this.usersService.findByEmail(dto.email);
     if (existing) throw new ConflictException("An account with this email already exists");
 
-    const { user, company } = await this.prisma.$transaction(async (tx) => {
+    /*const { user, company } = await this.prisma.$transaction(async (tx) => {
       // Phase 2: signup now runs the full Company Provisioning Engine
       // (Company + CompanyProfile + default Branch) instead of just creating
       // the bare Company row — see CompaniesService.provisionCompany.
@@ -50,7 +48,12 @@ export class AuthService {
         },
       });
       return { user, company: readyCompany };
-    });
+    });*/
+    const target = this.sharedTrialTarget(dto.country);
+    const company = await this.prisma.company.findUnique({ where: { slug: target.companySlug }, select: { id: true } });
+    if (!company) throw new BadRequestException("The configured shared-trial company is unavailable");
+    const trialStartsAt = new Date(); const trialEndsAt = new Date(trialStartsAt); trialEndsAt.setDate(trialEndsAt.getDate() + 10);
+    const user = await this.usersService.createSharedTrialUser({ companyId: company.id, email: dto.email, fullName: dto.fullName, password: dto.password, whatsapp: dto.whatsapp, roleCode: dto.trialRole, routeId: dto.trialRole === "SALES_REP" ? this.resolveTrialRouteCode(dto.country, dto.trialChannel!, dto.trialArea) : undefined, trialStartsAt, trialEndsAt });
 
     await this.auditLogService.record({
       companyId: company.id,
@@ -61,6 +64,19 @@ export class AuthService {
     });
 
     return this.issueSession(user.id, meta);
+  }
+
+  private sharedTrialTarget(country: TrialCountry) {
+    const target = country === "EGYPT" ? this.config.values.sharedTrial.egypt : this.config.values.sharedTrial.saudiArabia;
+    if (!target.companySlug) throw new BadRequestException("Shared trial is not configured for the selected country");
+    return target;
+  }
+
+  private resolveTrialRouteCode(country: TrialCountry, channel: "CASH_VAN" | "HORECA", area?: "ALEXANDRIA" | "SHARQIA") {
+    if (country === "SAUDI_ARABIA") return channel === "CASH_VAN" ? "RT-09" : "RT-12";
+    if (area === "ALEXANDRIA") return channel === "CASH_VAN" ? "RT-05" : "RT-06";
+    if (area === "SHARQIA") return channel === "CASH_VAN" ? "RT-11" : "RT-12";
+    throw new BadRequestException("Area is required for Egypt Sales Rep");
   }
 
   async login(dto: LoginInput, meta: RefreshTokenMeta) {

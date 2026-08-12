@@ -13,6 +13,8 @@ import {
   unassignUserRouteSchema,
   type AssignUserRouteInput,
   type UnassignUserRouteInput,
+  updateTrialEndsAtSchema,
+  type UpdateTrialEndsAtInput,
 } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
@@ -86,6 +88,11 @@ export class UsersController {
     @Body(new ZodValidationPipe(adminUpdateEmailSchema)) body: AdminUpdateEmailInput,
   ) {
     return this.usersService.adminChangeEmail(id, body.email, user);
+  }
+  @Patch(":id/trial-ends-at")
+  @Auth("SUPER_ADMIN")
+  updateTrialEndsAt(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Body(new ZodValidationPipe(updateTrialEndsAtSchema)) body: UpdateTrialEndsAtInput) {
+    return this.usersService.updateTrialEndsAt(id, body.trialEndsAt, user.userId);
   }
   @Patch(":id")
   @Auth("COMPANY_ADMIN", "SUPER_ADMIN")

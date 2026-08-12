@@ -13,6 +13,7 @@ export const usersApi = {
   create: (input: CreateUserInput, companyId?: string) =>
     apiFetch<User>("/users", { method: "POST", body: input, query: { companyId } }),
   updateEmail: (id: string, email: string) => apiFetch<User>(`/users/${id}/email`, { method: "PATCH", body: { email } }),
+  updateTrialEndsAt: (id: string, trialEndsAt: string) => apiFetch<User>(`/users/${id}/trial-ends-at`, { method: "PATCH", body: { trialEndsAt } }),
   update: (id: string, input: UpdateUserInput, companyId?: string) =>
     apiFetch<User>(`/users/${id}`, { method: "PATCH", body: input, query: { companyId } }),
   disable: (id: string, companyId?: string) => apiFetch<User>(`/users/${id}/disable`, { method: "POST", query: { companyId } }),

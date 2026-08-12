@@ -24,8 +24,11 @@ export default function RegisterPage() {
     register,
     handleSubmit,
     control,
+    watch,
     formState: { errors },
   } = useForm<RegisterInput>({ resolver: zodResolver(registerSchema) });
+  const selectedCountry = watch("country");
+  const selectedRole = watch("trialRole");
 
   const mutation = useMutation({
     mutationFn: authApi.register,
@@ -49,11 +52,6 @@ export default function RegisterPage() {
       <form className="relative" onSubmit={handleSubmit((values) => mutation.mutate(values))}>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="companyName">Company name</Label>
-            <Input id="companyName" placeholder="Acme Field Sales" {...register("companyName")} />
-            {errors.companyName && <p className="text-xs text-destructive">{errors.companyName.message}</p>}
-          </div>
-          <div className="space-y-2">
             <Label htmlFor="fullName">Your name</Label>
             <Input id="fullName" autoComplete="name" placeholder="Jane Doe" {...register("fullName")} />
             {errors.fullName && <p className="text-xs text-destructive">{errors.fullName.message}</p>}
@@ -69,9 +67,9 @@ export default function RegisterPage() {
             {errors.whatsapp && <p className="text-xs text-destructive">{errors.whatsapp.message}</p>}
           </div>
           <div className="space-y-2">
-            <Label htmlFor="accountType">You are signing up as</Label>
+            <Label htmlFor="country">Country</Label>
             <Controller
-              name="accountType"
+              name="country"
               control={control}
               render={({ field }) => (
                 <Select value={field.value} onValueChange={field.onChange}>
@@ -79,14 +77,17 @@ export default function RegisterPage() {
                     <SelectValue placeholder="Select one" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="COMPANY">A company</SelectItem>
-                    <SelectItem value="INDEPENDENT">An independent sales rep</SelectItem>
+                  <SelectItem value="EGYPT">Egypt</SelectItem><SelectItem value="SAUDI_ARABIA">Saudi Arabia</SelectItem>
                   </SelectContent>
                 </Select>
               )}
             />
-            {errors.accountType && <p className="text-xs text-destructive">{errors.accountType.message}</p>}
+            {errors.country && <p className="text-xs text-destructive">{errors.country.message}</p>}
           </div>
+          <div className="space-y-2"><Label>Trial experience</Label><Controller name="trialRole" control={control} render={({ field }) => <Select value={field.value} onValueChange={field.onChange}><SelectTrigger className="h-11 w-full"><SelectValue placeholder="Select one" /></SelectTrigger><SelectContent><SelectItem value="COMPANY_ADMIN">Company Admin</SelectItem><SelectItem value="SALES_REP">Sales Rep</SelectItem></SelectContent></Select>} />{errors.trialRole && <p className="text-xs text-destructive">{errors.trialRole.message}</p>}
+          </div>
+          {selectedRole === "SALES_REP" && <div className="space-y-2"><Label>Channel</Label><Controller name="trialChannel" control={control} render={({ field }) => <Select value={field.value} onValueChange={field.onChange}><SelectTrigger className="h-11 w-full"><SelectValue placeholder="Select one" /></SelectTrigger><SelectContent><SelectItem value="CASH_VAN">Cash Van</SelectItem><SelectItem value="HORECA">HoReCa</SelectItem></SelectContent></Select>} />{errors.trialChannel && <p className="text-xs text-destructive">{errors.trialChannel.message}</p>}</div>}
+          {selectedRole === "SALES_REP" && selectedCountry === "EGYPT" && <div className="space-y-2"><Label>Area</Label><Controller name="trialArea" control={control} render={({ field }) => <Select value={field.value} onValueChange={field.onChange}><SelectTrigger className="h-11 w-full"><SelectValue placeholder="Select one" /></SelectTrigger><SelectContent><SelectItem value="ALEXANDRIA">Alexandria</SelectItem><SelectItem value="SHARQIA">Sharqia</SelectItem></SelectContent></Select>} />{errors.trialArea && <p className="text-xs text-destructive">{errors.trialArea.message}</p>}</div>}
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>
             <Input id="password" type="password" autoComplete="new-password" {...register("password")} />
