@@ -32,7 +32,16 @@ export class DashboardPerformanceService {
     const range = (dates: number[]) => new Set(dates.map(key));
     const currentDates = range(selling);
     const priorMonthDates = await this.firstSellingDates(user.companyId!, monthStart(currentFrom, -1), elapsed);
-    const customMonths = comparisonStart && comparisonEnd ? Array.from(new Map(calendar.filter((d) => d.calendarDate >= comparisonStart && d.calendarDate <= comparisonEnd).reduce((map, d) => { const month = key(d.calendarDate.getTime()).slice(0, 7); const bucket = map.get(month) ?? []; bucket.push(d.calendarDate.getTime()); map.set(month, bucket); return map; }, new Map<string, number[]>())).values()).map(range) : null;
+    // Custom comparison deliberately reuses Dashboard's `firstSellingDates`
+    // helper: each selected month is compared on the same MTD selling-day
+    // count as the current period, then averages are calculated below.
+    // It must never sum Jan–Mar as one long reference window.
+    const customMonths = comparisonStart && comparisonEnd
+      ? await Promise.all(Array.from({ length: (comparisonEnd.getUTCFullYear() - comparisonStart.getUTCFullYear()) * 12 + comparisonEnd.getUTCMonth() - comparisonStart.getUTCMonth() + 1 }, (_, index) => {
+          const month = new Date(Date.UTC(comparisonStart.getUTCFullYear(), comparisonStart.getUTCMonth() + index, 1));
+          return this.firstSellingDates(user.companyId!, month, elapsed);
+        }))
+      : null;
     const quarterDates = customMonths?.length ? customMonths : benchmark === "previous-quarter-average" ? await this.previousQuarterDates(user.companyId!, currentFrom, elapsed) : [priorMonthDates];
     const invoiceByNo = new Map<string, { date: string; customer: string; routeId: string }>();
     if (invoices.available) for (const r of invoices.records) { const id = String(r.InvoiceNo ?? "").trim(); const t = time(r.InvoiceDate); if (id && t !== null) invoiceByNo.set(id, { date: key(t), customer: String(r.CustomerCode ?? "").trim(), routeId: String(r.RouteID ?? "").trim() }); }
