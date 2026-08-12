@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Download, TrendingDown, TrendingUp, Users, Wand2, CircleDollarSign, ClipboardCheck, ReceiptText, Package, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
@@ -34,11 +34,12 @@ export default function TeamPerformancePage() {
   const { t } = useTranslation();
   const { user } = useAuth();
 
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [compareEnabled, setCompareEnabled] = useState(false);
-  const [priorDateFrom, setPriorDateFrom] = useState("");
-  const [priorDateTo, setPriorDateTo] = useState("");
+  const initialPeriod = useMemo(() => { const now = new Date(); const pad = (n: number) => String(n).padStart(2, "0"); const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; const prior = new Date(now.getFullYear(), now.getMonth() - 1, 1); return { from: iso(new Date(now.getFullYear(), now.getMonth(), 1)), to: iso(now), priorFrom: iso(prior), priorTo: iso(new Date(prior.getFullYear(), prior.getMonth(), Math.min(now.getDate(), new Date(prior.getFullYear(), prior.getMonth() + 1, 0).getDate()))) }; }, []);
+  const [dateFrom] = useState(initialPeriod.from);
+  const [dateTo] = useState(initialPeriod.to);
+  const [compareEnabled, setCompareEnabled] = useState(true);
+  const [priorDateFrom] = useState(initialPeriod.priorFrom);
+  const [priorDateTo] = useState(initialPeriod.priorTo);
 
   const [result, setResult] = useState<TeamPerformanceResult | null>(null);
   const [mode, setMode] = useState<"focus" | "compare">("focus");
@@ -67,6 +68,7 @@ export default function TeamPerformancePage() {
       priorDateTo: compareEnabled ? priorDateTo : undefined,
     });
   }
+  useEffect(() => { handleQuery(); }, []);
 
   return (
     <div className="relative space-y-6">
@@ -85,6 +87,7 @@ export default function TeamPerformancePage() {
         </div>
       </div>
 
+      {result && <TeamPerformanceIntelligence result={result} mode={mode} onModeChange={setMode} selectedSupervisor={selectedSupervisor} onSupervisorChange={setSelectedSupervisor} selectedReps={selectedReps} onSelectedRepsChange={setSelectedReps} showAdditionalTargets={showAdditionalTargets} onShowAdditionalTargets={setShowAdditionalTargets} diagnostic={diagnostic} onDiagnostic={setDiagnostic} />}
       <Card className="glass-card rise-in rise-d1">
         <CardHeader>
           <CardTitle className="flex items-center gap-2.5">
@@ -95,33 +98,13 @@ export default function TeamPerformancePage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-5">
-          <div className="grid gap-4 sm:grid-cols-2 sm:max-w-md">
-            <div className="grid gap-2">
-              <Label>{t("teamPerformance.dateFromLabel")}</Label>
-              <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
-            </div>
-            <div className="grid gap-2">
-              <Label>{t("teamPerformance.dateToLabel")}</Label>
-              <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
-            </div>
-          </div>
+          <p className="text-sm text-muted-foreground">{dateFrom} — {dateTo}</p>
 
           <div className="space-y-2">
             <Button variant="outline" size="sm" onClick={() => setCompareEnabled((v) => !v)}>
               {compareEnabled ? t("teamPerformance.compareDisableButton") : t("teamPerformance.compareEnableButton")}
             </Button>
-            {compareEnabled && (
-              <div className="grid gap-4 sm:grid-cols-2 sm:max-w-md">
-                <div className="grid gap-2">
-                  <Label>{t("teamPerformance.priorDateFromLabel")}</Label>
-                  <Input type="date" value={priorDateFrom} onChange={(e) => setPriorDateFrom(e.target.value)} />
-                </div>
-                <div className="grid gap-2">
-                  <Label>{t("teamPerformance.priorDateToLabel")}</Label>
-                  <Input type="date" value={priorDateTo} onChange={(e) => setPriorDateTo(e.target.value)} />
-                </div>
-              </div>
-            )}
+            {compareEnabled && <p className="text-xs text-muted-foreground">{priorDateFrom} — {priorDateTo}</p>}
           </div>
 
           <Button disabled={!canQuery || queryMutation.isPending} onClick={handleQuery}>
@@ -140,20 +123,6 @@ export default function TeamPerformancePage() {
               {t("teamPerformance.exportExcelButton")}
             </Button>
           </div>
-          {result.scopedToOwnTeam ? <FlatTeamView reps={result.reps} /> : <ManagerTreeView reps={result.reps} />}
-          <TeamPerformanceIntelligence
-            result={result}
-            mode={mode}
-            onModeChange={setMode}
-            selectedSupervisor={selectedSupervisor}
-            onSupervisorChange={setSelectedSupervisor}
-            selectedReps={selectedReps}
-            onSelectedRepsChange={setSelectedReps}
-            showAdditionalTargets={showAdditionalTargets}
-            onShowAdditionalTargets={setShowAdditionalTargets}
-            diagnostic={diagnostic}
-            onDiagnostic={setDiagnostic}
-          />
         </>
       )}
     </div>
@@ -189,6 +158,7 @@ function TeamPerformanceIntelligence(props: {
   selectedSupervisor: string; onSupervisorChange: (value: string) => void; selectedReps: string[]; onSelectedRepsChange: (value: string[]) => void;
   showAdditionalTargets: boolean; onShowAdditionalTargets: (value: boolean) => void; diagnostic: string | null; onDiagnostic: (value: string | null) => void;
 }) {
+  const { t } = useTranslation();
   const supervisors = useMemo(() => Array.from(new Map(props.result.reps.map((rep) => [rep.supervisorEmail ?? "__unassigned__", rep.supervisorName ?? "Unassigned"])).entries()), [props.result.reps]);
   const availableReps = useMemo(() => props.result.reps.filter((rep) => !props.selectedSupervisor || (rep.supervisorEmail ?? "__unassigned__") === props.selectedSupervisor), [props.result.reps, props.selectedSupervisor]);
   const focused = useMemo(() => props.selectedReps.length ? availableReps.filter((rep) => props.selectedReps.includes(rep.repEmail)) : availableReps, [availableReps, props.selectedReps]);
@@ -210,23 +180,23 @@ function TeamPerformanceIntelligence(props: {
     return `Issue: no material adverse signal. Evidence: current ${props.diagnostic} is supported by the selected data. Possible cause: not applicable; confidence: high. Recommended action: continue monitoring.`;
   }, [focused, props.diagnostic, totals]);
   const cards = [
-    ["sales", "Sales", totals.sales, CircleDollarSign], ["collections", "Collections", totals.collections, ClipboardCheck], ["productiveCustomers", "Productive Customers", totals.productiveCustomers, Users],
-    ["averageInvoice", "Average Invoice", totals.averageInvoice, ReceiptText], ["skus", "Products / SKUs", totals.skus, Package], ["returns", "Returns", totals.returns, RotateCcw],
+    ["sales", t("performance.sales"), totals.sales, CircleDollarSign], ["collections", t("performance.collections"), totals.collections, ClipboardCheck], ["productiveCustomers", t("performance.customers"), totals.productiveCustomers, Users],
+    ["averageInvoice", t("performance.invoices"), totals.averageInvoice, ReceiptText], ["skus", t("performance.skus"), totals.skus, Package], ["returns", t("performance.returns"), totals.returns, RotateCcw],
   ] as const;
   const targets = props.result.targets.filter((target) => target.primary);
   const additionalTargets = props.result.targets.filter((target) => !target.primary);
   const compared = props.selectedReps.length > 1 ? focused.slice().sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0)) : [];
-  return <section className="space-y-5"><Card className="glass-card"><CardHeader><CardTitle>Team Performance Intelligence</CardTitle></CardHeader><CardContent className="space-y-4">
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Label>Region<select disabled className="mt-1 h-10 w-full rounded border bg-background px-2"><option>Company scope</option></select></Label><Label>Manager<select disabled className="mt-1 h-10 w-full rounded border bg-background px-2"><option>Available on managed hierarchy</option></select></Label><Label>Supervisor<select value={props.selectedSupervisor} onChange={(e) => { props.onSupervisorChange(e.target.value); props.onSelectedRepsChange([]); }} className="mt-1 h-10 w-full rounded border bg-background px-2"><option value="">All supervisors</option>{supervisors.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></Label><Label>Sales Rep<select value="" onChange={(e) => { if (e.target.value && !props.selectedReps.includes(e.target.value)) props.onSelectedRepsChange([...props.selectedReps, e.target.value]); }} className="mt-1 h-10 w-full rounded border bg-background px-2"><option value="">Choose rep</option>{availableReps.map((rep) => <option key={rep.repEmail} value={rep.repEmail}>{rep.repName}</option>)}</select></Label></div>
-    <div className="flex gap-2"><Button size="sm" variant={props.mode === "focus" ? "default" : "outline"} onClick={() => props.onModeChange("focus")}>Focus Mode</Button><Button size="sm" variant={props.mode === "compare" ? "default" : "outline"} onClick={() => props.onModeChange("compare")}>Compare Mode</Button></div>
+  return <section className="space-y-5"><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">{cards.map(([key, label, value, Icon]) => <KpiCard key={key} icon={Icon} label={label} value={value === null ? t("performance.unavailable") : Math.round(value).toLocaleString()} hint={value === null ? t("performance.unavailable") : `${t("performance.actual")}: ${Math.round(value).toLocaleString()}`} onClick={() => props.onDiagnostic(key)} />)}</div><Card className="glass-card"><CardHeader><CardTitle>{t("teamPerformance.title")}</CardTitle></CardHeader><CardContent className="space-y-4">
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Label>المنطقة<select disabled className="mt-1 h-10 w-full rounded border bg-background px-2"><option>نطاق الشركة</option></select></Label><Label>المدير<select disabled className="mt-1 h-10 w-full rounded border bg-background px-2"><option>حسب الهيكل المتاح</option></select></Label><Label>المشرف<select value={props.selectedSupervisor} onChange={(e) => { props.onSupervisorChange(e.target.value); props.onSelectedRepsChange([]); }} className="mt-1 h-10 w-full rounded border bg-background px-2"><option value="">كل المشرفين</option>{supervisors.map(([id, name]) => <option key={id} value={id}>{name}</option>)}</select></Label><Label>مندوب المبيعات<select value="" onChange={(e) => { if (e.target.value && !props.selectedReps.includes(e.target.value)) props.onSelectedRepsChange([...props.selectedReps, e.target.value]); }} className="mt-1 h-10 w-full rounded border bg-background px-2"><option value="">اختر مندوبًا</option>{availableReps.map((rep) => <option key={rep.repEmail} value={rep.repEmail}>{rep.repName}</option>)}</select></Label></div>
+    <div className="flex gap-2"><Button size="sm" variant={props.mode === "focus" ? "default" : "outline"} onClick={() => props.onModeChange("focus")}>وضع التركيز</Button><Button size="sm" variant={props.mode === "compare" ? "default" : "outline"} onClick={() => props.onModeChange("compare")}>وضع المقارنة</Button></div>
     {props.mode === "compare" && <div className="flex flex-wrap gap-2">{availableReps.map((rep) => <label key={rep.repEmail} className="flex items-center gap-1 text-sm"><input type="checkbox" checked={props.selectedReps.includes(rep.repEmail)} onChange={() => props.onSelectedRepsChange(props.selectedReps.includes(rep.repEmail) ? props.selectedReps.filter((id) => id !== rep.repEmail) : [...props.selectedReps, rep.repEmail])} />{rep.repName}</label>)}</div>}
   </CardContent></Card>
-  {props.mode === "focus" ? <><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">{cards.map(([key, label, value, Icon]) => <KpiCard key={key} icon={Icon} label={label} value={value === null ? "Insufficient data" : Math.round(value).toLocaleString()} hint="Click for evidence-based diagnostic" onClick={() => props.onDiagnostic(key)} />)}</div>{diagnosticText && <Card><CardContent className="p-4 text-sm"><strong>Diagnostic</strong><p className="mt-2">{diagnosticText}</p></CardContent></Card>}</> : <CompareSections reps={compared} />}
-  <TargetSection title="Performance vs target" targets={targets} /><Button variant="ghost" size="sm" onClick={() => props.onShowAdditionalTargets(!props.showAdditionalTargets)}>{props.showAdditionalTargets ? "Hide additional targets" : "Show additional targets"}</Button>{props.showAdditionalTargets && <TargetSection title="Additional targets" targets={additionalTargets} />}
+  {props.mode === "focus" ? <>{diagnosticText && <Card><CardContent className="p-4 text-sm"><strong>التشخيص</strong><p className="mt-2">{diagnosticText}</p></CardContent></Card>}</> : <CompareSections reps={compared} />}
+  <TargetSection title={t("performance.primaryTargets")} targets={targets} /><Button variant="ghost" size="sm" onClick={() => props.onShowAdditionalTargets(!props.showAdditionalTargets)}>{props.showAdditionalTargets ? "إخفاء الأهداف الإضافية" : "إظهار الأهداف الإضافية"}</Button>{props.showAdditionalTargets && <TargetSection title={t("performance.secondaryTargets")} targets={additionalTargets} />}
   </section>;
 }
 
-function TargetSection({ title, targets }: { title: string; targets: TeamPerformanceResult["targets"] }) { return <Card><CardHeader><CardTitle className="text-base">{title}</CardTitle></CardHeader><CardContent className="grid gap-3 sm:grid-cols-2">{targets.length ? targets.map((target) => <div key={target.key} className="rounded border p-3 text-sm"><div className="flex justify-between"><span>{target.label}</span><strong>{target.progressPct === null ? "Insufficient data" : `${target.progressPct.toFixed(0)}%`}</strong></div><p className="mt-1 text-muted-foreground">{target.actual ?? "—"} / {target.target}</p></div>) : <p className="text-sm text-muted-foreground">Insufficient data</p>}</CardContent></Card>; }
+function TargetSection({ title, targets }: { title: string; targets: TeamPerformanceResult["targets"] }) { const { t } = useTranslation(); return <section><h2 className="mb-3 text-xl font-semibold">{title}</h2><div className="grid gap-4 lg:grid-cols-2">{targets.length ? targets.map((target) => { const progress = target.progressPct ?? 0; const tone = progress >= 100 ? "bg-success" : progress >= 90 ? "bg-warning" : "bg-destructive"; return <Card key={target.key} className="glass-card"><CardHeader className="pb-2"><div className="flex items-center justify-between"><CardTitle className="text-base">{target.label}</CardTitle><Badge variant="outline" className={progress >= 100 ? "glow-success" : progress >= 90 ? "glow-warning" : "glow-critical"}>{progress >= 100 ? t("performance.ahead") : progress >= 90 ? t("performance.nearPlan") : t("performance.behind")}</Badge></div></CardHeader><CardContent className="space-y-3"><div className="grid grid-cols-3 gap-2 text-sm"><div><p className="text-xs text-muted-foreground">{t("performance.actual")}</p><strong>{target.actual?.toLocaleString() ?? "—"}</strong></div><div><p className="text-xs text-muted-foreground">{t("performance.monthlyTarget")}</p><strong>{target.target.toLocaleString()}</strong></div><div><p className="text-xs text-muted-foreground">{t("performance.achievement")}</p><strong>{target.progressPct === null ? "—" : `${target.progressPct.toFixed(0)}%`}</strong></div></div><div className="h-2 overflow-hidden rounded-full bg-secondary"><div className={`h-full ${tone}`} style={{ width: `${Math.min(100, progress)}%` }} /></div></CardContent></Card>; }) : <p className="text-sm text-muted-foreground">{t("performance.unavailable")}</p>}</div></section>; }
 function CompareSections({ reps }: { reps: TeamPerformanceRepRow[] }) { return <div className="space-y-3">{["Growth rates", "Performance vs target", "Additional targets"].map((title) => <Card key={title}><CardHeader><CardTitle className="text-base">{title}</CardTitle></CardHeader><CardContent>{reps.length ? reps.map((rep) => <div key={rep.repEmail} className="border-b py-2 text-sm last:border-0">{rep.repName} — Sales: {rep.sales ?? "Insufficient data"}</div>) : <p className="text-sm text-muted-foreground">Select at least two Sales Reps.</p>}</CardContent></Card>)}</div>; }
 
 function FlatTeamView({ reps }: { reps: TeamPerformanceRepRow[] }) {
