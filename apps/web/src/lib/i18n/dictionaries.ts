@@ -1053,6 +1053,34 @@ export type TranslationKey =
   | "teamPerformance.notAvailable"
   | "teamPerformance.sheetName"
   | "teamPerformance.fileName"
+  | "teamPerformance.supervisor"
+  | "teamPerformance.allSupervisors"
+  | "teamPerformance.salesRep"
+  | "teamPerformance.allSalesReps"
+  | "teamPerformance.comparisonFrom"
+  | "teamPerformance.comparisonTo"
+  | "teamPerformance.clearComparison"
+  | "teamPerformance.focusMode"
+  | "teamPerformance.compareMode"
+  | "teamPerformance.showAdditionalTargets"
+  | "teamPerformance.hideAdditionalTargets"
+  | "teamPerformance.compareGrowth"
+  | "teamPerformance.compareTargets"
+  | "teamPerformance.compareAdditionalTargets"
+  | "teamPerformance.selectEntities"
+  | "teamPerformance.salesAchievement"
+  | "teamPerformance.diagnosis"
+  | "teamPerformance.close"
+  | "teamPerformance.targetInsight"
+  | "teamPerformance.diagnosisSummaryPositive"
+  | "teamPerformance.diagnosisSummaryNegative"
+  | "teamPerformance.diagnosisEvidence"
+  | "teamPerformance.diagnosisCause"
+  | "teamPerformance.diagnosisUnknown"
+  | "teamPerformance.diagnosisConfidence"
+  | "teamPerformance.diagnosisAction"
+  | "teamPerformance.diagnosisEntities"
+  | "teamPerformance.mediumConfidence"
   | "copilot.title"
   | "copilot.subtitle"
   | "copilot.periodLabel"
@@ -2453,6 +2481,9 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "teamPerformance.notAvailable": "غير متاح",
     "teamPerformance.sheetName": "أداء الفريق",
     "teamPerformance.fileName": "أداء-الفريق.xlsx",
+    "teamPerformance.supervisor": "المشرف", "teamPerformance.allSupervisors": "كل المشرفين", "teamPerformance.salesRep": "مندوب المبيعات", "teamPerformance.allSalesReps": "كل المناديب", "teamPerformance.comparisonFrom": "من تاريخ المقارنة", "teamPerformance.comparisonTo": "إلى تاريخ المقارنة", "teamPerformance.clearComparison": "إلغاء مقارنة الفترة", "teamPerformance.focusMode": "وضع التركيز", "teamPerformance.compareMode": "وضع المقارنة", "teamPerformance.showAdditionalTargets": "إظهار الأهداف الإضافية", "teamPerformance.hideAdditionalTargets": "إخفاء الأهداف الإضافية", "teamPerformance.compareGrowth": "معدلات النمو", "teamPerformance.compareTargets": "الأداء مقابل الهدف", "teamPerformance.compareAdditionalTargets": "الأهداف الإضافية", "teamPerformance.selectEntities": "اختر كيانين أو أكثر من نفس المستوى للمقارنة.", "teamPerformance.salesAchievement": "تحقيق المبيعات", "teamPerformance.diagnosis": "التشخيص", "teamPerformance.close": "إغلاق", "teamPerformance.targetInsight": "اضغط لمعرفة سبب التقدم أو التأخر",
+    "teamPerformance.diagnosisSummaryPositive": "إشارة أداء إيجابية في النطاق المحدد.", "teamPerformance.diagnosisSummaryNegative": "إشارة أداء تحتاج تدخلاً في النطاق المحدد.", "teamPerformance.diagnosisEvidence": "الأدلة", "teamPerformance.diagnosisCause": "السبب المحتمل", "teamPerformance.diagnosisUnknown": "ما لا يمكن إثباته", "teamPerformance.diagnosisConfidence": "درجة الثقة", "teamPerformance.diagnosisAction": "القرار التنفيذي", "teamPerformance.diagnosisEntities": "الكيانات الأكثر تأثيرًا",
+    "teamPerformance.mediumConfidence": "متوسطة",
     "copilot.title": "مساعد الزيارات",
     "copilot.subtitle": "خطة يومك وزياراتك — كل حاجة تحتاجها قبل ما تدخل للعميل.",
     "copilot.periodLabel": "الفترة",
@@ -3867,6 +3898,9 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "teamPerformance.notAvailable": "Not available",
     "teamPerformance.sheetName": "Team Performance",
     "teamPerformance.fileName": "team-performance.xlsx",
+    "teamPerformance.supervisor": "Supervisor", "teamPerformance.allSupervisors": "All supervisors", "teamPerformance.salesRep": "Sales rep", "teamPerformance.allSalesReps": "All sales reps", "teamPerformance.comparisonFrom": "Comparison from", "teamPerformance.comparisonTo": "Comparison to", "teamPerformance.clearComparison": "Clear comparison", "teamPerformance.focusMode": "Focus mode", "teamPerformance.compareMode": "Compare mode", "teamPerformance.showAdditionalTargets": "Show additional targets", "teamPerformance.hideAdditionalTargets": "Hide additional targets", "teamPerformance.compareGrowth": "Growth rates", "teamPerformance.compareTargets": "Performance vs target", "teamPerformance.compareAdditionalTargets": "Additional targets", "teamPerformance.selectEntities": "Select at least two entities from the same level to compare.", "teamPerformance.salesAchievement": "Sales achievement", "teamPerformance.diagnosis": "Diagnosis", "teamPerformance.close": "Close", "teamPerformance.targetInsight": "Click to see why this target is ahead or behind",
+    "teamPerformance.diagnosisSummaryPositive": "Positive performance signal in the selected scope.", "teamPerformance.diagnosisSummaryNegative": "Performance signal requiring action in the selected scope.", "teamPerformance.diagnosisEvidence": "Evidence", "teamPerformance.diagnosisCause": "Possible cause", "teamPerformance.diagnosisUnknown": "What cannot be confirmed", "teamPerformance.diagnosisConfidence": "Confidence", "teamPerformance.diagnosisAction": "Executive action", "teamPerformance.diagnosisEntities": "Most impactful entities",
+    "teamPerformance.mediumConfidence": "Medium",
     "copilot.title": "Visit Copilot",
     "copilot.subtitle": "Your day plan and visits — everything you need before walking in.",
     "copilot.periodLabel": "Period",

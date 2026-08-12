@@ -7,7 +7,7 @@ import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { DashboardPerformanceService } from "./dashboard-performance.service";
 
-const dashboardPerformanceQuerySchema = z.object({ benchmark: z.enum(["previous-month", "previous-quarter-average"]).default("previous-month"), routeIds: z.string().optional() });
+const dashboardPerformanceQuerySchema = z.object({ benchmark: z.enum(["previous-month", "previous-quarter-average"]).default("previous-month"), routeIds: z.string().optional(), dateFrom: z.string().optional(), dateTo: z.string().optional(), comparisonFrom: z.string().optional(), comparisonTo: z.string().optional() });
 type DashboardPerformanceQuery = z.infer<typeof dashboardPerformanceQuerySchema>;
 
 @ApiTags("dashboard-performance")
@@ -17,6 +17,6 @@ export class DashboardPerformanceController {
   @Get()
   @Auth()
   get(@CurrentUser() user: AuthenticatedUser, @Query(new ZodValidationPipe(dashboardPerformanceQuerySchema)) query: DashboardPerformanceQuery) {
-    return this.service.get(user, query.benchmark, query.routeIds?.split(",").filter(Boolean));
+    return this.service.get(user, query.benchmark, query.routeIds?.split(",").filter(Boolean), query.dateFrom, query.dateTo, query.comparisonFrom, query.comparisonTo);
   }
 }
