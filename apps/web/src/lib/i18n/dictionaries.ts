@@ -1023,6 +1023,9 @@ export type TranslationKey =
   | "teamPerformance.priorDateToLabel"
   | "teamPerformance.showPerformanceButton"
   | "teamPerformance.exportExcelButton"
+  | "teamPerformance.exportExecutiveButton"
+  | "teamPerformance.exportExecutiveSuccess"
+  | "teamPerformance.exportExecutiveError"
   | "teamPerformance.categorySales"
   | "teamPerformance.categoryCollection"
   | "teamPerformance.categoryReturns"
@@ -2451,6 +2454,9 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "teamPerformance.priorDateToLabel": "إلى تاريخ (فترة المقارنة)",
     "teamPerformance.showPerformanceButton": "عرض الأداء",
     "teamPerformance.exportExcelButton": "تصدير Excel",
+    "teamPerformance.exportExecutiveButton": "تصدير العرض التنفيذي",
+    "teamPerformance.exportExecutiveSuccess": "تم إنشاء عرض تنفيذي من {count} شرائح.",
+    "teamPerformance.exportExecutiveError": "تعذر إنشاء العرض التنفيذي.",
     "teamPerformance.categorySales": "المبيعات",
     "teamPerformance.categoryCollection": "التحصيل",
     "teamPerformance.categoryReturns": "المرتجعات",
@@ -3868,6 +3874,9 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "teamPerformance.priorDateToLabel": "To date (comparison period)",
     "teamPerformance.showPerformanceButton": "Show performance",
     "teamPerformance.exportExcelButton": "Export Excel",
+    "teamPerformance.exportExecutiveButton": "Export executive deck",
+    "teamPerformance.exportExecutiveSuccess": "Executive deck generated with {count} slides.",
+    "teamPerformance.exportExecutiveError": "Could not generate the executive deck.",
     "teamPerformance.categorySales": "Sales",
     "teamPerformance.categoryCollection": "Collection",
     "teamPerformance.categoryReturns": "Returns",
