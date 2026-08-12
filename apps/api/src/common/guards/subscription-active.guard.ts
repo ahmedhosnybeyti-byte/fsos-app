@@ -12,6 +12,7 @@ const SHARED_TRIAL_READ_POST_PATHS = new Set([
   "/decision-analytics-studio/query", "/decision-analytics-studio/table",
   "/geo-engine/query", "/geo-engine/table",
   "/smart-loading/recalculate",
+  "/team-performance/query",
 ]);
 
 function isSharedTrialReadRequest(method: string | undefined, path: string): boolean {
