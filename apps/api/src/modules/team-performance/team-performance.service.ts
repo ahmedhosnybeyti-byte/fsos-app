@@ -39,6 +39,7 @@ interface ResolvedRep {
 }
 
 interface RepAccumulator {
+  routeIds: Set<string>;
   repName: string;
   repEmail: string;
   supervisorEmail: string | null;
@@ -187,6 +188,7 @@ export class TeamPerformanceService {
       let entry = acc.get(resolved.repKey);
       if (!entry) {
         entry = {
+          routeIds: new Set(),
           repName: resolved.repName,
           repEmail: resolved.repEmail,
           supervisorEmail: resolved.supervisorEmail,
@@ -200,6 +202,7 @@ export class TeamPerformanceService {
         };
         acc.set(resolved.repKey, entry);
       }
+      entry.routeIds.add(routeId);
       return entry;
     };
 
@@ -267,6 +270,7 @@ export class TeamPerformanceService {
     }
 
     const reps: TeamPerformanceRepRow[] = Array.from(acc.values()).map((r) => ({
+      routeIds: Array.from(r.routeIds),
       repEmail: r.repEmail,
       repName: r.repName,
       supervisorEmail: r.supervisorEmail,

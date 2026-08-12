@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Download, TrendingDown, TrendingUp, Users, Wand2, CircleDollarSign, ClipboardCheck, ReceiptText, Package, RotateCcw } from "lucide-react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { ChevronDown, ChevronRight, Download, TrendingDown, TrendingUp, Users, Wand2, CircleDollarSign, ClipboardCheck, ReceiptText, Package, RotateCcw, Target } from "lucide-react";
 import { toast } from "sonner";
 import { teamPerformanceApi } from "@/lib/api";
 import { ApiError } from "@/lib/api-client";
@@ -14,6 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { KpiCard } from "@/components/dashboard/kpi-card";
+import { PerformanceGrowthCard, PerformanceTargetCard } from "@/components/dashboard/performance-cards";
+import { dashboardPerformanceApi, type DashboardBenchmark } from "@/lib/api/dashboard-performance";
 import { useTranslation } from "@/components/translation-provider";
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
 import type { TeamPerformanceCoachResult, TeamPerformanceRepRow, TeamPerformanceResult } from "@/lib/types";
@@ -29,6 +31,12 @@ import type { TeamPerformanceCoachResult, TeamPerformanceRepRow, TeamPerformance
 // Dataset uploaded is omitted (not zeroed), per explicit product decision
 // — see CategoryAvailabilityBadges below.
 type Translate = (key: TranslationKey, params?: Record<string, string | number>) => string;
+type DiagnosticMetric = "sales" | "collections" | "invoices" | "customers" | "skus" | "returns";
+
+function diagnosticHint(key: DiagnosticMetric, metrics: Record<DiagnosticMetric, { growthPct: number | null }>) {
+  const value = metrics[key].growthPct;
+  return value === null ? "البيانات المتاحة لا تكفي لتحديد إشارة موثوقة." : `${value < 0 ? "تراجع" : "نمو"} ${Math.abs(value).toFixed(1)}% — اضغط لعرض الدليل والتشخيص.`;
+}
 
 export default function TeamPerformancePage() {
   const { t } = useTranslation();
@@ -47,6 +55,9 @@ export default function TeamPerformancePage() {
   const [selectedReps, setSelectedReps] = useState<string[]>([]);
   const [showAdditionalTargets, setShowAdditionalTargets] = useState(false);
   const [diagnostic, setDiagnostic] = useState<string | null>(null);
+  const [benchmark, setBenchmark] = useState<DashboardBenchmark>("previous-month");
+  const scopedRouteIds = useMemo(() => result ? result.reps.filter((row) => (!selectedSupervisor || (row.supervisorEmail ?? "__unassigned__") === selectedSupervisor) && (!selectedReps.length || selectedReps.includes(row.repEmail))).flatMap((row) => row.routeIds) : [], [result, selectedSupervisor, selectedReps]);
+  const dashboardQuery = useQuery({ queryKey: ["team-performance-dashboard", benchmark, scopedRouteIds.join(",")], queryFn: () => dashboardPerformanceApi.get(benchmark, scopedRouteIds) });
 
   const queryMutation = useMutation({
     mutationFn: teamPerformanceApi.query,
@@ -86,6 +97,8 @@ export default function TeamPerformancePage() {
           </p>
         </div>
       </div>
+
+      {dashboardQuery.data && <section className="space-y-5"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-xl font-semibold">{t("performance.growthTitle")}</h2><p className="text-sm text-muted-foreground">{t("performance.comparisonDays", { count: dashboardQuery.data.sellingDays.elapsed })}</p></div><div className="flex rounded-lg border border-border bg-background/30 p-1"><Button size="sm" variant={benchmark === "previous-month" ? "default" : "ghost"} onClick={() => setBenchmark("previous-month")}>{t("performance.previousMonth")}</Button><Button size="sm" variant={benchmark === "previous-quarter-average" ? "default" : "ghost"} onClick={() => setBenchmark("previous-quarter-average")}>{t("performance.previousQuarter")}</Button></div></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">{[["sales", t("performance.sales"), "currency", CircleDollarSign, "text-emerald-400", false], ["collections", t("performance.collections"), "currency", ClipboardCheck, "text-violet-400", false], ["invoices", t("performance.invoices"), "count", ReceiptText, "text-blue-400", false], ["customers", t("performance.customers"), "count", Users, "text-orange-400", false], ["skus", t("performance.skus"), "count", Package, "text-cyan-400", false], ["returns", t("performance.returns"), "currency", RotateCcw, "text-red-400", true]].map(([key, label, unit, Icon, color, lowerBetter]) => <PerformanceGrowthCard key={String(key)} label={String(label)} metric={dashboardQuery.data.metrics[key as keyof typeof dashboardQuery.data.metrics]} unit={String(unit)} Icon={Icon as typeof CircleDollarSign} color={String(color)} lowerBetter={Boolean(lowerBetter)} benchmarkType={benchmark} hint={diagnosticHint(key as DiagnosticMetric, dashboardQuery.data.metrics)} onClick={() => setDiagnostic(String(key))} />)}</div><div><h2 className="mb-3 flex items-center gap-2 text-xl font-semibold"><Target className="h-5 w-5 text-primary" />{t("performance.primaryTargets")}</h2><div className="grid gap-4 xl:grid-cols-2">{dashboardQuery.data.targets.filter((target) => target.primary).map((target) => <PerformanceTargetCard key={target.key} target={target} />)}</div></div></section>}
 
       {result && <TeamPerformanceIntelligence result={result} mode={mode} onModeChange={setMode} selectedSupervisor={selectedSupervisor} onSupervisorChange={setSelectedSupervisor} selectedReps={selectedReps} onSelectedRepsChange={setSelectedReps} showAdditionalTargets={showAdditionalTargets} onShowAdditionalTargets={setShowAdditionalTargets} diagnostic={diagnostic} onDiagnostic={setDiagnostic} />}
       <Card className="glass-card rise-in rise-d1">
@@ -170,14 +183,15 @@ function TeamPerformanceIntelligence(props: {
   const diagnosticText = useMemo(() => {
     if (!props.diagnostic) return null;
     const value = totals[props.diagnostic as keyof typeof totals];
-    if (value === null || value === undefined) return "Insufficient data";
     const priorField = props.diagnostic === "sales" ? "salesPrior" : props.diagnostic === "collections" ? "collectionPrior" : props.diagnostic === "returns" ? "returnsPrior" : null;
-    const prior = priorField ? focused.reduce((sum, rep) => sum + (rep[priorField] ?? 0), 0) : null;
-    const declining = prior !== null && prior > 0 && value < prior;
+    const prior = priorField ? focused.reduce((sum, row) => sum + (row[priorField] ?? 0), 0) : null;
+    if (value === null || value === undefined || prior === null || prior <= 0) return "المشكلة: لا توجد مقارنة قابلة للحساب. الدليل: القيمة الحالية أو الفترة المرجعية غير مكتملة. السبب المحتمل: البيانات المتاحة لا تكفي لتحديد سبب موثوق. درجة الثقة: منخفضة. القرار المقترح: استكمل بيانات الفترة المرجعية ثم أعد التحليل.";
+    const change = ((Number(value) - prior) / prior) * 100;
     const returnRate = totals.sales && totals.returns !== null ? totals.returns / totals.sales : null;
-    if (props.diagnostic === "returns" && returnRate !== null && returnRate > 0.1) return `Issue: elevated returns. Evidence: returns are ${(returnRate * 100).toFixed(1)}% of sales. Possible cause: possible over-loading; confidence: medium. Recommended action: review delivery quantities against sell-through.`;
-    if (declining) return `Issue: performance declined. Evidence: ${props.diagnostic} is below the comparison period. Possible cause: insufficient evidence to attribute a root cause; confidence: medium. Recommended action: review the selected team's execution plan.`;
-    return `Issue: no material adverse signal. Evidence: current ${props.diagnostic} is supported by the selected data. Possible cause: not applicable; confidence: high. Recommended action: continue monitoring.`;
+    const salesChange = focused.some((r) => r.sales !== null && r.salesPrior !== null && r.salesPrior > 0) ? focused.reduce((s, r) => s + (r.sales ?? 0), 0) / Math.max(1, focused.reduce((s, r) => s + (r.salesPrior ?? 0), 0)) - 1 : null;
+    if (props.diagnostic === "returns" && returnRate !== null && returnRate > .1) return `المشكلة: المرتجعات تمثل ${(returnRate * 100).toFixed(1)}% من المبيعات. الدليل: قيمة المرتجعات ${change >= 0 ? "زادت" : "انخفضت"} ${Math.abs(change).toFixed(1)}% ومعدلها من المبيعات مرتفع. السبب المحتمل: احتمال تحميل زائد؛ لا يمكن إثباته دون بيانات تصريف/مخزون. درجة الثقة: متوسطة. القرار المقترح: راجع الكميات الموردة مقابل معدل التصريف قبل زيادة التحميل.`;
+    if (change < 0 && salesChange !== null && salesChange < -.1) return `المشكلة: ${props.diagnostic === "sales" ? "المبيعات" : props.diagnostic === "collections" ? "التحصيل" : "المؤشر"} تراجع ${Math.abs(change).toFixed(1)}%. الدليل: المبيعات ضمن النطاق تراجعت ${(Math.abs(salesChange) * 100).toFixed(1)}% مقارنة بالفترة المرجعية. السبب المحتمل: الإشارة متسقة مع تراجع المبيعات، لكن البيانات المتاحة لا تكفي لإثبات سبب تشغيلي أدق. درجة الثقة: متوسطة. القرار المقترح: راجع المناديب الأكثر تراجعًا واستعد العملاء/الأصناف التي يظهر لها تراجع فعلي.`;
+    return `المشكلة: لا توجد إشارة سلبية موثوقة في هذا المؤشر. الدليل: التغير ${change >= 0 ? "+" : ""}${change.toFixed(1)}% مقارنة بالفترة المرجعية. السبب المحتمل: لا ينطبق. درجة الثقة: مرتفعة. القرار المقترح: استمر في المتابعة ولا تنسب سببًا دون دليل إضافي.`;
   }, [focused, props.diagnostic, totals]);
   const cards = [
     ["sales", t("performance.sales"), totals.sales, CircleDollarSign], ["collections", t("performance.collections"), totals.collections, ClipboardCheck], ["productiveCustomers", t("performance.customers"), totals.productiveCustomers, Users],

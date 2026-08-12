@@ -1,0 +1,35 @@
+"use client";
+
+import { TrendingDown, TrendingUp, type LucideIcon } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { useTranslation } from "@/components/translation-provider";
+import type { DashboardBenchmark, DashboardMetric, DashboardTarget } from "@/lib/api";
+
+export function dashboardFormat(value: number | null, unit = "count", locale: "ar" | "en" = "ar", unavailable = "غير متاح") {
+  if (value === null) return unavailable;
+  const number = new Intl.NumberFormat(locale === "ar" ? "ar-SA" : "en-US").format(Math.round(value));
+  return unit === "currency" ? new Intl.NumberFormat(locale === "ar" ? "ar-SA" : "en-US", { style: "currency", currency: "SAR", maximumFractionDigits: 0 }).format(Math.round(value)) : number;
+}
+function percent(value: number, locale: "ar" | "en", digits = 1) { return new Intl.NumberFormat(locale === "ar" ? "ar-SA" : "en-US", { style: "percent", minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value / 100); }
+
+export function PerformanceGrowthCard({ label, metric, unit, Icon, color, lowerBetter, benchmarkType, hint, onClick }: { label: string; metric: DashboardMetric; unit: string; Icon: LucideIcon; color: string; lowerBetter: boolean; benchmarkType: DashboardBenchmark; hint?: string; onClick?: () => void }) {
+  const { t, locale } = useTranslation();
+  const positive = metric.growthPct !== null && (lowerBetter ? metric.growthPct <= 0 : metric.growthPct >= 0);
+  const Trend = positive ? TrendingUp : TrendingDown;
+  const max = Math.max(...metric.sparkline, 1);
+  const points = metric.sparkline.map((value, index) => `${(index / Math.max(metric.sparkline.length - 1, 1)) * 100},${30 - (value / max) * 26}`).join(" ");
+  const ratio = metric.current !== null && metric.benchmark !== null && metric.benchmark !== 0 ? metric.current / metric.benchmark : null;
+  const state = ratio === null ? "flat" : lowerBetter ? ratio <= 1 ? "good" : ratio <= 1.1 ? "near" : "bad" : ratio >= 1 ? "good" : ratio >= .9 ? "near" : "bad";
+  const spark = state === "good" ? "text-emerald-400" : state === "near" ? "text-amber-400" : state === "bad" ? "text-destructive" : "text-muted-foreground";
+  const variant = state === "good" ? "success" as const : state === "near" ? "warning" as const : state === "bad" ? "destructive" as const : "secondary" as const;
+  return <button type="button" title={hint} onClick={onClick} className={`glass-card min-h-48 p-4 text-start transition hover:border-primary/50 hover:bg-secondary/20 ${onClick ? "cursor-pointer" : "cursor-default"}`}><div className="flex items-center justify-between"><span className={`flex h-9 w-9 items-center justify-center rounded-lg bg-background/50 ${color}`}><Icon className="h-4 w-4" /></span><Badge variant={variant} className="gap-1">{metric.growthPct === null ? t("performance.noChange") : <><Trend className="h-3 w-3" />{percent(Math.abs(metric.growthPct), locale)}</>}</Badge></div><p className="mt-4 text-sm text-muted-foreground">{label}</p><p className="mt-1 text-xl font-bold tabular-nums">{dashboardFormat(metric.current, unit, locale, t("performance.unavailable"))}</p><p className="mt-1 text-xs text-muted-foreground">{benchmarkType === "previous-month" ? t("performance.referencePeriod") : t("performance.quarterAverage")}: <span className="font-medium text-foreground">{dashboardFormat(metric.benchmark, unit, locale, t("performance.unavailable"))}</span></p>{metric.sparkline.length ? <svg viewBox="0 0 100 32" preserveAspectRatio="none" className={`mt-5 h-8 w-full drop-shadow-[0_0_3px_currentColor] ${spark}`}><polyline points={points} fill="none" stroke="currentColor" strokeWidth="2.25" vectorEffect="non-scaling-stroke" /></svg> : <div className="mt-5 h-8" />}</button>;
+}
+
+export function PerformanceTargetCard({ target }: { target: DashboardTarget }) {
+  const { t, locale } = useTranslation(); const achievement = target.progressPct; const ahead = (target.aheadBehind ?? 0) >= 0;
+  const state = achievement === null ? { variant: "secondary" as const, label: t("performance.unavailable"), text: "text-muted-foreground", bar: "bg-muted" } : achievement >= 100 ? { variant: "success" as const, label: t("performance.ahead"), text: "text-emerald-400", bar: "bg-emerald-500" } : achievement >= 90 ? { variant: "warning" as const, label: t("performance.nearPlan"), text: "text-amber-400", bar: "bg-amber-500" } : { variant: "destructive" as const, label: t("performance.behind"), text: "text-destructive", bar: "bg-destructive" };
+  const value = (n: number | null) => dashboardFormat(n, target.unit, locale, t("performance.unavailable"));
+  return <div className="glass-card border-primary/20 p-5"><div className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">{target.label}</h3><p className="mt-1 text-sm text-muted-foreground">{t("performance.monthlyTarget")}: {value(target.monthlyTarget)}</p></div><Badge variant={state.variant}>{state.label}</Badge></div><div className="mt-5 grid grid-cols-3 divide-x divide-x-reverse divide-border"><Stat label={t("performance.actual")} value={value(target.actualMtd)} /><Stat label={t("performance.targetToDate")} value={value(target.targetMtd)} /><Stat label={t("performance.difference")} value={target.aheadBehind === null ? t("performance.unavailable") : `${ahead ? "+" : ""}${value(target.aheadBehind)}`} className={state.text} /></div><div className="mt-5"><div className="mb-2 flex justify-between text-xs text-muted-foreground"><span>{t("performance.achievement")}</span><span>{achievement === null ? t("performance.unavailable") : percent(achievement, locale, 0)}</span></div><div className="h-3 overflow-hidden rounded-full bg-secondary"><div className={`h-full rounded-full ${state.bar}`} style={{ width: `${Math.min(100, Math.max(0, achievement ?? 0))}%` }} /></div></div><div className="mt-5 grid gap-2 sm:grid-cols-3"><Mini label={t("performance.remaining")} value={value(target.remainingMonthlyTarget)} /><Mini label={t("performance.requiredDaily")} value={value(target.requiredDailyVelocity)} /><Mini label={t("performance.forecast")} value={value(target.runRateForecast)} /></div></div>;
+}
+function Stat({ label, value, className }: { label: string; value: string; className?: string }) { return <div className="px-3 first:pr-0 last:pl-0"><p className="text-xs text-muted-foreground">{label}</p><p className={`mt-2 text-lg font-bold tabular-nums ${className ?? ""}`}>{value}</p></div>; }
+function Mini({ label, value }: { label: string; value: string }) { return <div className="rounded-lg border border-border bg-background/25 p-3"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-sm font-semibold tabular-nums">{value}</p></div>; }

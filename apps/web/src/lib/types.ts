@@ -686,6 +686,7 @@ export interface TeamPerformanceQueryRequest {
 // decision: an unavailable category is omitted, not zeroed, and does not
 // block the other two from rendering.
 export interface TeamPerformanceRepRow {
+  routeIds: string[];
   repEmail: string;
   repName: string;
   supervisorEmail: string | null;

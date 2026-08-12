@@ -18,6 +18,7 @@ import { MODULE_BADGE_CLASSES } from "@/lib/module-colors";
 import { formatDate } from "@/lib/utils";
 import { dashboardPerformanceApi, type DashboardBenchmark, type DashboardMetric, type DashboardTarget } from "@/lib/api";
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
+import { PerformanceGrowthCard, PerformanceTargetCard } from "@/components/dashboard/performance-cards";
 
 // FSOS Design Constitution §15.2 (Dashboard Pattern) — this screen must
 // answer, within seconds: what's happening now, the most important
@@ -46,7 +47,7 @@ export default function DashboardOverviewPage() {
       <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
       <div className="glass-hero relative overflow-hidden p-5 sm:p-7"><div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" /><div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between"><div><h1 className="flex items-center gap-2 text-2xl font-bold sm:text-3xl"><BarChart3 className="text-primary" />{t("performance.title")}</h1><p className="mt-1 text-sm text-muted-foreground">{t("performance.subtitle")}</p></div><div className="flex flex-wrap items-center gap-3"><Badge variant="outline" className="h-9 px-3 text-sm">{t("performance.sellingDays")}: {formatNumber(performance.sellingDays.elapsed, locale)} / {formatNumber(performance.sellingDays.total, locale)}</Badge><div className="flex rounded-lg border border-border bg-background/30 p-1"><Button size="sm" variant={benchmark === "previous-month" ? "default" : "ghost"} onClick={() => setBenchmark("previous-month")}>{t("performance.previousMonth")}</Button><Button size="sm" variant={benchmark === "previous-quarter-average" ? "default" : "ghost"} onClick={() => setBenchmark("previous-quarter-average")}>{t("performance.previousQuarter")}</Button></div><Button size="icon" variant="outline" aria-label={t("dashboard.refresh")} onClick={() => performanceQuery.refetch()} disabled={performanceQuery.isFetching}><RefreshCw className={performanceQuery.isFetching ? "animate-spin" : ""} /></Button></div></div></div>
       {performance.warnings.map((warning) => <div key={warning} className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-sm text-warning">{warning}</div>)}
-      <section><div className="mb-3 flex items-center justify-between"><div><h2 className="text-xl font-semibold">{t("performance.growthTitle")}</h2><p className="text-sm text-muted-foreground">{t("performance.comparisonDays", { count: performance.sellingDays.elapsed })}</p></div><span className="text-xs text-muted-foreground">{benchmark === "previous-month" ? t("performance.againstPreviousMonth") : t("performance.againstPreviousQuarter")}</span></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">{cards.map(([label, metric, unit, Icon, color, lowerBetter]) => <DashboardGrowthCard key={label} label={label} metric={metric} unit={unit} Icon={Icon} color={color} lowerBetter={lowerBetter} benchmarkType={benchmark} />)}</div></section>
+      <section><div className="mb-3 flex items-center justify-between"><div><h2 className="text-xl font-semibold">{t("performance.growthTitle")}</h2><p className="text-sm text-muted-foreground">{t("performance.comparisonDays", { count: performance.sellingDays.elapsed })}</p></div><span className="text-xs text-muted-foreground">{benchmark === "previous-month" ? t("performance.againstPreviousMonth") : t("performance.againstPreviousQuarter")}</span></div><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">{cards.map(([label, metric, unit, Icon, color, lowerBetter]) => <PerformanceGrowthCard key={label} label={label} metric={metric} unit={unit} Icon={Icon} color={color} lowerBetter={lowerBetter} benchmarkType={benchmark} />)}</div></section>
       {primaryTargets.length > 0 && <DashboardTargetSection title={t("performance.primaryTargets")} targets={primaryTargets} />}
       {secondaryTargets.length > 0 && <DashboardTargetSection title={t("performance.secondaryTargets")} targets={secondaryTargets} />}
     </div>
@@ -292,7 +293,7 @@ function DashboardGrowthCard({ label, metric, unit, Icon, color, lowerBetter, be
 }
 
 function DashboardTargetSection({ title, targets }: { title: string; targets: DashboardTarget[] }) {
-  return <section><h2 className="mb-3 flex items-center gap-2 text-xl font-semibold"><Target className="h-5 w-5 text-primary" />{title}</h2><div className="grid gap-4 xl:grid-cols-2">{targets.map((target) => <DashboardTargetCard key={target.key} target={target} />)}</div></section>;
+  return <section><h2 className="mb-3 flex items-center gap-2 text-xl font-semibold"><Target className="h-5 w-5 text-primary" />{title}</h2><div className="grid gap-4 xl:grid-cols-2">{targets.map((target) => <PerformanceTargetCard key={target.key} target={target} />)}</div></section>;
 }
 
 function DashboardTargetCard({ target }: { target: DashboardTarget }) {

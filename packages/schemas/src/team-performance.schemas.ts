@@ -45,6 +45,7 @@ export const teamPerformanceRieQuerySchema = z
 export type TeamPerformanceRieQueryInput = z.infer<typeof teamPerformanceRieQuerySchema>;
 
 export const teamPerformanceRepRowSchema = z.object({
+  routeIds: z.array(z.string()),
   // Employees.Email for the resolved rep — kept as the row identifier the
   // frontend already keys on. Falls back to the SalesRepID (or the bare
   // RouteID when the route has no SalesRepID) so rows with data-quality
