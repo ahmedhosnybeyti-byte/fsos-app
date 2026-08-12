@@ -4,6 +4,7 @@ import { generateTemporaryPassword } from "./temporary-password";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import type { LoginInput, RegisterInput } from "@field-sales-os/schemas";
 import { PrismaService } from "../../common/prisma";
+import { AppConfigService } from "../../common/config";
 import { UsersService } from "../users/users.service";
 import type { TrialCountry } from "@field-sales-os/schemas";
 import { AuditLogService } from "../audit-log/audit-log.service";
@@ -15,7 +16,7 @@ export class AuthService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly usersService: UsersService,
-    private readonly config: import("../../common/config").AppConfigService,
+    private readonly config: AppConfigService,
     private readonly tokensService: TokensService,
     private readonly auditLogService: AuditLogService,
     private readonly userActivity?: UserActivityService,
