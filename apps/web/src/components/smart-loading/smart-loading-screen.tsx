@@ -44,9 +44,9 @@ function parsePositiveNumber(value: string): number {
   return Math.max(0, Number(value) || 0);
 }
 
-function daysSinceLastSale(date: string | null): number | null {
+function daysSinceLastSale(date: string | null, referenceDate = new Date()): number | null {
   if (!date) return null;
-  return Math.floor((Date.now() - new Date(date).getTime()) / 86_400_000);
+  return Math.floor((referenceDate.getTime() - new Date(date).getTime()) / 86_400_000);
 }
 
 // Gregorian DD-MM-YYYY regardless of locale — sales reps read dates in this
@@ -114,6 +114,7 @@ export function SmartLoadingScreen({
   const [hasUnappliedChanges, setHasUnappliedChanges] = useState(false);
   const [staleDaysThreshold, setStaleDaysThreshold] = useState(4);
   const hydrated = useRef(false);
+  const activeRouteKey = useRef<string | null>(null);
   const [appliedInputs, setAppliedInputs] = useState<SmartLoadingRecalculateInput | null>(null);
   const restoredWork = useRef<Partial<{ selectionVersion: 1; targetDate: string; fromDate: string; toDate: string; visitsPerWeek: 1 | 2 | 6; selectedCustomerCodes: string[]; exceptionalCustomers: SmartLoadingRouteCustomer[]; confirmedOrders: Record<string, number>; appliedInputs: SmartLoadingRecalculateInput; hasUnappliedChanges: boolean; isSessionClosed: boolean; staleDaysThreshold: number }> | null>(null);
   useEffect(() => { try { restoredWork.current = JSON.parse(window.sessionStorage.getItem("smart-loading-work") ?? "null") as typeof restoredWork.current; if (restoredWork.current?.targetDate && restoredWork.current.targetDate !== targetDate) onTargetDateChange(restoredWork.current.targetDate); } catch { restoredWork.current = null; hydrated.current = true; } }, []);
@@ -122,16 +123,50 @@ export function SmartLoadingScreen({
   const recalculateAbort = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    if (session?.state !== "ready" || hydrated.current) return;
+    if (session?.state !== "ready") return;
+    const routeCustomerCodes = session.routeCustomers.map((customer) => customer.customerCode.trim()).filter(Boolean);
+    const routeKey = `${session.targetDate}:${routeCustomerCodes.join(",")}`;
+
+    // A different route (including a different rep's route) is a distinct
+    // loading session. Never carry its customer selection or operational
+    // edits into the newly received route.
+    if (hydrated.current && activeRouteKey.current !== routeKey) {
+      const customerCodes = [...new Set(routeCustomerCodes)];
+      setSelectedCustomerCodes(new Set(customerCodes));
+      setExceptionalCustomers([]);
+      setConfirmedOrdersByProduct({});
+      setConfirmedProductCode("");
+      setInputs({});
+      setRemovedProductCodes(new Set());
+      setManuallyAddedProductCodes(new Set());
+      setLostOpportunityAdditions({});
+      setLostOpportunityQuantityDrafts({});
+      setCheckedItems(new Set());
+      setRecalculation(null);
+      setAppliedInputs(null);
+      setHasUnappliedChanges(false);
+      setIsSessionClosed(false);
+      setPanel(null);
+      activeRouteKey.current = routeKey;
+      void applyRecalculation({ targetDate, fromDate, toDate, visitsPerWeek, staleDaysThreshold, customerCodes, confirmedOrders: [] });
+      return;
+    }
+    if (hydrated.current) return;
     const saved = restoredWork.current;
     // Sessions saved before selectionVersion did not distinguish the old empty
     // default from a rep deliberately clearing every customer. Treat those as
     // new sessions so every visit on the route is selected on first load.
     const savedSelection = saved?.selectionVersion === 1 ? saved.selectedCustomerCodes : undefined;
     const customerCodes = [...new Set((savedSelection ?? session.routeCustomers.map((customer) => customer.customerCode)).map((code) => code.trim()).filter(Boolean))];
+    const restoredFromDate = saved?.fromDate ?? fromDate;
+    const restoredToDate = saved?.toDate ?? toDate;
+    const restoredVisitsPerWeek = saved?.visitsPerWeek ?? visitsPerWeek;
+    const restoredStaleDaysThreshold = Math.max(1, saved?.staleDaysThreshold ?? staleDaysThreshold);
+    const confirmedOrders = saved?.confirmedOrders ?? {};
     setSelectedCustomerCodes(new Set(customerCodes)); setExceptionalCustomers(saved?.exceptionalCustomers ?? []);
-    if (saved) { setFromDate(saved.fromDate ?? fromDate); setToDate(saved.toDate ?? toDate); setVisitsPerWeek(saved.visitsPerWeek ?? visitsPerWeek); setConfirmedOrdersByProduct(saved.confirmedOrders ?? {}); setHasUnappliedChanges(saved.hasUnappliedChanges ?? false); setStaleDaysThreshold(Math.max(1, saved.staleDaysThreshold ?? 4)); setIsSessionClosed(saved.isSessionClosed ?? false); }
-    void applyRecalculation(saved?.appliedInputs ?? { targetDate, fromDate, toDate, visitsPerWeek, staleDaysThreshold, customerCodes, confirmedOrders: [] }); restoredWork.current = null; hydrated.current = true;
+    if (saved) { setFromDate(restoredFromDate); setToDate(restoredToDate); setVisitsPerWeek(restoredVisitsPerWeek); setConfirmedOrdersByProduct(confirmedOrders); setHasUnappliedChanges(saved.hasUnappliedChanges ?? false); setStaleDaysThreshold(restoredStaleDaysThreshold); setIsSessionClosed(saved.isSessionClosed ?? false); }
+    activeRouteKey.current = routeKey;
+    void applyRecalculation({ targetDate, fromDate: restoredFromDate, toDate: restoredToDate, visitsPerWeek: restoredVisitsPerWeek, staleDaysThreshold: restoredStaleDaysThreshold, customerCodes, confirmedOrders: Object.entries(confirmedOrders).filter(([, quantity]) => Number.isFinite(quantity) && quantity > 0).map(([productCode, quantity]) => ({ productCode, quantity })) }); restoredWork.current = null; hydrated.current = true;
   }, [session]);
 
   useEffect(() => () => recalculateAbort.current?.abort(), []);
@@ -225,10 +260,12 @@ export function SmartLoadingScreen({
     });
   }, [productSearch, rows, session]);
 
+  const analysisDate = useMemo(() => session?.state === "ready" ? new Date(`${session.asOfDate}T00:00:00.000Z`) : new Date(), [session]);
   // Staleness is a property of the complete route assortment, not only of
   // products with demand in the current recalculation. Use the live control
-  // value so changing the threshold updates the metric immediately.
-  const staleRows = useMemo(() => allRows.filter((row) => classifySalesRecency(row.product.lastSaleDate, new Date(), staleDaysThreshold) === "stale"), [allRows, staleDaysThreshold]);
+  // value and the session's analysis/loading date so the metric and list
+  // remain consistent as either value changes.
+  const staleRows = useMemo(() => allRows.filter((row) => classifySalesRecency(row.product.lastSaleDate, analysisDate, staleDaysThreshold) === "stale"), [allRows, analysisDate, staleDaysThreshold]);
 
   const hasLocalChanges = Object.keys(inputs).length > 0 || removedProductCodes.size > 0 || manuallyAddedProductCodes.size > 0 || Object.keys(lostOpportunityAdditions).length > 0 || Object.keys(lostOpportunityQuantityDrafts).length > 0 || checkedItems.size > 0;
   function currentRecalculationSnapshot(): SmartLoadingRecalculateInput { return { targetDate, fromDate, toDate, visitsPerWeek, staleDaysThreshold, customerCodes: [...new Set([...selectedCustomerCodes].map((code) => code.trim()).filter(Boolean))], confirmedOrders: Object.entries(confirmedOrdersByProduct).filter(([, quantity]) => Number.isFinite(quantity) && quantity > 0).map(([productCode, quantity]) => ({ productCode, quantity })) }; }
@@ -236,7 +273,6 @@ export function SmartLoadingScreen({
   async function applyRecalculation(snapshot = currentRecalculationSnapshot()) {
     if (snapshot.fromDate > snapshot.toDate) { setRecalculationError(label("smartLoading.invalidDateRange", "The start date must be on or before the end date.")); return; }
     if (snapshot.customerCodes.length === 0) { setRecalculationError(label("smartLoading.selectCustomer", "Select at least one customer.")); return; }
-    const confirmedOrders = Object.entries(confirmedOrdersByProduct).filter(([, quantity]) => Number.isFinite(quantity) && quantity > 0).map(([productCode, quantity]) => ({ productCode, quantity }));
     recalculateAbort.current?.abort();
     const controller = new AbortController();
     recalculateAbort.current = controller;
@@ -671,7 +707,7 @@ export function SmartLoadingScreen({
       )}
 
       {panel === "priority" && <PriorityProductsPopover groups={priorityGroups} openGroups={openPriorityGroups} onToggleGroup={(category) => setOpenPriorityGroups((current) => { const next = new Set(current); next.has(category) ? next.delete(category) : next.add(category); return next; })} onClose={() => setPanel(null)} />}
-      {panel === "stale" && <ProductListPopover rows={staleRows} stale onClose={() => setPanel(null)} />}
+      {panel === "stale" && <ProductListPopover rows={staleRows} stale referenceDate={analysisDate} onClose={() => setPanel(null)} />}
 
       <Card className="glass-card">
         <CardHeader className="pb-3">
@@ -1169,7 +1205,7 @@ function AddProductDialog({
   );
 }
 
-function CategoryProductGroups({ rows, stale }: { rows: Row[]; stale: boolean }) {
+function CategoryProductGroups({ rows, stale, referenceDate }: { rows: Row[]; stale: boolean; referenceDate?: Date }) {
   const { locale, t } = useTranslation();
   const [openCategories, setOpenCategories] = useState<Set<string>>(new Set());
   const groups = useMemo(() => {
@@ -1206,7 +1242,7 @@ function CategoryProductGroups({ rows, stale }: { rows: Row[]; stale: boolean })
                     <span className="text-left text-muted-foreground">
                       {t("smartLoading.vehicleStock")} {row.effectiveVehicleStock === null ? "—" : formatQuantity(row.effectiveVehicleStock, locale)}
                       {stale && (
-                        <> · {t("smartLoading.lastSale")} {formatGregorianDate(row.product.lastSaleDate) ?? "—"} · {daysSinceLastSale(row.product.lastSaleDate) ?? "—"} {t("smartLoading.staleDaysUnit")}</>
+                        <> · {t("smartLoading.lastSale")} {formatGregorianDate(row.product.lastSaleDate) ?? "—"} · {daysSinceLastSale(row.product.lastSaleDate, referenceDate) ?? "—"} {t("smartLoading.staleDaysUnit")}</>
                       )}
                       {!stale && <> · {t("smartLoading.suggestedLoading")} {formatQuantity(row.suggested, locale)}</>}
                     </span>
@@ -1261,7 +1297,7 @@ function PriorityProductsPopover({
     </div>
   );
 }
-function ProductListPopover({ rows, stale, onClose }: { rows: Row[]; stale: boolean; onClose: () => void }) {
+function ProductListPopover({ rows, stale, referenceDate, onClose }: { rows: Row[]; stale: boolean; referenceDate?: Date; onClose: () => void }) {
   const { t } = useTranslation();
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/20 pt-24" onClick={onClose}>
@@ -1271,7 +1307,7 @@ function ProductListPopover({ rows, stale, onClose }: { rows: Row[]; stale: bool
           <Button size="sm" variant="ghost" onClick={onClose}>{t("smartLoading.close")}</Button>
         </CardHeader>
         <CardContent className="max-h-[60vh] overflow-y-auto p-4 pt-0">
-          <CategoryProductGroups rows={rows} stale={stale} />
+          <CategoryProductGroups rows={rows} stale={stale} referenceDate={referenceDate} />
         </CardContent>
       </Card>
     </div>

@@ -18,6 +18,14 @@ test("uses the supplied stale-days threshold", () => {
   assert.equal(classifySalesRecency("2026-08-01T12:00:00.000Z", now, 1), "stale");
 });
 
+test("changes the stale-SKU count logically at 1, 4, and 7 days", () => {
+  const saleDates = ["2026-08-01T12:00:00.000Z", "2026-07-29T12:00:00.000Z", "2026-07-25T12:00:00.000Z"];
+  const countAt = (threshold: number) => saleDates.filter((date) => classifySalesRecency(date, now, threshold) === "stale").length;
+  assert.equal(countAt(1), 3);
+  assert.equal(countAt(4), 2);
+  assert.equal(countAt(7), 1);
+});
+
 test("classifies null and invalid dates as missing", () => {
   assert.equal(classifySalesRecency(null, now), "missing");
   assert.equal(classifySalesRecency("not-a-date", now), "missing");
