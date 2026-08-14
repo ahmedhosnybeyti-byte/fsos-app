@@ -299,13 +299,19 @@ export class SmartLoadingService {
     for (const item of invoiceItemsRecords) {
       const invoiceNo = String(item.InvoiceNo ?? "").trim();
       const invoice = invoiceMetaByNo.get(invoiceNo);
-      if (!invoice || !nextRouteCustomers.has(invoice.customerCode)) continue;
+      if (!invoice) continue;
       const productCode = String(item.ProductCode ?? "").trim();
       if (!productCode) continue;
 
+      // Staleness belongs to the stock currently carried by this caller's
+      // vehicle scope. Its last-sale date must therefore use all of that
+      // scope's sales, not just customers scheduled for the next visit.
       const prevLast = lastSaleMsByProduct.get(productCode);
       if (prevLast === undefined || invoice.date > prevLast) lastSaleMsByProduct.set(productCode, invoice.date);
 
+      // Demand and priority remain route-visit calculations, so they retain
+      // the next-route-customer filter independently from stale detection.
+      if (!nextRouteCustomers.has(invoice.customerCode)) continue;
       if (invoice.date >= windowStartMs && invoice.date <= nowMs) {
         const qty = toFiniteNumber(item.Quantity) ?? 0;
         windowQtyByProduct.set(productCode, (windowQtyByProduct.get(productCode) ?? 0) + qty);

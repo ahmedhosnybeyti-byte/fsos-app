@@ -153,11 +153,10 @@ export function SmartLoadingScreen({
     }
     if (hydrated.current) return;
     const saved = restoredWork.current;
-    // Sessions saved before selectionVersion did not distinguish the old empty
-    // default from a rep deliberately clearing every customer. Treat those as
-    // new sessions so every visit on the route is selected on first load.
-    const savedSelection = saved?.selectionVersion === 1 ? saved.selectedCustomerCodes : undefined;
-    const customerCodes = [...new Set((savedSelection ?? session.routeCustomers.map((customer) => customer.customerCode)).map((code) => code.trim()).filter(Boolean))];
+    // Customer selection is intentionally session-local. Opening Smart
+    // Loading must always start from every customer on the current route;
+    // retaining an old empty selection leaves the calculation unusable.
+    const customerCodes = [...new Set(routeCustomerCodes)];
     const restoredFromDate = saved?.fromDate ?? fromDate;
     const restoredToDate = saved?.toDate ?? toDate;
     const restoredVisitsPerWeek = saved?.visitsPerWeek ?? visitsPerWeek;
@@ -265,7 +264,7 @@ export function SmartLoadingScreen({
   // products with demand in the current recalculation. Use the live control
   // value and the session's analysis/loading date so the metric and list
   // remain consistent as either value changes.
-  const staleRows = useMemo(() => allRows.filter((row) => classifySalesRecency(row.product.lastSaleDate, analysisDate, staleDaysThreshold) === "stale"), [allRows, analysisDate, staleDaysThreshold]);
+  const staleRows = useMemo(() => allRows.filter((row) => row.effectiveVehicleStock !== null && row.effectiveVehicleStock > 0 && classifySalesRecency(row.product.lastSaleDate, analysisDate, staleDaysThreshold) === "stale"), [allRows, analysisDate, staleDaysThreshold]);
 
   const hasLocalChanges = Object.keys(inputs).length > 0 || removedProductCodes.size > 0 || manuallyAddedProductCodes.size > 0 || Object.keys(lostOpportunityAdditions).length > 0 || Object.keys(lostOpportunityQuantityDrafts).length > 0 || checkedItems.size > 0;
   function currentRecalculationSnapshot(): SmartLoadingRecalculateInput { return { targetDate, fromDate, toDate, visitsPerWeek, staleDaysThreshold, customerCodes: [...new Set([...selectedCustomerCodes].map((code) => code.trim()).filter(Boolean))], confirmedOrders: Object.entries(confirmedOrdersByProduct).filter(([, quantity]) => Number.isFinite(quantity) && quantity > 0).map(([productCode, quantity]) => ({ productCode, quantity })) }; }
