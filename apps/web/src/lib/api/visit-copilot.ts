@@ -41,9 +41,9 @@ export const visitCopilotApi = {
 
   plan: (body: VisitCopilotPlanRequest) => apiFetch<VisitCopilotPlanResult>("/visit-copilot/plan", { method: "POST", body }),
 
-  briefing: (params: PeriodParams & { customerCode: string; vanStock: boolean }) =>
+  briefing: (params: PeriodParams & { customerCode: string; vanStock: boolean; locale?: "ar" | "en" }) =>
     apiFetch<VisitCopilotBriefing>(`/visit-copilot/briefing/${encodeURIComponent(params.customerCode)}`, {
-      query: { period: params.period, from: params.from, to: params.to, vanStock: params.vanStock },
+      query: { period: params.period, from: params.from, to: params.to, vanStock: params.vanStock, locale: params.locale },
     }),
 
   // Chat body carries exactly one of customerCode / prospectId (Phase 2).

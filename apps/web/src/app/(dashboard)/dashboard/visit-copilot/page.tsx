@@ -233,7 +233,7 @@ function VisitCopilotScreen() {
 
   const briefingQuery = useQuery({
     queryKey: ["visit-copilot", "briefing", selectedCode, period, from, to, vanStock],
-    queryFn: () => visitCopilotApi.briefing({ customerCode: selectedCode!, ...periodParams, vanStock }),
+    queryFn: () => visitCopilotApi.briefing({ customerCode: selectedCode!, ...periodParams, vanStock, locale }),
     enabled: !!selectedCode && customPeriodReady,
   });
 

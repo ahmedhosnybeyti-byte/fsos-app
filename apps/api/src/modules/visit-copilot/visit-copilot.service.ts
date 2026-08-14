@@ -787,7 +787,7 @@ export class VisitCopilotService {
     return this.buildBriefing(user, customerCode, query);
   }
 
-  private async buildBriefing(user: AuthenticatedUser, customerCode: string, opts: PeriodInput & { vanStock: boolean }): Promise<CustomerBriefingResult> {
+  private async buildBriefing(user: AuthenticatedUser, customerCode: string, opts: PeriodInput & { vanStock: boolean; locale?: "ar" | "en" }): Promise<CustomerBriefingResult> {
     const ctx = this.rieContext(user);
     const range = resolveVisitCopilotPeriod(opts);
     const warnings: string[] = [];
@@ -1071,6 +1071,21 @@ export class VisitCopilotService {
       managementDiagnosis,
       executiveDecision,
     };
+    const localizedCustomer360 = opts.locale === "en" ? {
+      ...customer360,
+      executiveSummary: `${String(customer.CustomerName ?? code)} recorded ${round2(salesTotal)} in sales across ${invoiceCount} invoices during this period.${lostOpportunityResult.opportunities.length ? ` ${lostOpportunityResult.opportunities.length} stopped products need attention.` : ""}`,
+      kpiEvaluations: [
+        { label: "Average invoice", value: averageInvoiceValue ?? "—", evaluation: averageInvoiceValue === null ? "No invoices" : "Measured" },
+        { label: "Trend", value: trendPct === null ? "—" : `${trendPct}%`, evaluation: trendPct === null ? "Unavailable" : trendPct > 0 ? "Positive" : trendPct < 0 ? "Declining" : "Stable" },
+      ],
+      diagnoses: diagnoses.map((item) => ({ title: "Measured customer signal", evidence: item.title === "اتجاه المبيعات" || item.title === "تراجع المبيعات" ? `Sales trend: ${trendPct === null ? "unavailable" : `${trendPct}%`}.` : "A measured signal is available for this customer.", meaning: "Use this signal when planning the next visit.", confidence: item.confidence })),
+      strengths: customer360.strengths.length ? ["Measured strengths are available in the customer record."] : [],
+      weaknesses: customer360.weaknesses.length ? ["Measured risks require review before the next visit."] : [],
+      improvementOpportunities: customer360.improvementOpportunities.length ? ["Prioritize the next measured customer action."] : [],
+      managementDiagnosis: "Management assessment is based on the measured customer signals for this period.",
+      executiveDecision: lostOpportunityResult.opportunities.length ? "Prioritize recovering stopped products before adding new products." : "Maintain the current customer plan and monitor the measured signals.",
+      collectionContext: collectionsResult.available ? (collectionCount ? "Collection activity is available for the selected period." : "No completed collections are recorded for the selected period.") : "Collections data is unavailable.",
+    } : customer360;
 
     return {
       customerCode: code,
@@ -1083,7 +1098,7 @@ export class VisitCopilotService {
       topProducts,
       missingProducts,
       diagnosis,
-      customer360,
+      customer360: localizedCustomer360,
       topOpportunity: diagnosis.diagnosis,
       suggestedGoal: `هدف الزيارة: ${diagnosis.visitObjective}`,
       actions: diagnosis.visitActions,

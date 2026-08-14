@@ -77,6 +77,7 @@ export type VisitCopilotPlanRequest = z.infer<typeof visitCopilotPlanRequestSche
 export const visitCopilotBriefingQuerySchema = z
   .object({
     ...periodFields,
+    locale: z.enum(["ar", "en"]).optional(),
     // "Van stock filter" — when on, product recommendations exclude
     // products missing from the rep's latest Van Inventory report.
     vanStock: queryBooleanSchema.default(false),
