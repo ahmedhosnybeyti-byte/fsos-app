@@ -1494,6 +1494,7 @@ export interface VisitCopilotBriefing {
   sales: { total: number; invoiceCount: number; trendPct: number };
   returns: { total: number; rate: number };
   collections: { collected: number; pending: number; bounced: number; oldestPendingDueDate: string | null };
+  dataAvailability: { returns: boolean; collections: boolean };
   topProducts: VisitCopilotBriefingProduct[];
   missingProducts: VisitCopilotMissingProduct[];
   diagnosis?: {

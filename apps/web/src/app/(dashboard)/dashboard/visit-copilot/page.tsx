@@ -864,7 +864,7 @@ function VisitCopilotScreen() {
       ) : (
         /* ——— Visit Mode (customer or prospect) ——— */
         <div className="space-y-4">
-          <Button variant="ghost" size="sm" onClick={closeVisit} className="h-11 gap-2 px-3">
+          <Button variant="outline" size="sm" onClick={closeVisit} className="h-11 gap-2 border-blue-500/50 bg-blue-500/10 px-3 text-blue-700 hover:bg-blue-500/20 hover:text-blue-800 dark:text-blue-300 dark:hover:text-blue-200">
             <Undo2 className="h-4 w-4" />
             {t("copilot.back")}
           </Button>
@@ -902,12 +902,12 @@ function VisitCopilotScreen() {
                     <p className="mb-2 text-sm font-semibold">أهم مؤشرات الأداء</p>
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                     {briefing.customer360.kpiEvaluations.map((item) => <MiniKpi key={item.label} label={item.label} value={typeof item.value === "number" ? formatWholeNumber(item.value) : item.value} evaluation={item.evaluation} />)}
-                    <SkuKpiCard label="الأصناف المباعة" value={formatWholeNumber(briefing.customer360.soldSkuCount)} open={openSkuCard === "sold"} onClick={() => setOpenSkuCard(openSkuCard === "sold" ? null : "sold")} />
-                    <SkuKpiCard label="الأصناف المتوقفة" value={formatWholeNumber(briefing.customer360.lostSkuCount)} open={openSkuCard === "lost"} onClick={() => setOpenSkuCard(openSkuCard === "lost" ? null : "lost")} />
-                    <MiniKpi label="ترتيب المبيعات" value={briefing.customer360.salesRank ? `المرتبة ${formatWholeNumber(briefing.customer360.salesRank)} من ${formatWholeNumber(briefing.customer360.customerCount)}` : "—"} />
+                    <SkuKpiCard label={t("copilot.customer360SoldProducts")} value={formatWholeNumber(briefing.customer360.soldSkuCount)} open={openSkuCard === "sold"} onClick={() => setOpenSkuCard(openSkuCard === "sold" ? null : "sold")} />
+                    <SkuKpiCard label={t("copilot.customer360StoppedProducts")} value={formatWholeNumber(briefing.customer360.lostSkuCount)} open={openSkuCard === "lost"} onClick={() => setOpenSkuCard(openSkuCard === "lost" ? null : "lost")} />
+                    <MiniKpi label={t("copilot.customer360SalesRank")} value={briefing.customer360.salesRank ? t("copilot.customer360SalesRankValue", { rank: formatWholeNumber(briefing.customer360.salesRank), total: formatWholeNumber(briefing.customer360.customerCount) }) : "—"} />
                     </div>
-                    {openSkuCard === "sold" && <SkuGroups title="الأصناف المباعة خلال الفترة" items={briefing.customer360.soldSkus.map((sku) => ({ ...sku, details: [`الكمية: ${formatWholeNumber(sku.qty)}`, `المبيعات: ${formatWholeNumber(sku.value)}`, sku.lastPurchaseDate ? `آخر شراء: ${sku.lastPurchaseDate}` : null].filter((value): value is string => value !== null) }))} />}
-                    {openSkuCard === "lost" && <SkuGroups title="الأصناف التي توقفت وفق منطق Lost SKU" items={briefing.customer360.lostSkus.map((sku) => ({ ...sku, details: [`كمية الفترة السابقة: ${formatWholeNumber(sku.baselineNetQuantity)}`, "الحالة: متوقف في الفترة الأخيرة"] }))} />}
+                    {openSkuCard === "sold" && <SkuGroups title={t("copilot.customer360SoldProductsPeriod")} expandAllLabel={t("copilot.customer360ExpandAll")} collapseAllLabel={t("copilot.customer360CollapseAll")} emptyLabel={t("copilot.customer360NoProducts")} uncategorizedLabel={t("copilot.customer360Uncategorized")} items={briefing.customer360.soldSkus.map((sku) => ({ ...sku, sortQuantity: sku.qty, details: [`${t("copilot.customer360Quantity")}: ${formatWholeNumber(sku.qty)}`, `${t("copilot.salesLabel")}: ${formatWholeNumber(sku.value)}`, sku.lastPurchaseDate ? `${t("copilot.customer360LastPurchase")}: ${sku.lastPurchaseDate}` : null].filter((value): value is string => value !== null) }))} />}
+                    {openSkuCard === "lost" && <SkuGroups title={t("copilot.customer360StoppedProductsPeriod")} expandAllLabel={t("copilot.customer360ExpandAll")} collapseAllLabel={t("copilot.customer360CollapseAll")} emptyLabel={t("copilot.customer360NoProducts")} uncategorizedLabel={t("copilot.customer360Uncategorized")} items={briefing.customer360.lostSkus.map((sku) => ({ ...sku, sortQuantity: sku.baselineNetQuantity, details: [`${t("copilot.customer360PreviousQuantity")}: ${formatWholeNumber(sku.baselineNetQuantity)}`, t("copilot.customer360StoppedStatus")] }))} />}
                     <p className="mt-2 text-xs text-muted-foreground">{briefing.customer360.collectionContext}</p>
                   </section>
                   <details className="rounded-lg border border-border bg-background/40 p-3" open>
@@ -946,10 +946,10 @@ function VisitCopilotScreen() {
                 />
                 <BigNumber
                   label={t("copilot.returnsLabel")}
-                  value={formatWholeNumber(briefing.returns.total)}
+                  value={briefing.dataAvailability.returns ? formatWholeNumber(briefing.returns.total) : t("copilot.customer360DataUnavailable")}
                   caption={t("copilot.returnRate", { value: briefing.returns.rate === null ? "—" : formatPercentage(briefing.returns.rate) })}
                 />
-                <BigNumber label={t("copilot.pendingLabel")} value={formatWholeNumber(briefing.collections.pending)} />
+                <BigNumber label={t("copilot.collectedLabel")} value={briefing.dataAvailability.collections ? formatWholeNumber(briefing.collections.collected) : t("copilot.customer360DataUnavailable")} />
               </div>
 
               {briefing.topProducts.length > 0 && (
@@ -1148,23 +1148,25 @@ function SkuKpiCard({ label, value, open, onClick }: { label: string; value: str
   );
 }
 
-type SkuGroupItem = { productCode: string; productName: string; category: string | null; details: string[] };
+type SkuGroupItem = { productCode: string; productName: string; category: string | null; sortQuantity: number; details: string[] };
 
-function SkuGroups({ title, items }: { title: string; items: SkuGroupItem[] }) {
+function SkuGroups({ title, items, expandAllLabel, collapseAllLabel, emptyLabel, uncategorizedLabel }: { title: string; items: SkuGroupItem[]; expandAllLabel: string; collapseAllLabel: string; emptyLabel: string; uncategorizedLabel: string }) {
   const groups = useMemo(() => {
     const grouped = new globalThis.Map<string, SkuGroupItem[]>();
     for (const item of items) {
-      const category = item.category || "غير مصنف";
+      const category = item.category || uncategorizedLabel;
       grouped.set(category, [...(grouped.get(category) ?? []), item]);
     }
-    return [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b, "ar"));
-  }, [items]);
+    return [...grouped.entries()].map(([category, skus]) => [category, skus.sort((a, b) => b.sortQuantity - a.sortQuantity)] as const).sort(([a], [b]) => a.localeCompare(b));
+  }, [items, uncategorizedLabel]);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const setAllCategories = (expand: boolean) => setExpandedCategories(expand ? new Set(groups.map(([category]) => category)) : new Set());
 
   return (
     <section className="glow-ai rounded-lg p-3 text-sm">
-      <p className="mb-2 font-semibold">{title}</p>
-      {groups.length === 0 ? <p className="text-xs text-muted-foreground">لا توجد أصناف مطابقة للفترة.</p> : <div className="space-y-2">{groups.map(([category, skus]) => (
-        <details key={category} className="rounded-md border border-border bg-background/40 p-2" open>
+      <div className="mb-2 flex items-center justify-between gap-2"><p className="font-semibold">{title}</p>{groups.length > 1 && <div className="flex gap-1"><button type="button" onClick={() => setAllCategories(true)} className="rounded px-1.5 py-1 text-xs text-ai hover:bg-ai/10">{expandAllLabel}</button><button type="button" onClick={() => setAllCategories(false)} className="rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted">{collapseAllLabel}</button></div>}</div>
+      {groups.length === 0 ? <p className="text-xs text-muted-foreground">{emptyLabel}</p> : <div className="space-y-2">{groups.map(([category, skus]) => (
+        <details key={category} className="rounded-md border border-border bg-background/40 p-2" open={expandedCategories.has(category)} onToggle={(event) => setExpandedCategories((current) => { const next = new Set(current); if ((event.currentTarget as HTMLDetailsElement).open) next.add(category); else next.delete(category); return next; })}>
           <summary className="cursor-pointer font-medium">{category} <span className="text-xs text-muted-foreground">({formatWholeNumber(skus.length)})</span></summary>
           <div className="mt-2 space-y-2">{skus.map((sku) => <div key={sku.productCode} className="rounded-md bg-card/60 p-2 text-xs"><p className="font-medium">{sku.productName}</p><p className="mt-1 text-muted-foreground">{sku.details.join(" · ")}</p></div>)}</div>
         </details>

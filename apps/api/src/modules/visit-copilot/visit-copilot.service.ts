@@ -164,6 +164,7 @@ export interface CustomerBriefingResult {
   sales: { total: number; invoiceCount: number; trendPct: number | null };
   returns: { total: number; rate: number | null };
   collections: { collected: number; pending: number; bounced: number; oldestPendingDueDate: string | null };
+  dataAvailability: { returns: boolean; collections: boolean };
   topProducts: BriefingProduct[];
   missingProducts: BriefingMissingProduct[];
   diagnosis?: CustomerVisitDiagnosisV2;
@@ -357,7 +358,7 @@ function round2(n: number): number {
 function toFiniteNumber(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   if (typeof value === "string" && value.trim() !== "") {
-    const n = Number(value);
+    const n = Number(value.replace(/,/g, ""));
     return Number.isFinite(n) ? n : null;
   }
   return null;
@@ -447,16 +448,20 @@ export class VisitCopilotService {
   // Graceful degradation for every entity except Customers: unavailable or
   // erroring reads become a warning string + empty rows, never a 500.
   private async tryEntity(ctx: ReturnType<VisitCopilotService["rieContext"]>, entityName: string, arabicLabel: string, warnings: string[]): Promise<readonly EntityRecord[]> {
+    return (await this.tryEntityResult(ctx, entityName, arabicLabel, warnings)).records;
+  }
+
+  private async tryEntityResult(ctx: ReturnType<VisitCopilotService["rieContext"]>, entityName: string, arabicLabel: string, warnings: string[]): Promise<{ available: boolean; records: readonly EntityRecord[] }> {
     try {
       const result = await this.rieFacade.getEntityRecords(entityName, ctx);
       if (!result.available) {
         warnings.push(`بيانات "${arabicLabel}" غير متاحة — بعض الأرقام قد تكون ناقصة.`);
-        return [];
+        return { available: false, records: [] };
       }
-      return result.records;
+      return { available: true, records: result.records };
     } catch {
       warnings.push(`تعذر قراءة بيانات "${arabicLabel}" — بعض الأرقام قد تكون ناقصة.`);
-      return [];
+      return { available: false, records: [] };
     }
   }
 
@@ -794,14 +799,16 @@ export class VisitCopilotService {
     // rep's visible routes is indistinguishable from a non-existent one.
     if (!customer) throw new NotFoundException("العميل غير موجود ضمن نطاقك.");
 
-    const [invoices, items, returns, collections, products, vanInventory] = await Promise.all([
+    const [invoices, items, returnsResult, collectionsResult, products, vanInventory] = await Promise.all([
       this.tryEntity(ctx, "Invoices", "الفواتير", warnings),
       this.tryEntity(ctx, "Invoice Items", "أصناف الفاتورة", warnings),
-      this.tryEntity(ctx, "Returns", "المرتجعات", warnings),
-      this.tryEntity(ctx, "Collections", "التحصيلات", warnings),
+      this.tryEntityResult(ctx, "Returns", "المرتجعات", warnings),
+      this.tryEntityResult(ctx, "Collections", "التحصيلات", warnings),
       this.tryEntity(ctx, "Products", "الأصناف", warnings),
       opts.vanStock ? this.tryEntity(ctx, "Van Inventory", "مخزون السيارة", warnings) : Promise.resolve([] as readonly EntityRecord[]),
     ]);
+    const returns = returnsResult.records;
+    const collections = collectionsResult.records;
 
     const productNames = new Map<string, string>();
     const productCategories = new Map<string, string | null>();
@@ -887,7 +894,7 @@ export class VisitCopilotService {
     let returnsTotal = 0;
     let returnCount = 0;
     for (const ret of returns) {
-      if (String(ret.CustomerCode ?? "").trim() !== code) continue;
+      if (String(ret.CustomerCode ?? "").trim().toLowerCase() !== code.toLowerCase()) continue;
       const dateIso = isoDayOf(ret.ReturnDate);
       if (!dateIso || dateIso < range.from || dateIso > range.to) continue;
       returnsTotal += toFiniteNumber(ret.TotalAmount) ?? 0;
@@ -905,7 +912,7 @@ export class VisitCopilotService {
     let overdueAmount = 0;
     let oldestPendingDueDate: string | null = null;
     for (const col of collections) {
-      if (String(col.CustomerCode ?? "").trim() !== code) continue;
+      if (String(col.CustomerCode ?? "").trim().toLowerCase() !== code.toLowerCase()) continue;
       const status = String(col.Status ?? "").trim().toLowerCase();
       const amount = toFiniteNumber(col.Amount) ?? 0;
       // Canonical imports use "Cleared" while older datasets use
@@ -931,7 +938,7 @@ export class VisitCopilotService {
       .slice(0, TOP_PRODUCTS_LIMIT);
     const soldSkus: BriefingProduct[] = Array.from(customerProducts.entries())
       .map(([pCode, agg]) => ({ productCode: pCode, productName: productNames.get(pCode) ?? pCode, category: productCategories.get(pCode) ?? null, qty: round2(agg.qty), value: round2(agg.value), lastPurchaseDate: agg.lastPurchaseDate }))
-      .sort((a, b) => b.value - a.value);
+      .sort((a, b) => b.qty - a.qty || b.value - a.value);
 
     // Cross-sell candidates: products channel-peers buy in the period that
     // this customer doesn't, ranked by peer demand value. With the van
@@ -1046,7 +1053,7 @@ export class VisitCopilotService {
         baselineNetQuantity: opportunity.baselineNetQuantity,
         recentNetQuantity: opportunity.recentNetQuantity,
         suggestedQuantity: opportunity.suggestedQuantity,
-      })),
+      })).sort((a, b) => b.baselineNetQuantity - a.baselineNetQuantity),
       collectionContext: overdueAmount > 0 || bounced > 0
         ? `يوجد تحصيل متأخر بقيمة ${round2(overdueAmount)} أو مرتجع بقيمة ${round2(bounced)}.`
         : collectionCount === 0
@@ -1072,6 +1079,7 @@ export class VisitCopilotService {
       sales: { total: round2(salesTotal), invoiceCount, trendPct },
       returns: { total: round2(returnsTotal), rate: returnsRate },
       collections: { collected: round2(collected), pending: round2(pending), bounced: round2(bounced), oldestPendingDueDate },
+      dataAvailability: { returns: returnsResult.available, collections: collectionsResult.available },
       topProducts,
       missingProducts,
       diagnosis,
@@ -2042,6 +2050,7 @@ export class VisitCopilotService {
       sales: { total: 0, invoiceCount: 0, trendPct: null },
       returns: { total: 0, rate: null },
       collections: { collected: 0, pending: 0, bounced: 0, oldestPendingDueDate: null },
+      dataAvailability: { returns: false, collections: false },
       topProducts,
       missingProducts: [],
       topOpportunity,

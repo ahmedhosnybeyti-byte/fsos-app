@@ -1125,7 +1125,23 @@ export type TranslationKey =
   | "copilot.returnsLabel"
   | "copilot.returnRate"
   | "copilot.pendingLabel"
+  | "copilot.collectedLabel"
   | "copilot.trendLabel"
+  | "copilot.customer360SoldProducts"
+  | "copilot.customer360StoppedProducts"
+  | "copilot.customer360SalesRank"
+  | "copilot.customer360SalesRankValue"
+  | "copilot.customer360SoldProductsPeriod"
+  | "copilot.customer360StoppedProductsPeriod"
+  | "copilot.customer360ExpandAll"
+  | "copilot.customer360CollapseAll"
+  | "copilot.customer360NoProducts"
+  | "copilot.customer360Uncategorized"
+  | "copilot.customer360Quantity"
+  | "copilot.customer360PreviousQuantity"
+  | "copilot.customer360LastPurchase"
+  | "copilot.customer360StoppedStatus"
+  | "copilot.customer360DataUnavailable"
   | "copilot.topProductsTitle"
   | "copilot.actionsTitle"
   | "copilot.briefingLoadError"
@@ -2531,7 +2547,23 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.returnsLabel": "المرتجعات",
     "copilot.returnRate": "{value}% من المبيعات",
     "copilot.pendingLabel": "تحصيل معلّق",
+    "copilot.collectedLabel": "التحصيلات",
     "copilot.trendLabel": "الاتجاه",
+    "copilot.customer360SoldProducts": "الأصناف المباعة",
+    "copilot.customer360StoppedProducts": "الأصناف المتوقفة",
+    "copilot.customer360SalesRank": "ترتيب المبيعات",
+    "copilot.customer360SalesRankValue": "المرتبة {rank} من {total}",
+    "copilot.customer360SoldProductsPeriod": "الأصناف المباعة خلال الفترة",
+    "copilot.customer360StoppedProductsPeriod": "الأصناف التي توقفت خلال الفترة",
+    "copilot.customer360ExpandAll": "توسيع الكل",
+    "copilot.customer360CollapseAll": "طي الكل",
+    "copilot.customer360NoProducts": "لا توجد أصناف مطابقة للفترة.",
+    "copilot.customer360Uncategorized": "غير مصنف",
+    "copilot.customer360Quantity": "الكمية",
+    "copilot.customer360PreviousQuantity": "كمية الفترة السابقة",
+    "copilot.customer360LastPurchase": "آخر شراء",
+    "copilot.customer360StoppedStatus": "الحالة: متوقف في الفترة الأخيرة",
+    "copilot.customer360DataUnavailable": "البيانات غير متاحة",
     "copilot.topProductsTitle": "أكتر المنتجات",
     "copilot.actionsTitle": "خطوات الزيارة",
     "copilot.briefingLoadError": "معرفناش نجيب ملخص العميل",
@@ -3951,7 +3983,23 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "copilot.returnsLabel": "Returns",
     "copilot.returnRate": "{value}% of sales",
     "copilot.pendingLabel": "Pending collection",
+    "copilot.collectedLabel": "Collections",
     "copilot.trendLabel": "Trend",
+    "copilot.customer360SoldProducts": "Sold products",
+    "copilot.customer360StoppedProducts": "Stopped products",
+    "copilot.customer360SalesRank": "Sales rank",
+    "copilot.customer360SalesRankValue": "Rank {rank} of {total}",
+    "copilot.customer360SoldProductsPeriod": "Products sold during this period",
+    "copilot.customer360StoppedProductsPeriod": "Products stopped during this period",
+    "copilot.customer360ExpandAll": "Expand all",
+    "copilot.customer360CollapseAll": "Collapse all",
+    "copilot.customer360NoProducts": "No products match this period.",
+    "copilot.customer360Uncategorized": "Uncategorized",
+    "copilot.customer360Quantity": "Quantity",
+    "copilot.customer360PreviousQuantity": "Previous-period quantity",
+    "copilot.customer360LastPurchase": "Last purchase",
+    "copilot.customer360StoppedStatus": "Status: stopped in the recent period",
+    "copilot.customer360DataUnavailable": "Data unavailable",
     "copilot.topProductsTitle": "Top products",
     "copilot.actionsTitle": "Visit checklist",
     "copilot.briefingLoadError": "Could not load the customer briefing",
