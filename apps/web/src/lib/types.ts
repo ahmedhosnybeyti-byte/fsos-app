@@ -1498,6 +1498,7 @@ export interface VisitCopilotBriefing {
     evidence: string[];
     diagnosis: string;
     confidence: "عالٍ" | "متوسط" | "منخفض" | null;
+    rootCauseConfidence?: "غير معروف" | "منخفض";
     visitObjective: string;
     visitActions: string[];
   };

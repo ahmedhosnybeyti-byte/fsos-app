@@ -937,6 +937,7 @@ function VisitCopilotScreen() {
                   <div className="rounded-lg border border-border bg-background/40 p-3 text-sm">
                     <p className="font-medium">التشخيص: {briefing.diagnosis.diagnosis}</p>
                     {briefing.diagnosis.confidence && <p className="mt-1 text-xs text-muted-foreground">الثقة: {briefing.diagnosis.confidence}</p>}
+                    {briefing.diagnosis.rootCauseConfidence && <p className="mt-1 text-xs text-muted-foreground">ثقة سبب التغير: {briefing.diagnosis.rootCauseConfidence}</p>}
                     <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
                       {briefing.diagnosis.evidence.map((evidence, index) => <li key={index}>• {evidence}</li>)}
                     </ul>

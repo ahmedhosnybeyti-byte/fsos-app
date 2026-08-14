@@ -15,6 +15,10 @@ export interface CustomerVisitDiagnosis {
   visitActions: string[];
 }
 
+export interface CustomerVisitDiagnosisV2 extends CustomerVisitDiagnosis {
+  rootCauseConfidence: "غير معروف" | "منخفض";
+}
+
 const format = (value: number) => Math.round(value).toLocaleString("ar-EG");
 
 /**
@@ -92,6 +96,26 @@ export function buildDaily360Diagnosis(input: {
     visitAction: `تحقق من بيانات ${input.productName} قبل اتخاذ قرار تحميل.`,
     visitGoal: "تأكيد البيانات المطلوبة للقرار.",
   };
+}
+
+/** Corrected SKU wording: stoppage is a fact, never an asserted cause. */
+export function buildDaily360DiagnosisV2(input: {
+  productName: string;
+  sales90: number;
+  sales30: number;
+  suggestedQuantity: number;
+  returnQuantity?: number | null;
+  lastPurchaseDate?: string | null;
+}): Daily360Diagnosis {
+  const base = buildDaily360Diagnosis(input);
+  if (input.sales90 > 0 && input.sales30 === 0) {
+    return {
+      ...base,
+      diagnosis: `توقف بيع مثبت: كان لصنف ${input.productName} مبيعات سابقة (${format(input.sales90)} خلال 90 يومًا) ولم يسجل مبيعات خلال آخر 30 يومًا. سبب التوقف غير مثبت من البيانات الحالية.`,
+      confidence: "عالٍ",
+    };
+  }
+  return base;
 }
 
 /** Uses the same evidence-first rules for the main Customer Visit Card. */
@@ -186,4 +210,33 @@ export function buildCustomerVisitDiagnosis(input: {
     visitObjective: input.topProduct ? `الحفاظ على استمرار ${input.topProduct.productName} ومتابعة الطلب.` : "تأكيد بيانات العميل ونقطة البداية للطلب.",
     visitActions: [input.topProduct ? `تحقق من استمرار ${input.topProduct.productName} قبل توسيع الكمية تدريجيًا.` : "تحقق من بيانات العميل قبل اقتراح الطلب."],
   };
+}
+
+/** Last-30-days vs previous-30-days customer diagnosis. */
+export function buildCustomerVisitDiagnosisV2(input: {
+  salesTotal: number; invoiceCount: number; recent30Sales: number | null; previous30Sales: number | null;
+  returnsTotal: number; bouncedCollection: number; overdueCollection: number;
+  lostSkus: readonly { productName: string; baselineNetQuantity: number; suggestedQuantity: number }[];
+  topProduct: { productName: string; value: number } | null; missingProduct: { productName: string; peerValue: number } | null;
+}): CustomerVisitDiagnosisV2 {
+  const collectionRisk = input.bouncedCollection + input.overdueCollection;
+  const canCompare = input.recent30Sales !== null && input.previous30Sales !== null && input.previous30Sales > 0;
+  const trendPct = canCompare ? Math.round(((input.recent30Sales! - input.previous30Sales!) / input.previous30Sales!) * 100) : null;
+  const overall = trendPct === null ? null : `إجمالي المبيعات في آخر 30 يومًا ${format(input.recent30Sales!)} مقابل ${format(input.previous30Sales!)} في الـ30 يومًا السابقة (${trendPct >= 0 ? "تحسن" : "تراجع"} ${format(Math.abs(trendPct))}%).`;
+  const unknown = "غير معروف" as const;
+  if (collectionRisk > 0) return { evidence: [`تحصيل مرتد أو متأخر بقيمة ${format(collectionRisk)}.`], diagnosis: "ضغط تحصيلي مثبت: التحصيل المتأخر أو المرتد هو الأولوية قبل أي طلب جديد.", confidence: "عالٍ", rootCauseConfidence: unknown, visitObjective: `تحصيل ${format(collectionRisk)} أو الاتفاق على تسوية واضحة قبل تسجيل طلب جديد.`, visitActions: [`ناقش مبلغ التحصيل (${format(collectionRisk)}) وحدد التزامًا واضحًا.`, "لا توسع الطلب قبل تأكيد التحصيل."] };
+  if (input.lostSkus.length > 0) {
+    const primary = input.lostSkus[0]!;
+    const assortment = `${input.lostSkus.length} أصناف كانت تُباع سابقًا لم تسجل مبيعات خلال آخر 30 يومًا، أبرزها ${primary.productName}.`;
+    const diagnosis = trendPct !== null && trendPct > 0
+      ? `إجمالي مبيعات العميل تحسن، لكن ${assortment} توجد فرصة لاستعادة التوزيع المفقود. سبب توقف الأصناف غير مثبت من البيانات الحالية.`
+      : trendPct !== null && trendPct < 0
+        ? `إجمالي مبيعات العميل تراجع، و${assortment} هاتان إشارتان منفصلتان؛ سبب توقف الأصناف غير مثبت من البيانات الحالية.`
+        : `فقدان توزيع مثبت: ${assortment} سبب توقف الأصناف غير مثبت من البيانات الحالية.`;
+    return { evidence: [...(overall ? [overall] : []), assortment], diagnosis, confidence: "عالٍ", rootCauseConfidence: unknown, visitObjective: `استعادة توزيع ${primary.productName} تدريجيًا قبل اقتراح أصناف جديدة.`, visitActions: [`استفسر عن سبب توقف ${primary.productName} وتحقق من وجوده لدى العميل.`, `اقترح إعادة ${primary.productName} بكمية لا تتجاوز ${format(primary.suggestedQuantity)}.`, input.returnsTotal > 0 ? "راجع المرتجعات قبل زيادة كمية أي صنف مستعاد." : "ركز على استعادة الأصناف المفقودة بدل إضافة SKU جديد."] };
+  }
+  if (input.returnsTotal > 0) return { evidence: [`مرتجعات مثبتة بقيمة ${format(input.returnsTotal)}.`], diagnosis: "المرتجعات هي إشارة الضغط الظاهرة؛ سببها غير مثبت من البيانات الحالية.", confidence: "متوسط", rootCauseConfidence: "منخفض", visitObjective: "مراجعة المرتجع والكمية السابقة قبل أي زيادة في الطلب.", visitActions: ["راجع الأصناف والكميات المرتجعة مع العميل.", "أكد استمرار الأصناف الحالية قبل اقتراح تحميل إضافي."] };
+  if (trendPct !== null && trendPct < 0) return { evidence: [overall!], diagnosis: "تراجع مثبت في إجمالي قيمة الطلب بين آخر 30 يومًا والـ30 يومًا السابقة؛ السبب غير مثبت من البيانات الحالية.", confidence: "عالٍ", rootCauseConfidence: unknown, visitObjective: "تأكيد استمرار الأصناف الحالية واستعادة عمق الطلب تدريجيًا.", visitActions: [input.topProduct ? `أكد استمرار ${input.topProduct.productName}، وهو من أعلى المنتجات بقيمة ${format(input.topProduct.value)}.` : "راجع الأصناف الحالية قبل اقتراح أي جديد.", "استفسر عن التغير في الطلب وسجل الملاحظة دون افتراض السبب."] };
+  if (input.missingProduct) return { evidence: [`العميل لا يشتري ${input.missingProduct.productName} بينما حقق لدى عملاء القناة ${format(input.missingProduct.peerValue)} خلال الفترة.`], diagnosis: `فرصة بيع متقاطع مثبتة لـ${input.missingProduct.productName}.`, confidence: "متوسط", rootCauseConfidence: unknown, visitObjective: `تجربة ${input.missingProduct.productName} بكمية أولى مناسبة.`, visitActions: [`اعرض ${input.missingProduct.productName} كطلب تجريبي.`, "أكد ملاءمة الصنف للعميل قبل تسجيل الطلب."] };
+  return { evidence: overall ? [overall] : [`المبيعات ${format(input.salesTotal)} عبر ${input.invoiceCount} فاتورة خلال الفترة.`], diagnosis: input.salesTotal > 0 ? "أداء العميل مستقر ضمن البيانات المتاحة؛ لا توجد إشارة ضغط مثبتة." : "لا توجد بيانات كافية لتحديد السبب بدقة.", confidence: input.salesTotal > 0 ? "متوسط" : null, rootCauseConfidence: unknown, visitObjective: input.topProduct ? `الحفاظ على استمرار ${input.topProduct.productName} ومتابعة الطلب.` : "تأكيد بيانات العميل ونقطة البداية للطلب.", visitActions: [input.topProduct ? `تحقق من استمرار ${input.topProduct.productName} قبل توسيع الكمية تدريجيًا.` : "تحقق من بيانات العميل قبل اقتراح الطلب."] };
 }

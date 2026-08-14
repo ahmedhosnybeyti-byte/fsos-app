@@ -33,7 +33,7 @@ import { LocalDecisionEngine } from "../local-decision/rule-engine";
 import { VisitCopilotRuleRegistry } from "./visit-copilot.rules";
 import { SgiService } from "../sgi/sgi.service";
 import { LostOpportunityService, type LostOpportunityResult } from "../lost-opportunity/lost-opportunity.service";
-import { buildCustomerVisitDiagnosis, buildDaily360Diagnosis, type CustomerVisitDiagnosis } from "./daily-360-diagnosis";
+import { buildCustomerVisitDiagnosisV2, buildDaily360DiagnosisV2, type CustomerVisitDiagnosisV2 } from "./daily-360-diagnosis";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { ProspectService } from "../prospects/prospect.service";
 import { ProductFitService } from "../prospects/product-fit.service";
@@ -163,7 +163,7 @@ export interface CustomerBriefingResult {
   collections: { collected: number; pending: number; bounced: number; oldestPendingDueDate: string | null };
   topProducts: BriefingProduct[];
   missingProducts: BriefingMissingProduct[];
-  diagnosis?: CustomerVisitDiagnosis;
+  diagnosis?: CustomerVisitDiagnosisV2;
   topOpportunity: string;
   suggestedGoal: string;
   actions: string[];
@@ -794,29 +794,40 @@ export class VisitCopilotService {
 
     // In-period invoice metadata (all visible customers — needed for peers).
     const invoiceMeta = new Map<string, { customerCode: string; dateIso: string }>();
+    const trendInvoiceMeta = new Map<string, { customerCode: string; dateIso: string }>();
+    const comparisonEnd = new Date(`${range.to}T00:00:00.000Z`);
+    const recent30From = isoDay(new Date(comparisonEnd.getTime() - 29 * 86_400_000));
+    const previous30From = isoDay(new Date(comparisonEnd.getTime() - 59 * 86_400_000));
+    const previous30To = isoDay(new Date(comparisonEnd.getTime() - 30 * 86_400_000));
     for (const inv of invoices) {
       const no = String(inv.InvoiceNo ?? "").trim();
       const cust = String(inv.CustomerCode ?? "").trim();
       const dateIso = isoDayOf(inv.InvoiceDate);
-      if (!no || !cust || !dateIso || dateIso < range.from || dateIso > range.to) continue;
-      invoiceMeta.set(no, { customerCode: cust, dateIso });
+      if (!no || !cust || !dateIso) continue;
+      if (dateIso >= range.from && dateIso <= range.to) invoiceMeta.set(no, { customerCode: cust, dateIso });
+      if (cust === code && dateIso >= previous30From && dateIso <= range.to) trendInvoiceMeta.set(no, { customerCode: cust, dateIso });
     }
 
     // One pass over Invoice Items: this customer's totals/top products +
     // peer product demand, all in the analysis period.
     let salesTotal = 0;
-    const valueByInvoice = new Map<string, number>(); // this customer only — feeds the half-vs-half trend
+    let recent30Sales = 0;
+    let previous30Sales = 0;
     const customerProducts = new Map<string, { qty: number; value: number }>();
     const peerProductValue = new Map<string, number>();
     for (const item of items) {
       const no = String(item.InvoiceNo ?? "").trim();
       const meta = invoiceMeta.get(no);
-      if (!meta) continue;
+      const trendMeta = trendInvoiceMeta.get(no);
       const value = toFiniteNumber(item.LineTotal) ?? 0;
+      if (trendMeta) {
+        if (trendMeta.dateIso >= recent30From) recent30Sales += value;
+        else if (trendMeta.dateIso >= previous30From && trendMeta.dateIso <= previous30To) previous30Sales += value;
+      }
+      if (!meta) continue;
       const pCode = String(item.ProductCode ?? "").trim();
       if (meta.customerCode === code) {
         salesTotal += value;
-        valueByInvoice.set(no, (valueByInvoice.get(no) ?? 0) + value);
         if (pCode) {
           const agg = customerProducts.get(pCode) ?? { qty: 0, value: 0 };
           agg.qty += toFiniteNumber(item.Quantity) ?? 0;
@@ -831,16 +842,7 @@ export class VisitCopilotService {
     let invoiceCount = 0;
     for (const [, meta] of invoiceMeta) if (meta.customerCode === code) invoiceCount++;
 
-    // Trend: second half of the period vs the first half of the same period.
-    const midIso = isoDay(new Date((Date.parse(`${range.from}T00:00:00Z`) + Date.parse(`${range.to}T00:00:00Z`)) / 2));
-    let firstHalf = 0;
-    let secondHalf = 0;
-    for (const [no, value] of valueByInvoice) {
-      const meta = invoiceMeta.get(no)!;
-      if (meta.dateIso <= midIso) firstHalf += value;
-      else secondHalf += value;
-    }
-    const trendPct = firstHalf > 0 ? round2(((secondHalf - firstHalf) / firstHalf) * 100) : null;
+    const trendPct = previous30Sales > 0 ? round2(((recent30Sales - previous30Sales) / previous30Sales) * 100) : null;
 
     // Returns in the period.
     let returnsTotal = 0;
@@ -921,14 +923,12 @@ export class VisitCopilotService {
       customerCodes: [code],
       customerNames: new Map([[code, String(customer.CustomerName ?? code)]]),
     });
-    const diagnosis = buildCustomerVisitDiagnosis({
+    const diagnosis = buildCustomerVisitDiagnosisV2({
       salesTotal: round2(salesTotal),
       invoiceCount,
-      trendPct,
-      firstHalfSales: round2(firstHalf),
-      secondHalfSales: round2(secondHalf),
+      recent30Sales: previous30Sales > 0 ? round2(recent30Sales) : null,
+      previous30Sales: previous30Sales > 0 ? round2(previous30Sales) : null,
       returnsTotal: round2(returnsTotal),
-      pendingCollection: round2(pending),
       bouncedCollection: round2(bounced),
       overdueCollection: round2(overdueAmount),
       lostSkus: lostOpportunityResult.opportunities,
@@ -1265,7 +1265,7 @@ export class VisitCopilotService {
     const lostOpportunityResult = brief.lostOpportunityResult;
     const visibleLostOpportunities = await this.filterDaily360LostOpportunities(user, lostOpportunityResult.opportunities);
     const lostOpportunities = visibleLostOpportunities.map((opportunity) => {
-      const diagnosis = buildDaily360Diagnosis({
+      const diagnosis = buildDaily360DiagnosisV2({
         productName: opportunity.productName,
         sales90: opportunity.baselineNetQuantity,
         sales30: opportunity.recentNetQuantity,
