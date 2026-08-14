@@ -38,6 +38,7 @@ import { AuditLogService } from "../audit-log/audit-log.service";
 import { ProspectService } from "../prospects/prospect.service";
 import { ProductFitService } from "../prospects/product-fit.service";
 import { taxonomyForCanonicalChannel } from "../prospects/prospect-taxonomy";
+import { auditMemory } from "../../common/observability/memory-audit";
 
 // AI Visit Copilot — Phase 1. Decision-support screen for the field rep:
 // today's visit plan + a per-customer pre-visit briefing that must be
