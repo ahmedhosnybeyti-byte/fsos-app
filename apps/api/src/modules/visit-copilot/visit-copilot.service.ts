@@ -169,9 +169,14 @@ export interface CustomerBriefingResult {
     averageInvoiceValue: number | null;
     collectionCount: number;
     returnCount: number;
+    soldSkuCount: number;
+    lostSkuCount: number;
+    collectionContext: string;
     salesRank: number | null;
     customerCount: number;
     channel: string | null;
+    classifications: string[];
+    kpiEvaluations: { label: string; value: number | string; evaluation: string }[];
     diagnoses: { title: string; evidence: string; meaning: string; confidence: "عالٍ" | "متوسط" | "منخفض" }[];
     strengths: string[];
     weaknesses: string[];
@@ -814,12 +819,16 @@ export class VisitCopilotService {
     const recent30From = isoDay(new Date(comparisonEnd.getTime() - 29 * 86_400_000));
     const previous30From = isoDay(new Date(comparisonEnd.getTime() - 59 * 86_400_000));
     const previous30To = isoDay(new Date(comparisonEnd.getTime() - 30 * 86_400_000));
+    const invoiceCountByCustomer = new Map<string, number>();
     for (const inv of invoices) {
       const no = String(inv.InvoiceNo ?? "").trim();
       const cust = String(inv.CustomerCode ?? "").trim();
       const dateIso = isoDayOf(inv.InvoiceDate);
       if (!no || !cust || !dateIso) continue;
-      if (dateIso >= range.from && dateIso <= range.to) invoiceMeta.set(no, { customerCode: cust, dateIso });
+      if (dateIso >= range.from && dateIso <= range.to) {
+        invoiceMeta.set(no, { customerCode: cust, dateIso });
+        invoiceCountByCustomer.set(cust, (invoiceCountByCustomer.get(cust) ?? 0) + 1);
+      }
       if (cust === code && dateIso >= previous30From && dateIso <= range.to) trendInvoiceMeta.set(no, { customerCode: cust, dateIso });
     }
 
@@ -856,8 +865,7 @@ export class VisitCopilotService {
       }
     }
 
-    let invoiceCount = 0;
-    for (const [, meta] of invoiceMeta) if (meta.customerCode === code) invoiceCount++;
+    const invoiceCount = invoiceCountByCustomer.get(code) ?? 0;
 
     const trendPct = previous30Sales > 0 ? round2(((recent30Sales - previous30Sales) / previous30Sales) * 100) : null;
 
@@ -955,40 +963,74 @@ export class VisitCopilotService {
       topProduct: topProducts[0] ?? null,
       missingProduct: candidates[0] ? { productName: productNames.get(candidates[0][0]) ?? candidates[0][0], peerValue: round2(candidates[0][1]) } : null,
     });
-    const sortedCustomerSales = Array.from(salesByCustomer.entries()).sort((a, b) => b[1] - a[1]);
+    const visibleCustomerCodes = new Set(customers.map((row) => String(row.CustomerCode ?? "").trim()).filter(Boolean));
+    const sortedCustomerSales = Array.from(salesByCustomer.entries())
+      .filter(([customerCode]) => visibleCustomerCodes.has(customerCode))
+      .sort((a, b) => b[1] - a[1]);
     const salesRankIndex = sortedCustomerSales.findIndex(([customerCode]) => customerCode === code);
     const salesRank = salesRankIndex >= 0 ? salesRankIndex + 1 : null;
     const averageInvoiceValue = invoiceCount > 0 ? round2(salesTotal / invoiceCount) : null;
+    const peerInvoiceAverages = sortedCustomerSales
+      .map(([customerCode, value]) => {
+        const count = invoiceCountByCustomer.get(customerCode) ?? 0;
+        return count > 0 ? value / count : null;
+      })
+      .filter((value): value is number => value !== null);
+    const peerAverageInvoiceValue = peerInvoiceAverages.length
+      ? peerInvoiceAverages.reduce((total, value) => total + value, 0) / peerInvoiceAverages.length
+      : null;
     const strengths: string[] = [];
     if (salesRank === 1) strengths.push(`أعلى عميل مبيعات ضمن نطاقك خلال الفترة (${round2(salesTotal)}).`);
     else if (salesRank !== null && salesRank <= 3) strengths.push(`ضمن أعلى ${salesRank} عملاء مبيعات في نطاقك خلال الفترة.`);
     if (averageInvoiceValue !== null) strengths.push(`متوسط قيمة الفاتورة ${averageInvoiceValue}.`);
+    if (customerProducts.size > 0) strengths.push(`تشكيلة مباعة تضم ${customerProducts.size} أصناف خلال الفترة.`);
+    if (trendPct !== null && trendPct > 0) strengths.push(`نمو إجمالي المبيعات ${trendPct}% مقارنة بالـ30 يومًا السابقة.`);
     if (returnCount === 0) strengths.push("لا توجد مرتجعات مسجلة خلال الفترة.");
     const weaknesses: string[] = [];
-    if (collectionCount === 0) weaknesses.push("لا توجد تحصيلات مسجلة خلال الفترة؛ يلزم التحقق من حالة الاستحقاق دون افتراض السبب.");
+    if (overdueAmount > 0 || bounced > 0) weaknesses.push("يوجد دليل تحصيل يحتاج متابعة.");
     if (lostOpportunityResult.opportunities.length > 0) weaknesses.push(`${lostOpportunityResult.opportunities.length} أصناف مفقودة التوزيع خلال آخر 30 يومًا.`);
     if (diagnosis.confidence === null) weaknesses.push("لا توجد بيانات كافية لتحديد سبب التغير بدقة.");
-    const managementDiagnosis = salesRank !== null && salesRank <= 3
-      ? "عميل ذو مساهمة مبيعات مرتفعة؛ الأولوية الإدارية هي استمرارية التوريد وحماية التشكيلة ومتابعة الالتزامات المالية المتاحة."
-      : "القرار الإداري يتبع التشخيص المثبت في البيانات، مع تجنب افتراض سبب غير متاح.";
-    const executiveDecision = salesRank !== null && salesRank <= 3
-      ? "حافظ على العميل ضمن قائمة الأولوية، واستعد الأصناف المفقودة قبل توسيع التشكيلة الجديدة."
-      : diagnosis.visitObjective;
+    const classifications = [
+      salesRank !== null && salesRank <= 3 ? "Strategic" : null,
+      trendPct !== null && trendPct > 0 ? "Growing" : trendPct !== null && trendPct < 0 ? "Declining" : null,
+      lostOpportunityResult.opportunities.length > 0 ? "Distribution Loss" : null,
+      overdueAmount > 0 || bounced > 0 ? "Collection Risk" : null,
+      candidates.length > 0 ? "Cross-Sell Opportunity" : null,
+    ].filter((item): item is string => item !== null);
+    const managementDiagnosis = `${classifications.length ? classifications.join(" · ") : "Stable"}: ${salesRank !== null && salesRank <= 3 ? "عميل ذو مساهمة مبيعات مرتفعة؛ احمِ استمرارية التوريد والتشكيلة." : "القرار الإداري يتبع الإشارات المثبتة في البيانات."}${lostOpportunityResult.opportunities.length > 0 ? " فقدان التوزيع يحتاج إصلاحًا دون افتراض سبب التوقف." : ""}`;
+    const executiveDecision = lostOpportunityResult.opportunities.length > 0
+      ? "حافظ على قيمة العميل واستعد الأصناف المفقودة قبل إضافة أصناف جديدة."
+      : salesRank !== null && salesRank <= 3 ? "حافظ على استمرارية العميل ونمِّ التشكيلة وفق الدليل المتاح." : diagnosis.visitObjective;
+    const kpiEvaluations = [
+      { label: "المبيعات", value: round2(salesTotal), evaluation: trendPct === null ? "متاح" : trendPct > 0 ? "قوي" : trendPct < 0 ? "متراجع" : "مستقر" },
+      { label: "متوسط الفاتورة", value: averageInvoiceValue ?? "—", evaluation: averageInvoiceValue === null ? "لا توجد فواتير" : peerAverageInvoiceValue === null ? "لا توجد مقارنة كافية" : averageInvoiceValue >= peerAverageInvoiceValue * 1.2 ? "مرتفع" : averageInvoiceValue <= peerAverageInvoiceValue * 0.8 ? "منخفض" : "متوسط" },
+      { label: "المرتجعات", value: round2(returnsTotal), evaluation: returnCount === 0 ? "ممتاز" : "يحتاج متابعة" },
+      { label: "التحصيلات", value: round2(collected), evaluation: overdueAmount > 0 || bounced > 0 ? "خطر" : collectionCount === 0 ? "لا يمكن تقييم التأخر" : "طبيعي" },
+    ];
     const diagnoses = [
       trendPct !== null ? { title: trendPct >= 0 ? "اتجاه المبيعات" : "تراجع المبيعات", evidence: `آخر 30 يومًا ${recent30Sales} مقابل ${previous30Sales} في الـ30 يومًا السابقة.`, meaning: trendPct >= 0 ? "اتجاه إجمالي قيمة مبيعات العميل إيجابي." : "اتجاه إجمالي قيمة مبيعات العميل يحتاج متابعة.", confidence: "عالٍ" as const } : null,
       lostOpportunityResult.opportunities.length > 0 ? { title: "فقدان توزيع", evidence: `${lostOpportunityResult.opportunities.length} أصناف توقفت خلال آخر 30 يومًا بعد مبيعات سابقة.`, meaning: "توجد فرصة لاستعادة التوزيع؛ سبب توقف الأصناف غير مثبت.", confidence: "عالٍ" as const } : null,
       returnsTotal > 0 ? { title: "المرتجعات", evidence: `مرتجعات بقيمة ${round2(returnsTotal)} خلال الفترة.`, meaning: "راجع الكمية والتوريد قبل زيادة الطلب.", confidence: "متوسط" as const } : null,
-      collectionCount === 0 ? { title: "متابعة التحصيل", evidence: "لا توجد تحصيلات مسجلة خلال الفترة.", meaning: "تحقق من حالة الاستحقاق دون افتراض سبب عدم التسجيل.", confidence: "متوسط" as const } : null,
+      overdueAmount > 0 || bounced > 0 ? { title: "مخاطر التحصيل", evidence: `رصيد متأخر ${round2(overdueAmount)} وتحويلات مرتجعة ${round2(bounced)}.`, meaning: "توجد مخاطرة تحصيل مثبتة تستدعي المتابعة قبل توسيع الالتزام.", confidence: "عالٍ" as const } : null,
       candidates[0] ? { title: "فرصة بيع متقاطع", evidence: `${productNames.get(candidates[0][0]) ?? candidates[0][0]} متاح كفرصة لدى عملاء القناة.`, meaning: "اعرض الصنف فقط بعد تأكيد ملاءمته للعميل.", confidence: "متوسط" as const } : null,
     ].filter((item): item is NonNullable<typeof item> => item !== null).slice(0, 4);
     const customer360 = {
-      executiveSummary: `${String(customer.CustomerName ?? code)} حقق ${round2(salesTotal)} من خلال ${invoiceCount} فواتير خلال الفترة.${salesRank === 1 ? " وهو الأعلى مبيعات ضمن نطاقك." : ""}`,
+      executiveSummary: `${String(customer.CustomerName ?? code)} ${trendPct === null ? `حقق ${round2(salesTotal)} عبر ${invoiceCount} فواتير` : trendPct > 0 ? `ينمو في المبيعات بنسبة ${trendPct}%` : trendPct < 0 ? `يتراجع في المبيعات بنسبة ${Math.abs(trendPct)}%` : "مستقر في المبيعات"} خلال الفترة.${lostOpportunityResult.opportunities.length > 0 ? ` أهم فرصة: استعادة توزيع ${lostOpportunityResult.opportunities.length} أصناف مفقودة.` : candidates[0] ? " أهم فرصة: توسعة مدروسة للتشكيلة." : ""}${overdueAmount > 0 || bounced > 0 ? " أهم خطر: تحصيل مثبت يحتاج متابعة." : ""} القرار: ${executiveDecision}`,
       averageInvoiceValue,
       collectionCount,
       returnCount,
+      soldSkuCount: customerProducts.size,
+      lostSkuCount: lostOpportunityResult.opportunities.length,
+      collectionContext: overdueAmount > 0 || bounced > 0
+        ? `يوجد تحصيل متأخر بقيمة ${round2(overdueAmount)} أو مرتجع بقيمة ${round2(bounced)}.`
+        : collectionCount === 0
+          ? "لا توجد تحصيلات مسجلة خلال الفترة، ولا يمكن اعتبارها تأخرًا دون بيانات الاستحقاق."
+          : "لا تظهر البيانات المتاحة تأخرًا مثبتًا في التحصيل.",
       salesRank,
-      customerCount: sortedCustomerSales.length,
+      customerCount: visibleCustomerCodes.size,
       channel: channel || null,
+      classifications,
+      kpiEvaluations,
       diagnoses,
       strengths,
       weaknesses,

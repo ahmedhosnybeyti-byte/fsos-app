@@ -896,12 +896,19 @@ function VisitCopilotScreen() {
                   <section className="glow-ai rounded-lg p-3 text-sm">
                     <p className="mb-1 font-semibold">ملخص تنفيذي</p>
                     <p>{briefing.customer360.executiveSummary}</p>
+                    {briefing.customer360.classifications.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{briefing.customer360.classifications.map((item) => <span key={item} className="rounded-full border border-ai/30 bg-ai/10 px-2 py-0.5 text-[11px]">{item}</span>)}</div>}
                   </section>
-                  <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    <MiniKpi label="متوسط الفاتورة" value={briefing.customer360.averageInvoiceValue?.toLocaleString() ?? "—"} />
+                  <section>
+                    <p className="mb-2 text-sm font-semibold">أهم مؤشرات الأداء</p>
+                    <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    {briefing.customer360.kpiEvaluations.map((item) => <MiniKpi key={item.label} label={item.label} value={typeof item.value === "number" ? item.value.toLocaleString() : item.value} evaluation={item.evaluation} />)}
                     <MiniKpi label="عدد التحصيلات" value={briefing.customer360.collectionCount.toLocaleString()} />
                     <MiniKpi label="عدد المرتجعات" value={briefing.customer360.returnCount.toLocaleString()} />
+                    <MiniKpi label="الأصناف المباعة" value={briefing.customer360.soldSkuCount.toLocaleString()} />
+                    <MiniKpi label="الأصناف المتوقفة" value={briefing.customer360.lostSkuCount.toLocaleString()} />
                     <MiniKpi label="ترتيب المبيعات" value={briefing.customer360.salesRank ? `${briefing.customer360.salesRank} / ${briefing.customer360.customerCount}` : "—"} />
+                    </div>
+                    <p className="mt-2 text-xs text-muted-foreground">{briefing.customer360.collectionContext}</p>
                   </section>
                   <details className="rounded-lg border border-border bg-background/40 p-3" open>
                     <summary className="cursor-pointer text-sm font-semibold">تشخيص العميل</summary>
@@ -1140,8 +1147,8 @@ function BigNumber({ label, value, caption }: { label: string; value: string; ca
   );
 }
 
-function MiniKpi({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-lg bg-background/60 p-2.5"><p className="text-[11px] text-muted-foreground">{label}</p><p className="mt-1 text-sm font-semibold">{value}</p></div>;
+function MiniKpi({ label, value, evaluation }: { label: string; value: string; evaluation?: string }) {
+  return <div className="rounded-lg bg-background/60 p-2.5"><p className="text-[11px] text-muted-foreground">{label}</p><p className="mt-1 text-sm font-semibold">{value}</p>{evaluation && <p className="mt-1 text-[11px] text-ai">{evaluation}</p>}</div>;
 }
 
 function Customer360List({ title, items, empty }: { title: string; items: string[]; empty?: string }) {

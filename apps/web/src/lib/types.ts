@@ -1507,9 +1507,14 @@ export interface VisitCopilotBriefing {
     averageInvoiceValue: number | null;
     collectionCount: number;
     returnCount: number;
+    soldSkuCount: number;
+    lostSkuCount: number;
+    collectionContext: string;
     salesRank: number | null;
     customerCount: number;
     channel: string | null;
+    classifications: string[];
+    kpiEvaluations: { label: string; value: number | string; evaluation: string }[];
     diagnoses: { title: string; evidence: string; meaning: string; confidence: "عالٍ" | "متوسط" | "منخفض" }[];
     strengths: string[];
     weaknesses: string[];
