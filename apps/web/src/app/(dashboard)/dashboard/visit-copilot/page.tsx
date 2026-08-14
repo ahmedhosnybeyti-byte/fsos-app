@@ -19,11 +19,10 @@ import {
   Sparkles,
   Square,
   Target,
-  TrendingDown,
-  TrendingUp,
   Undo2,
   User,
   Zap,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { visitCopilotApi } from "@/lib/api";
@@ -47,6 +46,7 @@ import type {
   VisitCopilotProspect,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { formatPercentage, formatWholeNumber } from "@/lib/number-format";
 
 // Flexible plan date (2026-07-30, explicit product request) — helpers kept
 // local to this page since nothing else needs "today in YYYY-MM-DD" or
@@ -177,6 +177,7 @@ function VisitCopilotScreen() {
   const [chatMessages, setChatMessages] = useState<VisitCopilotChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [doneActions, setDoneActions] = useState<Set<number>>(new Set());
+  const [openSkuCard, setOpenSkuCard] = useState<"sold" | "lost" | null>(null);
 
   // "ملخص اليوم 360°" (2026-07-28) — its own modal, opened on demand; the
   // query inside Daily360SummaryModal only runs while this is true, and the
@@ -436,7 +437,6 @@ function VisitCopilotScreen() {
   const inVisitMode = selectedCode !== null || selectedProspectId !== null;
   const activeBriefingQuery = selectedProspectId ? prospectBriefingQuery : briefingQuery;
   const briefing = activeBriefingQuery.data;
-  const trendUp = (briefing?.sales.trendPct ?? 0) >= 0;
   const routeOpp = routeOppQuery.data;
   const showOppCard = !!plan && !!routeOpp && !routeOpp.disabled && routeOpp.highCount + routeOpp.mediumCount > 0;
   const discoveryProspects = useMemo(() => {
@@ -901,13 +901,13 @@ function VisitCopilotScreen() {
                   <section>
                     <p className="mb-2 text-sm font-semibold">أهم مؤشرات الأداء</p>
                     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {briefing.customer360.kpiEvaluations.map((item) => <MiniKpi key={item.label} label={item.label} value={typeof item.value === "number" ? item.value.toLocaleString() : item.value} evaluation={item.evaluation} />)}
-                    <MiniKpi label="عدد التحصيلات" value={briefing.customer360.collectionCount.toLocaleString()} />
-                    <MiniKpi label="عدد المرتجعات" value={briefing.customer360.returnCount.toLocaleString()} />
-                    <MiniKpi label="الأصناف المباعة" value={briefing.customer360.soldSkuCount.toLocaleString()} />
-                    <MiniKpi label="الأصناف المتوقفة" value={briefing.customer360.lostSkuCount.toLocaleString()} />
-                    <MiniKpi label="ترتيب المبيعات" value={briefing.customer360.salesRank ? `${briefing.customer360.salesRank} / ${briefing.customer360.customerCount}` : "—"} />
+                    {briefing.customer360.kpiEvaluations.map((item) => <MiniKpi key={item.label} label={item.label} value={typeof item.value === "number" ? formatWholeNumber(item.value) : item.value} evaluation={item.evaluation} />)}
+                    <SkuKpiCard label="الأصناف المباعة" value={formatWholeNumber(briefing.customer360.soldSkuCount)} open={openSkuCard === "sold"} onClick={() => setOpenSkuCard(openSkuCard === "sold" ? null : "sold")} />
+                    <SkuKpiCard label="الأصناف المتوقفة" value={formatWholeNumber(briefing.customer360.lostSkuCount)} open={openSkuCard === "lost"} onClick={() => setOpenSkuCard(openSkuCard === "lost" ? null : "lost")} />
+                    <MiniKpi label="ترتيب المبيعات" value={briefing.customer360.salesRank ? `المرتبة ${formatWholeNumber(briefing.customer360.salesRank)} من ${formatWholeNumber(briefing.customer360.customerCount)}` : "—"} />
                     </div>
+                    {openSkuCard === "sold" && <SkuGroups title="الأصناف المباعة خلال الفترة" items={briefing.customer360.soldSkus.map((sku) => ({ ...sku, details: [`الكمية: ${formatWholeNumber(sku.qty)}`, `المبيعات: ${formatWholeNumber(sku.value)}`, sku.lastPurchaseDate ? `آخر شراء: ${sku.lastPurchaseDate}` : null].filter((value): value is string => value !== null) }))} />}
+                    {openSkuCard === "lost" && <SkuGroups title="الأصناف التي توقفت وفق منطق Lost SKU" items={briefing.customer360.lostSkus.map((sku) => ({ ...sku, details: [`كمية الفترة السابقة: ${formatWholeNumber(sku.baselineNetQuantity)}`, "الحالة: متوقف في الفترة الأخيرة"] }))} />}
                     <p className="mt-2 text-xs text-muted-foreground">{briefing.customer360.collectionContext}</p>
                   </section>
                   <details className="rounded-lg border border-border bg-background/40 p-3" open>
@@ -941,27 +941,15 @@ function VisitCopilotScreen() {
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <BigNumber
                   label={t("copilot.salesLabel")}
-                  value={briefing.sales.total.toLocaleString()}
+                  value={formatWholeNumber(briefing.sales.total)}
                   caption={t("copilot.invoiceCount", { count: briefing.sales.invoiceCount })}
                 />
                 <BigNumber
                   label={t("copilot.returnsLabel")}
-                  value={briefing.returns.total.toLocaleString()}
-                  caption={t("copilot.returnRate", { value: briefing.returns.rate.toLocaleString() })}
+                  value={formatWholeNumber(briefing.returns.total)}
+                  caption={t("copilot.returnRate", { value: briefing.returns.rate === null ? "—" : formatPercentage(briefing.returns.rate) })}
                 />
-                <BigNumber label={t("copilot.pendingLabel")} value={briefing.collections.pending.toLocaleString()} />
-                <div className="rounded-lg bg-background/60 p-3 max-md:p-2">
-                  <p className="text-xs text-muted-foreground">{t("copilot.trendLabel")}</p>
-                  <p
-                    className={cn(
-                      "mt-1 flex items-center gap-1 text-xl font-bold",
-                      trendUp ? "text-emerald-600 dark:text-emerald-300" : "text-rose-600 dark:text-rose-300",
-                    )}
-                  >
-                    {trendUp ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
-                    {Math.abs(briefing.sales.trendPct).toLocaleString()}%
-                  </p>
-                </div>
+                <BigNumber label={t("copilot.pendingLabel")} value={formatWholeNumber(briefing.collections.pending)} />
               </div>
 
               {briefing.topProducts.length > 0 && (
@@ -970,7 +958,7 @@ function VisitCopilotScreen() {
                   <div className="flex flex-wrap gap-1.5">
                     {briefing.topProducts.map((p) => (
                       <Badge key={p.productCode} variant="secondary" className="font-normal">
-                        {p.productName} · {p.value.toLocaleString()}
+                        {p.productName} · {formatWholeNumber(p.value)}
                       </Badge>
                     ))}
                   </div>
@@ -1149,6 +1137,40 @@ function BigNumber({ label, value, caption }: { label: string; value: string; ca
 
 function MiniKpi({ label, value, evaluation }: { label: string; value: string; evaluation?: string }) {
   return <div className="rounded-lg bg-background/60 p-2.5"><p className="text-[11px] text-muted-foreground">{label}</p><p className="mt-1 text-sm font-semibold">{value}</p>{evaluation && <p className="mt-1 text-[11px] text-ai">{evaluation}</p>}</div>;
+}
+
+function SkuKpiCard({ label, value, open, onClick }: { label: string; value: string; open: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick} className="rounded-lg border border-ai/25 bg-ai/10 p-2.5 text-start transition hover:bg-ai/15 focus:outline-none focus:ring-2 focus:ring-ai/50" aria-expanded={open}>
+      <span className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground">{label}<ChevronDown className={cn("h-3.5 w-3.5 text-ai transition-transform", open && "rotate-180")} /></span>
+      <span className="mt-1 block text-sm font-semibold">{value}</span>
+    </button>
+  );
+}
+
+type SkuGroupItem = { productCode: string; productName: string; category: string | null; details: string[] };
+
+function SkuGroups({ title, items }: { title: string; items: SkuGroupItem[] }) {
+  const groups = useMemo(() => {
+    const grouped = new globalThis.Map<string, SkuGroupItem[]>();
+    for (const item of items) {
+      const category = item.category || "غير مصنف";
+      grouped.set(category, [...(grouped.get(category) ?? []), item]);
+    }
+    return [...grouped.entries()].sort(([a], [b]) => a.localeCompare(b, "ar"));
+  }, [items]);
+
+  return (
+    <section className="glow-ai rounded-lg p-3 text-sm">
+      <p className="mb-2 font-semibold">{title}</p>
+      {groups.length === 0 ? <p className="text-xs text-muted-foreground">لا توجد أصناف مطابقة للفترة.</p> : <div className="space-y-2">{groups.map(([category, skus]) => (
+        <details key={category} className="rounded-md border border-border bg-background/40 p-2" open>
+          <summary className="cursor-pointer font-medium">{category} <span className="text-xs text-muted-foreground">({formatWholeNumber(skus.length)})</span></summary>
+          <div className="mt-2 space-y-2">{skus.map((sku) => <div key={sku.productCode} className="rounded-md bg-card/60 p-2 text-xs"><p className="font-medium">{sku.productName}</p><p className="mt-1 text-muted-foreground">{sku.details.join(" · ")}</p></div>)}</div>
+        </details>
+      ))}</div>}
+    </section>
+  );
 }
 
 function Customer360List({ title, items, empty }: { title: string; items: string[]; empty?: string }) {

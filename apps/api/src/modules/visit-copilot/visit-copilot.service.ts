@@ -144,8 +144,10 @@ export interface DailyBriefResult {
 export interface BriefingProduct {
   productCode: string;
   productName: string;
+  category: string | null;
   qty: number;
   value: number;
+  lastPurchaseDate: string | null;
 }
 
 export interface BriefingMissingProduct {
@@ -171,6 +173,8 @@ export interface CustomerBriefingResult {
     returnCount: number;
     soldSkuCount: number;
     lostSkuCount: number;
+    soldSkus: BriefingProduct[];
+    lostSkus: { productCode: string; productName: string; category: string | null; baselineNetQuantity: number; recentNetQuantity: number; suggestedQuantity: number }[];
     collectionContext: string;
     salesRank: number | null;
     customerCount: number;
@@ -770,6 +774,10 @@ export class VisitCopilotService {
   // ------------------------------------------------------------------
 
   async briefing(user: AuthenticatedUser, customerCode: string, query: VisitCopilotBriefingQuery): Promise<CustomerBriefingResult> {
+    return auditMemory("customer-360", () => this.briefingMeasured(user, customerCode, query), { companyId: user.companyId, customerCode });
+  }
+
+  private async briefingMeasured(user: AuthenticatedUser, customerCode: string, query: VisitCopilotBriefingQuery): Promise<CustomerBriefingResult> {
     return this.buildBriefing(user, customerCode, query);
   }
 
@@ -795,9 +803,13 @@ export class VisitCopilotService {
     ]);
 
     const productNames = new Map<string, string>();
+    const productCategories = new Map<string, string | null>();
     for (const p of products) {
       const pCode = String(p.ProductCode ?? "").trim();
-      if (pCode) productNames.set(pCode, String(p.ProductName ?? pCode));
+      if (pCode) {
+        productNames.set(pCode, String(p.ProductName ?? pCode));
+        productCategories.set(pCode, String(p.Category ?? "").trim() || null);
+      }
     }
 
     // Channel peers: other visible customers with the same Channel — the
@@ -838,7 +850,7 @@ export class VisitCopilotService {
     let recent30Sales = 0;
     let previous30Sales = 0;
     const salesByCustomer = new Map<string, number>();
-    const customerProducts = new Map<string, { qty: number; value: number }>();
+    const customerProducts = new Map<string, { qty: number; value: number; lastPurchaseDate: string | null }>();
     const peerProductValue = new Map<string, number>();
     for (const item of items) {
       const no = String(item.InvoiceNo ?? "").trim();
@@ -855,9 +867,10 @@ export class VisitCopilotService {
       if (meta.customerCode === code) {
         salesTotal += value;
         if (pCode) {
-          const agg = customerProducts.get(pCode) ?? { qty: 0, value: 0 };
+          const agg = customerProducts.get(pCode) ?? { qty: 0, value: 0, lastPurchaseDate: null };
           agg.qty += toFiniteNumber(item.Quantity) ?? 0;
           agg.value += value;
+          if (!agg.lastPurchaseDate || meta.dateIso > agg.lastPurchaseDate) agg.lastPurchaseDate = meta.dateIso;
           customerProducts.set(pCode, agg);
         }
       } else if (peerCodes.has(meta.customerCode) && pCode) {
@@ -894,7 +907,9 @@ export class VisitCopilotService {
       if (String(col.CustomerCode ?? "").trim() !== code) continue;
       const status = String(col.Status ?? "").trim().toLowerCase();
       const amount = toFiniteNumber(col.Amount) ?? 0;
-      if (status === "collected") {
+      // Canonical imports use "Cleared" while older datasets use
+      // "Collected". Both mean a completed collection flow.
+      if (status === "collected" || status === "cleared") {
         const dateIso = isoDayOf(col.CollectionDate);
         if (dateIso && dateIso >= range.from && dateIso <= range.to) { collected += amount; collectionCount++; }
       } else if (status === "pending") {
@@ -910,9 +925,12 @@ export class VisitCopilotService {
     }
 
     const topProducts: BriefingProduct[] = Array.from(customerProducts.entries())
-      .map(([pCode, agg]) => ({ productCode: pCode, productName: productNames.get(pCode) ?? pCode, qty: round2(agg.qty), value: round2(agg.value) }))
+      .map(([pCode, agg]) => ({ productCode: pCode, productName: productNames.get(pCode) ?? pCode, category: productCategories.get(pCode) ?? null, qty: round2(agg.qty), value: round2(agg.value), lastPurchaseDate: agg.lastPurchaseDate }))
       .sort((a, b) => b.value - a.value)
       .slice(0, TOP_PRODUCTS_LIMIT);
+    const soldSkus: BriefingProduct[] = Array.from(customerProducts.entries())
+      .map(([pCode, agg]) => ({ productCode: pCode, productName: productNames.get(pCode) ?? pCode, category: productCategories.get(pCode) ?? null, qty: round2(agg.qty), value: round2(agg.value), lastPurchaseDate: agg.lastPurchaseDate }))
+      .sort((a, b) => b.value - a.value);
 
     // Cross-sell candidates: products channel-peers buy in the period that
     // this customer doesn't, ranked by peer demand value. With the van
@@ -1002,10 +1020,8 @@ export class VisitCopilotService {
       ? "حافظ على قيمة العميل واستعد الأصناف المفقودة قبل إضافة أصناف جديدة."
       : salesRank !== null && salesRank <= 3 ? "حافظ على استمرارية العميل ونمِّ التشكيلة وفق الدليل المتاح." : diagnosis.visitObjective;
     const kpiEvaluations = [
-      { label: "المبيعات", value: round2(salesTotal), evaluation: trendPct === null ? "متاح" : trendPct > 0 ? "قوي" : trendPct < 0 ? "متراجع" : "مستقر" },
       { label: "متوسط الفاتورة", value: averageInvoiceValue ?? "—", evaluation: averageInvoiceValue === null ? "لا توجد فواتير" : peerAverageInvoiceValue === null ? "لا توجد مقارنة كافية" : averageInvoiceValue >= peerAverageInvoiceValue * 1.2 ? "مرتفع" : averageInvoiceValue <= peerAverageInvoiceValue * 0.8 ? "منخفض" : "متوسط" },
-      { label: "المرتجعات", value: round2(returnsTotal), evaluation: returnCount === 0 ? "ممتاز" : "يحتاج متابعة" },
-      { label: "التحصيلات", value: round2(collected), evaluation: overdueAmount > 0 || bounced > 0 ? "خطر" : collectionCount === 0 ? "لا يمكن تقييم التأخر" : "طبيعي" },
+      { label: "الاتجاه", value: trendPct === null ? "—" : `${trendPct}%`, evaluation: trendPct === null ? "غير متاح" : trendPct > 0 ? "إيجابي" : trendPct < 0 ? "متراجع" : "مستقر" },
     ];
     const diagnoses = [
       trendPct !== null ? { title: trendPct >= 0 ? "اتجاه المبيعات" : "تراجع المبيعات", evidence: `آخر 30 يومًا ${recent30Sales} مقابل ${previous30Sales} في الـ30 يومًا السابقة.`, meaning: trendPct >= 0 ? "اتجاه إجمالي قيمة مبيعات العميل إيجابي." : "اتجاه إجمالي قيمة مبيعات العميل يحتاج متابعة.", confidence: "عالٍ" as const } : null,
@@ -1021,6 +1037,15 @@ export class VisitCopilotService {
       returnCount,
       soldSkuCount: customerProducts.size,
       lostSkuCount: lostOpportunityResult.opportunities.length,
+      soldSkus,
+      lostSkus: lostOpportunityResult.opportunities.map((opportunity) => ({
+        productCode: opportunity.productCode,
+        productName: opportunity.productName,
+        category: opportunity.category,
+        baselineNetQuantity: opportunity.baselineNetQuantity,
+        recentNetQuantity: opportunity.recentNetQuantity,
+        suggestedQuantity: opportunity.suggestedQuantity,
+      })),
       collectionContext: overdueAmount > 0 || bounced > 0
         ? `يوجد تحصيل متأخر بقيمة ${round2(overdueAmount)} أو مرتجع بقيمة ${round2(bounced)}.`
         : collectionCount === 0
@@ -1989,7 +2014,7 @@ export class VisitCopilotService {
     }
     const topProducts: BriefingProduct[] = ranked
       .slice(0, TOP_PRODUCTS_LIMIT)
-      .map(([pCode, agg]) => ({ productCode: pCode, productName: productNames.get(pCode) ?? pCode, qty: round2(agg.qty), value: round2(agg.value) }));
+      .map(([pCode, agg]) => ({ productCode: pCode, productName: productNames.get(pCode) ?? pCode, category: null, qty: round2(agg.qty), value: round2(agg.value), lastPurchaseDate: null }));
 
     // source is free text now (provider id or "UPLOAD") — anything that
     // isn't the literal upload marker was found by a discovery provider.

@@ -1472,8 +1472,10 @@ export interface VisitCopilotPlanResult {
 export interface VisitCopilotBriefingProduct {
   productCode: string;
   productName: string;
+  category: string | null;
   qty: number;
   value: number;
+  lastPurchaseDate: string | null;
 }
 
 export interface VisitCopilotMissingProduct {
@@ -1509,6 +1511,8 @@ export interface VisitCopilotBriefing {
     returnCount: number;
     soldSkuCount: number;
     lostSkuCount: number;
+    soldSkus: VisitCopilotBriefingProduct[];
+    lostSkus: { productCode: string; productName: string; category: string | null; baselineNetQuantity: number; recentNetQuantity: number; suggestedQuantity: number }[];
     collectionContext: string;
     salesRank: number | null;
     customerCount: number;
