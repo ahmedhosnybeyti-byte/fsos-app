@@ -1502,6 +1502,21 @@ export interface VisitCopilotBriefing {
     visitObjective: string;
     visitActions: string[];
   };
+  customer360?: {
+    executiveSummary: string;
+    averageInvoiceValue: number | null;
+    collectionCount: number;
+    returnCount: number;
+    salesRank: number | null;
+    customerCount: number;
+    channel: string | null;
+    diagnoses: { title: string; evidence: string; meaning: string; confidence: "عالٍ" | "متوسط" | "منخفض" }[];
+    strengths: string[];
+    weaknesses: string[];
+    improvementOpportunities: string[];
+    managementDiagnosis: string;
+    executiveDecision: string;
+  };
   topOpportunity: string;
   suggestedGoal: string;
   actions: string[];

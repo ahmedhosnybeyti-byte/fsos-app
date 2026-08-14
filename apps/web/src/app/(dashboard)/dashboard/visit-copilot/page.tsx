@@ -891,6 +891,45 @@ function VisitCopilotScreen() {
                 )}
               </div>
 
+              {briefing.customer360 && (
+                <div className="space-y-3">
+                  <section className="glow-ai rounded-lg p-3 text-sm">
+                    <p className="mb-1 font-semibold">ملخص تنفيذي</p>
+                    <p>{briefing.customer360.executiveSummary}</p>
+                  </section>
+                  <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                    <MiniKpi label="متوسط الفاتورة" value={briefing.customer360.averageInvoiceValue?.toLocaleString() ?? "—"} />
+                    <MiniKpi label="عدد التحصيلات" value={briefing.customer360.collectionCount.toLocaleString()} />
+                    <MiniKpi label="عدد المرتجعات" value={briefing.customer360.returnCount.toLocaleString()} />
+                    <MiniKpi label="ترتيب المبيعات" value={briefing.customer360.salesRank ? `${briefing.customer360.salesRank} / ${briefing.customer360.customerCount}` : "—"} />
+                  </section>
+                  <details className="rounded-lg border border-border bg-background/40 p-3" open>
+                    <summary className="cursor-pointer text-sm font-semibold">تشخيص العميل</summary>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                      {briefing.customer360.diagnoses.map((item) => (
+                        <div key={item.title} className="rounded-md bg-card/60 p-2.5 text-xs">
+                          <p className="font-medium">{item.title} <span className="text-muted-foreground">· ثقة {item.confidence}</span></p>
+                          <p className="mt-1 text-muted-foreground">{item.evidence}</p>
+                          <p className="mt-1">{item.meaning}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                  <details className="rounded-lg border border-border bg-background/40 p-3">
+                    <summary className="cursor-pointer text-sm font-semibold">القوة والمخاطر وفرص التحسين</summary>
+                    <div className="mt-3 grid gap-3 text-xs sm:grid-cols-3">
+                      <Customer360List title="نقاط القوة" items={briefing.customer360.strengths} />
+                      <Customer360List title="المخاطر" items={briefing.customer360.weaknesses} empty="لا توجد مخاطر مثبتة من البيانات الحالية." />
+                      <Customer360List title="الأولويات" items={briefing.customer360.improvementOpportunities.slice(0, 3)} />
+                    </div>
+                  </details>
+                  <section className="rounded-lg border border-ai/30 bg-ai/10 p-3 text-sm">
+                    <p className="font-semibold">التشخيص الإداري</p><p className="mt-1">{briefing.customer360.managementDiagnosis}</p>
+                    <p className="mt-2 font-semibold">القرار التنفيذي</p><p className="mt-1">{briefing.customer360.executiveDecision}</p>
+                  </section>
+                </div>
+              )}
+
               {/* Scannable in <10s: 4 big numbers. */}
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <BigNumber
@@ -1099,4 +1138,12 @@ function BigNumber({ label, value, caption }: { label: string; value: string; ca
       {caption && <p className="text-[11px] text-muted-foreground">{caption}</p>}
     </div>
   );
+}
+
+function MiniKpi({ label, value }: { label: string; value: string }) {
+  return <div className="rounded-lg bg-background/60 p-2.5"><p className="text-[11px] text-muted-foreground">{label}</p><p className="mt-1 text-sm font-semibold">{value}</p></div>;
+}
+
+function Customer360List({ title, items, empty }: { title: string; items: string[]; empty?: string }) {
+  return <div><p className="mb-1 font-medium">{title}</p>{items.length ? <ul className="space-y-1 text-muted-foreground">{items.map((item, index) => <li key={index}>• {item}</li>)}</ul> : <p className="text-muted-foreground">{empty ?? "لا توجد بيانات كافية."}</p>}</div>;
 }

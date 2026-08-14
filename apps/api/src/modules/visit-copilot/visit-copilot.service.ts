@@ -164,6 +164,21 @@ export interface CustomerBriefingResult {
   topProducts: BriefingProduct[];
   missingProducts: BriefingMissingProduct[];
   diagnosis?: CustomerVisitDiagnosisV2;
+  customer360?: {
+    executiveSummary: string;
+    averageInvoiceValue: number | null;
+    collectionCount: number;
+    returnCount: number;
+    salesRank: number | null;
+    customerCount: number;
+    channel: string | null;
+    diagnoses: { title: string; evidence: string; meaning: string; confidence: "عالٍ" | "متوسط" | "منخفض" }[];
+    strengths: string[];
+    weaknesses: string[];
+    improvementOpportunities: string[];
+    managementDiagnosis: string;
+    executiveDecision: string;
+  };
   topOpportunity: string;
   suggestedGoal: string;
   actions: string[];
@@ -813,6 +828,7 @@ export class VisitCopilotService {
     let salesTotal = 0;
     let recent30Sales = 0;
     let previous30Sales = 0;
+    const salesByCustomer = new Map<string, number>();
     const customerProducts = new Map<string, { qty: number; value: number }>();
     const peerProductValue = new Map<string, number>();
     for (const item of items) {
@@ -826,6 +842,7 @@ export class VisitCopilotService {
       }
       if (!meta) continue;
       const pCode = String(item.ProductCode ?? "").trim();
+      salesByCustomer.set(meta.customerCode, (salesByCustomer.get(meta.customerCode) ?? 0) + value);
       if (meta.customerCode === code) {
         salesTotal += value;
         if (pCode) {
@@ -846,11 +863,13 @@ export class VisitCopilotService {
 
     // Returns in the period.
     let returnsTotal = 0;
+    let returnCount = 0;
     for (const ret of returns) {
       if (String(ret.CustomerCode ?? "").trim() !== code) continue;
       const dateIso = isoDayOf(ret.ReturnDate);
       if (!dateIso || dateIso < range.from || dateIso > range.to) continue;
       returnsTotal += toFiniteNumber(ret.TotalAmount) ?? 0;
+      returnCount++;
     }
     const returnsRate = salesTotal > 0 ? round2((returnsTotal / salesTotal) * 100) : null;
 
@@ -858,6 +877,7 @@ export class VisitCopilotService {
     // outstanding exposure (a stock — counted regardless of period).
     const todayIso = isoDay(new Date());
     let collected = 0;
+    let collectionCount = 0;
     let pending = 0;
     let bounced = 0;
     let overdueAmount = 0;
@@ -868,7 +888,7 @@ export class VisitCopilotService {
       const amount = toFiniteNumber(col.Amount) ?? 0;
       if (status === "collected") {
         const dateIso = isoDayOf(col.CollectionDate);
-        if (dateIso && dateIso >= range.from && dateIso <= range.to) collected += amount;
+        if (dateIso && dateIso >= range.from && dateIso <= range.to) { collected += amount; collectionCount++; }
       } else if (status === "pending") {
         pending += amount;
         const dueIso = isoDayOf(col.DueDate);
@@ -935,6 +955,47 @@ export class VisitCopilotService {
       topProduct: topProducts[0] ?? null,
       missingProduct: candidates[0] ? { productName: productNames.get(candidates[0][0]) ?? candidates[0][0], peerValue: round2(candidates[0][1]) } : null,
     });
+    const sortedCustomerSales = Array.from(salesByCustomer.entries()).sort((a, b) => b[1] - a[1]);
+    const salesRankIndex = sortedCustomerSales.findIndex(([customerCode]) => customerCode === code);
+    const salesRank = salesRankIndex >= 0 ? salesRankIndex + 1 : null;
+    const averageInvoiceValue = invoiceCount > 0 ? round2(salesTotal / invoiceCount) : null;
+    const strengths: string[] = [];
+    if (salesRank === 1) strengths.push(`أعلى عميل مبيعات ضمن نطاقك خلال الفترة (${round2(salesTotal)}).`);
+    else if (salesRank !== null && salesRank <= 3) strengths.push(`ضمن أعلى ${salesRank} عملاء مبيعات في نطاقك خلال الفترة.`);
+    if (averageInvoiceValue !== null) strengths.push(`متوسط قيمة الفاتورة ${averageInvoiceValue}.`);
+    if (returnCount === 0) strengths.push("لا توجد مرتجعات مسجلة خلال الفترة.");
+    const weaknesses: string[] = [];
+    if (collectionCount === 0) weaknesses.push("لا توجد تحصيلات مسجلة خلال الفترة؛ يلزم التحقق من حالة الاستحقاق دون افتراض السبب.");
+    if (lostOpportunityResult.opportunities.length > 0) weaknesses.push(`${lostOpportunityResult.opportunities.length} أصناف مفقودة التوزيع خلال آخر 30 يومًا.`);
+    if (diagnosis.confidence === null) weaknesses.push("لا توجد بيانات كافية لتحديد سبب التغير بدقة.");
+    const managementDiagnosis = salesRank !== null && salesRank <= 3
+      ? "عميل ذو مساهمة مبيعات مرتفعة؛ الأولوية الإدارية هي استمرارية التوريد وحماية التشكيلة ومتابعة الالتزامات المالية المتاحة."
+      : "القرار الإداري يتبع التشخيص المثبت في البيانات، مع تجنب افتراض سبب غير متاح.";
+    const executiveDecision = salesRank !== null && salesRank <= 3
+      ? "حافظ على العميل ضمن قائمة الأولوية، واستعد الأصناف المفقودة قبل توسيع التشكيلة الجديدة."
+      : diagnosis.visitObjective;
+    const diagnoses = [
+      trendPct !== null ? { title: trendPct >= 0 ? "اتجاه المبيعات" : "تراجع المبيعات", evidence: `آخر 30 يومًا ${recent30Sales} مقابل ${previous30Sales} في الـ30 يومًا السابقة.`, meaning: trendPct >= 0 ? "اتجاه إجمالي قيمة مبيعات العميل إيجابي." : "اتجاه إجمالي قيمة مبيعات العميل يحتاج متابعة.", confidence: "عالٍ" as const } : null,
+      lostOpportunityResult.opportunities.length > 0 ? { title: "فقدان توزيع", evidence: `${lostOpportunityResult.opportunities.length} أصناف توقفت خلال آخر 30 يومًا بعد مبيعات سابقة.`, meaning: "توجد فرصة لاستعادة التوزيع؛ سبب توقف الأصناف غير مثبت.", confidence: "عالٍ" as const } : null,
+      returnsTotal > 0 ? { title: "المرتجعات", evidence: `مرتجعات بقيمة ${round2(returnsTotal)} خلال الفترة.`, meaning: "راجع الكمية والتوريد قبل زيادة الطلب.", confidence: "متوسط" as const } : null,
+      collectionCount === 0 ? { title: "متابعة التحصيل", evidence: "لا توجد تحصيلات مسجلة خلال الفترة.", meaning: "تحقق من حالة الاستحقاق دون افتراض سبب عدم التسجيل.", confidence: "متوسط" as const } : null,
+      candidates[0] ? { title: "فرصة بيع متقاطع", evidence: `${productNames.get(candidates[0][0]) ?? candidates[0][0]} متاح كفرصة لدى عملاء القناة.`, meaning: "اعرض الصنف فقط بعد تأكيد ملاءمته للعميل.", confidence: "متوسط" as const } : null,
+    ].filter((item): item is NonNullable<typeof item> => item !== null).slice(0, 4);
+    const customer360 = {
+      executiveSummary: `${String(customer.CustomerName ?? code)} حقق ${round2(salesTotal)} من خلال ${invoiceCount} فواتير خلال الفترة.${salesRank === 1 ? " وهو الأعلى مبيعات ضمن نطاقك." : ""}`,
+      averageInvoiceValue,
+      collectionCount,
+      returnCount,
+      salesRank,
+      customerCount: sortedCustomerSales.length,
+      channel: channel || null,
+      diagnoses,
+      strengths,
+      weaknesses,
+      improvementOpportunities: diagnosis.visitActions,
+      managementDiagnosis,
+      executiveDecision,
+    };
 
     return {
       customerCode: code,
@@ -946,6 +1007,7 @@ export class VisitCopilotService {
       topProducts,
       missingProducts,
       diagnosis,
+      customer360,
       topOpportunity: diagnosis.diagnosis,
       suggestedGoal: `هدف الزيارة: ${diagnosis.visitObjective}`,
       actions: diagnosis.visitActions,
