@@ -13,6 +13,11 @@ test("classifies a sale older than four days as stale", () => {
   assert.equal(classifySalesRecency("2026-07-29T12:00:00.000Z", now), "stale");
 });
 
+test("uses the supplied stale-days threshold", () => {
+  assert.equal(classifySalesRecency("2026-08-01T12:00:00.000Z", now, 4), "recent");
+  assert.equal(classifySalesRecency("2026-08-01T12:00:00.000Z", now, 1), "stale");
+});
+
 test("classifies null and invalid dates as missing", () => {
   assert.equal(classifySalesRecency(null, now), "missing");
   assert.equal(classifySalesRecency("not-a-date", now), "missing");

@@ -11,7 +11,7 @@ function validSaleTime(lastSaleDate: string | null): number | null {
 export function classifySalesRecency(lastSaleDate: string | null, now = new Date(), staleDaysThreshold = SMART_LOADING_STALE_DAYS): SalesRecency {
   const saleTime = validSaleTime(lastSaleDate);
   if (saleTime === null) return "missing";
-  return Math.floor((now.getTime() - saleTime) / 86_400_000) >= staleDaysThreshold ? "stale" : "recent";
+  return Math.floor((now.getTime() - saleTime) / 86_400_000) > staleDaysThreshold ? "stale" : "recent";
 }
 
 export function summarizeSalesRecency<T extends { lastSaleDate: string | null }>(products: readonly T[], now = new Date()) {
