@@ -1635,6 +1635,7 @@ export interface VisitCopilot360LostOpportunity {
   diagnosis: string;
   visitDecision: string;
   likelyReason?: string | null;
+  confidence?: "عالٍ" | "متوسط" | "منخفض" | null;
   visitGoal?: string;
   extraProductCount?: number;
   customerCode: string;

@@ -33,7 +33,7 @@ import { LocalDecisionEngine } from "../local-decision/rule-engine";
 import { VisitCopilotRuleRegistry } from "./visit-copilot.rules";
 import { SgiService } from "../sgi/sgi.service";
 import { LostOpportunityService, type LostOpportunityResult } from "../lost-opportunity/lost-opportunity.service";
-import { buildLostOpportunityCoaching } from "./daily-360-recommendation-builder";
+import { buildDaily360Diagnosis } from "./daily-360-diagnosis";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { ProspectService } from "../prospects/prospect.service";
 import { ProductFitService } from "../prospects/product-fit.service";
@@ -1255,13 +1255,21 @@ export class VisitCopilotService {
     // same selected-date customer plan and shared engine as Smart Loading.
     const lostOpportunityResult = brief.lostOpportunityResult;
     const visibleLostOpportunities = await this.filterDaily360LostOpportunities(user, lostOpportunityResult.opportunities);
-    const lostOpportunities = visibleLostOpportunities.map((opportunity) => ({
+    const lostOpportunities = visibleLostOpportunities.map((opportunity) => {
+      const diagnosis = buildDaily360Diagnosis({
+        productName: opportunity.productName,
+        sales90: opportunity.baselineNetQuantity,
+        sales30: opportunity.recentNetQuantity,
+        suggestedQuantity: opportunity.suggestedQuantity,
+      });
+      return {
       customerName: opportunity.customerName, declineValue: opportunity.baselineNetQuantity, valueBefore: opportunity.baselineNetQuantity, valueAfter: opportunity.recentNetQuantity,
       lastVisitDate: brief.customers.find((customer) => customer.customerCode === opportunity.customerCode)?.lastVisitDate ?? null,
       stoppedProducts: [{ productName: opportunity.productName, quantity: opportunity.baselineNetQuantity, unit: "", value: opportunity.suggestedQuantity }],
-      diagnosis: narrativeLocale === "en" ? `Sales of ${opportunity.productName} stopped during the last 30 days.` : `توقف بيع ${opportunity.productName} خلال آخر 30 يومًا.`, visitDecision: narrativeLocale === "en" ? `Review the customer's need for ${opportunity.productName}.` : `راجع احتياج العميل إلى ${opportunity.productName}.`, likelyReason: null, visitGoal: narrativeLocale === "en" ? `Propose ${opportunity.suggestedQuantity} units.` : `اقتراح ${opportunity.suggestedQuantity} وحدة.`, extraProductCount: 0,
+      diagnosis: diagnosis.diagnosis, visitDecision: diagnosis.visitAction, likelyReason: null, visitGoal: diagnosis.visitGoal, confidence: diagnosis.confidence, extraProductCount: 0,
       customerCode: opportunity.customerCode, productCode: opportunity.productCode, productName: opportunity.productName, category: opportunity.category, baselineNetQuantity: opportunity.baselineNetQuantity, recentNetQuantity: opportunity.recentNetQuantity, suggestedQuantity: opportunity.suggestedQuantity,
-    }));
+      };
+    });
     // ---- Collections + priority debtors (COLLECTION_RISK situations for
     // the "who to chase" list; real collected/pending/bounced totals below,
     // computed directly from the Collections entity — was hardcoded to 0

@@ -404,6 +404,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                                               )}
                                               <div className="space-y-1.5 rounded-md border border-border bg-card p-2.5">
                                                 <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360Diagnosis")}: </span>{op.diagnosis}</p>
+                                                {op.confidence && <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">الثقة: </span>{op.confidence}</p>}
                                                 {op.likelyReason && <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360LikelyReason")}: </span>{op.likelyReason}</p>}
                                                 <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360VisitDecision")}: </span>{op.visitDecision}</p>
                                                 {op.visitGoal && <p className="text-xs text-foreground"><span className="font-medium text-muted-foreground">{t("copilot.summary360VisitGoal")}: </span>{op.visitGoal}</p>}

@@ -262,6 +262,7 @@ export const visitCopilot360LostOpportunitySchema = z.object({
   // diagnosis/reason/action/goal shape. `extraProductCount` lets the UI
   // show only the top products plus a "+N more" note instead of every chip.
   likelyReason: z.string().nullable().optional(),
+  confidence: z.enum(["عالٍ", "متوسط", "منخفض"]).nullable().optional(),
   visitGoal: z.string().optional(),
   extraProductCount: z.number().optional(),
   customerCode: z.string(),
