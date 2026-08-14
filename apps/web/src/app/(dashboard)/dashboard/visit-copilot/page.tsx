@@ -933,6 +933,15 @@ function VisitCopilotScreen() {
 
               {/* The two decision lines — server-worded, rendered as-is. */}
               <div className="space-y-2">
+                {briefing.diagnosis && (
+                  <div className="rounded-lg border border-border bg-background/40 p-3 text-sm">
+                    <p className="font-medium">التشخيص: {briefing.diagnosis.diagnosis}</p>
+                    {briefing.diagnosis.confidence && <p className="mt-1 text-xs text-muted-foreground">الثقة: {briefing.diagnosis.confidence}</p>}
+                    <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                      {briefing.diagnosis.evidence.map((evidence, index) => <li key={index}>• {evidence}</li>)}
+                    </ul>
+                  </div>
+                )}
                 <p className="glow-ai flex items-start gap-2 rounded-lg p-3 text-sm font-medium">
                   <Target className="mt-0.5 h-4 w-4 shrink-0 text-ai" />
                   {briefing.suggestedGoal}

@@ -7,6 +7,14 @@ export interface Daily360Diagnosis {
   visitGoal: string;
 }
 
+export interface CustomerVisitDiagnosis {
+  evidence: string[];
+  diagnosis: string;
+  confidence: Daily360Confidence | null;
+  visitObjective: string;
+  visitActions: string[];
+}
+
 const format = (value: number) => Math.round(value).toLocaleString("ar-EG");
 
 /**
@@ -83,5 +91,99 @@ export function buildDaily360Diagnosis(input: {
     confidence: null,
     visitAction: `تحقق من بيانات ${input.productName} قبل اتخاذ قرار تحميل.`,
     visitGoal: "تأكيد البيانات المطلوبة للقرار.",
+  };
+}
+
+/** Uses the same evidence-first rules for the main Customer Visit Card. */
+export function buildCustomerVisitDiagnosis(input: {
+  salesTotal: number;
+  invoiceCount: number;
+  trendPct: number | null;
+  firstHalfSales: number;
+  secondHalfSales: number;
+  returnsTotal: number;
+  pendingCollection: number;
+  bouncedCollection: number;
+  overdueCollection: number;
+  lostSkus: readonly { productName: string; baselineNetQuantity: number; suggestedQuantity: number }[];
+  topProduct: { productName: string; value: number } | null;
+  missingProduct: { productName: string; peerValue: number } | null;
+}): CustomerVisitDiagnosis {
+  const evidence: string[] = [
+    `المبيعات ${format(input.salesTotal)} عبر ${input.invoiceCount} فاتورة خلال الفترة.`,
+  ];
+  if (input.trendPct !== null) evidence.push(`النصف الثاني ${input.trendPct >= 0 ? "أعلى" : "أقل"} من الأول بـ${format(Math.abs(input.trendPct))}% (${format(input.firstHalfSales)} ← ${format(input.secondHalfSales)}).`);
+  if (input.lostSkus.length > 0) evidence.push(`${input.lostSkus.length} أصناف توقفت في آخر 30 يومًا بعد مبيعات سابقة.`);
+  if (input.returnsTotal > 0) evidence.push(`مرتجعات مثبتة بقيمة ${format(input.returnsTotal)}.`);
+  const collectionRisk = input.bouncedCollection + input.overdueCollection;
+  if (collectionRisk > 0) evidence.push(`تحصيل مرتد أو متأخر بقيمة ${format(collectionRisk)}.`);
+
+  if (collectionRisk > 0) {
+    return {
+      evidence,
+      diagnosis: input.bouncedCollection > 0 ? "ضغط تحصيلي مثبت: التحصيل المرتد أو المتأخر هو الأولوية قبل أي طلب جديد." : "تحصيل متأخر مثبت: يلزم تأمين التحصيل قبل توسيع البيع.",
+      confidence: "عالٍ",
+      visitObjective: `تحصيل ${format(collectionRisk)} أو الاتفاق على تسوية واضحة قبل تسجيل طلب جديد.`,
+      visitActions: [
+        `ناقش مبلغ التحصيل المتأخر/المرتد (${format(collectionRisk)}) وحدد التزامًا واضحًا.`,
+        input.lostSkus.length > 0 ? `بعد تأمين التحصيل، ركز على استعادة ${input.lostSkus[0]!.productName} بدل إضافة صنف جديد.` : "لا توسع الطلب قبل تأكيد التحصيل.",
+      ],
+    };
+  }
+
+  if (input.lostSkus.length > 0) {
+    const primary = input.lostSkus[0]!;
+    return {
+      evidence,
+      diagnosis: `فقدان توزيع مثبت: تراجع العميل يرتبط بتوقف ${input.lostSkus.length} أصناف، أبرزها ${primary.productName}؛ لا توجد بيانات كافية لتحديد سبب التوقف بدقة.`,
+      confidence: "عالٍ",
+      visitObjective: `استعادة توزيع ${primary.productName} تدريجيًا قبل اقتراح أصناف جديدة.`,
+      visitActions: [
+        `استفسر عن سبب توقف ${primary.productName} وتحقق من وجوده لدى العميل.`,
+        `اقترح إعادة ${primary.productName} بكمية لا تتجاوز ${format(primary.suggestedQuantity)}.`,
+        input.returnsTotal > 0 ? "راجع المرتجعات قبل زيادة كمية أي صنف مستعاد." : "ركز على استعادة الأصناف المفقودة بدل إضافة SKU جديد.",
+      ],
+    };
+  }
+
+  if (input.returnsTotal > 0) {
+    return {
+      evidence,
+      diagnosis: "المرتجعات هي إشارة الضغط الظاهرة؛ لا توجد بيانات كافية لتحديد سببها بدقة.",
+      confidence: "متوسط",
+      visitObjective: "مراجعة المرتجع والكمية السابقة قبل أي زيادة في الطلب.",
+      visitActions: ["راجع الأصناف والكميات المرتجعة مع العميل.", "أكد استمرار الأصناف الحالية قبل اقتراح تحميل إضافي."],
+    };
+  }
+
+  if (input.trendPct !== null && input.trendPct < 0) {
+    return {
+      evidence,
+      diagnosis: "تراجع مثبت في قيمة الطلب خلال الفترة، دون دليل يثبت سببًا تشغيليًا أو تجاريًا محددًا.",
+      confidence: "متوسط",
+      visitObjective: "تأكيد استمرار الأصناف الحالية واستعادة عمق الطلب تدريجيًا.",
+      visitActions: [
+        input.topProduct ? `أكد استمرار ${input.topProduct.productName}، وهو أعلى صنف بقيمة ${format(input.topProduct.value)}.` : "راجع الأصناف الحالية قبل اقتراح أي جديد.",
+        "استفسر عن التغير في الطلب وسجل الملاحظة دون افتراض السبب.",
+      ],
+    };
+  }
+
+  if (input.missingProduct) {
+    return {
+      evidence,
+      diagnosis: `فرصة بيع متقاطع مثبتة: العميل لا يشتري ${input.missingProduct.productName} بينما حقق لدى عملاء القناة ${format(input.missingProduct.peerValue)} خلال الفترة.`,
+      confidence: "متوسط",
+      visitObjective: `تجربة ${input.missingProduct.productName} بكمية أولى مناسبة.`,
+      visitActions: [`اعرض ${input.missingProduct.productName} كطلب تجريبي.`, "أكد ملاءمة الصنف للعميل قبل تسجيل الطلب."],
+    };
+  }
+
+  return {
+    evidence,
+    diagnosis: input.salesTotal > 0 ? "أداء العميل مستقر ضمن البيانات المتاحة؛ لا توجد إشارة ضغط مثبتة." : "لا توجد بيانات كافية لتحديد السبب بدقة.",
+    confidence: input.salesTotal > 0 ? "متوسط" : null,
+    visitObjective: input.topProduct ? `الحفاظ على استمرار ${input.topProduct.productName} ومتابعة الطلب.` : "تأكيد بيانات العميل ونقطة البداية للطلب.",
+    visitActions: [input.topProduct ? `تحقق من استمرار ${input.topProduct.productName} قبل توسيع الكمية تدريجيًا.` : "تحقق من بيانات العميل قبل اقتراح الطلب."],
   };
 }

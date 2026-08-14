@@ -1494,6 +1494,13 @@ export interface VisitCopilotBriefing {
   collections: { collected: number; pending: number; bounced: number; oldestPendingDueDate: string | null };
   topProducts: VisitCopilotBriefingProduct[];
   missingProducts: VisitCopilotMissingProduct[];
+  diagnosis?: {
+    evidence: string[];
+    diagnosis: string;
+    confidence: "عالٍ" | "متوسط" | "منخفض" | null;
+    visitObjective: string;
+    visitActions: string[];
+  };
   topOpportunity: string;
   suggestedGoal: string;
   actions: string[];

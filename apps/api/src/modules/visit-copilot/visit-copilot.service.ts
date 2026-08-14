@@ -33,7 +33,7 @@ import { LocalDecisionEngine } from "../local-decision/rule-engine";
 import { VisitCopilotRuleRegistry } from "./visit-copilot.rules";
 import { SgiService } from "../sgi/sgi.service";
 import { LostOpportunityService, type LostOpportunityResult } from "../lost-opportunity/lost-opportunity.service";
-import { buildDaily360Diagnosis } from "./daily-360-diagnosis";
+import { buildCustomerVisitDiagnosis, buildDaily360Diagnosis, type CustomerVisitDiagnosis } from "./daily-360-diagnosis";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { ProspectService } from "../prospects/prospect.service";
 import { ProductFitService } from "../prospects/product-fit.service";
@@ -163,6 +163,7 @@ export interface CustomerBriefingResult {
   collections: { collected: number; pending: number; bounced: number; oldestPendingDueDate: string | null };
   topProducts: BriefingProduct[];
   missingProducts: BriefingMissingProduct[];
+  diagnosis?: CustomerVisitDiagnosis;
   topOpportunity: string;
   suggestedGoal: string;
   actions: string[];
@@ -914,18 +915,25 @@ export class VisitCopilotService {
       reason: `عملاء بنفس القناة اشتروه بقيمة ${round2(value)} خلال الفترة وهذا العميل لا يشتريه`,
     }));
 
-    // Rule-based briefing strings (instant — no model call). Priority:
-    // bounced/overdue collection > declining trend > biggest cross-sell
-    // value > reorder top product.
-    const { topOpportunity, suggestedGoal, actions } = this.composeGuidance({
-      bounced: round2(bounced),
-      overdueAmount: round2(overdueAmount),
-      pending: round2(pending),
+    const lostOpportunityResult = await this.lostOpportunityService.detect({
+      ...ctx,
+      selectedDate: range.to,
+      customerCodes: [code],
+      customerNames: new Map([[code, String(customer.CustomerName ?? code)]]),
+    });
+    const diagnosis = buildCustomerVisitDiagnosis({
+      salesTotal: round2(salesTotal),
+      invoiceCount,
       trendPct,
-      firstHalf: round2(firstHalf),
-      topMissing: missingProducts[0] ?? null,
-      topMissingValue: candidates.length > 0 ? round2(candidates[0]![1]) : 0,
+      firstHalfSales: round2(firstHalf),
+      secondHalfSales: round2(secondHalf),
+      returnsTotal: round2(returnsTotal),
+      pendingCollection: round2(pending),
+      bouncedCollection: round2(bounced),
+      overdueCollection: round2(overdueAmount),
+      lostSkus: lostOpportunityResult.opportunities,
       topProduct: topProducts[0] ?? null,
+      missingProduct: candidates[0] ? { productName: productNames.get(candidates[0][0]) ?? candidates[0][0], peerValue: round2(candidates[0][1]) } : null,
     });
 
     return {
@@ -937,9 +945,10 @@ export class VisitCopilotService {
       collections: { collected: round2(collected), pending: round2(pending), bounced: round2(bounced), oldestPendingDueDate },
       topProducts,
       missingProducts,
-      topOpportunity,
-      suggestedGoal,
-      actions,
+      diagnosis,
+      topOpportunity: diagnosis.diagnosis,
+      suggestedGoal: `هدف الزيارة: ${diagnosis.visitObjective}`,
+      actions: diagnosis.visitActions,
       warnings,
     };
   }
