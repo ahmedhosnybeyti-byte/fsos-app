@@ -16,3 +16,9 @@ export function formatWholeNumber(value: number): string {
 export function formatPercentage(value: number): string {
   return percentageFormatter.format(value);
 }
+
+
+/** Formats numeric fragments from measured server-authored Customer 360 text. */
+export function formatDynamicNumbers(text: string): string {
+  return text.replace(/(?<![\d-])-?\d[\d,]*(?:\.\d+)?/g, (fragment) => formatWholeNumber(Number(fragment.replace(/,/g, ""))));
+}

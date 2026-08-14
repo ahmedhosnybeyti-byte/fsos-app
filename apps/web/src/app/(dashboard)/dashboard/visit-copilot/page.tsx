@@ -46,7 +46,7 @@ import type {
   VisitCopilotProspect,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { formatPercentage, formatWholeNumber } from "@/lib/number-format";
+import { formatDynamicNumbers, formatPercentage, formatWholeNumber } from "@/lib/number-format";
 
 // Flexible plan date (2026-07-30, explicit product request) — helpers kept
 // local to this page since nothing else needs "today in YYYY-MM-DD" or
@@ -895,7 +895,7 @@ function VisitCopilotScreen() {
                 <div className="space-y-3">
                   <section className="glow-ai rounded-lg p-3 text-sm">
                     <p className="mb-1 font-semibold">ملخص تنفيذي</p>
-                    <p>{briefing.customer360.executiveSummary}</p>
+                    <p>{formatDynamicNumbers(briefing.customer360.executiveSummary)}</p>
                     {briefing.customer360.classifications.length > 0 && <div className="mt-2 flex flex-wrap gap-1.5">{briefing.customer360.classifications.map((item) => <span key={item} className="rounded-full border border-ai/30 bg-ai/10 px-2 py-0.5 text-[11px]">{item}</span>)}</div>}
                   </section>
                   <section>
@@ -916,8 +916,8 @@ function VisitCopilotScreen() {
                       {briefing.customer360.diagnoses.map((item) => (
                         <div key={item.title} className="rounded-md bg-card/60 p-2.5 text-xs">
                           <p className="font-medium">{item.title} <span className="text-muted-foreground">· ثقة {item.confidence}</span></p>
-                          <p className="mt-1 text-muted-foreground">{item.evidence}</p>
-                          <p className="mt-1">{item.meaning}</p>
+                          <p className="mt-1 text-muted-foreground">{formatDynamicNumbers(item.evidence)}</p>
+                          <p className="mt-1">{formatDynamicNumbers(item.meaning)}</p>
                         </div>
                       ))}
                     </div>
@@ -925,14 +925,14 @@ function VisitCopilotScreen() {
                   <details className="rounded-lg border border-border bg-background/40 p-3">
                     <summary className="cursor-pointer text-sm font-semibold">القوة والمخاطر وفرص التحسين</summary>
                     <div className="mt-3 grid gap-3 text-xs sm:grid-cols-3">
-                      <Customer360List title="نقاط القوة" items={briefing.customer360.strengths} />
-                      <Customer360List title="المخاطر" items={briefing.customer360.weaknesses} empty="لا توجد مخاطر مثبتة من البيانات الحالية." />
-                      <Customer360List title="الأولويات" items={briefing.customer360.improvementOpportunities.slice(0, 3)} />
+                      <Customer360List title="نقاط القوة" items={briefing.customer360.strengths.map(formatDynamicNumbers)} />
+                      <Customer360List title="المخاطر" items={briefing.customer360.weaknesses.map(formatDynamicNumbers)} empty="لا توجد مخاطر مثبتة من البيانات الحالية." />
+                      <Customer360List title="الأولويات" items={briefing.customer360.improvementOpportunities.slice(0, 3).map(formatDynamicNumbers)} />
                     </div>
                   </details>
                   <section className="rounded-lg border border-ai/30 bg-ai/10 p-3 text-sm">
-                    <p className="font-semibold">التشخيص الإداري</p><p className="mt-1">{briefing.customer360.managementDiagnosis}</p>
-                    <p className="mt-2 font-semibold">القرار التنفيذي</p><p className="mt-1">{briefing.customer360.executiveDecision}</p>
+                    <p className="font-semibold">التشخيص الإداري</p><p className="mt-1">{formatDynamicNumbers(briefing.customer360.managementDiagnosis)}</p>
+                    <p className="mt-2 font-semibold">القرار التنفيذي</p><p className="mt-1">{formatDynamicNumbers(briefing.customer360.executiveDecision)}</p>
                   </section>
                 </div>
               )}
@@ -1161,15 +1161,20 @@ function SkuGroups({ title, items, expandAllLabel, collapseAllLabel, emptyLabel,
   }, [items, uncategorizedLabel]);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const setAllCategories = (expand: boolean) => setExpandedCategories(expand ? new Set(groups.map(([category]) => category)) : new Set());
+  const toggleCategory = (category: string) => setExpandedCategories((current) => {
+    const next = new Set(current);
+    if (next.has(category)) next.delete(category); else next.add(category);
+    return next;
+  });
 
   return (
     <section className="glow-ai rounded-lg p-3 text-sm">
       <div className="mb-2 flex items-center justify-between gap-2"><p className="font-semibold">{title}</p>{groups.length > 1 && <div className="flex gap-1"><button type="button" onClick={() => setAllCategories(true)} className="rounded px-1.5 py-1 text-xs text-ai hover:bg-ai/10">{expandAllLabel}</button><button type="button" onClick={() => setAllCategories(false)} className="rounded px-1.5 py-1 text-xs text-muted-foreground hover:bg-muted">{collapseAllLabel}</button></div>}</div>
       {groups.length === 0 ? <p className="text-xs text-muted-foreground">{emptyLabel}</p> : <div className="space-y-2">{groups.map(([category, skus]) => (
-        <details key={category} className="rounded-md border border-border bg-background/40 p-2" open={expandedCategories.has(category)} onToggle={(event) => setExpandedCategories((current) => { const next = new Set(current); if ((event.currentTarget as HTMLDetailsElement).open) next.add(category); else next.delete(category); return next; })}>
-          <summary className="cursor-pointer font-medium">{category} <span className="text-xs text-muted-foreground">({formatWholeNumber(skus.length)})</span></summary>
-          <div className="mt-2 space-y-2">{skus.map((sku) => <div key={sku.productCode} className="rounded-md bg-card/60 p-2 text-xs"><p className="font-medium">{sku.productName}</p><p className="mt-1 text-muted-foreground">{sku.details.join(" · ")}</p></div>)}</div>
-        </details>
+        <div key={category} className="rounded-md border border-border bg-background/40 p-2">
+          <button type="button" onClick={() => toggleCategory(category)} aria-expanded={expandedCategories.has(category)} className="flex w-full items-center justify-between gap-2 text-start font-medium"><span>{category} <span className="text-xs text-muted-foreground">({formatWholeNumber(skus.length)})</span></span><ChevronDown className={cn("h-4 w-4 text-ai transition-transform", expandedCategories.has(category) && "rotate-180")} /></button>
+          {expandedCategories.has(category) && <div className="mt-2 space-y-2">{skus.map((sku) => <div key={sku.productCode} className="rounded-md bg-card/60 p-2 text-xs"><p className="font-medium">{sku.productName}</p><p className="mt-1 text-muted-foreground">{sku.details.join(" · ")}</p></div>)}</div>}
+        </div>
       ))}</div>}
     </section>
   );
