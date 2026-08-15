@@ -2130,6 +2130,10 @@ export class VisitCopilotService {
     const sourceLabel =
       prospect.source === "UPLOAD"
         ? "من ملف العملاء المحتملين"
+        : prospect.source === "GOOGLE"
+          ? "مكتشف عبر Google Places"
+          : "مكتشف عبر OpenStreetMap";
+
     // Reuse the Discovery nearby-sales evidence for a prospect; these are
     // recommendations, never this prospect's non-existent purchase history.
     const nearby = await this.buildNearbyBestSellers(user, range, [prospect], prospect.channel, warnings).then((result) => result.get(prospect.id));
@@ -2138,9 +2142,12 @@ export class VisitCopilotService {
       topProducts = nearbyProducts.map((product) => ({ productCode: product.productCode, productName: product.productName, category: null, qty: 0, value: 0, lastPurchaseDate: null, nearbyCustomerCount: product.nearbyCustomerCount }));
     }
 
+        /* Stale continuation from the prior edit; the source label above is
+         * complete before nearby recommendations are resolved.
         : prospect.source === "GOOGLE"
           ? "مكتشف عبر Google Places"
           : "مكتشف عبر OpenStreetMap";
+    */
     const top = topProducts[0] ?? null;
     const topOpportunity = top
       ? `عميل محتمل جديد (${sourceLabel}) — عملاء نفس القناة يشترون "${top.productName}" بكثافة، وهو مدخلك الأفضل لفتح التعامل.`
@@ -2166,13 +2173,17 @@ export class VisitCopilotService {
       actions: actions.slice(0, 4),
       warnings,
       isProspect: true,
+      recommendationSource: nearbyProducts.length > 0 ? `مبيعات ${nearby?.customerCount ?? 0} عميل قريب من نفس القناة` : "مبيعات عملاء نفس القناة",
+      recommendationConfidence: prospect.scoreConfidence,
     };
   }
 
   // ------------------------------------------------------------------
   // Discovery internals
+  /*
       recommendationSource: nearbyProducts.length > 0 ? `?????? ${nearby?.customerCount ?? 0} ???? ???? ?? ??? ??????` : "?????? ????? ??? ??????",
       recommendationConfidence: prospect.scoreConfidence,
+  */
   // ------------------------------------------------------------------
 
   // One pass over visible Customers + in-period Invoices/Invoice Items:
