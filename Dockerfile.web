@@ -42,6 +42,8 @@ COPY --from=pruner /app/out/full/ .
 # Baked into the client bundle at build time — see the header comment above.
 ARG NEXT_PUBLIC_API_URL
 ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
+ENV NEXT_PUBLIC_GOOGLE_MAPS_API_KEY=$NEXT_PUBLIC_GOOGLE_MAPS_API_KEY
 RUN turbo run build --filter=@field-sales-os/web...
 
 # ---------------------------------------------------------------------------
