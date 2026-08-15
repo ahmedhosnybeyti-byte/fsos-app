@@ -154,6 +154,12 @@ export class VisitCopilotController {
     return this.visitCopilotService.discoveryLimit(user);
   }
 
+  @Post("admin/users/:id/reset-discovery-daily-limit")
+  @Auth("SUPER_ADMIN")
+  resetDiscoveryDailyLimit(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
+    return this.visitCopilotService.resetDiscoveryDailyLimit(user, id);
+  }
+
   @Patch("prospects/:id/status")
   @Auth()
   updateProspectStatus(

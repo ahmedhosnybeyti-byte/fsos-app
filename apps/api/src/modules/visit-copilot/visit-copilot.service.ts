@@ -449,6 +449,32 @@ export class VisitCopilotService {
     return { dailyLimit: DAILY_DISCOVERY_LIMIT, remaining: Math.max(0, DAILY_DISCOVERY_LIMIT - used) };
   }
 
+  // Platform-only operational recovery. This mutates only the selected
+  // user's per-day discovery quota fields; discovered prospects and visit
+  // scheduling records are intentionally not part of this operation.
+  async resetDiscoveryDailyLimit(actor: AuthenticatedUser, targetUserId: string) {
+    if (actor.roleCode !== "SUPER_ADMIN") throw new ForbiddenException("Only Super Admin can reset Google Discovery limits.");
+    const target = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true, companyId: true, company: { select: { profile: { select: { timeZone: true } } } } },
+    });
+    if (!target?.companyId) throw new NotFoundException("Company user not found");
+    const resetAt = new Date();
+    await this.prisma.user.update({
+      where: { id: target.id },
+      data: { discoveryQuotaDay: companyDayStart(target.company?.profile?.timeZone), discoveryIssuedToday: 0 },
+    });
+    await this.auditLogService.record({
+      companyId: target.companyId,
+      userId: actor.userId,
+      action: "visit_copilot.google_discovery.daily_limit.reset",
+      entityType: "User",
+      entityId: target.id,
+      metadata: { targetUserId: target.id, actorUserId: actor.userId, resetAt: resetAt.toISOString(), dailyLimit: DAILY_DISCOVERY_LIMIT },
+    });
+    return { success: true as const, resetAt, dailyLimit: DAILY_DISCOVERY_LIMIT, remaining: DAILY_DISCOVERY_LIMIT };
+  }
+
   private async reserveDiscoveryQuota(user: AuthenticatedUser): Promise<number> {
     const account = await this.prisma.user.findUnique({ where: { id: user.userId }, select: { company: { select: { profile: { select: { timeZone: true } } } } } });
     const today = companyDayStart(account?.company?.profile?.timeZone);

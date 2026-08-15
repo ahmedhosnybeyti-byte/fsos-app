@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { companyScreenRegistry, getCompanyFeatureAccessState, type CompanyFeatureAccess, type CompanyScreenAccessState, type CompanyStatus } from "@field-sales-os/schemas";
-import { companiesApi, gptApi } from "@/lib/api";
+import { companiesApi, gptApi, visitCopilotApi } from "@/lib/api";
 import { ApiError } from "@/lib/api-client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,6 +16,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { formatDate } from "@/lib/utils";
 import { canSubmitCompanyDetails, getCompanyDetailsViewState } from "@/lib/admin-company-details-state";
 import { useTranslation } from "@/components/translation-provider";
+import { useAuth } from "@/hooks/use-auth";
 
 const accessLabels: Record<CompanyScreenAccessState, string> = { ENABLED: "مفعّلة", LOCKED: "ظاهرة ومجمّدة", HIDDEN: "مخفية" };
 
@@ -23,6 +24,7 @@ export default function AdminCompanyDetailsPage() {
   const params = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const { locale } = useTranslation();
+  const { user: currentUser } = useAuth();
   const { data, isLoading, isError } = useQuery({ queryKey: ["admin", "company", params.id], queryFn: () => companiesApi.details(params.id), enabled: Boolean(params.id) });
   const featureQuery = useQuery({ queryKey: ["admin", "company", params.id, "feature-access"], queryFn: () => companiesApi.featureAccess(params.id), enabled: Boolean(params.id) });
   const [form, setForm] = useState<{ name: string; slug: string; status: CompanyStatus; maxExcelUploadSizeMb: number }>({ name: "", slug: "", status: "ACTIVE", maxExcelUploadSizeMb: 100 });
@@ -32,6 +34,7 @@ export default function AdminCompanyDetailsPage() {
   useEffect(() => { if (featureQuery.data) setFeatureAccess(featureQuery.data.featureAccess); }, [featureQuery.data]);
   const updateMutation = useMutation({ mutationFn: () => companiesApi.update(params.id, { name: form.name, slug: form.slug.trim().toLowerCase(), status: form.status, maxExcelUploadSizeMb: form.maxExcelUploadSizeMb }), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["admin", "company", params.id] }); await queryClient.invalidateQueries({ queryKey: ["admin", "companies"] }); } });
   const resetLaunchCodesMutation = useMutation({ mutationFn: (userId: string) => gptApi.resetDailyLaunchCodes(userId) });
+  const resetDiscoveryLimitMutation = useMutation({ mutationFn: (userId: string) => visitCopilotApi.resetDiscoveryDailyLimit(userId) });
   const featureMutation = useMutation({ mutationFn: () => companiesApi.updateFeatureAccess(params.id, featureAccess), onSuccess: async () => { await queryClient.invalidateQueries({ queryKey: ["admin", "company", params.id, "feature-access"] }); } });
   const lifecycleMutation = useMutation({
     mutationFn: (event: "ARCHIVE" | "ACTIVATE") => companiesApi.lifecycle(params.id, event),
@@ -55,7 +58,7 @@ export default function AdminCompanyDetailsPage() {
     <section className="glass-card space-y-3 p-4">
       <h2 className="font-semibold">Daily GPT code reset</h2>
       <Input value={launchCodeSearch} onChange={(event) => setLaunchCodeSearch(event.target.value)} placeholder="Search by name or email" aria-label="Search company users" />
-      {filteredLaunchCodeUsers.map((user) => <div key={user.id} className="flex items-center justify-between gap-3 border-b py-2 last:border-0"><span>{user.fullName} ({user.email})</span><Button variant="outline" size="sm" disabled={resetLaunchCodesMutation.isPending} onClick={() => resetLaunchCodesMutation.mutate(user.id)}>Reset daily GPT codes</Button></div>)}
+      {filteredLaunchCodeUsers.map((user) => <div key={user.id} className="flex items-center justify-between gap-3 border-b py-2 last:border-0"><span>{user.fullName} ({user.email})</span><div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={resetLaunchCodesMutation.isPending} onClick={() => resetLaunchCodesMutation.mutate(user.id)}>Reset daily GPT codes</Button>{currentUser?.role.code === "SUPER_ADMIN" && <Button variant="outline" size="sm" disabled={resetDiscoveryLimitMutation.isPending} onClick={() => resetDiscoveryLimitMutation.mutate(user.id)}>Reset Google Discovery</Button>}</div></div>)}
     </section>
     <div><Link href="/admin/companies" className="text-sm text-primary hover:underline">← Companies</Link><div className="mt-2 flex items-center gap-2"><h1 className="text-2xl font-semibold">{data.name}</h1><Badge variant={data.status === "ARCHIVED" ? "destructive" : "outline"}>{data.status === "ARCHIVED" ? "Archived / Cancelled" : data.status}</Badge></div><p className="text-muted-foreground">Created {formatDate(data.createdAt)} · Updated {formatDate(data.updatedAt)}</p></div>
     <section className="glass-card space-y-3 p-4"><h2 className="font-semibold">Edit company</h2><Label>Name<Input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Label><Label>Slug<Input value={form.slug} onChange={(e) => setForm({ ...form, slug: e.target.value })} /></Label><Label>Status<Select value={form.status} onValueChange={(value) => setForm({ ...form, status: value as CompanyStatus })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ACTIVE">Active</SelectItem><SelectItem value="SUSPENDED">Suspended</SelectItem><SelectItem value="DRAFT">Draft</SelectItem><SelectItem value="CONFIGURING">Configuring</SelectItem><SelectItem value="ARCHIVED">Archived</SelectItem></SelectContent></Select></Label>{updateMutation.isError && <p className="text-sm text-destructive">{updateMutation.error instanceof ApiError ? updateMutation.error.message : "Could not update company."}</p>}<Button disabled={!canSubmitCompanyDetails(updateMutation.isPending)} onClick={() => updateMutation.mutate()}>{updateMutation.isPending ? "Saving…" : "Save changes"}</Button></section>

@@ -62,6 +62,9 @@ export const visitCopilotApi = {
 
   discoveryLimit: () => apiFetch<VisitCopilotDiscoveryLimit>("/visit-copilot/discovery/limit"),
 
+  resetDiscoveryDailyLimit: (userId: string) =>
+    apiFetch<{ success: true; resetAt: string; dailyLimit: number; remaining: number }>(`/visit-copilot/admin/users/${encodeURIComponent(userId)}/reset-discovery-daily-limit`, { method: "POST" }),
+
   prospectStatus: (params: { id: string; status: VisitCopilotProspectStatus }) =>
     apiFetch<VisitCopilotProspect>(`/visit-copilot/prospects/${encodeURIComponent(params.id)}/status`, {
       method: "PATCH",
