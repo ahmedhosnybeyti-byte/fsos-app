@@ -171,6 +171,7 @@ function VisitCopilotScreen() {
   const [minimumProspectScore, setMinimumProspectScore] = useState("");
   const [prospectSort, setProspectSort] = useState<"PROSPECT_SCORE" | "CATALOG_FIT">("PROSPECT_SCORE");
   const [scheduledProspectDates, setScheduledProspectDates] = useState<Record<string, string>>({});
+  const [scheduledProspects, setScheduledProspects] = useState<Record<string, string>>({});
   const [collapsedProspectGroups, setCollapsedProspectGroups] = useState<Set<string>>(new Set());
   const [expandedProspects, setExpandedProspects] = useState<Set<string>>(new Set());
   const [latestGoogleProspects, setLatestGoogleProspects] = useState<VisitCopilotProspect[]>([]);
@@ -218,7 +219,7 @@ function VisitCopilotScreen() {
   const mapCustomers = useMemo<VisitCopilotDiscoveryCustomer[]>(
     () =>
       (dailyRouteCustomers ?? [])
-        .filter((customer) => customer.lat !== null && customer.lon !== null)
+        .filter((customer) => !customer.isProspect && customer.lat !== null && customer.lon !== null)
         .map((customer) => ({
           customerCode: customer.customerCode,
           name: customer.customerName,
@@ -309,7 +310,14 @@ function VisitCopilotScreen() {
 
   const prospectVisitMutation = useMutation({
     mutationFn: visitCopilotApi.createProspectVisit,
-    onSuccess: () => toast.success(t("copilot.prospectVisitAdded")),
+    onSuccess: (_data, variables) => {
+      setScheduledProspectDates((current) => ({ ...current, [variables.prospectId]: variables.scheduledFor }));
+      setScheduledProspects((current) => ({ ...current, [variables.prospectId]: variables.scheduledFor }));
+      setPlan(null);
+      queryClient.invalidateQueries({ queryKey: ["visit-copilot", "daily-brief"] });
+      queryClient.invalidateQueries({ queryKey: ["visit-copilot", "discovery"] });
+      toast.success(t("copilot.prospectVisitAdded"));
+    },
     onError: (error) => toast.error(error instanceof ApiError ? error.message : t("copilot.prospectVisitError")),
   });
 
@@ -659,6 +667,7 @@ function VisitCopilotScreen() {
                         <button className="w-full text-left text-sm font-semibold" onClick={() => setCollapsedProspectGroups((current) => { const next = new Set(current); if (next.has(group.key)) next.delete(group.key); else next.add(group.key); return next; })}>{group.label} ({group.prospects.length})</button>
                         {!collapsedProspectGroups.has(group.key) && group.prospects.map((prospect) => {
                     const scheduledFor = scheduledProspectDates[prospect.id] ?? "";
+                    const scheduledDate = scheduledProspects[prospect.id];
                     const expanded = expandedProspects.has(prospect.id);
                       return (
                         <div key={prospect.id} className={cn("cursor-pointer rounded-lg border p-3 text-sm", selectedDiscoveryProspectId === prospect.id && "ring-2 ring-primary")} onClick={() => setSelectedDiscoveryProspectId(prospect.id)}>
@@ -669,6 +678,7 @@ function VisitCopilotScreen() {
                               <p className="text-xs text-muted-foreground">{prospect.businessType ?? t("copilot.businessTypeUnavailable")}</p>
                               {prospect.address && <p className="text-xs text-muted-foreground">{prospect.address}</p>}
                               {prospect.distanceKm !== null && prospect.distanceKm !== undefined && <p className="text-xs text-muted-foreground">{prospect.distanceKm.toFixed(1)} km</p>}
+                              {scheduledDate && <Badge variant="outline" className="mt-1 border-emerald-500/50 text-emerald-700 dark:text-emerald-300">مجدولة: {scheduledDate}</Badge>}
                             </div>
                             <div className="flex flex-wrap gap-1">
                               <Badge>{t("copilot.prospectScore", { value: prospect.priorityScore.toFixed(0) })}</Badge>
@@ -695,9 +705,9 @@ function VisitCopilotScreen() {
                             <Button size="sm" variant="outline" onClick={() => window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${prospect.lat},${prospect.lon}`)}${prospect.source === "GOOGLE" && prospect.externalKey ? `&query_place_id=${encodeURIComponent(prospect.externalKey)}` : ""}`, "_blank", "noopener,noreferrer")}>{t("copilot.directions")}</Button>
                             {prospect.phone && <Button size="sm" variant="outline" onClick={() => window.location.href = `tel:${prospect.phone}`}>{t("copilot.call")}</Button>}
                             <Button size="sm" variant="outline" onClick={() => setExpandedProspects((current) => { const next = new Set(current); if (next.has(prospect.id)) next.delete(prospect.id); else next.add(prospect.id); return next; })}>{expanded ? t("copilot.hideDetails") : t("copilot.details")}</Button>
-                            <Button size="sm" onClick={() => createProspectVisit(prospect.id, todayIsoDate())} disabled={prospectVisitMutation.isPending}>{t("copilot.addToday")}</Button>
+                            <Button size="sm" onClick={() => createProspectVisit(prospect.id, todayIsoDate())} disabled={prospectVisitMutation.isPending || scheduledDate === todayIsoDate()}>{t("copilot.addToday")}</Button>
                             <Input className="w-40" type="date" min={todayIsoDate()} value={scheduledFor} onChange={(event) => setScheduledProspectDates((current) => ({ ...current, [prospect.id]: event.target.value }))} />
-                            <Button size="sm" variant="secondary" onClick={() => createProspectVisit(prospect.id, scheduledFor)} disabled={!scheduledFor || prospectVisitMutation.isPending}>{t("copilot.scheduleLater")}</Button>
+                            <Button size="sm" variant="secondary" onClick={() => createProspectVisit(prospect.id, scheduledFor)} disabled={!scheduledFor || prospectVisitMutation.isPending || scheduledDate === scheduledFor}>{t("copilot.scheduleLater")}</Button>
                           </div>
                         </div>
                       );
@@ -842,7 +852,7 @@ function VisitCopilotScreen() {
                     {customers.map((c) => (
                       <li key={c.customerCode}>
                         <button
-                          onClick={() => openVisit(c.customerCode)}
+                          onClick={() => c.isProspect && c.prospectId ? openProspectVisit(c.prospectId) : openVisit(c.customerCode)}
                           className="flex w-full items-center gap-3 px-1 py-3 text-start transition-colors hover:bg-secondary/50 max-md:gap-2 max-md:py-2"
                         >
                           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-semibold max-md:h-7 max-md:w-7 max-md:text-xs">
@@ -850,6 +860,7 @@ function VisitCopilotScreen() {
                           </span>
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm font-medium max-md:text-[13px]">{c.customerName}</span>
+                            {c.isProspect && <Badge variant="outline" className="mt-1 border-amber-500/50 text-[10px] text-amber-700 dark:text-amber-300">فرصة جديدة</Badge>}
                             <span className="block text-xs text-muted-foreground">
                               {t("copilot.avgOrder", { value: c.avgOrderValue.toLocaleString() })}
                             </span>

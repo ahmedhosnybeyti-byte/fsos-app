@@ -137,6 +137,8 @@ export interface DailyBriefCustomer {
   avgOrderValue: number;
   lastVisitDate: string | null;
   priorityScore: number;
+  isProspect?: boolean;
+  prospectId?: string;
 }
 
 export interface DailyBriefResult {
@@ -672,6 +674,34 @@ export class VisitCopilotService {
       ),
     }));
 
+    // ProspectVisitIntent is an operational stop, not a Customer. Merge the
+    // assigned rep's planned stops for the selected calendar date into the
+    // day plan so counts, route ordering, distance/time and the UI all use
+    // the same persistence-backed list.
+    const scheduledProspects = await this.prisma.prospectVisitIntent.findMany({
+      where: { companyId: user.companyId!, assignedToUserId: user.userId, scheduledFor: new Date(`${todayIso}T00:00:00.000Z`), status: "PLANNED" },
+      include: { prospect: true },
+      orderBy: { createdAt: "asc" },
+    });
+    for (const intent of scheduledProspects) {
+      const lat = intent.prospect.lat;
+      const lon = intent.prospect.lon;
+      const hasCoords = lat !== null && lon !== null && isSaneCoordinate(lat, lon);
+      entries.push({
+        customerCode: `prospect:${intent.prospectId}`,
+        customerName: intent.prospect.name,
+        lat: hasCoords ? lat : null,
+        lon: hasCoords ? lon : null,
+        visitSequence: null,
+        channel: intent.prospect.channel,
+        avgOrderValue: 0,
+        lastVisitDate: null,
+        priorityScore: 0,
+        isProspect: true,
+        prospectId: intent.prospectId,
+      });
+    }
+
     // Default order = plan order (VisitSequence asc, unsequenced last).
     entries.sort((a, b) => {
       const sa = a.visitSequence ?? Number.POSITIVE_INFINITY;
@@ -719,8 +749,8 @@ export class VisitCopilotService {
     const lostOpportunityResult = await this.lostOpportunityService.detect({
       ...ctx,
       selectedDate: todayIso,
-      customerCodes: entries.map((entry) => entry.customerCode),
-      customerNames: new Map(entries.map((entry) => [entry.customerCode, entry.customerName])),
+      customerCodes: entries.filter((entry) => !entry.isProspect).map((entry) => entry.customerCode),
+      customerNames: new Map(entries.filter((entry) => !entry.isProspect).map((entry) => [entry.customerCode, entry.customerName])),
     });
 
     return {

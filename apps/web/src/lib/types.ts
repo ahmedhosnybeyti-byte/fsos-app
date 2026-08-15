@@ -1436,6 +1436,8 @@ export interface VisitCopilotCustomer {
   avgOrderValue: number;
   lastVisitDate: string | null;
   priorityScore: number;
+  isProspect?: boolean;
+  prospectId?: string;
 }
 
 export interface VisitCopilotDailyBrief {
