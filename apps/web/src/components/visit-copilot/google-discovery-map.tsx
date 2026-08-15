@@ -46,9 +46,9 @@ function hasCoordinates(point: { lat: unknown; lon: unknown }): point is { lat: 
   return typeof point.lat === "number" && Number.isFinite(point.lat) && typeof point.lon === "number" && Number.isFinite(point.lon);
 }
 
-// The map has two marker sources: blue route customers and red discovery
-// prospects. While a discovery circle is active, neither source may render
-// outside it; the backend remains the authority for persisted prospects.
+// The map has two independent marker sources: blue route customers and red
+// discovery prospects. The search circle restricts discovery prospects only;
+// route customers remain visible as the context for the rep's day.
 function isInsideSearchCircle(point: { lat: number; lon: number }, center: LatLng | null, radiusMeters: number): boolean {
   if (!center) return true;
   const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
@@ -74,13 +74,14 @@ export function GoogleDiscoveryMap({ customers, prospects, selectedProspectId, o
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<DiscoveryGoogleMap | null>(null);
   const infoWindowRef = useRef<DiscoveryGoogleInfoWindow | null>(null);
-  const markersRef = useRef<DiscoveryGoogleMarker[]>([]);
+  const routeMarkersRef = useRef<DiscoveryGoogleMarker[]>([]);
   const prospectMarkersRef = useRef(new Map<string, DiscoveryGoogleMarker>());
   const prospectPositionsRef = useRef(new Map<string, LatLng>());
   const onSelectRef = useRef(onSelectProspect);
   const onManualCenterRef = useRef(onManualCenter);
   const manualCenterModeRef = useRef(manualCenterMode);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [mapReady, setMapReady] = useState(false);
   onSelectRef.current = onSelectProspect;
   onManualCenterRef.current = onManualCenter;
   manualCenterModeRef.current = manualCenterMode;
@@ -96,21 +97,43 @@ export function GoogleDiscoveryMap({ customers, prospects, selectedProspectId, o
         infoWindowRef.current = new google.maps.InfoWindow();
         mapRef.current.addListener("click", (event) => { if (manualCenterModeRef.current && event.latLng) onManualCenterRef.current({ lat: event.latLng.lat(), lng: event.latLng.lng() }); });
       }
-      markersRef.current.forEach((marker) => marker.setMap(null));
-      markersRef.current = [];
-      prospectMarkersRef.current.clear();
-      prospectPositionsRef.current.clear();
+      setMapReady(true);
+    }).catch(() => { if (!cancelled) setLoadFailed(true); });
+    return () => { cancelled = true; };
+  }, [apiKey]);
+
+  useEffect(() => {
+    if (!apiKey || !mapReady || !mapRef.current) return;
+    let cancelled = false;
+    void loadGoogleMaps(apiKey).then((google) => {
+      if (cancelled || !mapRef.current) return;
       const map = mapRef.current;
       const bounds = new google.maps.LatLngBounds();
-      customers.filter(hasCoordinates).filter((customer) => isInsideSearchCircle(customer, searchCenter, radiusMeters)).forEach((customer) => {
+      routeMarkersRef.current.forEach((marker) => marker.setMap(null));
+      routeMarkersRef.current = [];
+      customers.filter(hasCoordinates).forEach((customer) => {
         const position = { lat: customer.lat, lng: customer.lon };
         const marker = new google.maps.Marker({ map, position, title: customer.name, icon: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png" });
         marker.addListener("click", () => {
           const content = document.createElement("div"); content.dir = locale === "ar" ? "rtl" : "ltr"; content.textContent = `${customer.name}${customer.channel ? ` — ${customer.channel}` : ""}`;
           infoWindowRef.current?.setContent(content); infoWindowRef.current?.open(map, marker);
         });
-        markersRef.current.push(marker); bounds.extend(position);
+        routeMarkersRef.current.push(marker); bounds.extend(position);
       });
+      if (!bounds.isEmpty()) map.fitBounds(bounds, 32);
+    }).catch(() => { if (!cancelled) setLoadFailed(true); });
+    return () => { cancelled = true; };
+  }, [apiKey, customers, locale, mapReady]);
+
+  useEffect(() => {
+    if (!apiKey || !mapReady || !mapRef.current) return;
+    let cancelled = false;
+    void loadGoogleMaps(apiKey).then((google) => {
+      if (cancelled || !mapRef.current) return;
+      const map = mapRef.current;
+      prospectMarkersRef.current.forEach((marker) => marker.setMap(null));
+      prospectMarkersRef.current.clear();
+      prospectPositionsRef.current.clear();
       prospects.filter(hasCoordinates).filter((prospect) => isInsideSearchCircle(prospect, searchCenter, radiusMeters)).forEach((prospect) => {
         const position = { lat: prospect.lat, lng: prospect.lon };
         const marker = new google.maps.Marker({ map, position, title: prospect.name, icon: "https://maps.google.com/mapfiles/ms/icons/red-dot.png" });
@@ -124,12 +147,11 @@ export function GoogleDiscoveryMap({ customers, prospects, selectedProspectId, o
         };
         marker.addListener("click", openProspect);
         marker.addListener("mouseover", openProspect);
-        markersRef.current.push(marker); prospectMarkersRef.current.set(prospect.id, marker); prospectPositionsRef.current.set(prospect.id, position); bounds.extend(position);
+        prospectMarkersRef.current.set(prospect.id, marker); prospectPositionsRef.current.set(prospect.id, position);
       });
-      if (!bounds.isEmpty()) map.fitBounds(bounds, 32);
     }).catch(() => { if (!cancelled) setLoadFailed(true); });
     return () => { cancelled = true; };
-  }, [apiKey, customers, locale, prospects, radiusMeters, searchCenter]);
+  }, [apiKey, locale, mapReady, prospects, radiusMeters, searchCenter]);
 
   useEffect(() => {
     if (!apiKey || !searchCenter || !mapRef.current) return;
@@ -150,7 +172,12 @@ export function GoogleDiscoveryMap({ customers, prospects, selectedProspectId, o
     return () => window.clearTimeout(timeout);
   }, [selectedProspectId, prospects]);
 
-  useEffect(() => () => { markersRef.current.forEach((marker) => marker.setMap(null)); infoWindowRef.current?.close(); mapRef.current = null; }, []);
+  useEffect(() => () => {
+    routeMarkersRef.current.forEach((marker) => marker.setMap(null));
+    prospectMarkersRef.current.forEach((marker) => marker.setMap(null));
+    infoWindowRef.current?.close();
+    mapRef.current = null;
+  }, []);
 
   const message = !apiKey
     ? (locale === "ar" ? "لم يتم إعداد مفتاح Google Maps." : "Google Maps API key is not configured.")
