@@ -1,26 +1,20 @@
-export const NEED_TAXONOMY_VERSION = "v2";
+export const NEED_TAXONOMY_VERSION = "v3";
 export type NeedDefinition = { tag: string; businessTypes: readonly string[]; menuTags: readonly string[]; categoryTerms: readonly string[]; productTerms: readonly string[] };
+const HORECA_TYPES = ["hotel", "restaurant", "cafe", "coffee_shop", "bakery", "patisserie", "kitchen", "catering_service"] as const;
 
 // Terms describe a business need, never an assumed company catalogue value.
 // They match only values actually present in the company's Products data.
 export const NEED_TAXONOMY: readonly NeedDefinition[] = [
-  { tag: "restaurant-food-service", businessTypes: ["restaurant"], menuTags: [], categoryTerms: ["food", "ingredient", "cooking"], productTerms: ["flour", "دقيق", "oil", "زيت", "rice", "أرز", "sauce", "صلصة", "cheese", "جبن"] },
-  { tag: "restaurant-coffee", businessTypes: ["restaurant"], menuTags: ["restaurant-coffee"], categoryTerms: ["coffee", "beverage"], productTerms: ["coffee"] },
-  { tag: "restaurant-dessert", businessTypes: ["restaurant"], menuTags: ["restaurant-dessert"], categoryTerms: ["dessert", "sweet"], productTerms: ["dessert", "chocolate"] },
-  { tag: "restaurant-breakfast", businessTypes: ["restaurant"], menuTags: ["restaurant-breakfast"], categoryTerms: ["breakfast", "dairy"], productTerms: [] },
-  { tag: "restaurant-meals", businessTypes: ["restaurant"], menuTags: ["restaurant-meals"], categoryTerms: ["food", "meal"], productTerms: [] },
+  // Every HoReCa operation has food service and operational consumption.
+  // Candidates still require a real catalogue match and are ranked by sales
+  // evidence; this does not turn the full catalogue into recommendations.
+  { tag: "horeca-food-service", businessTypes: HORECA_TYPES, menuTags: [], categoryTerms: ["food", "ingredient", "cooking", "breakfast", "meal"], productTerms: ["flour", "دقيق", "oil", "زيت", "rice", "أرز", "sauce", "صلصة", "cheese", "جبن"] },
+  { tag: "horeca-beverages", businessTypes: HORECA_TYPES, menuTags: [], categoryTerms: ["beverage", "coffee", "tea"], productTerms: ["coffee", "قهوة", "tea", "شاي", "milk", "حليب"] },
+  { tag: "horeca-sweets", businessTypes: HORECA_TYPES, menuTags: [], categoryTerms: ["dessert", "sweet", "bakery", "pastry"], productTerms: ["dessert", "chocolate", "sugar", "flour"] },
+  { tag: "horeca-cleaning", businessTypes: HORECA_TYPES, menuTags: [], categoryTerms: ["cleaning", "housekeeping"], productTerms: ["cleaner", "detergent"] },
+  { tag: "horeca-hygiene", businessTypes: HORECA_TYPES, menuTags: [], categoryTerms: ["tissue", "hygiene"], productTerms: ["tissue", "paper"] },
+  { tag: "horeca-disposables", businessTypes: HORECA_TYPES, menuTags: [], categoryTerms: ["disposable", "plastic", "packaging", "paper"], productTerms: ["disposable", "plastic", "بلاستيك", "تعبئة"] },
   { tag: "retail-extended-hours", businessTypes: ["grocery_store", "convenience_store", "supermarket", "hypermarket"], menuTags: ["retail-extended-hours"], categoryTerms: ["grocery", "food", "beverage"], productTerms: [] },
-  // A hotel is a broad HoReCa operation: guest rooms, housekeeping, dining,
-  // breakfast, and coffee service all create legitimate FMCG demand.
-  { tag: "hotel-housekeeping", businessTypes: ["hotel"], menuTags: [], categoryTerms: ["cleaning", "housekeeping"], productTerms: ["cleaner", "detergent"] },
-  { tag: "hotel-hygiene", businessTypes: ["hotel"], menuTags: [], categoryTerms: ["tissue", "hygiene"], productTerms: ["tissue", "paper"] },
-  { tag: "hotel-food-service", businessTypes: ["hotel"], menuTags: [], categoryTerms: ["food", "ingredient", "cooking", "breakfast", "meal"], productTerms: ["flour", "دقيق", "oil", "زيت", "rice", "أرز", "sauce", "صلصة", "cheese", "جبن"] },
-  { tag: "hotel-beverages", businessTypes: ["hotel"], menuTags: [], categoryTerms: ["beverage", "coffee", "tea"], productTerms: ["coffee", "قهوة", "tea", "شاي", "milk", "حليب"] },
-  { tag: "hotel-disposables", businessTypes: ["hotel"], menuTags: [], categoryTerms: ["disposable", "plastic", "packaging", "paper"], productTerms: ["disposable", "plastic", "بلاستيك", "تعبئة"] },
-  { tag: "pizza-cheese", businessTypes: ["restaurant"], menuTags: ["pizza"], categoryTerms: ["cheese", "dairy"], productTerms: ["cheese", "mozzarella"] },
-  { tag: "pizza-sauces", businessTypes: ["restaurant"], menuTags: ["pizza"], categoryTerms: ["sauce", "condiment"], productTerms: ["sauce", "tomato"] },
-  { tag: "cafe-hot-beverages", businessTypes: ["cafe", "coffee_shop"], menuTags: [], categoryTerms: ["coffee", "beverage", "tea"], productTerms: ["coffee", "قهوة", "tea", "شاي", "milk", "حليب"] },
-  { tag: "bakery-ingredients", businessTypes: ["bakery"], menuTags: ["bakery", "pastry"], categoryTerms: ["baking", "ingredients"], productTerms: ["flour", "sugar", "chocolate"] },
   { tag: "retail-staples", businessTypes: ["grocery_store", "convenience_store", "supermarket", "hypermarket"], menuTags: [], categoryTerms: ["grocery", "food", "beverage"], productTerms: [] },
 ];
 

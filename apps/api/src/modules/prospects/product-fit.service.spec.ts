@@ -3,16 +3,12 @@ import test from "node:test";
 import { ProductFitService } from "./product-fit.service";
 import { NEED_TAXONOMY } from "./need-taxonomy";
 
-const hotelNeedTags = NEED_TAXONOMY.filter((need) => need.businessTypes.includes("hotel")).map((need) => need.tag);
+const horecaNeedTags = (businessType: string) => NEED_TAXONOMY.filter((need) => need.businessTypes.includes(businessType)).map((need) => need.tag);
 
-test("hotel has a broad HoReCa FMCG need profile", () => {
-  assert.deepEqual(hotelNeedTags, [
-    "hotel-housekeeping",
-    "hotel-hygiene",
-    "hotel-food-service",
-    "hotel-beverages",
-    "hotel-disposables",
-  ]);
+test("every requested HoReCa business has a broad FMCG operational profile", () => {
+  for (const businessType of ["hotel", "restaurant", "cafe", "patisserie", "kitchen"]) {
+    assert.deepEqual(horecaNeedTags(businessType), ["horeca-food-service", "horeca-beverages", "horeca-sweets", "horeca-cleaning", "horeca-hygiene", "horeca-disposables"]);
+  }
 });
 
 test("hotel recommendations use restaurant/cafe evidence only when hotel sales are absent", () => {
@@ -31,4 +27,21 @@ test("hotel recommendations use restaurant/cafe evidence only when hotel sales a
   assert.equal(hotelFirst.scope, "CUSTOMER_TYPE");
   assert.equal(hotelFirst.sales.get("tissue")?.value, 200);
   assert.equal(hotelFirst.sales.has("water"), false);
+});
+
+test("all requested HoReCa profiles return distinct evidence-ranked FMCG candidates", () => {
+  const service = new ProductFitService({} as never, {} as never, {} as never) as unknown as {
+    matchProducts: (products: readonly Record<string, unknown>[], needs: readonly unknown[], peer: { sales: Map<string, { customers: Set<string>; value: number }>; scope: "CUSTOMER_TYPE" }, tier: null) => { productCode: string }[];
+  };
+  const products = [
+    { ProductCode: "water", ProductName: "Bottled Water", Category: "Beverage", ProductStatus: "active" },
+    { ProductCode: "flour", ProductName: "Flour", Category: "Food ingredient", ProductStatus: "active" },
+    { ProductCode: "detergent", ProductName: "Detergent", Category: "Cleaning", ProductStatus: "active" },
+    { ProductCode: "cups", ProductName: "Plastic cups", Category: "Plastic packaging", ProductStatus: "active" },
+  ];
+  const peer = { scope: "CUSTOMER_TYPE" as const, sales: new Map(products.map((product, index) => [String(product.ProductCode), { customers: new Set(["peer-1"]), value: (index + 1) * 100 }])) };
+  for (const businessType of ["hotel", "restaurant", "cafe", "patisserie", "kitchen"]) {
+    const candidates = service.matchProducts(products, NEED_TAXONOMY.filter((need) => need.businessTypes.includes(businessType)), peer, null);
+    assert.deepEqual(candidates.map((candidate) => candidate.productCode), ["cups", "detergent", "flour", "water"]);
+  }
 });

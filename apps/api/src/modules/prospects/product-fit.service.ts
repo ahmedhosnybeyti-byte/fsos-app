@@ -11,6 +11,7 @@ export type ProductFitOutput = { version: string; computedAt: string; inputFinge
 const norm = (value: unknown) => String(value ?? "").trim().toLowerCase();
 const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : Number(value) || 0;
 const hasTerm = (value: unknown, terms: readonly string[]) => terms.some((term) => norm(value).includes(term));
+const HORECA_TYPES = new Set(["hotel", "restaurant", "cafe", "coffee_shop", "bakery", "patisserie", "kitchen", "catering_service"]);
 
 @Injectable()
 export class ProductFitService {
@@ -72,12 +73,12 @@ export class ProductFitService {
     };
     let sales = salesFor(typePeers.size > 0 ? typePeers : channelPeers);
     let scope: Candidate["peerSignals"]["peerScope"] = typePeers.size > 0 ? "CUSTOMER_TYPE" : channelPeers.size > 0 ? "CHANNEL" : "NONE";
-    // Hotels remain anchored to actual hotel buyers. If there is no hotel
-    // sales evidence, use comparable local restaurants/cafes rather than
-    // inventing a recommendation from the complete catalogue.
-    if (norm(businessType) === "hotel" && sales.size === 0) {
+    // All HoReCa profiles use their own type's buyers first. On missing
+    // evidence, comparable local HoReCa buyers support the ranking rather
+    // than inventing a recommendation from the complete catalogue.
+    if (HORECA_TYPES.has(norm(businessType)) && sales.size === 0) {
       const comparableHorecaPeers = new Set(customers
-        .filter((row) => ["restaurant", "cafe", "coffee_shop"].includes(norm(row.CustomerType)))
+        .filter((row) => HORECA_TYPES.has(norm(row.CustomerType)))
         .map((row) => norm(row.CustomerCode)));
       const comparableSales = salesFor(comparableHorecaPeers);
       if (comparableSales.size > 0) {
@@ -104,7 +105,15 @@ export class ProductFitService {
       const tierBonus = commercialTier !== null && productTier === commercialTier ? 5 : 0;
       candidates.push({ productCode, productName: String(product.ProductName ?? productCode), brand: product.Brand ? String(product.Brand) : null, category: product.Category ? String(product.Category) : null, priority: Math.min(100, Math.round((categoryMatch ? 80 : 60) + peerRank + tierBonus)), confidence: categoryMatch ? 80 : 60, likelyNeed: need.tag, matchQuality: categoryMatch ? "CATEGORY" : "PRODUCT_TEXT", productTier, reasons: [categoryMatch ? "فئة المنتج تطابق الاحتياج" : "اسم/علامة المنتج تطابق الاحتياج", ...(tierBonus ? ["يتوافق مع الشريحة التجارية"] : []), ...(signal.value > 0 ? ["مباع لدى عملاء مشابهين"] : [])], peerSignals: { buyerCount: signal.customers.size, orderValue: signal.value, peerScope: peer.scope }, availability: "UNKNOWN" });
     }
-    return candidates.sort((a, b) => b.priority - a.priority || b.peerSignals.orderValue - a.peerSignals.orderValue);
+    // A broad HoReCa profile can match a product through more than one need
+    // (for example paper through hygiene and disposables). Keep the strongest
+    // evidence-backed match once instead of repeating it as multiple offers.
+    const bestByProduct = new Map<string, Candidate>();
+    for (const candidate of candidates) {
+      const existing = bestByProduct.get(candidate.productCode);
+      if (!existing || candidate.priority > existing.priority || (candidate.priority === existing.priority && candidate.peerSignals.orderValue > existing.peerSignals.orderValue)) bestByProduct.set(candidate.productCode, candidate);
+    }
+    return [...bestByProduct.values()].sort((a, b) => b.priority - a.priority || b.peerSignals.orderValue - a.peerSignals.orderValue);
   }
 }
 

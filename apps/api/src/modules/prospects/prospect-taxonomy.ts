@@ -22,6 +22,10 @@ export function taxonomyForCanonicalChannel(channel: string | null): { segment: 
 
 export function businessTypeFromGooglePrimaryType(primaryType: string | undefined): string | null {
   const type = (primaryType ?? "").trim();
+  if (type.endsWith("_restaurant")) return "restaurant";
+  if (type.endsWith("_hotel")) return "hotel";
+  if (["bakery", "pastry_shop", "cake_shop"].includes(type)) return "bakery";
+  if (["catering_service", "food_delivery"].includes(type)) return "catering_service";
   const allowed = new Set(["hypermarket", "supermarket", "grocery_store", "convenience_store", "food_store", "wholesaler", "warehouse_store", "hotel", "restaurant", "cafe", "coffee_shop", "bakery", "catering_service"]);
   return allowed.has(type) ? type : null;
 }
