@@ -46,6 +46,18 @@ function hasCoordinates(point: { lat: unknown; lon: unknown }): point is { lat: 
   return typeof point.lat === "number" && Number.isFinite(point.lat) && typeof point.lon === "number" && Number.isFinite(point.lon);
 }
 
+// The map has two marker sources: blue route customers and red discovery
+// prospects. While a discovery circle is active, neither source may render
+// outside it; the backend remains the authority for persisted prospects.
+function isInsideSearchCircle(point: { lat: number; lon: number }, center: LatLng | null, radiusMeters: number): boolean {
+  if (!center) return true;
+  const toRadians = (degrees: number) => (degrees * Math.PI) / 180;
+  const dLat = toRadians(point.lat - center.lat);
+  const dLon = toRadians(point.lon - center.lng);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRadians(center.lat)) * Math.cos(toRadians(point.lat)) * Math.sin(dLon / 2) ** 2;
+  return 6_371_000 * 2 * Math.asin(Math.sqrt(Math.min(1, a))) <= radiusMeters + 0.000001;
+}
+
 export function GoogleDiscoveryMap({ customers, prospects, selectedProspectId, onSelectProspect, heightClassName, searchCenter, radiusMeters, manualCenterMode, onManualCenter }: {
   customers: VisitCopilotDiscoveryCustomer[];
   prospects: VisitCopilotProspect[];
@@ -90,7 +102,7 @@ export function GoogleDiscoveryMap({ customers, prospects, selectedProspectId, o
       prospectPositionsRef.current.clear();
       const map = mapRef.current;
       const bounds = new google.maps.LatLngBounds();
-      customers.filter(hasCoordinates).forEach((customer) => {
+      customers.filter(hasCoordinates).filter((customer) => isInsideSearchCircle(customer, searchCenter, radiusMeters)).forEach((customer) => {
         const position = { lat: customer.lat, lng: customer.lon };
         const marker = new google.maps.Marker({ map, position, title: customer.name, icon: "https://maps.google.com/mapfiles/ms/icons/blue-dot.png" });
         marker.addListener("click", () => {
@@ -99,7 +111,7 @@ export function GoogleDiscoveryMap({ customers, prospects, selectedProspectId, o
         });
         markersRef.current.push(marker); bounds.extend(position);
       });
-      prospects.filter(hasCoordinates).forEach((prospect) => {
+      prospects.filter(hasCoordinates).filter((prospect) => isInsideSearchCircle(prospect, searchCenter, radiusMeters)).forEach((prospect) => {
         const position = { lat: prospect.lat, lng: prospect.lon };
         const marker = new google.maps.Marker({ map, position, title: prospect.name, icon: "https://maps.google.com/mapfiles/ms/icons/red-dot.png" });
         const openProspect = () => {
@@ -117,7 +129,7 @@ export function GoogleDiscoveryMap({ customers, prospects, selectedProspectId, o
       if (!bounds.isEmpty()) map.fitBounds(bounds, 32);
     }).catch(() => { if (!cancelled) setLoadFailed(true); });
     return () => { cancelled = true; };
-  }, [apiKey, customers, locale, prospects]);
+  }, [apiKey, customers, locale, prospects, radiusMeters, searchCenter]);
 
   useEffect(() => {
     if (!apiKey || !searchCenter || !mapRef.current) return;

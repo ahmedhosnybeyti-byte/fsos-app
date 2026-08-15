@@ -334,7 +334,10 @@ function VisitCopilotScreen() {
         toast.warning(data.message || t("copilot.googleSearchDisabled"));
         return;
       }
-      setLatestGoogleProspects(data.prospects.filter((prospect) => prospect.source === "GOOGLE"));
+      // The selected provider may be Google Places or the configured OSM
+      // fallback. These are already the current, radius-filtered response;
+      // never discard a valid provider's results before cards/pins render.
+      setLatestGoogleProspects(data.prospects);
       queryClient.setQueryData<VisitCopilotDiscoveryLimit>(["visit-copilot", "discovery-limit"], { dailyLimit: 3, remaining: data.dailyRemaining ?? 0 });
       toast.success(t("copilot.googleSearchResult", { found: data.found, newCount: data.newCount }));
       queryClient.invalidateQueries({ queryKey: ["visit-copilot", "discovery"] });
@@ -454,9 +457,9 @@ function VisitCopilotScreen() {
   const showOppCard = !!plan && !!routeOpp && !routeOpp.disabled && routeOpp.highCount + routeOpp.mediumCount > 0;
   const discoveryProspects = useMemo(() => {
     // The discovery surface is deliberately scoped to the most recent
-    // explicit Google search. Existing stored prospects belong to other
+    // explicit discovery search. Existing stored prospects belong to other
     // searches/scopes and must not leak into this radius' red markers/list.
-    return latestGoogleProspects.filter((prospect) => prospect.source === "GOOGLE").sort((a, b) => prospectSort === "CATALOG_FIT"
+    return latestGoogleProspects.sort((a, b) => prospectSort === "CATALOG_FIT"
       ? (b.catalogFitScore ?? -1) - (a.catalogFitScore ?? -1)
       : b.priorityScore - a.priorityScore);
   }, [latestGoogleProspects, prospectSort]);
