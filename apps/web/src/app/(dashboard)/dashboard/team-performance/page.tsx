@@ -19,6 +19,7 @@ import { KpiCard } from "@/components/dashboard/kpi-card";
 import { PerformanceGrowthCard, PerformanceTargetCard } from "@/components/dashboard/performance-cards";
 import { dashboardPerformanceApi, type DashboardBenchmark, type DashboardMetric, type DashboardPerformance, type DashboardTarget } from "@/lib/api/dashboard-performance";
 import { buildTeamExecutiveDiagnosis, generateTeamExecutivePptx } from "@/lib/export/team-performance-executive-pptx";
+import { buildContextualDiagnosis, type DiagnosisKpi } from "@/lib/team-performance/contextual-diagnosis";
 import { useTranslation } from "@/components/translation-provider";
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
 import type { TeamPerformanceCoachResult, TeamPerformanceRepRow, TeamPerformanceResult } from "@/lib/types";
@@ -200,9 +201,11 @@ type DiagnosisEntity = { id: string; type: "scope" | "supervisor" | "rep"; name:
 function TeamDiagnosisV1({ kind, dashboard, reps: _reps, entity, onClose }: { kind: string; dashboard: DashboardPerformance; reps: TeamPerformanceRepRow[]; entity: DiagnosisEntity; onClose: () => void }) {
   const { t, locale } = useTranslation();
   const ar = locale === "ar";
-  const analysis = buildTeamExecutiveDiagnosis(dashboard, locale, kind);
   const target = kind.startsWith("target:") ? dashboard.targets.find((item) => item.key === kind.slice(7)) : undefined;
   const metricKey = kind.startsWith("target:") ? (kind.includes("Collection") ? "collections" : "sales") : kind as DiagnosticMetric;
+  const metric = dashboard.metrics[metricKey];
+  const diagnosis = buildContextualDiagnosis({ entityId: entity.id, entityType: entity.type, entityName: entity.name, selectedKpi: kind as DiagnosisKpi, currentPeriod: entity.currentPeriod, comparisonPeriod: entity.comparisonPeriod, currentKpiValue: target ? target.actualMtd : metric.current, comparisonKpiValue: target ? target.targetMtd : metric.benchmark, relatedKpis: dashboard.metrics, targetData: target });
+  const analysis = { ...diagnosis, interpretation: `${diagnosis.interpretation} ${diagnosis.probableCause}` };
   const change = dashboard.metrics[metricKey]?.growthPct ?? null;
   const isRisk = metricKey === "returns" ? change !== null && change > 0 : change !== null && change < 0;
   const judgment = target ? (target.aheadBehind !== null && target.aheadBehind < 0 ? (ar ? "متأخر عن المسار" : "Behind plan") : (ar ? "جيد" : "On track")) : change === null ? (ar ? "يحتاج متابعة" : "Needs review") : isRisk ? (metricKey === "returns" ? (ar ? "خطر" : "Risk") : (ar ? "يحتاج متابعة" : "Needs review")) : (ar ? "جيد" : "Good");
