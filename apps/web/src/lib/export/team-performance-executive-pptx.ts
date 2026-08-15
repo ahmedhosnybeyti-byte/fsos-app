@@ -70,7 +70,14 @@ function buildFocusedDiagnosis(dashboard: DashboardPerformance, locale: Locale, 
 export function buildTeamExecutiveDiagnosis(dashboard: DashboardPerformance, locale: Locale, focus?: string): ExecutiveDiagnosis {
   if (focus?.startsWith("target:")) {
     const ar = locale === "ar"; const collection = focus.includes("Collection"); const target = dashboard.targets.find((item) => item.key === focus.slice(7)); const base = buildFocusedDiagnosis(dashboard, locale, collection ? "collections" : "sales"); const ahead = (target?.aheadBehind ?? 0) >= 0;
-    return { ...base, summary: ar ? `${collection ? "هدف التحصيل" : "هدف المبيعات"} ${ahead ? "متقدم" : "متأخر"} عن المسار. ${base.summary}` : `${collection ? "Collection" : "Sales"} target is ${ahead ? "ahead of" : "behind"} plan. ${base.summary}`, decision: ar ? `${ahead ? "ثبّت" : "صحّح"} مسار الهدف: ${base.decision}` : `${ahead ? "Protect" : "Correct"} the target path: ${base.decision}` };
+    const targetEvidence = target ? [
+      ar ? `المحقق حتى اليوم ${format(target.actualMtd, target.unit === "currency", ar)}` : `Actual to date ${format(target.actualMtd, target.unit === "currency", ar)}`,
+      ar ? `الهدف حتى اليوم ${format(target.targetMtd, target.unit === "currency", ar)}` : `Target to date ${format(target.targetMtd, target.unit === "currency", ar)}`,
+      target.aheadBehind === null ? null : (ar ? `الفجوة ${signed(target.aheadBehind, target.unit === "currency", ar)}` : `Gap ${signed(target.aheadBehind, target.unit === "currency", ar)}`),
+      target.progressPct === null ? null : (ar ? `الإنجاز ${target.progressPct.toFixed(1)}%` : `Achievement ${target.progressPct.toFixed(1)}%`),
+      target.runRateForecast === null ? null : (ar ? `توقع نهاية الشهر ${format(target.runRateForecast, target.unit === "currency", ar)}` : `Month-end forecast ${format(target.runRateForecast, target.unit === "currency", ar)}`),
+    ].filter((value): value is string => Boolean(value)) : [];
+    return { ...base, summary: ar ? `${collection ? "هدف التحصيل" : "هدف المبيعات"} ${ahead ? "متقدم" : "متأخر"} عن المسار. ${base.summary}` : `${collection ? "Collection" : "Sales"} target is ${ahead ? "ahead of" : "behind"} plan. ${base.summary}`, evidence: [...targetEvidence, ...base.evidence], decision: ar ? `${ahead ? "ثبّت" : "صحّح"} مسار الهدف: ${base.decision}` : `${ahead ? "Protect" : "Correct"} the target path: ${base.decision}` };
   }
   const normalizedFocus = focus?.startsWith("target:") ? (focus.includes("Collection") ? "collections" : "sales") : focus;
   if (["sales", "collections", "invoices", "customers", "skus", "returns"].includes(normalizedFocus ?? "")) return buildFocusedDiagnosis(dashboard, locale, normalizedFocus as DiagnosisFocus);
