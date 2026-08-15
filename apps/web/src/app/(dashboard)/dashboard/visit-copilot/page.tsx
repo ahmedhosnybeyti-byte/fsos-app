@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useMemo, useState } from "react";
+import { Suspense, useCallback, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -179,6 +179,9 @@ function VisitCopilotScreen() {
   const [discoveryCenterMode, setDiscoveryCenterMode] = useState<"gps" | "manual">("gps");
   const [discoveryCenter, setDiscoveryCenter] = useState<{ lat: number; lng: number } | null>(null);
   const [discoveryRadiusMeters, setDiscoveryRadiusMeters] = useState<number>(GOOGLE_SEARCH_RADIUS_METERS);
+  // A new scan supersedes every previous scan, including a slower response
+  // that finishes after the user has changed centre or radius.
+  const latestGoogleSearchId = useRef(0);
 
   const [chatMessages, setChatMessages] = useState<VisitCopilotChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -322,8 +325,9 @@ function VisitCopilotScreen() {
   });
 
   const googleSearchMutation = useMutation({
-    mutationFn: visitCopilotApi.googleSearch,
-    onSuccess: (data) => {
+    mutationFn: ({ searchId: _searchId, ...request }: { searchId: number; lat: number; lon: number; radiusMeters: number }) => visitCopilotApi.googleSearch(request),
+    onSuccess: (data, variables) => {
+      if (variables.searchId !== latestGoogleSearchId.current) return;
       // disabled:true means no Places API key server-side — surface the
       // server's own message and skip the refetch (nothing changed).
       if (data.disabled) {
@@ -407,7 +411,11 @@ function VisitCopilotScreen() {
   function searchGoogleAround() {
     if (googleSearchMutation.isPending) return;
     if (!discoveryCenter) { toast.error(discoveryCenterMode === "manual" ? "اضغط على الخريطة أولًا لتحديد مركز البحث." : "حدّد موقعك الحالي أولًا."); return; }
-    googleSearchMutation.mutate({ lat: discoveryCenter.lat, lon: discoveryCenter.lng, radiusMeters: discoveryRadiusMeters });
+    const searchId = latestGoogleSearchId.current + 1;
+    latestGoogleSearchId.current = searchId;
+    setLatestGoogleProspects([]);
+    setSelectedDiscoveryProspectId(null);
+    googleSearchMutation.mutate({ searchId, lat: discoveryCenter.lat, lon: discoveryCenter.lng, radiusMeters: discoveryRadiusMeters });
   }
 
   function sendChat(text: string) {

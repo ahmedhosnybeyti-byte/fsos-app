@@ -28,6 +28,7 @@ import { haversineKm, type LatLon } from "../route-planning/route-balancer.util"
 import { categoryForChannel, type ProspectDiscoveryProvider } from "./discovery/discovery-provider.interface";
 import { GooglePlacesProvider } from "./discovery/google-places.provider";
 import { OverpassProvider } from "./discovery/overpass.provider";
+import { isWithinDiscoveryRadius } from "./discovery/radius.util";
 import { resolveMentionedCustomer } from "../local-decision/dictionary-engine";
 import { LocalDecisionEngine } from "../local-decision/rule-engine";
 import { VisitCopilotRuleRegistry } from "./visit-copilot.rules";
@@ -1918,7 +1919,14 @@ export class VisitCopilotService {
     const dailyRemaining = await this.reserveDiscoveryQuota(user);
     const searchResult = await provider.search({ lat: body.lat, lon: body.lon, radiusMeters: body.radiusMeters, channel: stats.repChannel });
     warnings.push(...searchResult.warnings);
-    const places = searchResult.places.filter((pl) => isSaneCoordinate(pl.lat, pl.lon));
+    // Google locationRestriction is the upstream hard boundary, but enforce
+    // it again from returned coordinates before any persistence or response.
+    // Providers can return imperfect/expanded results and no out-of-radius
+    // row may become a saved prospect, pin, or card for this search.
+    const searchCenter = { lat: body.lat, lon: body.lon };
+    const places = searchResult.places.filter(
+      (pl) => isSaneCoordinate(pl.lat, pl.lon) && isWithinDiscoveryRadius(searchCenter, { lat: pl.lat, lon: pl.lon }, body.radiusMeters),
+    );
     const taxonomy = taxonomyForCanonicalChannel(stats.repChannel);
     if (!taxonomy) {
       warnings.push("لا توجد قناة معيارية معروفة للمندوب؛ لم يتم حفظ نتائج غير موجهة لقناة.");

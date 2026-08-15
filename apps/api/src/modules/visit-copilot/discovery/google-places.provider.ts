@@ -19,6 +19,15 @@ const GOOGLE_MAX_RESULT_COUNT = 20;
 const GOOGLE_MAX_PAGES = 3;
 const GOOGLE_INTELLIGENCE_FIELD_MASK = "primaryType,types,priceLevel,priceRange,rating,userRatingCount,regularOpeningHours,servesBreakfast,servesLunch,servesDinner,servesBrunch,servesCoffee,servesDessert,servesVegetarianFood,delivery,dineIn,takeout";
 
+function locationRestriction(params: DiscoverySearchParams) {
+  return {
+    circle: {
+      center: { latitude: params.lat, longitude: params.lon },
+      radius: params.radiusMeters,
+    },
+  };
+}
+
 // Search Text carries the selling-channel intent directly to Google instead
 // of asking the same generic nearby query for every rep channel.
 const CATEGORY_SEARCH_TEXT: Record<DiscoveryCategory, string> = {
@@ -76,7 +85,10 @@ export class GooglePlacesProvider implements ProspectDiscoveryProvider {
         body: JSON.stringify({
           textQuery: CATEGORY_SEARCH_TEXT[category],
           maxResultCount: GOOGLE_MAX_RESULT_COUNT,
-          locationBias: { circle: { center: { latitude: params.lat, longitude: params.lon }, radius: params.radiusMeters } },
+          // `locationBias` only ranks results near this point; it does not
+          // exclude farther places. Discovery's chosen radius is a hard
+          // boundary, so use Text Search's restriction instead.
+          locationRestriction: locationRestriction(params),
         }),
       });
     } catch {
@@ -108,7 +120,7 @@ export class GooglePlacesProvider implements ProspectDiscoveryProvider {
           body: JSON.stringify({
             textQuery: CATEGORY_SEARCH_TEXT[category],
             maxResultCount: GOOGLE_MAX_RESULT_COUNT,
-            locationBias: { circle: { center: { latitude: params.lat, longitude: params.lon }, radius: params.radiusMeters } },
+            locationRestriction: locationRestriction(params),
             pageToken,
           }),
         });
