@@ -38,6 +38,7 @@ import { buildCustomerVisitDiagnosisV2, buildDaily360DiagnosisV2, type CustomerV
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { ProspectService } from "../prospects/prospect.service";
 import { ProductFitService } from "../prospects/product-fit.service";
+import { NEED_TAXONOMY_VERSION } from "../prospects/need-taxonomy";
 import { taxonomyForCanonicalChannel } from "../prospects/prospect-taxonomy";
 import { auditMemory } from "../../common/observability/memory-audit";
 
@@ -2022,7 +2023,7 @@ export class VisitCopilotService {
     if (taxonomyForCanonicalChannel(repChannel)?.category !== "horeca") return;
     for (const prospect of prospects) {
       const fit = prospect.intelligenceProfile?.productFitInsights;
-      if (fit && typeof fit === "object" && !Array.isArray(fit)) continue;
+      if (fit && typeof fit === "object" && !Array.isArray(fit) && (fit as { version?: unknown }).version === NEED_TAXONOMY_VERSION) continue;
       try {
         await this.productFit.build(user, prospect.id);
       } catch (error) {

@@ -6,7 +6,7 @@ import { MurshidakIntelligenceService } from "./murshidak-intelligence.service";
 import { NEED_TAXONOMY, NEED_TAXONOMY_VERSION, type NeedDefinition } from "./need-taxonomy";
 import { CatalogFitService } from "./catalog-fit.service";
 
-export type Candidate = { productCode: string; productName: string; brand: string | null; category: string | null; priority: number; confidence: number; likelyNeed: string; matchQuality: "CATEGORY" | "PRODUCT_TEXT"; productTier: "PREMIUM" | "MID_MARKET" | "VALUE" | null; reasons: string[]; peerSignals: { buyerCount: number; orderValue: number; peerScope: "CUSTOMER_TYPE" | "CHANNEL" | "NONE" }; availability: "UNKNOWN" };
+export type Candidate = { productCode: string; productName: string; brand: string | null; category: string | null; priority: number; confidence: number; likelyNeed: string; matchQuality: "CATEGORY" | "PRODUCT_TEXT"; productTier: "PREMIUM" | "MID_MARKET" | "VALUE" | null; reasons: string[]; peerSignals: { buyerCount: number; orderValue: number; peerScope: "CUSTOMER_TYPE" | "HORECA_FALLBACK" | "CHANNEL" | "NONE" }; availability: "UNKNOWN" };
 export type ProductFitOutput = { version: string; computedAt: string; inputFingerprint: string | null; confirmedNeedTags: string[]; candidates: Candidate[] };
 const norm = (value: unknown) => String(value ?? "").trim().toLowerCase();
 const number = (value: unknown) => typeof value === "number" && Number.isFinite(value) ? value : Number(value) || 0;
@@ -59,15 +59,31 @@ export class ProductFitService {
   private peerSales(customers: readonly EntityRecord[], invoices: readonly EntityRecord[], items: readonly EntityRecord[], businessType: string | null, channel: string | null) {
     const typePeers = new Set(customers.filter((row) => norm(row.CustomerType) === norm(businessType) && norm(businessType) !== "").map((row) => norm(row.CustomerCode)));
     const channelPeers = new Set(customers.filter((row) => norm(row.Channel) === norm(channel) && norm(channel) !== "").map((row) => norm(row.CustomerCode)));
-    const peers = typePeers.size > 0 ? typePeers : channelPeers;
-    const scope: Candidate["peerSignals"]["peerScope"] = typePeers.size > 0 ? "CUSTOMER_TYPE" : channelPeers.size > 0 ? "CHANNEL" : "NONE";
     const invoiceCustomers = new Map(invoices.map((row) => [norm(row.InvoiceNo), norm(row.CustomerCode)]));
-    const sales = new Map<string, { customers: Set<string>; value: number }>();
-    for (const item of items) {
-      const customer = invoiceCustomers.get(norm(item.InvoiceNo)); const code = norm(item.ProductCode);
-      if (!customer || !code || !peers.has(customer)) continue;
-      const entry = sales.get(code) ?? { customers: new Set<string>(), value: 0 };
-      entry.customers.add(customer); entry.value += number(item.LineTotal); sales.set(code, entry);
+    const salesFor = (peers: ReadonlySet<string>) => {
+      const sales = new Map<string, { customers: Set<string>; value: number }>();
+      for (const item of items) {
+        const customer = invoiceCustomers.get(norm(item.InvoiceNo)); const code = norm(item.ProductCode);
+        if (!customer || !code || !peers.has(customer)) continue;
+        const entry = sales.get(code) ?? { customers: new Set<string>(), value: 0 };
+        entry.customers.add(customer); entry.value += number(item.LineTotal); sales.set(code, entry);
+      }
+      return sales;
+    };
+    let sales = salesFor(typePeers.size > 0 ? typePeers : channelPeers);
+    let scope: Candidate["peerSignals"]["peerScope"] = typePeers.size > 0 ? "CUSTOMER_TYPE" : channelPeers.size > 0 ? "CHANNEL" : "NONE";
+    // Hotels remain anchored to actual hotel buyers. If there is no hotel
+    // sales evidence, use comparable local restaurants/cafes rather than
+    // inventing a recommendation from the complete catalogue.
+    if (norm(businessType) === "hotel" && sales.size === 0) {
+      const comparableHorecaPeers = new Set(customers
+        .filter((row) => ["restaurant", "cafe", "coffee_shop"].includes(norm(row.CustomerType)))
+        .map((row) => norm(row.CustomerCode)));
+      const comparableSales = salesFor(comparableHorecaPeers);
+      if (comparableSales.size > 0) {
+        sales = comparableSales;
+        scope = "HORECA_FALLBACK";
+      }
     }
     return { sales, scope };
   }

@@ -1,4 +1,4 @@
-export const NEED_TAXONOMY_VERSION = "v1";
+export const NEED_TAXONOMY_VERSION = "v2";
 export type NeedDefinition = { tag: string; businessTypes: readonly string[]; menuTags: readonly string[]; categoryTerms: readonly string[]; productTerms: readonly string[] };
 
 // Terms describe a business need, never an assumed company catalogue value.
@@ -10,10 +10,13 @@ export const NEED_TAXONOMY: readonly NeedDefinition[] = [
   { tag: "restaurant-breakfast", businessTypes: ["restaurant"], menuTags: ["restaurant-breakfast"], categoryTerms: ["breakfast", "dairy"], productTerms: [] },
   { tag: "restaurant-meals", businessTypes: ["restaurant"], menuTags: ["restaurant-meals"], categoryTerms: ["food", "meal"], productTerms: [] },
   { tag: "retail-extended-hours", businessTypes: ["grocery_store", "convenience_store", "supermarket", "hypermarket"], menuTags: ["retail-extended-hours"], categoryTerms: ["grocery", "food", "beverage"], productTerms: [] },
+  // A hotel is a broad HoReCa operation: guest rooms, housekeeping, dining,
+  // breakfast, and coffee service all create legitimate FMCG demand.
   { tag: "hotel-housekeeping", businessTypes: ["hotel"], menuTags: [], categoryTerms: ["cleaning", "housekeeping"], productTerms: ["cleaner", "detergent"] },
   { tag: "hotel-hygiene", businessTypes: ["hotel"], menuTags: [], categoryTerms: ["tissue", "hygiene"], productTerms: ["tissue", "paper"] },
-  { tag: "hotel-food-service", businessTypes: ["hotel"], menuTags: [], categoryTerms: ["food", "breakfast"], productTerms: [] },
-  { tag: "hotel-beverages", businessTypes: ["hotel"], menuTags: [], categoryTerms: ["beverage", "coffee", "tea"], productTerms: [] },
+  { tag: "hotel-food-service", businessTypes: ["hotel"], menuTags: [], categoryTerms: ["food", "ingredient", "cooking", "breakfast", "meal"], productTerms: ["flour", "دقيق", "oil", "زيت", "rice", "أرز", "sauce", "صلصة", "cheese", "جبن"] },
+  { tag: "hotel-beverages", businessTypes: ["hotel"], menuTags: [], categoryTerms: ["beverage", "coffee", "tea"], productTerms: ["coffee", "قهوة", "tea", "شاي", "milk", "حليب"] },
+  { tag: "hotel-disposables", businessTypes: ["hotel"], menuTags: [], categoryTerms: ["disposable", "plastic", "packaging", "paper"], productTerms: ["disposable", "plastic", "بلاستيك", "تعبئة"] },
   { tag: "pizza-cheese", businessTypes: ["restaurant"], menuTags: ["pizza"], categoryTerms: ["cheese", "dairy"], productTerms: ["cheese", "mozzarella"] },
   { tag: "pizza-sauces", businessTypes: ["restaurant"], menuTags: ["pizza"], categoryTerms: ["sauce", "condiment"], productTerms: ["sauce", "tomato"] },
   { tag: "cafe-hot-beverages", businessTypes: ["cafe", "coffee_shop"], menuTags: [], categoryTerms: ["coffee", "beverage", "tea"], productTerms: ["coffee", "قهوة", "tea", "شاي", "milk", "حليب"] },
