@@ -1478,6 +1478,7 @@ export interface VisitCopilotBriefingProduct {
   qty: number;
   value: number;
   lastPurchaseDate: string | null;
+  nearbyCustomerCount?: number;
 }
 
 export interface VisitCopilotMissingProduct {
@@ -1492,6 +1493,8 @@ export interface VisitCopilotBriefing {
   // Phase 2: /visit-copilot/prospect-briefing/:id returns this SAME shape
   // with isProspect: true (zeros for sales/returns/collections render fine).
   isProspect?: boolean;
+  recommendationSource?: string;
+  recommendationConfidence?: number | null;
   period: { from: string; to: string };
   sales: { total: number; invoiceCount: number; trendPct: number };
   returns: { total: number; rate: number };

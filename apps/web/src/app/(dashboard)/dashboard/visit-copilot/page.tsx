@@ -962,7 +962,7 @@ function VisitCopilotScreen() {
               )}
 
               {/* Scannable in <10s: 4 big numbers. */}
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              {!briefing.isProspect && <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <BigNumber
                   label={t("copilot.salesLabel")}
                   value={formatWholeNumber(briefing.sales.total)}
@@ -978,7 +978,8 @@ function VisitCopilotScreen() {
 
               {briefing.topProducts.length > 0 && (
                 <div>
-                  <p className="mb-1.5 text-xs font-medium text-muted-foreground">{t("copilot.topProductsTitle")}</p>
+                  <p className="mb-1.5 text-xs font-medium text-muted-foreground">{briefing.isProspect ? "??????? ???????? ???? ???" : t("copilot.topProductsTitle")}</p>
+                  {briefing.isProspect && <p className="mb-1.5 text-xs text-muted-foreground">{briefing.recommendationSource}{briefing.recommendationConfidence !== null && briefing.recommendationConfidence !== undefined ? ` ? ??? ${Math.round(briefing.recommendationConfidence)}%` : ""}</p>}
                   <div className="flex flex-wrap gap-1.5">
                     {briefing.topProducts.map((p) => (
                       <Badge key={p.productCode} variant="secondary" className="font-normal">
@@ -1001,15 +1002,18 @@ function VisitCopilotScreen() {
                     </ul>
                   </div>
                 )}
+                      <>
                 <p className="glow-ai flex items-start gap-2 rounded-lg p-3 text-sm font-medium">
                   <Target className="mt-0.5 h-4 w-4 shrink-0 text-ai" />
                   {briefing.suggestedGoal}
+                      {briefing.isProspect && p.nearbyCustomerCount !== undefined && <span className="self-center text-xs text-muted-foreground">{p.nearbyCustomerCount} ???? ????</span>}
+                      </>
                 </p>
                 <p className="flex items-start gap-2 rounded-lg bg-amber-500/10 p-3 text-sm">
                   <Lightbulb className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-300" />
                   {briefing.topOpportunity}
                 </p>
-              </div>
+              </div>}
 
               {briefing.actions.length > 0 && (
                 <div>

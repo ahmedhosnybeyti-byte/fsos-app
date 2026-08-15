@@ -162,6 +162,7 @@ export interface BriefingProduct {
   qty: number;
   value: number;
   lastPurchaseDate: string | null;
+  nearbyCustomerCount?: number;
 }
 
 export interface BriefingMissingProduct {
@@ -303,6 +304,8 @@ export interface RouteOpportunitiesResult {
 // renders it unchanged — only isProspect flags the mode.
 export interface ProspectBriefingResult extends CustomerBriefingResult {
   isProspect: true;
+  recommendationSource?: string;
+  recommendationConfidence?: number | null;
 }
 
 // POST /visit-copilot/chat result. activeCustomerCode/Name are present only
@@ -2118,7 +2121,7 @@ export class VisitCopilotService {
         warnings.push("فلتر مخزون السيارة مفعّل لكن لا توجد بيانات مخزون — عُرضت الاقتراحات دون فلترة.");
       }
     }
-    const topProducts: BriefingProduct[] = ranked
+    let topProducts: BriefingProduct[] = ranked
       .slice(0, TOP_PRODUCTS_LIMIT)
       .map(([pCode, agg]) => ({ productCode: pCode, productName: productNames.get(pCode) ?? pCode, category: null, qty: round2(agg.qty), value: round2(agg.value), lastPurchaseDate: null }));
 
@@ -2127,6 +2130,14 @@ export class VisitCopilotService {
     const sourceLabel =
       prospect.source === "UPLOAD"
         ? "من ملف العملاء المحتملين"
+    // Reuse the Discovery nearby-sales evidence for a prospect; these are
+    // recommendations, never this prospect's non-existent purchase history.
+    const nearby = await this.buildNearbyBestSellers(user, range, [prospect], prospect.channel, warnings).then((result) => result.get(prospect.id));
+    const nearbyProducts = nearby?.products ?? [];
+    if (nearbyProducts.length > 0) {
+      topProducts = nearbyProducts.map((product) => ({ productCode: product.productCode, productName: product.productName, category: null, qty: 0, value: 0, lastPurchaseDate: null, nearbyCustomerCount: product.nearbyCustomerCount }));
+    }
+
         : prospect.source === "GOOGLE"
           ? "مكتشف عبر Google Places"
           : "مكتشف عبر OpenStreetMap";
@@ -2160,6 +2171,8 @@ export class VisitCopilotService {
 
   // ------------------------------------------------------------------
   // Discovery internals
+      recommendationSource: nearbyProducts.length > 0 ? `?????? ${nearby?.customerCount ?? 0} ???? ???? ?? ??? ??????` : "?????? ????? ??? ??????",
+      recommendationConfidence: prospect.scoreConfidence,
   // ------------------------------------------------------------------
 
   // One pass over visible Customers + in-period Invoices/Invoice Items:
