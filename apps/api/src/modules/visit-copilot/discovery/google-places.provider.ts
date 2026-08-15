@@ -27,21 +27,28 @@ function locationRestriction(params: DiscoverySearchParams) {
   };
 }
 
-// Search Text carries the selling-channel intent directly to Google instead
-// of asking the same generic nearby query for every rep channel.
-const CATEGORY_SEARCH_TEXT: Record<DiscoveryCategory, string> = {
-  traditional: "متاجر البقالة grocery stores mini markets تموينات",
-  modern: "supermarkets hypermarkets",
-  horeca: "restaurants cafes hotels",
-  wholesale: "food wholesalers FMCG wholesalers",
-};
-
-const CATEGORY_ACCEPTED_TYPES: Record<DiscoveryCategory, readonly string[]> = {
-  traditional: ["grocery_store", "asian_grocery_store", "convenience_store", "supermarket", "food_store"],
-  horeca: ["restaurant", "cafe", "coffee_shop", "bakery", "hotel", "catering_service"],
-  modern: ["supermarket", "hypermarket", "department_store", "shopping_mall"],
+// Google Places API (New) Table A types only.  Primary-type restrictions are
+// intentional here: a channel must discover businesses whose main activity
+// is sellable by that channel, rather than businesses that happen to carry an
+// incidental matching type.
+const CATEGORY_PRIMARY_TYPES: Record<DiscoveryCategory, readonly string[]> = {
+  // Cash Van / Traditional Trade: only FMCG retail outlets.
+  traditional: ["grocery_store", "convenience_store", "supermarket"],
+  // Modern Trade: no malls, departments, electronics, or pharmacies.
+  modern: ["supermarket", "hypermarket", "discount_supermarket"],
+  // HoReCa: food-service venues and lodging only.
+  horeca: ["restaurant", "cafe", "coffee_shop", "hotel"],
+  // Google Table A has no narrower FMCG-wholesale category.
   wholesale: ["wholesaler", "warehouse_store"],
 };
+
+function hasAllowedPrimaryType(category: DiscoveryCategory, primaryType: string | undefined): boolean {
+  if (!primaryType) return false;
+  if (CATEGORY_PRIMARY_TYPES[category].includes(primaryType)) return true;
+  // Google documents that a generic `restaurant` primary-type restriction
+  // also returns a more specific restaurant primary type.
+  return category === "horeca" && (primaryType.endsWith("_restaurant") || primaryType.endsWith("_hotel"));
+}
 
 type PlacesSearchResponse = {
   nextPageToken?: string;
@@ -83,7 +90,7 @@ export class GooglePlacesProvider implements ProspectDiscoveryProvider {
         },
         body: JSON.stringify({
           maxResultCount: GOOGLE_MAX_RESULT_COUNT,
-          includedTypes: CATEGORY_ACCEPTED_TYPES[category],
+          includedPrimaryTypes: CATEGORY_PRIMARY_TYPES[category],
           rankPreference: "DISTANCE",
           // Nearby Search supports a strict circular restriction; Text
           // Search only accepts a rectangular locationRestriction.
@@ -110,7 +117,7 @@ export class GooglePlacesProvider implements ProspectDiscoveryProvider {
     for (const pl of searchRows) {
       const lat = pl.location?.latitude;
       const lon = pl.location?.longitude;
-      if (typeof pl.id !== "string" || pl.id === "" || typeof lat !== "number" || typeof lon !== "number" || !CATEGORY_ACCEPTED_TYPES[category].includes(pl.primaryType ?? "")) continue;
+      if (typeof pl.id !== "string" || pl.id === "" || typeof lat !== "number" || typeof lon !== "number" || !hasAllowedPrimaryType(category, pl.primaryType)) continue;
       places.set(pl.id, {
         externalKey: pl.id,
         name: pl.displayName?.text?.trim() || pl.primaryType || "غير معروف",
