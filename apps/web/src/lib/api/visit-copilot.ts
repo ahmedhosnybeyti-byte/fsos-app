@@ -7,6 +7,7 @@ import type {
   VisitCopilotChatResponse,
   VisitCopilotDailyBrief,
   VisitCopilotDiscoveryResult,
+  VisitCopilotDiscoveryLimit,
   VisitCopilotGoogleSearchRequest,
   VisitCopilotGoogleSearchResult,
   VisitCopilotPeriod,
@@ -58,6 +59,8 @@ export const visitCopilotApi = {
 
   googleSearch: (body: VisitCopilotGoogleSearchRequest) =>
     apiFetch<VisitCopilotGoogleSearchResult>("/visit-copilot/discovery/search", { method: "POST", body }),
+
+  discoveryLimit: () => apiFetch<VisitCopilotDiscoveryLimit>("/visit-copilot/discovery/limit"),
 
   prospectStatus: (params: { id: string; status: VisitCopilotProspectStatus }) =>
     apiFetch<VisitCopilotProspect>(`/visit-copilot/prospects/${encodeURIComponent(params.id)}/status`, {

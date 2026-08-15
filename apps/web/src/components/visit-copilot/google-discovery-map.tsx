@@ -6,14 +6,15 @@ import type { VisitCopilotDiscoveryCustomer, VisitCopilotProspect } from "@/lib/
 
 type LatLng = { lat: number; lng: number };
 type DiscoveryGoogleInfoWindow = { close: () => void; open: (map: DiscoveryGoogleMap, marker: DiscoveryGoogleMarker) => void; setContent: (content: HTMLElement) => void };
-type DiscoveryGoogleMarker = { setMap: (map: DiscoveryGoogleMap | null) => void; setAnimation: (animation: unknown) => void; addListener: (event: "click", handler: () => void) => void };
-type DiscoveryGoogleMap = { fitBounds: (bounds: DiscoveryGoogleBounds, padding?: number) => void; panTo: (position: LatLng) => void; setZoom: (zoom: number) => void; getZoom: () => number | undefined };
+type DiscoveryGoogleMarker = { setMap: (map: DiscoveryGoogleMap | null) => void; setAnimation: (animation: unknown) => void; addListener: (event: string, handler: () => void) => void };
+type DiscoveryGoogleMap = { fitBounds: (bounds: DiscoveryGoogleBounds, padding?: number) => void; panTo: (position: LatLng) => void; setZoom: (zoom: number) => void; getZoom: () => number | undefined; addListener: (event: "click", handler: (event: { latLng?: { lat: () => number; lng: () => number } }) => void) => void };
 type DiscoveryGoogleBounds = { extend: (position: LatLng) => void; isEmpty: () => boolean };
 type DiscoveryMapsApi = { maps: {
   Map: new (element: HTMLElement, options: { center: LatLng; zoom: number; mapTypeControl?: boolean; streetViewControl?: boolean }) => DiscoveryGoogleMap;
   Marker: new (options: { map: DiscoveryGoogleMap; position: LatLng; title: string; icon?: string }) => DiscoveryGoogleMarker;
   LatLngBounds: new () => DiscoveryGoogleBounds;
   InfoWindow: new () => DiscoveryGoogleInfoWindow;
+  Circle: new (options: { map: DiscoveryGoogleMap; center: LatLng; radius: number; fillColor: string; fillOpacity: number; strokeColor: string; strokeOpacity: number; strokeWeight: number }) => { setMap: (map: DiscoveryGoogleMap | null) => void };
   Animation: { BOUNCE: unknown };
 } };
 
@@ -45,12 +46,16 @@ function hasCoordinates(point: { lat: unknown; lon: unknown }): point is { lat: 
   return typeof point.lat === "number" && Number.isFinite(point.lat) && typeof point.lon === "number" && Number.isFinite(point.lon);
 }
 
-export function GoogleDiscoveryMap({ customers, prospects, selectedProspectId, onSelectProspect, heightClassName }: {
+export function GoogleDiscoveryMap({ customers, prospects, selectedProspectId, onSelectProspect, heightClassName, searchCenter, radiusMeters, manualCenterMode, onManualCenter }: {
   customers: VisitCopilotDiscoveryCustomer[];
   prospects: VisitCopilotProspect[];
   selectedProspectId: string | null;
   onSelectProspect: (id: string) => void;
   heightClassName: string;
+  searchCenter: LatLng | null;
+  radiusMeters: number;
+  manualCenterMode: boolean;
+  onManualCenter: (center: LatLng) => void;
 }) {
   const { locale } = useTranslation();
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
@@ -61,8 +66,12 @@ export function GoogleDiscoveryMap({ customers, prospects, selectedProspectId, o
   const prospectMarkersRef = useRef(new Map<string, DiscoveryGoogleMarker>());
   const prospectPositionsRef = useRef(new Map<string, LatLng>());
   const onSelectRef = useRef(onSelectProspect);
+  const onManualCenterRef = useRef(onManualCenter);
+  const manualCenterModeRef = useRef(manualCenterMode);
   const [loadFailed, setLoadFailed] = useState(false);
   onSelectRef.current = onSelectProspect;
+  onManualCenterRef.current = onManualCenter;
+  manualCenterModeRef.current = manualCenterMode;
 
   useEffect(() => {
     if (!apiKey || !containerRef.current) return;
@@ -73,6 +82,7 @@ export function GoogleDiscoveryMap({ customers, prospects, selectedProspectId, o
       if (!mapRef.current) {
         mapRef.current = new google.maps.Map(containerRef.current, { center: { lat: 21.6, lng: 39.19 }, zoom: 10, mapTypeControl: false, streetViewControl: false });
         infoWindowRef.current = new google.maps.InfoWindow();
+        mapRef.current.addListener("click", (event) => { if (manualCenterModeRef.current && event.latLng) onManualCenterRef.current({ lat: event.latLng.lat(), lng: event.latLng.lng() }); });
       }
       markersRef.current.forEach((marker) => marker.setMap(null));
       markersRef.current = [];
@@ -91,19 +101,30 @@ export function GoogleDiscoveryMap({ customers, prospects, selectedProspectId, o
       });
       prospects.filter(hasCoordinates).forEach((prospect) => {
         const position = { lat: prospect.lat, lng: prospect.lon };
-        const marker = new google.maps.Marker({ map, position, title: prospect.name });
-        marker.addListener("click", () => {
-          const content = document.createElement("div"); content.dir = locale === "ar" ? "rtl" : "ltr";
+        const marker = new google.maps.Marker({ map, position, title: prospect.name, icon: "https://maps.google.com/mapfiles/ms/icons/red-dot.png" });
+        const openProspect = () => {
+          const content = document.createElement("div"); content.dir = locale === "ar" ? "rtl" : "ltr"; content.style.cssText = `max-width:220px;padding:8px;border-radius:6px;background:${document.documentElement.classList.contains("dark") ? "#111827" : "#ffffff"};color:${document.documentElement.classList.contains("dark") ? "#f9fafb" : "#111827"};`;
           const title = document.createElement("strong"); title.textContent = prospect.name;
           const details = document.createElement("div"); details.textContent = [prospect.businessType, prospect.address, prospect.channel].filter(Boolean).join(" — ");
-          content.append(title, details); infoWindowRef.current?.setContent(content); infoWindowRef.current?.open(map, marker); onSelectRef.current(prospect.id);
-        });
+          content.append(title, details);
+          if (prospect.photo?.url) { const image = document.createElement("img"); image.src = prospect.photo.url; image.alt = prospect.name; image.style.cssText = "display:block;width:100%;max-height:120px;object-fit:cover;margin-top:8px;border-radius:4px;"; content.append(image); }
+          infoWindowRef.current?.setContent(content); infoWindowRef.current?.open(map, marker); onSelectRef.current(prospect.id);
+        };
+        marker.addListener("click", openProspect);
+        marker.addListener("mouseover", openProspect);
         markersRef.current.push(marker); prospectMarkersRef.current.set(prospect.id, marker); prospectPositionsRef.current.set(prospect.id, position); bounds.extend(position);
       });
       if (!bounds.isEmpty()) map.fitBounds(bounds, 32);
     }).catch(() => { if (!cancelled) setLoadFailed(true); });
     return () => { cancelled = true; };
   }, [apiKey, customers, locale, prospects]);
+
+  useEffect(() => {
+    if (!apiKey || !searchCenter || !mapRef.current) return;
+    let circle: { setMap: (map: DiscoveryGoogleMap | null) => void } | null = null;
+    void loadGoogleMaps(apiKey).then((google) => { if (mapRef.current) circle = new google.maps.Circle({ map: mapRef.current, center: searchCenter, radius: radiusMeters, fillColor: "#2563eb", fillOpacity: 0.12, strokeColor: "#2563eb", strokeOpacity: 0.9, strokeWeight: 2 }); });
+    return () => circle?.setMap(null);
+  }, [apiKey, radiusMeters, searchCenter]);
 
   useEffect(() => {
     if (!selectedProspectId) return;

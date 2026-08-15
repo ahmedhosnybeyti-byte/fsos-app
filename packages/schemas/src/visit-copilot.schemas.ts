@@ -124,8 +124,9 @@ export type VisitCopilotDiscoveryQuery = z.infer<typeof visitCopilotDiscoveryQue
 
 // POST /visit-copilot/discovery/google-search
 export const VISIT_COPILOT_DISCOVERY_LIMITS = {
-  defaultRadiusMeters: 3000,
+  defaultRadiusMeters: 2000,
   maxRadiusMeters: 10000,
+  allowedRadiusMeters: [1000, 2000, 3000, 5000] as const,
 };
 
 export const visitCopilotGoogleSearchRequestSchema = z.object({
@@ -136,7 +137,8 @@ export const visitCopilotGoogleSearchRequestSchema = z.object({
     .int()
     .positive()
     .max(VISIT_COPILOT_DISCOVERY_LIMITS.maxRadiusMeters, `أقصى نصف قطر للبحث ${VISIT_COPILOT_DISCOVERY_LIMITS.maxRadiusMeters} متر`)
-    .default(VISIT_COPILOT_DISCOVERY_LIMITS.defaultRadiusMeters),
+    .default(VISIT_COPILOT_DISCOVERY_LIMITS.defaultRadiusMeters)
+    .refine((value) => (VISIT_COPILOT_DISCOVERY_LIMITS.allowedRadiusMeters as readonly number[]).includes(value), "Radius must be 1, 2, 3, or 5 km"),
   minimumScore: z.coerce.number().min(0).max(100).optional(),
 });
 export type VisitCopilotGoogleSearchRequest = z.infer<typeof visitCopilotGoogleSearchRequestSchema>;

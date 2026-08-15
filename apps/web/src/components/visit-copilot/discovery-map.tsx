@@ -198,15 +198,23 @@ export function DiscoveryMap({
   prospects,
   selectedProspectId,
   onSelectProspect,
+  searchCenter,
+  radiusMeters,
+  manualCenterMode,
+  onManualCenter,
   heightClassName = "h-[60vh]",
 }: {
   customers: VisitCopilotDiscoveryCustomer[];
   prospects: VisitCopilotProspect[];
   selectedProspectId: string | null;
   onSelectProspect: (id: string) => void;
+  searchCenter: { lat: number; lng: number } | null;
+  radiusMeters: number;
+  manualCenterMode: boolean;
+  onManualCenter: (center: { lat: number; lng: number }) => void;
   heightClassName?: string;
 }) {
-  return <GoogleDiscoveryMap customers={customers} prospects={prospects} selectedProspectId={selectedProspectId} onSelectProspect={onSelectProspect} heightClassName={heightClassName} />;
+  return <GoogleDiscoveryMap customers={customers} prospects={prospects} selectedProspectId={selectedProspectId} onSelectProspect={onSelectProspect} heightClassName={heightClassName} searchCenter={searchCenter} radiusMeters={radiusMeters} manualCenterMode={manualCenterMode} onManualCenter={onManualCenter} />;
 }
 
 function LegendDot({ color, label, faded }: { color: string; label: string; faded?: boolean }) {

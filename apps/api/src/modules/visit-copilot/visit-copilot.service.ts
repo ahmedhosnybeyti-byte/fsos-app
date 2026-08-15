@@ -82,6 +82,17 @@ const ROUTE_OPPORTUNITY_MEDIUM_SCORE = 40;
 const BEST_OPPORTUNITIES_LIMIT = 2;
 const NEARBY_PRODUCT_RADIUS_KM = 3;
 const NEARBY_PRODUCT_MIN_CUSTOMERS = 2;
+const DAILY_DISCOVERY_LIMIT = 3;
+
+function companyDayStart(timeZone: string | null | undefined): Date {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timeZone || "UTC", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+    const value = (type: string) => Number(parts.find((part) => part.type === type)?.value);
+    return new Date(Date.UTC(value("year"), value("month") - 1, value("day")));
+  } catch {
+    return companyDayStart("UTC");
+  }
+}
 
 // Loose channel equality — real data mixes labels ("TT" vs "Traditional
 // Trade"), so equal-or-substring either way, case-insensitive.
@@ -247,6 +258,7 @@ export interface GoogleSearchResult {
   warnings: string[];
   disabled?: boolean;
   message?: string;
+  dailyRemaining?: number;
 }
 
 function prospectIntelligence(profile: { businessClassification: unknown; productFitInsights: unknown } | null | undefined) {
@@ -422,6 +434,29 @@ function normalize(value: number, min: number, max: number): number {
 @Injectable()
 export class VisitCopilotService {
   private readonly logger = new Logger(VisitCopilotService.name);
+  private readonly discoverySearchesInFlight = new Map<string, Promise<GoogleSearchResult>>();
+
+  async discoveryLimit(user: AuthenticatedUser) {
+    const account = await this.prisma.user.findUnique({ where: { id: user.userId }, select: { discoveryQuotaDay: true, discoveryIssuedToday: true, company: { select: { profile: { select: { timeZone: true } } } } } });
+    const today = companyDayStart(account?.company?.profile?.timeZone);
+    const used = account?.discoveryQuotaDay?.getTime() === today.getTime() ? account.discoveryIssuedToday : 0;
+    return { dailyLimit: DAILY_DISCOVERY_LIMIT, remaining: Math.max(0, DAILY_DISCOVERY_LIMIT - used) };
+  }
+
+  private async reserveDiscoveryQuota(user: AuthenticatedUser): Promise<number> {
+    const account = await this.prisma.user.findUnique({ where: { id: user.userId }, select: { company: { select: { profile: { select: { timeZone: true } } } } } });
+    const today = companyDayStart(account?.company?.profile?.timeZone);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const incremented = await this.prisma.user.updateMany({ where: { id: user.userId, discoveryQuotaDay: today, discoveryIssuedToday: { lt: DAILY_DISCOVERY_LIMIT } }, data: { discoveryIssuedToday: { increment: 1 } } });
+      if (incremented.count === 1) {
+        const updated = await this.prisma.user.findUniqueOrThrow({ where: { id: user.userId }, select: { discoveryIssuedToday: true } });
+        return DAILY_DISCOVERY_LIMIT - updated.discoveryIssuedToday;
+      }
+      const initialized = await this.prisma.user.updateMany({ where: { id: user.userId, OR: [{ discoveryQuotaDay: null }, { discoveryQuotaDay: { not: today } }] }, data: { discoveryQuotaDay: today, discoveryIssuedToday: 1 } });
+      if (initialized.count === 1) return DAILY_DISCOVERY_LIMIT - 1;
+    }
+    throw new ForbiddenException("تم استخدام عمليات Google Discovery الثلاث المتاحة اليوم. حاول مجددًا بعد بداية يوم الشركة التالي.");
+  }
 
   constructor(
     private readonly rieFacade: RieFacade,
@@ -1789,6 +1824,22 @@ export class VisitCopilotService {
   // ------------------------------------------------------------------
 
   async discoverySearch(user: AuthenticatedUser, body: VisitCopilotGoogleSearchRequest): Promise<GoogleSearchResult> {
+    // A double tap / network retry reaches this service at most once while the
+    // same request is still running; the quota reservation remains atomic for
+    // separate requests and across API instances.
+    const key = `${user.userId}:${body.lat.toFixed(6)}:${body.lon.toFixed(6)}:${body.radiusMeters}`;
+    const active = this.discoverySearchesInFlight.get(key);
+    if (active) return active;
+    const work = this.discoverySearchImpl(user, body);
+    this.discoverySearchesInFlight.set(key, work);
+    try {
+      return await work;
+    } finally {
+      this.discoverySearchesInFlight.delete(key);
+    }
+  }
+
+  private async discoverySearchImpl(user: AuthenticatedUser, body: VisitCopilotGoogleSearchRequest): Promise<GoogleSearchResult> {
     const warnings: string[] = [];
 
     // Provider choice is a company-level setting; a missing profile row
@@ -1831,13 +1882,14 @@ export class VisitCopilotService {
     const { matched } = categoryForChannel(stats.repChannel);
     if (!matched) warnings.push("قناة عملائك غير معروفة — تم البحث بفئات التجارة التقليدية.");
 
+    const dailyRemaining = await this.reserveDiscoveryQuota(user);
     const searchResult = await provider.search({ lat: body.lat, lon: body.lon, radiusMeters: body.radiusMeters, channel: stats.repChannel });
     warnings.push(...searchResult.warnings);
     const places = searchResult.places.filter((pl) => isSaneCoordinate(pl.lat, pl.lon));
     const taxonomy = taxonomyForCanonicalChannel(stats.repChannel);
     if (!taxonomy) {
       warnings.push("لا توجد قناة معيارية معروفة للمندوب؛ لم يتم حفظ نتائج غير موجهة لقناة.");
-      return { found: places.length, newCount: 0, prospects: [], warnings };
+      return { found: places.length, newCount: 0, prospects: [], warnings, dailyRemaining };
     }
     const allCustomerPoints: LatLon[] = stats.customers.filter((c) => c.lat !== null && c.lon !== null).map((c) => ({ lat: c.lat!, lon: c.lon! }));
     const materialized = await this.prospectService.materializeScan({
@@ -1854,7 +1906,7 @@ export class VisitCopilotService {
     await this.buildMissingProductFit(user, materialized.prospects, warnings, stats.repChannel);
     const enriched = await this.prisma.prospect.findMany({ where: { id: { in: materialized.prospects.map((prospect) => prospect.id) } }, include: { intelligenceProfile: { select: { businessClassification: true, productFitInsights: true } } } });
     const nearbyBestSellers = await this.buildNearbyBestSellers(user, stats.range, enriched, stats.repChannel, warnings);
-    return { found: materialized.found, newCount: materialized.newCount, prospects: this.scoreProspects(enriched, stats, photoUrls, nearbyBestSellers).sort((a, b) => b.priorityScore - a.priorityScore), warnings };
+    return { found: materialized.found, newCount: materialized.newCount, prospects: this.scoreProspects(enriched, stats, photoUrls, nearbyBestSellers).sort((a, b) => b.priorityScore - a.priorityScore), warnings, dailyRemaining };
     const found = places.length;
 
     // A place within ~100m of an existing customer IS that customer — skip.

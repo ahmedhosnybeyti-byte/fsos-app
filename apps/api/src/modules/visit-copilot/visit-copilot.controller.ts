@@ -147,6 +147,13 @@ export class VisitCopilotController {
     return this.visitCopilotService.discoverySearch(user, body);
   }
 
+  @Get("discovery/limit")
+  @Auth()
+  discoveryLimit(@CurrentUser() user: AuthenticatedUser) {
+    if (!user.companyId) throw new ForbiddenException();
+    return this.visitCopilotService.discoveryLimit(user);
+  }
+
   @Patch("prospects/:id/status")
   @Auth()
   updateProspectStatus(

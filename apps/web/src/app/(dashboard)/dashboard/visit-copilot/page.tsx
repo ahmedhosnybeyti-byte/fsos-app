@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useCallback, useMemo, useState } from "react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -40,6 +40,7 @@ import { Daily360SummaryModal } from "@/components/visit-copilot/daily-360-summa
 import type {
   VisitCopilotChatMessage,
   VisitCopilotDiscoveryCustomer,
+  VisitCopilotDiscoveryLimit,
   VisitCopilotPeriod,
   VisitCopilotPlanMode,
   VisitCopilotPlanResult,
@@ -93,7 +94,8 @@ function MapLoadingFallback() {
   );
 }
 
-const GOOGLE_SEARCH_RADIUS_METERS = 3000;
+const GOOGLE_SEARCH_RADIUS_METERS = 2000;
+const GOOGLE_RADIUS_OPTIONS = [1000, 2000, 3000, 5000] as const;
 
 const PERIODS: { value: VisitCopilotPeriod; labelKey: "copilot.period1m" | "copilot.period3m" | "copilot.period6m" | "copilot.period12m" | "copilot.periodCustom" }[] = [
   { value: "1m", labelKey: "copilot.period1m" },
@@ -173,6 +175,9 @@ function VisitCopilotScreen() {
   const [expandedProspects, setExpandedProspects] = useState<Set<string>>(new Set());
   const [latestGoogleProspects, setLatestGoogleProspects] = useState<VisitCopilotProspect[]>([]);
   const [selectedDiscoveryProspectId, setSelectedDiscoveryProspectId] = useState<string | null>(null);
+  const [discoveryCenterMode, setDiscoveryCenterMode] = useState<"gps" | "manual">("gps");
+  const [discoveryCenter, setDiscoveryCenter] = useState<{ lat: number; lng: number } | null>(null);
+  const [discoveryRadiusMeters, setDiscoveryRadiusMeters] = useState<number>(GOOGLE_SEARCH_RADIUS_METERS);
 
   const [chatMessages, setChatMessages] = useState<VisitCopilotChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -296,6 +301,12 @@ function VisitCopilotScreen() {
     onError: (error) => toast.error(error instanceof ApiError ? error.message : t("copilot.statusError")),
   });
 
+  const discoveryLimitQuery = useQuery<VisitCopilotDiscoveryLimit>({
+    queryKey: ["visit-copilot", "discovery-limit"],
+    queryFn: visitCopilotApi.discoveryLimit,
+    enabled: showDiscovery,
+  });
+
   const prospectVisitMutation = useMutation({
     mutationFn: visitCopilotApi.createProspectVisit,
     onSuccess: () => toast.success(t("copilot.prospectVisitAdded")),
@@ -312,6 +323,7 @@ function VisitCopilotScreen() {
         return;
       }
       setLatestGoogleProspects(data.prospects.filter((prospect) => prospect.source === "GOOGLE"));
+      queryClient.setQueryData<VisitCopilotDiscoveryLimit>(["visit-copilot", "discovery-limit"], { dailyLimit: 3, remaining: data.dailyRemaining ?? 0 });
       toast.success(t("copilot.googleSearchResult", { found: data.found, newCount: data.newCount }));
       queryClient.invalidateQueries({ queryKey: ["visit-copilot", "discovery"] });
     },
@@ -375,34 +387,19 @@ function VisitCopilotScreen() {
 
   // "Search around me": GPS first; if geolocation is missing/denied, fall
   // back to the center of the customer markers already on the map.
-  function searchGoogleAround() {
-    if (googleSearchMutation.isPending) return;
-    const fallback = () => {
-      const data = discoveryQuery.data;
-      const points = data && data.customers.length > 0 ? data.customers : data?.prospects ?? [];
-      if (points.length === 0) {
-        toast.error(t("copilot.geoUnavailable"));
-        return;
-      }
-      toast.warning(t("copilot.geoFallbackNotice"));
-      const lat = points.reduce((sum, p) => sum + p.lat, 0) / points.length;
-      const lon = points.reduce((sum, p) => sum + p.lon, 0) / points.length;
-      googleSearchMutation.mutate({ lat, lon, radiusMeters: GOOGLE_SEARCH_RADIUS_METERS });
-    };
-    if (typeof navigator === "undefined" || !navigator.geolocation) {
-      fallback();
-      return;
-    }
+  const setGpsCenter = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) { toast.error("GPS غير متاح على هذا الجهاز."); return; }
     navigator.geolocation.getCurrentPosition(
-      (pos) =>
-        googleSearchMutation.mutate({
-          lat: pos.coords.latitude,
-          lon: pos.coords.longitude,
-          radiusMeters: GOOGLE_SEARCH_RADIUS_METERS,
-        }),
-      fallback,
+      (pos) => setDiscoveryCenter({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+      () => toast.error("تعذر الوصول إلى موقعك الحالي. اسمح بالوصول إلى GPS ثم حاول مجددًا."),
       { enableHighAccuracy: true, timeout: 10_000 },
     );
+  }, []);
+
+  function searchGoogleAround() {
+    if (googleSearchMutation.isPending) return;
+    if (!discoveryCenter) { toast.error(discoveryCenterMode === "manual" ? "اضغط على الخريطة أولًا لتحديد مركز البحث." : "حدّد موقعك الحالي أولًا."); return; }
+    googleSearchMutation.mutate({ lat: discoveryCenter.lat, lon: discoveryCenter.lng, radiusMeters: discoveryRadiusMeters });
   }
 
   function sendChat(text: string) {
@@ -440,12 +437,13 @@ function VisitCopilotScreen() {
   const routeOpp = routeOppQuery.data;
   const showOppCard = !!plan && !!routeOpp && !routeOpp.disabled && routeOpp.highCount + routeOpp.mediumCount > 0;
   const discoveryProspects = useMemo(() => {
-    const rows = new globalThis.Map<string, VisitCopilotProspect>((discoveryQuery.data?.prospects ?? []).map((prospect) => [prospect.id, prospect]));
-    latestGoogleProspects.forEach((prospect) => rows.set(prospect.id, prospect));
-    return [...rows.values()].sort((a, b) => prospectSort === "CATALOG_FIT"
+    // The discovery surface is deliberately scoped to the most recent
+    // explicit Google search. Existing stored prospects belong to other
+    // searches/scopes and must not leak into this radius' red markers/list.
+    return latestGoogleProspects.filter((prospect) => prospect.source === "GOOGLE").sort((a, b) => prospectSort === "CATALOG_FIT"
       ? (b.catalogFitScore ?? -1) - (a.catalogFitScore ?? -1)
       : b.priorityScore - a.priorityScore);
-  }, [discoveryQuery.data?.prospects, latestGoogleProspects, prospectSort]);
+  }, [latestGoogleProspects, prospectSort]);
   const prospectGroups = useMemo(() => {
     const groups = [{ key: "HOTELS", label: t("copilot.businessHotels"), prospects: [] as typeof discoveryProspects }, { key: "RESTAURANTS", label: t("copilot.businessRestaurants"), prospects: [] as typeof discoveryProspects }, { key: "CAFES", label: t("copilot.businessCafes"), prospects: [] as typeof discoveryProspects }, { key: "OTHER", label: t("copilot.businessOther"), prospects: [] as typeof discoveryProspects }];
     for (const prospect of discoveryProspects) groups[prospect.businessType === "hotel" ? 0 : prospect.businessType === "restaurant" ? 1 : prospect.businessType === "cafe" || prospect.businessType === "coffee_shop" ? 2 : 3]!.prospects.push(prospect);
@@ -504,7 +502,6 @@ function VisitCopilotScreen() {
             className="h-11 gap-2 max-md:h-10 max-md:flex-1 max-md:px-3 max-md:text-xs"
             onClick={() => {
               setShowDiscovery(true);
-              searchGoogleAround();
             }}
           >
             <Search className="h-4 w-4" />
@@ -588,12 +585,24 @@ function VisitCopilotScreen() {
                   variant="secondary"
                   className="h-11 gap-2 max-md:h-10 max-md:flex-1 max-md:px-3 max-md:text-xs"
                   onClick={searchGoogleAround}
-                  disabled={googleSearchMutation.isPending || discoveryQuery.isLoading}
+                  disabled={googleSearchMutation.isPending || discoveryQuery.isLoading || !discoveryCenter || (discoveryLimitQuery.data?.remaining ?? 0) === 0}
                 >
                   {googleSearchMutation.isPending ? <Spinner className="h-4 w-4" /> : <LocateFixed className="h-4 w-4" />}
-                  {t("copilot.googleSearchButton")}
+                  اكتشف الفرص داخل هذا النطاق
                 </Button>
               </div>
+
+              <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 p-3 text-sm">
+                <Button type="button" size="sm" variant={discoveryCenterMode === "gps" ? "default" : "outline"} onClick={() => { setDiscoveryCenterMode("gps"); setGpsCenter(); }}>حول موقعي</Button>
+                <Button type="button" size="sm" variant={discoveryCenterMode === "manual" ? "default" : "outline"} onClick={() => { setDiscoveryCenterMode("manual"); setDiscoveryCenter(null); }}>حدد على الخريطة</Button>
+                <Select value={String(discoveryRadiusMeters)} onValueChange={(value) => setDiscoveryRadiusMeters(Number(value))}>
+                  <SelectTrigger className="h-9 w-24"><SelectValue /></SelectTrigger>
+                  <SelectContent>{GOOGLE_RADIUS_OPTIONS.map((radius) => <SelectItem key={radius} value={String(radius)}>{radius / 1000} km</SelectItem>)}</SelectContent>
+                </Select>
+                <span className="text-xs text-muted-foreground">{discoveryCenterMode === "manual" ? "اضغط على الخريطة لاختيار مركز البحث." : discoveryCenter ? "تم تحديد موقعك الحالي." : "حدّد موقعك الحالي للبدء."}</span>
+                <span className="ms-auto text-xs font-medium text-muted-foreground">متبقي {discoveryLimitQuery.data?.remaining ?? "…"} من 3 اليوم</span>
+              </div>
+              {discoveryLimitQuery.data?.remaining === 0 && <p className="text-sm text-destructive">تم استخدام عمليات Google Discovery الثلاث المتاحة اليوم. حاول مجددًا بعد بداية يوم الشركة التالي.</p>}
 
               {dailyRouteCustomers?.length === 0 ? (
                 <p className="text-sm text-muted-foreground">{t("copilot.noCustomersForDate", { weekday: briefQuery.data?.weekday ?? "" })}</p>
@@ -626,6 +635,10 @@ function VisitCopilotScreen() {
                       prospects={discoveryProspects}
                       selectedProspectId={selectedDiscoveryProspectId}
                       onSelectProspect={setSelectedDiscoveryProspectId}
+                      searchCenter={discoveryCenter}
+                      radiusMeters={discoveryRadiusMeters}
+                      manualCenterMode={discoveryCenterMode === "manual"}
+                      onManualCenter={setDiscoveryCenter}
                     />
                   )}
                   <div className="space-y-3 border-t pt-3">

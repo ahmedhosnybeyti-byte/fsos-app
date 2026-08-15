@@ -1630,6 +1630,12 @@ export interface VisitCopilotGoogleSearchResult {
   prospects: VisitCopilotProspect[];
   disabled?: boolean;
   message?: string;
+  dailyRemaining?: number;
+}
+
+export interface VisitCopilotDiscoveryLimit {
+  dailyLimit: number;
+  remaining: number;
 }
 
 export interface VisitCopilotRouteOpportunityBest {
