@@ -15,23 +15,25 @@ type GoogleMapsApi = {
   };
 };
 
-declare global {
-  interface Window {
-    google?: GoogleMapsApi;
-  }
-}
-
 let googleMapsLoad: Promise<GoogleMapsApi> | null = null;
 
+function currentGoogle(): GoogleMapsApi | undefined {
+  return (window as unknown as { google?: GoogleMapsApi }).google;
+}
+
 function loadGoogleMaps(apiKey: string): Promise<GoogleMapsApi> {
-  if (window.google?.maps) return Promise.resolve(window.google);
+  const google = currentGoogle();
+  if (google?.maps) return Promise.resolve(google);
   if (googleMapsLoad) return googleMapsLoad;
 
   googleMapsLoad = new Promise((resolve, reject) => {
     const script = document.createElement("script");
     script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(apiKey)}&v=weekly`;
     script.async = true;
-    script.onload = () => (window.google?.maps ? resolve(window.google) : reject(new Error("Google Maps did not initialize")));
+    script.onload = () => {
+      const loadedGoogle = currentGoogle();
+      loadedGoogle?.maps ? resolve(loadedGoogle) : reject(new Error("Google Maps did not initialize"));
+    };
     script.onerror = () => reject(new Error("Google Maps failed to load"));
     document.head.appendChild(script);
   });

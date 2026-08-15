@@ -2,16 +2,13 @@
 
 import { useEffect, useRef } from "react";
 import type { Map as LeafletMap, CircleMarker } from "leaflet";
-// Stylesheet import is safe statically (no `window` access at module load).
-// The Leaflet JS itself is only ever imported inside useEffect — same
-// SSR-safety reasoning as route-split-map.tsx / resolved-customers-map.tsx.
-// On top of that, the copilot page loads this whole component through
-// next/dynamic (ssr: false), so even this module costs nothing until the
-// rep actually opens Discovery Mode.
 import "leaflet/dist/leaflet.css";
 import { useTranslation } from "@/components/translation-provider";
 import type { VisitCopilotDiscoveryCustomer, VisitCopilotProspect, VisitCopilotProspectStatus } from "@/lib/types";
+import { GoogleDiscoveryMap } from "@/components/visit-copilot/google-discovery-map";
 
+// Legacy Leaflet renderer is no longer mounted by DiscoveryMap. Leaflet
+// remains untouched in the rest of the app.
 // Same color family as the other maps (route-split-map GROUP_COLORS):
 // existing customers stay muted blue so the green/gold prospect signal
 // pops; IGNORED keeps its gray but fades to near-transparent.
@@ -23,7 +20,7 @@ const STATUS_COLORS: Record<VisitCopilotProspectStatus, string> = {
   CONVERTED: "#f39c12",
 };
 
-export function DiscoveryMap({
+function LegacyDiscoveryMap({
   customers,
   prospects,
   onStartVisit,
@@ -194,6 +191,22 @@ export function DiscoveryMap({
       <div ref={containerRef} className={`${heightClassName} w-full rounded-lg border border-border`} />
     </div>
   );
+}
+
+export function DiscoveryMap({
+  customers,
+  prospects,
+  selectedProspectId,
+  onSelectProspect,
+  heightClassName = "h-[60vh]",
+}: {
+  customers: VisitCopilotDiscoveryCustomer[];
+  prospects: VisitCopilotProspect[];
+  selectedProspectId: string | null;
+  onSelectProspect: (id: string) => void;
+  heightClassName?: string;
+}) {
+  return <GoogleDiscoveryMap customers={customers} prospects={prospects} selectedProspectId={selectedProspectId} onSelectProspect={onSelectProspect} heightClassName={heightClassName} />;
 }
 
 function LegendDot({ color, label, faded }: { color: string; label: string; faded?: boolean }) {

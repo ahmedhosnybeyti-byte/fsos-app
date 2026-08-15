@@ -72,8 +72,7 @@ const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 // prospect briefing. Built mobile-first: single column, big touch targets.
 const MAX_HISTORY_SENT = 10;
 
-// The map (and the whole Leaflet chunk behind it) costs nothing until the
-// rep actually opens Discovery — ssr:false dynamic import, per spec.
+// The Discovery Google Maps chunk costs nothing until the rep opens it.
 const DiscoveryMap = dynamic(() => import("@/components/visit-copilot/discovery-map").then((m) => m.DiscoveryMap), {
   ssr: false,
   loading: MapLoadingFallback,
@@ -173,6 +172,7 @@ function VisitCopilotScreen() {
   const [collapsedProspectGroups, setCollapsedProspectGroups] = useState<Set<string>>(new Set());
   const [expandedProspects, setExpandedProspects] = useState<Set<string>>(new Set());
   const [latestGoogleProspects, setLatestGoogleProspects] = useState<VisitCopilotProspect[]>([]);
+  const [selectedDiscoveryProspectId, setSelectedDiscoveryProspectId] = useState<string | null>(null);
 
   const [chatMessages, setChatMessages] = useState<VisitCopilotChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -623,9 +623,9 @@ function VisitCopilotScreen() {
                   ) : (
                     <DiscoveryMap
                       customers={mapCustomers}
-                      prospects={discoveryQuery.data.prospects.filter((prospect) => prospect.source !== "GOOGLE")}
-                      onStartVisit={openProspectVisit}
-                      onIgnore={(id) => statusMutation.mutate({ id, status: "IGNORED" })}
+                      prospects={discoveryProspects}
+                      selectedProspectId={selectedDiscoveryProspectId}
+                      onSelectProspect={setSelectedDiscoveryProspectId}
                     />
                   )}
                   <div className="space-y-3 border-t pt-3">
@@ -648,7 +648,7 @@ function VisitCopilotScreen() {
                     const scheduledFor = scheduledProspectDates[prospect.id] ?? "";
                     const expanded = expandedProspects.has(prospect.id);
                       return (
-                        <div key={prospect.id} className="rounded-lg border p-3 text-sm">
+                        <div key={prospect.id} className={cn("cursor-pointer rounded-lg border p-3 text-sm", selectedDiscoveryProspectId === prospect.id && "ring-2 ring-primary")} onClick={() => setSelectedDiscoveryProspectId(prospect.id)}>
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             {prospect.photo?.url && <div className="w-16 shrink-0"><img src={prospect.photo.url} alt={prospect.name} loading="lazy" className="h-16 w-16 rounded-md object-cover" />{prospect.photo.attribution && <p className="mt-1 text-[10px] text-muted-foreground">{t("copilot.photoAttribution", { attribution: prospect.photo.attribution })}</p>}</div>}
                             <div>
