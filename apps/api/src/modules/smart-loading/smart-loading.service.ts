@@ -108,6 +108,19 @@ export function isStaleVehicleInventory(currentVehicleStock: number | null, last
   return Math.floor((staleAsOfDate.getTime() - lastSaleMs) / MS_PER_DAY) > staleDaysThreshold;
 }
 
+function normalizedRouteId(value: unknown): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+export function isRouteInActiveVehicleScope(itemRouteId: unknown, invoiceRouteId: unknown, activeRouteIds: ReadonlySet<string>): boolean {
+  // Invoice Items is the product-level source of truth for the sales route.
+  // Older imports can omit it, so use the header's snapshot RouteID only as
+  // a fallback. Normalize both sources because RIE access filtering is
+  // case-insensitive and a mismatch here must not silently erase sales.
+  const saleRouteId = normalizedRouteId(itemRouteId) || normalizedRouteId(invoiceRouteId);
+  return saleRouteId !== "" && activeRouteIds.has(saleRouteId);
+}
+
 export function parseTargetDate(value: string | undefined): Date {
   const tomorrow = nextRouteDate(companyCalendarDate());
   const date = value ? parseAsOfDate(value) : tomorrow;
@@ -205,7 +218,7 @@ export class SmartLoadingService {
     const latestReportIsoByRoute = new Map<string, string>();
     for (const row of vanInventoryRecords.records) {
       const t = toEpochMs(row.ReportDate);
-      const routeId = String(row.RouteID ?? "").trim();
+      const routeId = normalizedRouteId(row.RouteID);
       if (!routeId) continue;
       if (t === null) continue;
       const d = isoDay(t);
@@ -217,7 +230,7 @@ export class SmartLoadingService {
     if (vehicleStockAvailable && activeVehicleRouteIds.size > 0) {
       for (const row of vanInventoryRecords.records) {
         const t = toEpochMs(row.ReportDate);
-        const routeId = String(row.RouteID ?? "").trim();
+        const routeId = normalizedRouteId(row.RouteID);
         if (t === null || !routeId || isoDay(t) !== latestReportIsoByRoute.get(routeId)) continue;
         const productCode = String(row.ProductCode ?? "").trim();
         if (!productCode) continue;
@@ -282,8 +295,8 @@ export class SmartLoadingService {
       const no = String(inv.InvoiceNo ?? "").trim();
       const t = toEpochMs(inv.InvoiceDate);
       const customerCode = String(inv.CustomerCode ?? "").trim();
-      const routeId = String(inv.RouteID ?? "").trim();
-      if (no && t !== null && customerCode && routeId) invoiceMetaByNo.set(no, { date: t, customerCode, routeId });
+      const routeId = normalizedRouteId(inv.RouteID);
+      if (no && t !== null && customerCode) invoiceMetaByNo.set(no, { date: t, customerCode, routeId });
     }
 
     // ---- Invoice Items joined to Invoices -> lastSaleDate + weekly
@@ -313,7 +326,7 @@ export class SmartLoadingService {
       const invoiceNo = String(item.InvoiceNo ?? "").trim();
       const invoice = invoiceMetaByNo.get(invoiceNo);
       if (!invoice) continue;
-      if (!activeVehicleRouteIds.has(invoice.routeId)) continue;
+      if (!isRouteInActiveVehicleScope(item.RouteID, invoice.routeId, activeVehicleRouteIds)) continue;
       const productCode = String(item.ProductCode ?? "").trim();
       if (!productCode) continue;
 
