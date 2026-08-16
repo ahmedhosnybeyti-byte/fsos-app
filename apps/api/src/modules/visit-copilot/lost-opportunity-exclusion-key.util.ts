@@ -17,3 +17,16 @@ export function lostOpportunityExclusionScopeKey(
   if (scopeType === "TEAM_PRODUCT") return JSON.stringify([values.teamScopeId, values.productCode]);
   return values.productCode;
 }
+
+export function lostOpportunityExclusionAppliesToOpportunity(
+  exclusion: { scopeType: LostOpportunityExclusionScope; customerCode: string | null; productCode: string; salespersonId: string | null; teamScopeId: string | null },
+  opportunity: { customerCode: string; productCode: string },
+  userId: string,
+  teamScopeId: string | null,
+): boolean {
+  if (exclusion.productCode !== opportunity.productCode) return false;
+  return exclusion.scopeType === "COMPANY_PRODUCT"
+    || (exclusion.scopeType === "CUSTOMER_PRODUCT" && exclusion.customerCode === opportunity.customerCode)
+    || (exclusion.scopeType === "SALESPERSON_PRODUCT" && exclusion.salespersonId === userId)
+    || (exclusion.scopeType === "TEAM_PRODUCT" && teamScopeId !== null && exclusion.teamScopeId === teamScopeId);
+}

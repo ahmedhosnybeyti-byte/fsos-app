@@ -18,7 +18,7 @@ import {
   type VisitCopilotPlanRequest,
   type VisitCopilotProspectStatusRequest,
 } from "@field-sales-os/schemas";
-import { lostOpportunityExclusionScopeKey } from "./lost-opportunity-exclusion-key.util";
+import { lostOpportunityExclusionAppliesToOpportunity, lostOpportunityExclusionScopeKey } from "./lost-opportunity-exclusion-key.util";
 import type { Prospect } from "@field-sales-os/database";
 import { AppConfigService } from "../../common/config/app-config.service";
 import { PrismaService } from "../../common/prisma/prisma.service";
@@ -1465,10 +1465,7 @@ export class VisitCopilotService {
     const productCodes = [...new Set(opportunities.map((opportunity) => opportunity.productCode))];
     const exclusions = await this.prisma.lostOpportunityExclusion.findMany({ where: { companyId: user.companyId, revokedAt: null, productCode: { in: productCodes } } });
     return opportunities.filter((opportunity) => !exclusions.some((exclusion) =>
-      exclusion.scopeType === "COMPANY_PRODUCT"
-      || (exclusion.scopeType === "CUSTOMER_PRODUCT" && exclusion.customerCode === opportunity.customerCode)
-      || (exclusion.scopeType === "SALESPERSON_PRODUCT" && exclusion.salespersonId === user.userId)
-      || (exclusion.scopeType === "TEAM_PRODUCT" && teamScopeId !== null && exclusion.teamScopeId === teamScopeId)
+      lostOpportunityExclusionAppliesToOpportunity(exclusion, opportunity, user.userId, teamScopeId)
     ));
   }
 
