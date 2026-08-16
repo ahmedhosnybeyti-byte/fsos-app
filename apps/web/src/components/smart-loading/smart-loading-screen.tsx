@@ -258,9 +258,14 @@ export function SmartLoadingScreen({
 
   const staleReferenceDate = useMemo(() => session?.state === "ready" ? new Date(`${session.staleAsOfDate}T00:00:00.000Z`) : new Date(), [session]);
   // The API evaluates stale status from the selected threshold, the latest
-  // Van Inventory snapshot, and route-scoped invoice history. Keep this list
-  // tied to that result so its metric and detail panel have one source of truth.
-  const staleRows = useMemo(() => allRows.filter((row) => row.product.isStale), [allRows]);
+  // Van Inventory snapshot, and route-scoped invoice history. The summary
+  // must read that session result directly: `allRows` is an operational view
+  // that can be rebuilt while recommendations are being recalculated.
+  const staleProducts = useMemo(() => session?.state === "ready" ? session.products.filter((product) => product.isStale) : [], [session]);
+  const staleRows = useMemo(() => {
+    const staleProductCodes = new Set(staleProducts.map((product) => product.productCode));
+    return allRows.filter((row) => staleProductCodes.has(row.product.productCode));
+  }, [allRows, staleProducts]);
 
   const hasLocalChanges = Object.keys(inputs).length > 0 || removedProductCodes.size > 0 || manuallyAddedProductCodes.size > 0 || Object.keys(lostOpportunityAdditions).length > 0 || Object.keys(lostOpportunityQuantityDrafts).length > 0 || checkedItems.size > 0;
   function currentRecalculationSnapshot(): SmartLoadingRecalculateInput { return { targetDate, fromDate, toDate, visitsPerWeek, staleDaysThreshold, customerCodes: [...new Set([...selectedCustomerCodes].map((code) => code.trim()).filter(Boolean))], confirmedOrders: Object.entries(confirmedOrdersByProduct).filter(([, quantity]) => Number.isFinite(quantity) && quantity > 0).map(([productCode, quantity]) => ({ productCode, quantity })) }; }
@@ -646,7 +651,7 @@ export function SmartLoadingScreen({
         onStaleDaysThresholdChange={(value) => { onStaleDaysThresholdChange(Math.max(1, value)); setHasUnappliedChanges(true); }}
         selectedCustomerCodes={selectedCustomerCodes}
         exceptionalCustomers={exceptionalCustomers}
-        loadingSummary={{ productsToLoad: rows.length, totalQuantity: rows.reduce((sum, row) => sum + row.suggested, 0), priorityProducts: priorityProducts.length, staleProducts: staleRows.length }}
+        loadingSummary={{ productsToLoad: rows.length, totalQuantity: rows.reduce((sum, row) => sum + row.suggested, 0), priorityProducts: priorityProducts.length, staleProducts: staleProducts.length }}
         confirmedOrders={confirmedOrdersByProduct}
         confirmedProductCode={confirmedProductCode}
         confirmedQuantity={confirmedQuantity}
