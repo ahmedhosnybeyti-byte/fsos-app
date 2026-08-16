@@ -1307,6 +1307,17 @@ export type TranslationKey =
   | "smartLoading.refresh"
   | "smartLoading.noOtherAlerts"
   | "smartLoading.staleProducts"
+  | "smartLoading.staleProductsPage"
+  | "smartLoading.staleProductsPlanTitle"
+  | "smartLoading.staleProductsLoading"
+  | "smartLoading.staleProductsError"
+  | "smartLoading.noStaleProducts"
+  | "smartLoading.selectStaleProduct"
+  | "smartLoading.noPurchasingCustomers"
+  | "smartLoading.customer"
+  | "smartLoading.totalPurchasedQuantity"
+  | "smartLoading.purchaseFrequency"
+  | "smartLoading.lastPurchaseDate"
   | "smartLoading.staleProductsPanelTitle"
   | "smartLoading.priorityProductsPanelTitle"
   | "smartLoading.close"
@@ -2729,6 +2740,17 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.refresh": "تحديث",
     "smartLoading.noOtherAlerts": "لا توجد تنبيهات إضافية.",
     "smartLoading.staleProducts": "أصناف راكدة",
+    "smartLoading.staleProductsPage": "الأصناف الراكدة",
+    "smartLoading.staleProductsPlanTitle": "خطة تصريف الأصناف الراكدة",
+    "smartLoading.staleProductsLoading": "جارٍ تحميل الأصناف الراكدة...",
+    "smartLoading.staleProductsError": "تعذر تحميل بيانات الأصناف الراكدة.",
+    "smartLoading.noStaleProducts": "لا توجد أصناف راكدة ضمن فترة الركود المحددة.",
+    "smartLoading.selectStaleProduct": "اختر صنفًا لعرض العملاء الذين اشتروا الصنف فعليًا.",
+    "smartLoading.noPurchasingCustomers": "لا توجد مشتريات فعلية مسجلة لهذا الصنف ضمن نطاقك.",
+    "smartLoading.customer": "العميل",
+    "smartLoading.totalPurchasedQuantity": "إجمالي الكمية المشتراة",
+    "smartLoading.purchaseFrequency": "عدد مرات الشراء",
+    "smartLoading.lastPurchaseDate": "آخر تاريخ شراء",
     "smartLoading.staleProductsPanelTitle": "أصناف راكدة",
     "smartLoading.priorityProductsPanelTitle": "أصناف أولوية",
     "smartLoading.close": "إغلاق",
@@ -4165,6 +4187,17 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.refresh": "Refresh",
     "smartLoading.noOtherAlerts": "There are no additional alerts.",
     "smartLoading.staleProducts": "Stale Products",
+    "smartLoading.staleProductsPage": "Stale Products",
+    "smartLoading.staleProductsPlanTitle": "Stale Products Clearance Plan",
+    "smartLoading.staleProductsLoading": "Loading stale products...",
+    "smartLoading.staleProductsError": "Unable to load stale product data.",
+    "smartLoading.noStaleProducts": "There are no stale products for the selected stale period.",
+    "smartLoading.selectStaleProduct": "Select a product to view customers who actually purchased it.",
+    "smartLoading.noPurchasingCustomers": "There are no recorded purchases for this product in your scope.",
+    "smartLoading.customer": "Customer",
+    "smartLoading.totalPurchasedQuantity": "Total purchased quantity",
+    "smartLoading.purchaseFrequency": "Purchase frequency",
+    "smartLoading.lastPurchaseDate": "Last purchase date",
     "smartLoading.staleProductsPanelTitle": "Stale Products",
     "smartLoading.priorityProductsPanelTitle": "Priority Products",
     "smartLoading.close": "Close",

@@ -605,6 +605,12 @@ export function SmartLoadingScreen({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button asChild variant="outline">
+            <Link href={`/dashboard/stale-products?targetDate=${targetDate}&staleDaysThreshold=${staleDaysThreshold}`}>
+              <PackagePlus className="h-4 w-4" />
+              {t("smartLoading.staleProductsPage")}
+            </Link>
+          </Button>
           <Button variant="outline" onClick={() => { setLostOpportunitiesOpen(true); setLostOpportunityWarning(null); }}>
             <AlertTriangle className="h-4 w-4 text-amber-600" />
             {t("smartLoading.lostOpportunities")} ({formatQuantity(lostOpportunityGroups.reduce((sum, category) => sum + category.products.reduce((productSum, product) => productSum + product.customers.length, 0), 0), locale)})

@@ -37,6 +37,23 @@ export const smartLoadingProductSchema = z.object({
 });
 export type SmartLoadingProduct = z.infer<typeof smartLoadingProductSchema>;
 
+export const smartLoadingStaleProductCustomerSchema = z.object({
+  customerCode: z.string(),
+  customerName: z.string(),
+  totalQuantity: z.number(),
+  purchaseFrequency: z.number().int().positive(),
+  lastPurchaseDate: z.string(),
+});
+export type SmartLoadingStaleProductCustomer = z.infer<typeof smartLoadingStaleProductCustomerSchema>;
+
+export const smartLoadingStaleProductPlanSchema = z.object({
+  productCode: z.string(),
+  productName: z.string(),
+  category: z.string().nullable(),
+  customers: z.array(smartLoadingStaleProductCustomerSchema),
+});
+export type SmartLoadingStaleProductPlan = z.infer<typeof smartLoadingStaleProductPlanSchema>;
+
 export const smartLoadingRouteSchema = z.object({
   targetDate: z.string(),
   customerCount: z.number().int().nonnegative(),
@@ -100,6 +117,7 @@ export type SmartLoadingLostOpportunityReason = z.infer<typeof smartLoadingLostO
 export const smartLoadingReadySessionSchema = z.object({
   state: z.literal("ready"),
   products: z.array(smartLoadingProductSchema),
+  staleProductPlans: z.array(smartLoadingStaleProductPlanSchema),
   attention: z.array(smartLoadingAttentionSchema),
   asOfDate: z.string(),
   staleAsOfDate: z.string(),

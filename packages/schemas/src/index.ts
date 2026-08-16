@@ -40,6 +40,8 @@ export {
   DEFAULT_SMART_LOADING_STALE_DAYS,
   smartLoadingStaleDaysThresholdSchema,
   smartLoadingProductSchema,
+  smartLoadingStaleProductCustomerSchema,
+  smartLoadingStaleProductPlanSchema,
   smartLoadingRouteCustomerSchema,
   smartLoadingCustomerSearchResultSchema,
   smartLoadingRecalculateInputSchema,
@@ -55,6 +57,8 @@ export {
 export type {
   SmartLoadingPriority,
   SmartLoadingProduct,
+  SmartLoadingStaleProductCustomer,
+  SmartLoadingStaleProductPlan,
   SmartLoadingRoute,
   SmartLoadingRouteCustomer,
   SmartLoadingCustomerSearchResult,

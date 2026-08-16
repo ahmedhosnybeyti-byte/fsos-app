@@ -205,6 +205,12 @@ export class SmartLoadingService {
       this.rieFacade.getEntityRecords("Van Inventory", ctx),
     ]);
     const customersRecords = customersResult.records;
+    const customerNamesByCode = new Map(
+      customersRecords.map((customer) => [
+        String(customer.CustomerCode ?? "").trim(),
+        String(customer.CustomerName ?? customer.CustomerCode ?? "").trim(),
+      ]),
+    );
     const invoicesRecords = invoicesResult.records;
     const invoiceItemsRecords = invoiceItemsResult.records;
     const returnsRecords = returnsResult.records;
@@ -324,6 +330,7 @@ export class SmartLoadingService {
     const lastSaleMsByProduct = new Map<string, number>();
     const windowQtyByProduct = new Map<string, number>();
     const prioritySalesByProduct = new Map<string, { customers: Set<string>; totalQuantity: number }>();
+    const customerPurchasesByProduct = new Map<string, Map<string, { totalQuantity: number; invoiceNumbers: Set<string>; lastPurchaseMs: number }>>();
 
     for (const item of invoiceItemsRecords) {
       const invoiceNo = String(item.InvoiceNo ?? "").trim();
@@ -339,16 +346,30 @@ export class SmartLoadingService {
       const prevLast = lastSaleMsByProduct.get(productCode);
       if (prevLast === undefined || invoice.date > prevLast) lastSaleMsByProduct.set(productCode, invoice.date);
 
+      const quantity = toFiniteNumber(item.Quantity) ?? 0;
+      if (quantity > 0) {
+        const purchasesByCustomer = customerPurchasesByProduct.get(productCode) ?? new Map();
+        const purchase = purchasesByCustomer.get(invoice.customerCode) ?? {
+          totalQuantity: 0,
+          invoiceNumbers: new Set<string>(),
+          lastPurchaseMs: invoice.date,
+        };
+        purchase.totalQuantity += quantity;
+        purchase.invoiceNumbers.add(invoiceNo);
+        purchase.lastPurchaseMs = Math.max(purchase.lastPurchaseMs, invoice.date);
+        purchasesByCustomer.set(invoice.customerCode, purchase);
+        customerPurchasesByProduct.set(productCode, purchasesByCustomer);
+      }
+
       // Demand and priority remain route-visit calculations, so they retain
       // the next-route-customer filter independently from stale detection.
       if (!nextRouteCustomers.has(invoice.customerCode)) continue;
       if (invoice.date >= windowStartMs && invoice.date <= nowMs) {
-        const qty = toFiniteNumber(item.Quantity) ?? 0;
-        windowQtyByProduct.set(productCode, (windowQtyByProduct.get(productCode) ?? 0) + qty);
-        if (qty > 0) {
+        windowQtyByProduct.set(productCode, (windowQtyByProduct.get(productCode) ?? 0) + quantity);
+        if (quantity > 0) {
           const priority = prioritySalesByProduct.get(productCode) ?? { customers: new Set<string>(), totalQuantity: 0 };
           priority.customers.add(invoice.customerCode);
-          priority.totalQuantity += qty;
+          priority.totalQuantity += quantity;
           prioritySalesByProduct.set(productCode, priority);
         }
       }
@@ -386,6 +407,42 @@ export class SmartLoadingService {
 
     products.sort((a, b) => a.productName.localeCompare(b.productName, "ar"));
 
+    const staleProductPlans = products
+      .filter((product) => product.isStale)
+      .map((product) => {
+        const customerPurchases = [...(customerPurchasesByProduct.get(product.productCode)?.entries() ?? [])];
+        const maxFrequency = Math.max(...customerPurchases.map(([, purchase]) => purchase.invoiceNumbers.size), 1);
+        const maxQuantity = Math.max(...customerPurchases.map(([, purchase]) => purchase.totalQuantity), 1);
+        const earliestPurchaseMs = Math.min(...customerPurchases.map(([, purchase]) => purchase.lastPurchaseMs), 0);
+        const latestPurchaseMs = Math.max(...customerPurchases.map(([, purchase]) => purchase.lastPurchaseMs), 0);
+
+        const customers = customerPurchases
+          .map(([customerCode, purchase]) => {
+            // Normalize each signal before combining it so quantity units do
+            // not overpower invoice frequency or purchase recency.
+            const recency = latestPurchaseMs === earliestPurchaseMs
+              ? 1
+              : (purchase.lastPurchaseMs - earliestPurchaseMs) / (latestPurchaseMs - earliestPurchaseMs);
+            return {
+              customerCode,
+              customerName: customerNamesByCode.get(customerCode) || customerCode,
+              totalQuantity: purchase.totalQuantity,
+              purchaseFrequency: purchase.invoiceNumbers.size,
+              lastPurchaseDate: isoDay(purchase.lastPurchaseMs),
+              rankingScore: purchase.invoiceNumbers.size / maxFrequency + purchase.totalQuantity / maxQuantity + recency,
+            };
+          })
+          .sort((a, b) => b.rankingScore - a.rankingScore || b.purchaseFrequency - a.purchaseFrequency || b.totalQuantity - a.totalQuantity || b.lastPurchaseDate.localeCompare(a.lastPurchaseDate) || a.customerName.localeCompare(b.customerName, "ar"))
+          .map(({ rankingScore: _rankingScore, ...customer }) => customer);
+
+        return {
+          productCode: product.productCode,
+          productName: product.productName,
+          category: product.category,
+          customers,
+        };
+      });
+
     const priorityProducts: SmartLoadingPriorityProduct[] = selectRoutePriorityProducts(
       [...prioritySalesByProduct.entries()].map(([productCode, value]) => ({
         productCode,
@@ -399,6 +456,7 @@ export class SmartLoadingService {
     return {
       state: "ready",
       products,
+      staleProductPlans,
       attention: attentionList,
       calculatedAt: new Date(nowMs).toISOString(),
       asOfDate: targetDateIso,
