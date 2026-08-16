@@ -112,6 +112,10 @@ function normalizedRouteId(value: unknown): string {
   return String(value ?? "").trim().toLowerCase();
 }
 
+export function normalizedProductCode(value: unknown): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
 export function isRouteInActiveVehicleScope(itemRouteId: unknown, invoiceRouteId: unknown, activeRouteIds: ReadonlySet<string>): boolean {
   // Invoice Items is the product-level source of truth for the sales route.
   // Older imports can omit it, so use the header's snapshot RouteID only as
@@ -241,7 +245,7 @@ export class SmartLoadingService {
         const t = toEpochMs(row.ReportDate);
         const routeId = normalizedRouteId(row.RouteID);
         if (t === null || !routeId || isoDay(t) !== latestReportIsoByRoute.get(routeId)) continue;
-        const productCode = String(row.ProductCode ?? "").trim();
+        const productCode = normalizedProductCode(row.ProductCode);
         if (!productCode) continue;
         const qty = toFiniteNumber(row.Quantity) ?? 0;
         vehicleStockByProduct.set(productCode, (vehicleStockByProduct.get(productCode) ?? 0) + qty);
@@ -249,13 +253,14 @@ export class SmartLoadingService {
     }
 
     // ---- Products -> category (+ name fallback).
-    const productMeta = new Map<string, { name: string; category: string | null }>();
+    const productMeta = new Map<string, { code: string; name: string; category: string | null }>();
     if (productsResult.available) {
       for (const p of productsResult.records) {
-        const code = String(p.ProductCode ?? "").trim();
+        const code = normalizedProductCode(p.ProductCode);
         if (!code) continue;
         productMeta.set(code, {
-          name: String(p.ProductName ?? code).trim() || code,
+          code: String(p.ProductCode ?? code).trim() || code,
+          name: String(p.ProductName ?? p.ProductCode ?? code).trim() || code,
           category: p.Category ? String(p.Category).trim() || null : null,
         });
       }
@@ -337,7 +342,7 @@ export class SmartLoadingService {
       const invoice = invoiceMetaByNo.get(invoiceNo);
       if (!invoice) continue;
       if (!isRouteInActiveVehicleScope(item.RouteID, invoice.routeId, activeVehicleRouteIds)) continue;
-      const productCode = String(item.ProductCode ?? "").trim();
+      const productCode = normalizedProductCode(item.ProductCode);
       if (!productCode) continue;
 
       // Staleness belongs to the stock currently carried by this caller's
@@ -393,7 +398,7 @@ export class SmartLoadingService {
 
 
       products.push({
-        productCode,
+        productCode: meta?.code ?? productCode,
         productName: meta?.name ?? productCode,
         currentVehicleStock,
         weeklyAverageSales,
@@ -445,7 +450,7 @@ export class SmartLoadingService {
 
     const priorityProducts: SmartLoadingPriorityProduct[] = selectRoutePriorityProducts(
       [...prioritySalesByProduct.entries()].map(([productCode, value]) => ({
-        productCode,
+        productCode: productMeta.get(productCode)?.code ?? productCode,
         productName: productMeta.get(productCode)?.name ?? productCode,
         category: productMeta.get(productCode)?.category ?? null,
         routeCustomerCount: value.customers.size,
