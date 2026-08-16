@@ -57,7 +57,11 @@ export default function StaleProductsPage() {
       .sort(([left], [right]) => left.localeCompare(right, locale))
       .map(([category, items]) => ({
         category,
-        plans: items.sort((left, right) => left.productName.localeCompare(right.productName, locale)),
+        plans: items.sort((left, right) => (
+          right.currentVehicleStock - left.currentVehicleStock
+          || staleDaysSince(right.lastSaleDate, operationalTargetDate!) - staleDaysSince(left.lastSaleDate, operationalTargetDate!)
+          || left.productName.localeCompare(right.productName, locale)
+        )),
         decisionPlans: (() => {
           const maximums = {
             stock: Math.max(...items.map((plan) => plan.currentVehicleStock), 1),
