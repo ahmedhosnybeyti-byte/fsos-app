@@ -1320,6 +1320,7 @@ export type TranslationKey =
   | "smartLoading.lastPurchaseDate"
   | "smartLoading.daysStale"
   | "smartLoading.productLabel"
+  | "smartLoading.backToSmartLoading"
   | "smartLoading.openAllSections"
   | "smartLoading.closeAllSections"
   | "smartLoading.practicalDecision"
@@ -2759,6 +2760,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.lastPurchaseDate": "آخر تاريخ شراء",
     "smartLoading.daysStale": "أيام الركود",
     "smartLoading.productLabel": "الصنف",
+    "smartLoading.backToSmartLoading": "الرجوع إلى التحميل الذكي",
     "smartLoading.openAllSections": "فتح كل الأقسام",
     "smartLoading.closeAllSections": "إغلاق كل الأقسام",
     "smartLoading.practicalDecision": "القرار العملي",
@@ -4212,6 +4214,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.lastPurchaseDate": "Last purchase date",
     "smartLoading.daysStale": "Stale days",
     "smartLoading.productLabel": "Product",
+    "smartLoading.backToSmartLoading": "Back to Smart Loading",
     "smartLoading.openAllSections": "Open all sections",
     "smartLoading.closeAllSections": "Close all sections",
     "smartLoading.practicalDecision": "Practical decision",

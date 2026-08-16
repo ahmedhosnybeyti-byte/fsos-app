@@ -32,6 +32,9 @@ test("uses one SKU key for stock and invoice items despite casing or whitespace"
   const stockSku = normalizedProductCode(" P-080 ");
   const invoiceItemSku = normalizedProductCode("p-080");
   assert.equal(stockSku, invoiceItemSku);
+
+  const purchases = new Map([[invoiceItemSku, "customer"]]);
+  assert.equal(purchases.get(normalizedProductCode("P-080")), "customer");
 });
 
 test("excludes sales posted after the selected operational date", () => {

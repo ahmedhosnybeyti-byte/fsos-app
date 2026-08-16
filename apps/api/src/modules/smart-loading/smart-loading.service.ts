@@ -423,7 +423,7 @@ export class SmartLoadingService {
     const staleProductPlans = products
       .filter((product) => product.isStale)
       .map((product) => {
-        const customerPurchases = [...(customerPurchasesByProduct.get(product.productCode)?.entries() ?? [])];
+        const customerPurchases = [...(customerPurchasesByProduct.get(normalizedProductCode(product.productCode))?.entries() ?? [])];
         const maxFrequency = Math.max(...customerPurchases.map(([, purchase]) => purchase.invoiceNumbers.size), 1);
         const maxQuantity = Math.max(...customerPurchases.map(([, purchase]) => purchase.totalQuantity), 1);
         const earliestPurchaseMs = Math.min(...customerPurchases.map(([, purchase]) => purchase.lastPurchaseMs), 0);

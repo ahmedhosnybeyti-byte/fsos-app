@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -88,6 +89,11 @@ export default function StaleProductsPage() {
         {t("smartLoading.staleProductsPlanTitle")}
       </h1>
       <div className="flex flex-wrap gap-2">
+        <Button asChild variant="outline">
+          <Link href="/dashboard/smart-loading">
+            {t("smartLoading.backToSmartLoading")}
+          </Link>
+        </Button>
         <Button variant="outline" onClick={openAllCategories}>
           {t("smartLoading.openAllSections")}
         </Button>
