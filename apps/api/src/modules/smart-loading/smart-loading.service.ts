@@ -190,7 +190,10 @@ export class SmartLoadingService {
     const ctx = this.rieContext(user);
     const targetDate = parseTargetDate(requestedTargetDate);
     const targetDateIso = isoDay(targetDate.getTime());
-    const staleAsOfDate = companyCalendarDate();
+    // The stale card belongs to this loading session. Before `isStale` moved
+    // to the API, the UI compared sales against `session.asOfDate` (the
+    // target loading date); retain that same reference date on the server.
+    const staleAsOfDate = targetDate;
 
     const [productsResult, customersResult, invoicesResult, invoiceItemsResult, returnsResult, returnItemsResult, vanInventoryRecords] = await Promise.all([
       this.rieFacade.getEntityRecords("Products", ctx),
