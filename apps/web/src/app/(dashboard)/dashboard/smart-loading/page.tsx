@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { SmartLoadingScreen } from "@/components/smart-loading/smart-loading-screen";
 import { smartLoadingApi } from "@/lib/api/smart-loading";
+import { DEFAULT_SMART_LOADING_STALE_DAYS } from "@field-sales-os/schemas";
 
 function tomorrowIso(): string {
   const date = new Date();
@@ -13,9 +14,10 @@ function tomorrowIso(): string {
 
 export default function SmartLoadingPage() {
   const [targetDate, setTargetDate] = useState(tomorrowIso);
+  const [staleDaysThreshold, setStaleDaysThreshold] = useState(DEFAULT_SMART_LOADING_STALE_DAYS);
   const session = useQuery({
-    queryKey: ["smart-loading", "session", targetDate],
-    queryFn: () => smartLoadingApi.getSession(targetDate),
+    queryKey: ["smart-loading", "session", targetDate, staleDaysThreshold],
+    queryFn: () => smartLoadingApi.getSession(targetDate, staleDaysThreshold),
   });
 
   return (
@@ -25,6 +27,8 @@ export default function SmartLoadingPage() {
       isError={session.isError}
       targetDate={targetDate}
       onTargetDateChange={setTargetDate}
+      staleDaysThreshold={staleDaysThreshold}
+      onStaleDaysThresholdChange={setStaleDaysThreshold}
       onRetry={async () => {
         const result = await session.refetch();
         if (result.isError) throw result.error;

@@ -1,5 +1,3 @@
-export const SMART_LOADING_STALE_DAYS = 4;
-
 export type SalesRecency = "recent" | "stale" | "missing";
 
 function validSaleTime(lastSaleDate: string | null): number | null {
@@ -8,16 +6,16 @@ function validSaleTime(lastSaleDate: string | null): number | null {
   return Number.isNaN(time) ? null : time;
 }
 
-export function classifySalesRecency(lastSaleDate: string | null, now = new Date(), staleDaysThreshold = SMART_LOADING_STALE_DAYS): SalesRecency {
+export function classifySalesRecency(lastSaleDate: string | null, now: Date, staleDaysThreshold: number): SalesRecency {
   const saleTime = validSaleTime(lastSaleDate);
   if (saleTime === null) return "missing";
   return Math.floor((now.getTime() - saleTime) / 86_400_000) > staleDaysThreshold ? "stale" : "recent";
 }
 
-export function summarizeSalesRecency<T extends { lastSaleDate: string | null }>(products: readonly T[], now = new Date()) {
+export function summarizeSalesRecency<T extends { lastSaleDate: string | null }>(products: readonly T[], now: Date, staleDaysThreshold: number) {
   return products.reduce(
     (summary, product) => {
-      summary[classifySalesRecency(product.lastSaleDate, now)] += 1;
+      summary[classifySalesRecency(product.lastSaleDate, now, staleDaysThreshold)] += 1;
       return summary;
     },
     { recent: 0, stale: 0, missing: 0 },

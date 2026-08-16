@@ -37,6 +37,8 @@ export * from "./fsos-360.schemas";
 export * from "./geo-engine.schemas";
 export {
   smartLoadingPrioritySchema,
+  DEFAULT_SMART_LOADING_STALE_DAYS,
+  smartLoadingStaleDaysThresholdSchema,
   smartLoadingProductSchema,
   smartLoadingRouteCustomerSchema,
   smartLoadingCustomerSearchResultSchema,

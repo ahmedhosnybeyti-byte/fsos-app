@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from "@nestjs/common";
-import type { SmartLoadingPriorityProduct, SmartLoadingProduct, SmartLoadingSession, SmartLoadingRecalculateInput, SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
+import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingPriorityProduct, type SmartLoadingProduct, type SmartLoadingSession, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
 import { LostOpportunityService } from "../lost-opportunity/lost-opportunity.service";
@@ -30,9 +30,10 @@ import { selectRoutePriorityProducts } from "./smart-loading-priority";
 // "latest ReportDate per route, Quantity > 0" pattern reused below for
 // currentVehicleStock). So all three fields below are real:
 //   - category            <- Products.Category
-//   - lastSaleDate        <- max(Invoices.InvoiceDate) per ProductCode,
-//                            via Invoice Items joined to Invoices (same
-//                            join shape as SGI/Team Performance)
+//   - lastSaleDate        <- max(Invoices.InvoiceDate) per ProductCode and
+//                            current Van Inventory RouteID, via Invoice
+//                            Items joined to Invoices (same join shape as
+//                            SGI/Team Performance)
 //   - currentVehicleStock <- Van Inventory.Quantity at the latest
 //                            ReportDate, for the caller's own RouteID(s)
 //                            (RIE hierarchy scoping already narrows
@@ -56,7 +57,6 @@ import { selectRoutePriorityProducts } from "./smart-loading-priority";
 const MONTHS_LOOKBACK = 3;
 const WEEKS_DIVISOR = 12;
 const MS_PER_DAY = 86_400_000;
-const HIGH_PRIORITY_DAYS_STALE = 4;
 function toFiniteNumber(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
   if (typeof value === "string" && value.trim() !== "") {
@@ -101,6 +101,11 @@ export function parseAsOfDate(value: string | undefined): Date {
     throw new BadRequestException("asOfDate must be a valid calendar date.");
   }
   return date;
+}
+
+export function isStaleVehicleInventory(currentVehicleStock: number | null, lastSaleMs: number | null, staleAsOfDate: Date, staleDaysThreshold: number): boolean {
+  if (currentVehicleStock === null || currentVehicleStock <= 0 || lastSaleMs === null) return false;
+  return Math.floor((staleAsOfDate.getTime() - lastSaleMs) / MS_PER_DAY) > staleDaysThreshold;
 }
 
 export function parseTargetDate(value: string | undefined): Date {
@@ -167,11 +172,12 @@ export class SmartLoadingService {
     }
   }
 
-  async getSession(user: AuthenticatedUser, requestedTargetDate?: string): Promise<SmartLoadingSession> {
+  async getSession(user: AuthenticatedUser, requestedTargetDate?: string, staleDaysThreshold = DEFAULT_SMART_LOADING_STALE_DAYS): Promise<SmartLoadingSession> {
     if (!user.companyId) throw new ForbiddenException();
     const ctx = this.rieContext(user);
     const targetDate = parseTargetDate(requestedTargetDate);
     const targetDateIso = isoDay(targetDate.getTime());
+    const staleAsOfDate = companyCalendarDate();
 
     const [productsResult, customersResult, invoicesResult, invoiceItemsResult, returnsResult, returnItemsResult, vanInventoryRecords] = await Promise.all([
       this.rieFacade.getEntityRecords("Products", ctx),
@@ -196,18 +202,23 @@ export class SmartLoadingService {
     // as visit-copilot.service.ts's latestVanStockSet. RIE hierarchy
     // scoping has already narrowed `records` to routes the caller may
     // see (a SALES_REP gets only their own route's rows).
-    let latestReportIso: string | null = null;
+    const latestReportIsoByRoute = new Map<string, string>();
     for (const row of vanInventoryRecords.records) {
       const t = toEpochMs(row.ReportDate);
+      const routeId = String(row.RouteID ?? "").trim();
+      if (!routeId) continue;
       if (t === null) continue;
       const d = isoDay(t);
-      if (!latestReportIso || d > latestReportIso) latestReportIso = d;
+      const previous = latestReportIsoByRoute.get(routeId);
+      if (!previous || d > previous) latestReportIsoByRoute.set(routeId, d);
     }
+    const activeVehicleRouteIds = new Set(latestReportIsoByRoute.keys());
     const vehicleStockByProduct = new Map<string, number>();
-    if (vehicleStockAvailable && latestReportIso) {
+    if (vehicleStockAvailable && activeVehicleRouteIds.size > 0) {
       for (const row of vanInventoryRecords.records) {
         const t = toEpochMs(row.ReportDate);
-        if (t === null || isoDay(t) !== latestReportIso) continue;
+        const routeId = String(row.RouteID ?? "").trim();
+        if (t === null || !routeId || isoDay(t) !== latestReportIsoByRoute.get(routeId)) continue;
         const productCode = String(row.ProductCode ?? "").trim();
         if (!productCode) continue;
         const qty = toFiniteNumber(row.Quantity) ?? 0;
@@ -266,19 +277,21 @@ export class SmartLoadingService {
         : lostOpportunityResult.status === "no-customers" ? "no-tomorrow-route-customers" : lostOpportunityResult.status;
     // ---- Invoices -> per-InvoiceNo customer/date lookup (same join shape
     // as sgi.service.ts / team-performance.service.ts).
-    const invoiceMetaByNo = new Map<string, { date: number; customerCode: string }>();
+    const invoiceMetaByNo = new Map<string, { date: number; customerCode: string; routeId: string }>();
     for (const inv of invoicesRecords) {
       const no = String(inv.InvoiceNo ?? "").trim();
       const t = toEpochMs(inv.InvoiceDate);
       const customerCode = String(inv.CustomerCode ?? "").trim();
-      if (no && t !== null && customerCode) invoiceMetaByNo.set(no, { date: t, customerCode });
+      const routeId = String(inv.RouteID ?? "").trim();
+      if (no && t !== null && customerCode && routeId) invoiceMetaByNo.set(no, { date: t, customerCode, routeId });
     }
 
     // ---- Invoice Items joined to Invoices -> lastSaleDate + weekly
     // average, per ProductCode. lastSaleDate is the max InvoiceDate seen
-    // for that product anywhere in the caller's RIE-scoped Invoice Items ط£آ¢أ¢â€ڑآ¬أ¢â‚¬â€Œ
-    // "last actual sale of the item within the caller's automatic scope",
-    // exactly as specified.
+    // for that product on the RouteID(s) of the current Van Inventory
+    // snapshot. RIE still scopes the records to the caller's company and
+    // hierarchy; the explicit RouteID join prevents another visible van
+    // from changing the stale status of this van's stock.
     //
     // weeklyAverageSales (2026-07-28 correction, approved formula):
     // total sold Quantity over the last 3 months / 12 ط£آ¢أ¢â€ڑآ¬أ¢â‚¬â€Œ NOT a rolling
@@ -300,6 +313,7 @@ export class SmartLoadingService {
       const invoiceNo = String(item.InvoiceNo ?? "").trim();
       const invoice = invoiceMetaByNo.get(invoiceNo);
       if (!invoice) continue;
+      if (!activeVehicleRouteIds.has(invoice.routeId)) continue;
       const productCode = String(item.ProductCode ?? "").trim();
       if (!productCode) continue;
 
@@ -338,6 +352,7 @@ export class SmartLoadingService {
       const lastSaleMs = lastSaleMsByProduct.get(productCode) ?? null;
       const lastSaleDate = lastSaleMs !== null ? isoDay(lastSaleMs) : null;
       const weeklyAverageSales = (windowQtyByProduct.get(productCode) ?? 0) / WEEKS_DIVISOR;
+      const isStale = isStaleVehicleInventory(currentVehicleStock, lastSaleMs, staleAsOfDate, staleDaysThreshold);
 
 
       products.push({
@@ -348,6 +363,7 @@ export class SmartLoadingService {
         priority: "normal",
         category: meta?.category ?? null,
         lastSaleDate,
+        isStale,
       });
 
     }
@@ -370,6 +386,8 @@ export class SmartLoadingService {
       attention: attentionList,
       calculatedAt: new Date(nowMs).toISOString(),
       asOfDate: targetDateIso,
+      staleAsOfDate: isoDay(staleAsOfDate.getTime()),
+      staleDaysThreshold,
       targetDate: targetDateIso,
       route: nextRouteCustomers.size > 0 ? { targetDate: targetDateIso, customerCount: nextRouteCustomers.size } : null,
       routeCustomers: [...routeCustomersByCode.values()].sort((a, b) => (a.visitSequence ?? Number.MAX_SAFE_INTEGER) - (b.visitSequence ?? Number.MAX_SAFE_INTEGER) || a.customerName.localeCompare(b.customerName, "ar")),

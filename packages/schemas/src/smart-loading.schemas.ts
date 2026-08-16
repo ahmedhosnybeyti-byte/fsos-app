@@ -20,6 +20,11 @@ import { z } from "zod";
 export const smartLoadingPrioritySchema = z.enum(["high", "normal"]);
 export type SmartLoadingPriority = z.infer<typeof smartLoadingPrioritySchema>;
 
+// This is only the initial UI/API default. Every stale calculation receives
+// the user-selected threshold; it must never be treated as a business-rule constant.
+export const DEFAULT_SMART_LOADING_STALE_DAYS = 4;
+export const smartLoadingStaleDaysThresholdSchema = z.coerce.number().int().min(1).default(DEFAULT_SMART_LOADING_STALE_DAYS);
+
 export const smartLoadingProductSchema = z.object({
   productCode: z.string(),
   productName: z.string(),
@@ -28,6 +33,7 @@ export const smartLoadingProductSchema = z.object({
   priority: smartLoadingPrioritySchema,
   category: z.string().nullable(),
   lastSaleDate: z.string().nullable(),
+  isStale: z.boolean(),
 });
 export type SmartLoadingProduct = z.infer<typeof smartLoadingProductSchema>;
 
@@ -40,7 +46,7 @@ export const smartLoadingRouteCustomerSchema = z.object({ customerCode: z.string
 export type SmartLoadingRouteCustomer = z.infer<typeof smartLoadingRouteCustomerSchema>;
 export const smartLoadingCustomerSearchResultSchema = z.object({ customers: z.array(smartLoadingRouteCustomerSchema) });
 export type SmartLoadingCustomerSearchResult = z.infer<typeof smartLoadingCustomerSearchResultSchema>;
-export const smartLoadingRecalculateInputSchema = z.object({ targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), visitsPerWeek: z.union([z.literal(1), z.literal(2), z.literal(6)]), staleDaysThreshold: z.number().int().min(1).default(4), customerCodes: z.array(z.string().trim().min(1)).min(1).max(500), confirmedOrders: z.array(z.object({ productCode: z.string().trim().min(1), quantity: z.number().positive() })) });
+export const smartLoadingRecalculateInputSchema = z.object({ targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/), visitsPerWeek: z.union([z.literal(1), z.literal(2), z.literal(6)]), staleDaysThreshold: smartLoadingStaleDaysThresholdSchema, customerCodes: z.array(z.string().trim().min(1)).min(1).max(500), confirmedOrders: z.array(z.object({ productCode: z.string().trim().min(1), quantity: z.number().positive() })) });
 export type SmartLoadingRecalculateInput = z.infer<typeof smartLoadingRecalculateInputSchema>;
 export const smartLoadingRecalculatedProductSchema = z.object({ productCode: z.string(), productName: z.string(), estimatedCustomerDemand: z.number(), confirmedOrderQuantity: z.number(), safetyStock: z.number(), vehicleStock: z.number().nullable(), suggestedQuantity: z.number() });
 export type SmartLoadingRecalculatedProduct = z.infer<typeof smartLoadingRecalculatedProductSchema>;
@@ -96,6 +102,8 @@ export const smartLoadingReadySessionSchema = z.object({
   products: z.array(smartLoadingProductSchema),
   attention: z.array(smartLoadingAttentionSchema),
   asOfDate: z.string(),
+  staleAsOfDate: z.string(),
+  staleDaysThreshold: z.number().int().positive(),
   targetDate: z.string(),
   route: smartLoadingRouteSchema.nullable(),
   routeCustomers: z.array(smartLoadingRouteCustomerSchema),

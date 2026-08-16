@@ -23,10 +23,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useTranslation } from "@/components/translation-provider";
 import type { SmartLoadingLostOpportunity, SmartLoadingPriorityProduct, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
 import { smartLoadingApi } from "@/lib/api/smart-loading";
-import type { SmartLoadingRecalculateInput, SmartLoadingRecalculateResult, SmartLoadingRouteCustomer } from "@field-sales-os/schemas";
+import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult, type SmartLoadingRouteCustomer } from "@field-sales-os/schemas";
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
 import { categoryAddedProductCount, formatLostOpportunityQuantity, formatLostOpportunityQuantityInput, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
-import { classifySalesRecency, summarizeSalesRecency } from "./sales-classification";
 import { calculateSuggestedLoading } from "./suggested-loading";
 
 type Inputs = { confirmedOrders: number; safetyStock: number; vehicleStock?: number; manual?: number };
@@ -66,6 +65,8 @@ export function SmartLoadingScreen({
   onRetry,
   targetDate,
   onTargetDateChange,
+  staleDaysThreshold,
+  onStaleDaysThresholdChange,
 }: {
   session?: SmartLoadingSession;
   isLoading: boolean;
@@ -73,6 +74,8 @@ export function SmartLoadingScreen({
   onRetry: () => Promise<unknown> | void;
   targetDate: string;
   onTargetDateChange: (value: string) => void;
+  staleDaysThreshold: number;
+  onStaleDaysThresholdChange: (value: number) => void;
 }) {
   const { locale, t } = useTranslation();
   const label = (key: string, fallback: string) => {
@@ -112,7 +115,6 @@ export function SmartLoadingScreen({
   const [recalculationLoading, setRecalculationLoading] = useState(false);
   const [recalculationError, setRecalculationError] = useState<string | null>(null);
   const [hasUnappliedChanges, setHasUnappliedChanges] = useState(false);
-  const [staleDaysThreshold, setStaleDaysThreshold] = useState(4);
   const hydrated = useRef(false);
   const activeRouteKey = useRef<string | null>(null);
   const [appliedInputs, setAppliedInputs] = useState<SmartLoadingRecalculateInput | null>(null);
@@ -163,7 +165,7 @@ export function SmartLoadingScreen({
     const restoredStaleDaysThreshold = Math.max(1, saved?.staleDaysThreshold ?? staleDaysThreshold);
     const confirmedOrders = saved?.confirmedOrders ?? {};
     setSelectedCustomerCodes(new Set(customerCodes)); setExceptionalCustomers(saved?.exceptionalCustomers ?? []);
-    if (saved) { setFromDate(restoredFromDate); setToDate(restoredToDate); setVisitsPerWeek(restoredVisitsPerWeek); setConfirmedOrdersByProduct(confirmedOrders); setHasUnappliedChanges(saved.hasUnappliedChanges ?? false); setStaleDaysThreshold(restoredStaleDaysThreshold); setIsSessionClosed(saved.isSessionClosed ?? false); }
+    if (saved) { setFromDate(restoredFromDate); setToDate(restoredToDate); setVisitsPerWeek(restoredVisitsPerWeek); setConfirmedOrdersByProduct(confirmedOrders); setHasUnappliedChanges(saved.hasUnappliedChanges ?? false); onStaleDaysThresholdChange(restoredStaleDaysThreshold); setIsSessionClosed(saved.isSessionClosed ?? false); }
     activeRouteKey.current = routeKey;
     void applyRecalculation({ targetDate, fromDate: restoredFromDate, toDate: restoredToDate, visitsPerWeek: restoredVisitsPerWeek, staleDaysThreshold: restoredStaleDaysThreshold, customerCodes, confirmedOrders: Object.entries(confirmedOrders).filter(([, quantity]) => Number.isFinite(quantity) && quantity > 0).map(([productCode, quantity]) => ({ productCode, quantity })) }); restoredWork.current = null; hydrated.current = true;
   }, [session]);
@@ -207,7 +209,7 @@ export function SmartLoadingScreen({
     for (const addition of Object.values(lostOpportunityAdditions)) {
       if (rowsByProduct.has(addition.productId)) continue;
       const lostOpportunityProduct = lostOpportunityGroups.flatMap((category) => category.products).find((item) => item.productCode === addition.productId);
-      const product = productsByCode.get(addition.productId) ?? { productCode: addition.productId, productName: lostOpportunityProduct?.productName ?? addition.productId, currentVehicleStock: null, weeklyAverageSales: 0, priority: "normal" as const, category: null, lastSaleDate: null };
+      const product = productsByCode.get(addition.productId) ?? { productCode: addition.productId, productName: lostOpportunityProduct?.productName ?? addition.productId, currentVehicleStock: null, weeklyAverageSales: 0, priority: "normal" as const, category: null, lastSaleDate: null, isStale: false };
       const input = inputs[addition.productId] ?? { confirmedOrders: 0, safetyStock: 0 };
       const effectiveAddition = lostOpportunityProduct ? { ...addition, addedQuantity: lostOpportunityProduct.totalQuantity } : addition;
       rowsByProduct.set(addition.productId, { product, input, original: 0, baseSuggested: 0, suggested: input.manual ?? effectiveAddition.addedQuantity, manuallyAdded: manuallyAddedProductCodes.has(addition.productId), lostOpportunity: effectiveAddition, stockAvailable: false, effectiveVehicleStock: null, preliminary: true });
@@ -245,11 +247,6 @@ export function SmartLoadingScreen({
       return groups;
     }, {});
   }, [priorityProducts, t]);
-  const salesRecency = useMemo(
-    () => session?.state === "ready" ? summarizeSalesRecency(session.products) : { recent: 0, stale: 0, missing: 0 },
-    [session],
-  );
-
   const availableProducts = useMemo(() => {
     if (session?.state !== "ready") return [];
     const query = productSearch.trim().toLocaleLowerCase();
@@ -259,12 +256,11 @@ export function SmartLoadingScreen({
     });
   }, [productSearch, rows, session]);
 
-  const analysisDate = useMemo(() => session?.state === "ready" ? new Date(`${session.asOfDate}T00:00:00.000Z`) : new Date(), [session]);
-  // Staleness is a property of the complete route assortment, not only of
-  // products with demand in the current recalculation. Use the live control
-  // value and the session's analysis/loading date so the metric and list
-  // remain consistent as either value changes.
-  const staleRows = useMemo(() => allRows.filter((row) => row.effectiveVehicleStock !== null && row.effectiveVehicleStock > 0 && classifySalesRecency(row.product.lastSaleDate, analysisDate, staleDaysThreshold) === "stale"), [allRows, analysisDate, staleDaysThreshold]);
+  const staleReferenceDate = useMemo(() => session?.state === "ready" ? new Date(`${session.staleAsOfDate}T00:00:00.000Z`) : new Date(), [session]);
+  // The API evaluates stale status from the selected threshold, the latest
+  // Van Inventory snapshot, and route-scoped invoice history. Keep this list
+  // tied to that result so its metric and detail panel have one source of truth.
+  const staleRows = useMemo(() => allRows.filter((row) => row.product.isStale), [allRows]);
 
   const hasLocalChanges = Object.keys(inputs).length > 0 || removedProductCodes.size > 0 || manuallyAddedProductCodes.size > 0 || Object.keys(lostOpportunityAdditions).length > 0 || Object.keys(lostOpportunityQuantityDrafts).length > 0 || checkedItems.size > 0;
   function currentRecalculationSnapshot(): SmartLoadingRecalculateInput { return { targetDate, fromDate, toDate, visitsPerWeek, staleDaysThreshold, customerCodes: [...new Set([...selectedCustomerCodes].map((code) => code.trim()).filter(Boolean))], confirmedOrders: Object.entries(confirmedOrdersByProduct).filter(([, quantity]) => Number.isFinite(quantity) && quantity > 0).map(([productCode, quantity]) => ({ productCode, quantity })) }; }
@@ -546,7 +542,7 @@ export function SmartLoadingScreen({
       root.remove();
     }
   }
-  function resetOperationalState() { const customerCodes = session?.state === "ready" ? session.routeCustomers.map((customer) => customer.customerCode) : []; setExceptionalCustomers([]); setSelectedCustomerCodes(new Set(customerCodes)); setConfirmedOrdersByProduct({}); setInputs({}); setRecalculation(null); setAppliedInputs(null); setHasUnappliedChanges(false); setIsSessionClosed(false); setVisitsPerWeek(1); setStaleDaysThreshold(4); void applyRecalculation({ targetDate, fromDate, toDate, visitsPerWeek: 1, staleDaysThreshold: 4, customerCodes, confirmedOrders: [] }); }
+  function resetOperationalState() { const customerCodes = session?.state === "ready" ? session.routeCustomers.map((customer) => customer.customerCode) : []; setExceptionalCustomers([]); setSelectedCustomerCodes(new Set(customerCodes)); setConfirmedOrdersByProduct({}); setInputs({}); setRecalculation(null); setAppliedInputs(null); setHasUnappliedChanges(false); setIsSessionClosed(false); setVisitsPerWeek(1); onStaleDaysThresholdChange(DEFAULT_SMART_LOADING_STALE_DAYS); void applyRecalculation({ targetDate, fromDate, toDate, visitsPerWeek: 1, staleDaysThreshold: DEFAULT_SMART_LOADING_STALE_DAYS, customerCodes, confirmedOrders: [] }); }
   async function closeAndExport() { if (hasUnappliedChanges) await applyRecalculation(); if (recalculationError || !window.confirm(locale === "ar" ? "هل أنت متأكد من إغلاق جلسة التحميل؟" : "Close the loading session?")) return; await exportExcel(); resetOperationalState(); }
   function startNewSession() { if (!window.confirm(locale === "ar" ? "بدء جلسة جديدة؟" : "Start a new session?")) return; window.sessionStorage.removeItem("smart-loading-work"); resetOperationalState(); }
   if (isLoading) {
@@ -647,7 +643,7 @@ export function SmartLoadingScreen({
         toDate={toDate}
         visitsPerWeek={visitsPerWeek}
         staleDaysThreshold={staleDaysThreshold}
-        onStaleDaysThresholdChange={(value) => { setStaleDaysThreshold(Math.max(1, value)); setHasUnappliedChanges(true); }}
+        onStaleDaysThresholdChange={(value) => { onStaleDaysThresholdChange(Math.max(1, value)); setHasUnappliedChanges(true); }}
         selectedCustomerCodes={selectedCustomerCodes}
         exceptionalCustomers={exceptionalCustomers}
         loadingSummary={{ productsToLoad: rows.length, totalQuantity: rows.reduce((sum, row) => sum + row.suggested, 0), priorityProducts: priorityProducts.length, staleProducts: staleRows.length }}
@@ -706,7 +702,7 @@ export function SmartLoadingScreen({
       )}
 
       {panel === "priority" && <PriorityProductsPopover groups={priorityGroups} openGroups={openPriorityGroups} onToggleGroup={(category) => setOpenPriorityGroups((current) => { const next = new Set(current); next.has(category) ? next.delete(category) : next.add(category); return next; })} onClose={() => setPanel(null)} />}
-      {panel === "stale" && <ProductListPopover rows={staleRows} stale referenceDate={analysisDate} onClose={() => setPanel(null)} />}
+      {panel === "stale" && <ProductListPopover rows={staleRows} stale referenceDate={staleReferenceDate} onClose={() => setPanel(null)} />}
 
       <Card className="glass-card">
         <CardHeader className="pb-3">
