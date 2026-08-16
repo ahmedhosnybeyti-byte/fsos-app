@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { isRouteInActiveVehicleScope, isStaleVehicleInventory, normalizedProductCode } from "./smart-loading.service";
+import { isRouteInActiveVehicleScope, isSaleOnOrBeforeTargetDate, isStaleVehicleInventory, normalizedProductCode } from "./smart-loading.service";
 
 const asOfDate = new Date("2026-08-10T00:00:00.000Z");
 const daysAgo = (days: number) => asOfDate.getTime() - days * 86_400_000;
@@ -32,4 +32,15 @@ test("uses one SKU key for stock and invoice items despite casing or whitespace"
   const stockSku = normalizedProductCode(" P-080 ");
   const invoiceItemSku = normalizedProductCode("p-080");
   assert.equal(stockSku, invoiceItemSku);
+});
+
+test("excludes sales posted after the selected operational date", () => {
+  assert.equal(isSaleOnOrBeforeTargetDate(Date.parse("2026-12-31T12:00:00.000Z"), "2026-12-31"), true);
+  assert.equal(isSaleOnOrBeforeTargetDate(Date.parse("2027-01-01T00:00:00.000Z"), "2026-12-31"), false);
+});
+
+test("marks the four RT-12 stocked SKUs stale on 2026-12-31 at a four-day threshold", () => {
+  for (const lastSaleDate of ["2026-12-23", "2026-12-26", "2026-12-23", "2026-12-23"]) {
+    assert.equal(isStaleVehicleInventory(1, Date.parse(`${lastSaleDate}T00:00:00.000Z`), new Date("2026-12-31T00:00:00.000Z"), 4), true);
+  }
 });

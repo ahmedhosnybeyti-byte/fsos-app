@@ -116,6 +116,10 @@ export function normalizedProductCode(value: unknown): string {
   return String(value ?? "").trim().toLowerCase();
 }
 
+export function isSaleOnOrBeforeTargetDate(saleMs: number, targetDateIso: string): boolean {
+  return isoDay(saleMs) <= targetDateIso;
+}
+
 export function isRouteInActiveVehicleScope(itemRouteId: unknown, invoiceRouteId: unknown, activeRouteIds: ReadonlySet<string>): boolean {
   // Invoice Items is the product-level source of truth for the sales route.
   // Older imports can omit it, so use the header's snapshot RouteID only as
@@ -341,6 +345,10 @@ export class SmartLoadingService {
       const invoiceNo = String(item.InvoiceNo ?? "").trim();
       const invoice = invoiceMetaByNo.get(invoiceNo);
       if (!invoice) continue;
+      // The loading session is a point-in-time operational decision. Sales
+      // entered after its selected target date must not make a SKU appear
+      // recently sold for that earlier operational date.
+      if (!isSaleOnOrBeforeTargetDate(invoice.date, targetDateIso)) continue;
       if (!isRouteInActiveVehicleScope(item.RouteID, invoice.routeId, activeVehicleRouteIds)) continue;
       const productCode = normalizedProductCode(item.ProductCode);
       if (!productCode) continue;
