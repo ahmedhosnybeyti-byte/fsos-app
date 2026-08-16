@@ -16,6 +16,10 @@ function formatPurchaseDate(value: string): string {
     .replaceAll("/", "-");
 }
 
+function staleDaysSince(lastSaleDate: string, targetDate: string): number {
+  return Math.floor((Date.parse(`${targetDate}T00:00:00.000Z`) - Date.parse(`${lastSaleDate}T00:00:00.000Z`)) / 86_400_000);
+}
+
 export default function StaleProductsPage() {
   const { locale, t } = useTranslation();
   const searchParams = useSearchParams();
@@ -29,6 +33,7 @@ export default function StaleProductsPage() {
     queryFn: () => smartLoadingApi.getSession(targetDate, staleDaysThreshold),
   });
   const plans = session.data?.state === "ready" ? session.data.staleProductPlans : [];
+  const operationalTargetDate = session.data?.state === "ready" ? session.data.targetDate : targetDate;
   const [selectedProductCode, setSelectedProductCode] = useState<string | null>(null);
   const plansByCategory = useMemo(() => {
     const groups = new Map<string, SmartLoadingStaleProductPlan[]>();
@@ -67,11 +72,16 @@ export default function StaleProductsPage() {
               <button
                 key={plan.productCode}
                 type="button"
-                className="rounded-md border px-3 py-2 text-start text-sm font-medium transition-colors hover:bg-secondary"
+                className={`min-w-56 rounded-md border p-3 text-start text-sm transition-colors hover:bg-secondary ${selectedPlan?.productCode === plan.productCode ? "border-primary bg-secondary" : ""}`}
                 aria-pressed={selectedPlan?.productCode === plan.productCode}
                 onClick={() => setSelectedProductCode(plan.productCode)}
               >
-                {plan.productName}
+                <p className="font-medium">{plan.productName}</p>
+                <div className="mt-2 grid gap-1 text-xs text-muted-foreground">
+                  <p>{t("smartLoading.vehicleStock")}: {formatQuantity(plan.currentVehicleStock, locale)}</p>
+                  <p>{t("smartLoading.daysStale")}: {formatQuantity(staleDaysSince(plan.lastSaleDate, operationalTargetDate!), locale)} {t("smartLoading.staleDaysUnit")}</p>
+                  <p>{t("smartLoading.lastSale")}: {formatPurchaseDate(plan.lastSaleDate)}</p>
+                </div>
               </button>
             ))}
           </CardContent>
@@ -84,6 +94,11 @@ export default function StaleProductsPage() {
         <Card>
           <CardHeader>
             <CardTitle>{selectedPlan.productName}</CardTitle>
+            <div className="grid gap-2 text-sm text-muted-foreground sm:grid-cols-3">
+              <p>{t("smartLoading.vehicleStock")}: <span className="font-medium text-foreground">{formatQuantity(selectedPlan.currentVehicleStock, locale)}</span></p>
+              <p>{t("smartLoading.daysStale")}: <span className="font-medium text-foreground">{formatQuantity(staleDaysSince(selectedPlan.lastSaleDate, operationalTargetDate!), locale)} {t("smartLoading.staleDaysUnit")}</span></p>
+              <p>{t("smartLoading.lastSale")}: <span className="font-medium text-foreground">{formatPurchaseDate(selectedPlan.lastSaleDate)}</span></p>
+            </div>
           </CardHeader>
           <CardContent>
             {selectedPlan.customers.length === 0 ? (

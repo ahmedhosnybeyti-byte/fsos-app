@@ -50,6 +50,8 @@ export const smartLoadingStaleProductPlanSchema = z.object({
   productCode: z.string(),
   productName: z.string(),
   category: z.string().nullable(),
+  currentVehicleStock: z.number(),
+  lastSaleDate: z.string(),
   customers: z.array(smartLoadingStaleProductCustomerSchema),
 });
 export type SmartLoadingStaleProductPlan = z.infer<typeof smartLoadingStaleProductPlanSchema>;

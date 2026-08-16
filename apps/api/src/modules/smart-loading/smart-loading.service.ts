@@ -452,6 +452,8 @@ export class SmartLoadingService {
           productCode: product.productCode,
           productName: product.productName,
           category: product.category,
+          currentVehicleStock: product.currentVehicleStock!,
+          lastSaleDate: product.lastSaleDate!,
           customers,
         };
       });

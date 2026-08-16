@@ -1318,6 +1318,7 @@ export type TranslationKey =
   | "smartLoading.totalPurchasedQuantity"
   | "smartLoading.purchaseFrequency"
   | "smartLoading.lastPurchaseDate"
+  | "smartLoading.daysStale"
   | "smartLoading.staleProductsPanelTitle"
   | "smartLoading.priorityProductsPanelTitle"
   | "smartLoading.close"
@@ -2751,6 +2752,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.totalPurchasedQuantity": "إجمالي الكمية المشتراة",
     "smartLoading.purchaseFrequency": "عدد مرات الشراء",
     "smartLoading.lastPurchaseDate": "آخر تاريخ شراء",
+    "smartLoading.daysStale": "أيام الركود",
     "smartLoading.staleProductsPanelTitle": "أصناف راكدة",
     "smartLoading.priorityProductsPanelTitle": "أصناف أولوية",
     "smartLoading.close": "إغلاق",
@@ -4198,6 +4200,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.totalPurchasedQuantity": "Total purchased quantity",
     "smartLoading.purchaseFrequency": "Purchase frequency",
     "smartLoading.lastPurchaseDate": "Last purchase date",
+    "smartLoading.daysStale": "Stale days",
     "smartLoading.staleProductsPanelTitle": "Stale Products",
     "smartLoading.priorityProductsPanelTitle": "Priority Products",
     "smartLoading.close": "Close",
