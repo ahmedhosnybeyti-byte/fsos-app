@@ -54,7 +54,11 @@ export default function StaleProductsPage() {
       groups.set(category, items);
     }
     return [...groups.entries()]
-      .sort(([left], [right]) => left.localeCompare(right, locale))
+      .sort(([leftCategory, leftItems], [rightCategory, rightItems]) => (
+        rightItems.reduce((total, plan) => total + plan.currentVehicleStock, 0)
+        - leftItems.reduce((total, plan) => total + plan.currentVehicleStock, 0)
+        || leftCategory.localeCompare(rightCategory, locale)
+      ))
       .map(([category, items]) => ({
         category,
         plans: items.sort((left, right) => (
