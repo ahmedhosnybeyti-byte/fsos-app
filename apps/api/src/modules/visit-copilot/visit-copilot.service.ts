@@ -18,6 +18,7 @@ import {
   type VisitCopilotPlanRequest,
   type VisitCopilotProspectStatusRequest,
 } from "@field-sales-os/schemas";
+import { lostOpportunityExclusionScopeKey } from "./lost-opportunity-exclusion-key.util";
 import type { Prospect } from "@field-sales-os/database";
 import { AppConfigService } from "../../common/config/app-config.service";
 import { PrismaService } from "../../common/prisma/prisma.service";
@@ -1408,9 +1409,7 @@ export class VisitCopilotService {
     const teamScopeId = input.scopeType === "TEAM_PRODUCT" ? await this.teamScopeIdFor(user) : null;
     if (input.scopeType === "TEAM_PRODUCT" && !teamScopeId) throw new BadRequestException("Your supervisor team could not be resolved");
     const salespersonId = input.scopeType === "SALESPERSON_PRODUCT" ? user.userId : null;
-    const scopeKey = input.scopeType === "CUSTOMER_PRODUCT" ? `${customerCode}\u0000${productCode}`
-      : input.scopeType === "SALESPERSON_PRODUCT" ? `${salespersonId}\u0000${productCode}`
-      : input.scopeType === "TEAM_PRODUCT" ? `${teamScopeId}\u0000${productCode}` : productCode;
+    const scopeKey = lostOpportunityExclusionScopeKey(input.scopeType, { customerCode, productCode, salespersonId, teamScopeId });
 
     return this.prisma.$transaction(async (tx) => {
       const row = await tx.lostOpportunityExclusion.upsert({
