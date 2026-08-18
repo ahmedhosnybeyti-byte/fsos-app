@@ -50,6 +50,17 @@ export interface User {
   featureAccess?: import("@field-sales-os/schemas").CompanyFeatureAccess;
 }
 
+export interface NewSubscriber {
+  id: string;
+  fullName: string;
+  email: string;
+  whatsapp: string | null;
+  companyName: string | null;
+  plan: { status: SubscriptionStatus; plan: { name: string } } | null;
+  createdAt: string;
+  status: UserStatus;
+}
+
 export interface AdminCompanyDetails extends Company {
   users: User[];
   subscriptions: Subscription[];

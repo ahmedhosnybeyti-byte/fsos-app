@@ -31,6 +31,14 @@ export const listUsersQuerySchema = z.object({
 });
 export type ListUsersQueryInput = z.infer<typeof listUsersQuerySchema>;
 
+export const listNewSubscribersQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+export type ListNewSubscribersQueryInput = z.infer<typeof listNewSubscribersQuerySchema>;
+
 // Phase 4: admin-issued temporary password. No request body — the caller
 // (Company/Platform Administrator) never chooses the value; the server
 // generates it and returns it exactly once.

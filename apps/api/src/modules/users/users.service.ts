@@ -1,6 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import * as argon2 from "argon2";
-import type { AssignUserRouteInput, CreateUserInput, ListUsersQueryInput, RouteAssignmentEndReason, UpdateUserInput, UserStatus } from "@field-sales-os/schemas";
+import type { AssignUserRouteInput, CreateUserInput, ListNewSubscribersQueryInput, ListUsersQueryInput, RouteAssignmentEndReason, UpdateUserInput, UserStatus } from "@field-sales-os/schemas";
 import { PrismaService, type PrismaTx, isUniqueConstraintError } from "../../common/prisma";
 import { RolesService } from "../roles/roles.service";
 import { OrgUnitsService } from "../companies/org-units.service";
@@ -179,6 +179,56 @@ export class UsersService {
     const assignments = items.length === 0 ? [] : await this.prisma.userRouteAssignment.findMany({ where: { ...(companyId ? { companyId } : {}), userId: { in: items.map((item) => item.id) }, endedAt: null }, select: { userId: true, routeId: true, startedAt: true } });
     const assignmentByUserId = new Map(assignments.map((assignment) => [assignment.userId, assignment]));
     return { items: items.map((item) => ({ ...item, currentRouteAssignment: assignmentByUserId.get(item.id) ?? null })), total, page, pageSize };
+  }
+
+  async listNewSubscribers(query: ListNewSubscribersQueryInput) {
+    const parseDate = (value: string, endOfDay = false) => {
+      const date = new Date(`${value}T00:00:00.000Z`);
+      if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== value) throw new BadRequestException("Invalid date filter");
+      if (endOfDay) date.setUTCDate(date.getUTCDate() + 1);
+      return date;
+    };
+    const from = query.from ? parseDate(query.from) : undefined;
+    const toExclusive = query.to ? parseDate(query.to, true) : undefined;
+    if (from && toExclusive && from >= toExclusive) throw new BadRequestException("The end date must be on or after the start date");
+    const where = {
+      companyId: { not: null },
+      role: { code: { not: "SUPER_ADMIN" as const } },
+      ...(from || toExclusive ? { createdAt: { ...(from ? { gte: from } : {}), ...(toExclusive ? { lt: toExclusive } : {}) } } : {}),
+    };
+    const [items, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        select: {
+          id: true,
+          fullName: true,
+          email: true,
+          whatsapp: true,
+          createdAt: true,
+          status: true,
+          company: {
+            select: {
+              name: true,
+              subscriptions: {
+                orderBy: { createdAt: "desc" },
+                take: 1,
+                select: { status: true, plan: { select: { name: true } } },
+              },
+            },
+          },
+        },
+        orderBy: { createdAt: "desc" },
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+      }),
+      this.prisma.user.count({ where }),
+    ]);
+    return {
+      items: items.map(({ company, ...user }) => ({ ...user, companyName: company?.name ?? null, plan: company?.subscriptions[0] ?? null })),
+      total,
+      page: query.page,
+      pageSize: query.pageSize,
+    };
   }
 
   async updateUser(id: string, companyId: string, dto: UpdateUserInput, actorUserId?: string) {

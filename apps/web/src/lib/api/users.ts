@@ -1,15 +1,18 @@
 import type { CreateUserInput, RoleCode, RouteAssignmentEndReason, UpdateUserInput, UserStatus } from "@field-sales-os/schemas";
 import { apiFetch } from "../api-client";
-import type { Paginated, User } from "../types";
+import type { NewSubscriber, Paginated, User } from "../types";
 
 export type UserRouteAssignment = { id: string; routeId: string; startedAt: string; endedAt: string | null; endReason: RouteAssignmentEndReason | null };
 export type UserRouteAssignmentDetails = { current: UserRouteAssignment | null; history: UserRouteAssignment[]; routes: Array<{ id: string; name: string | null }> };
 
 export type UserListFilters = { search?: string; roleCode?: Exclude<RoleCode, "SUPER_ADMIN">; status?: UserStatus };
+export type NewSubscribersFilters = { from?: string; to?: string };
 
 export const usersApi = {
   list: (page: number, pageSize = 20, companyId?: string, filters: UserListFilters = {}) =>
     apiFetch<Paginated<User>>("/users", { query: { page, pageSize, companyId, ...filters } }),
+  newSubscribers: (page: number, pageSize = 20, filters: NewSubscribersFilters = {}) =>
+    apiFetch<Paginated<NewSubscriber>>("/users/new-subscribers", { query: { page, pageSize, ...filters } }),
   create: (input: CreateUserInput, companyId?: string) =>
     apiFetch<User>("/users", { method: "POST", body: input, query: { companyId } }),
   updateEmail: (id: string, email: string) => apiFetch<User>(`/users/${id}/email`, { method: "PATCH", body: { email } }),

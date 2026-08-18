@@ -15,6 +15,8 @@ import {
   type UnassignUserRouteInput,
   updateTrialEndsAtSchema,
   type UpdateTrialEndsAtInput,
+  listNewSubscribersQuerySchema,
+  type ListNewSubscribersQueryInput,
 } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
@@ -60,6 +62,12 @@ export class UsersController {
     }
     const scopedCompanyId = this.resolveCompanyScope(user, companyId);
     return this.usersService.listByCompany(scopedCompanyId, query);
+  }
+
+  @Get("new-subscribers")
+  @Auth("SUPER_ADMIN")
+  newSubscribers(@Query(new ZodValidationPipe(listNewSubscribersQuerySchema)) query: ListNewSubscribersQueryInput) {
+    return this.usersService.listNewSubscribers(query);
   }
 
   @Get(":id/route-assignment")
