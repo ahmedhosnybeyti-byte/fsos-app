@@ -129,10 +129,6 @@ export function isRouteInActiveVehicleScope(itemRouteId: unknown, invoiceRouteId
   return saleRouteId !== "" && activeRouteIds.has(saleRouteId);
 }
 
-export function isCashVanChannel(value: unknown): boolean {
-  return String(value ?? "").trim().toLowerCase() === "cash van";
-}
-
 export function parseTargetDate(value: string | undefined): Date {
   const tomorrow = nextRouteDate(companyCalendarDate());
   const date = value ? parseAsOfDate(value) : tomorrow;
@@ -206,20 +202,6 @@ export class SmartLoadingService {
     // to the API, the UI compared sales against `session.asOfDate` (the
     // target loading date); retain that same reference date on the server.
     const staleAsOfDate = targetDate;
-
-    // Smart Loading is an operational preparation workflow for cash vans
-    // only. Check the caller's RIE-scoped route before reading inventory or
-    // sales so non-van routes never look like a zero-demand loading session.
-    const routesResult = await this.tryEntity(ctx, "Routes");
-    const currentRoutes = routesResult.records.filter((route) => normalizedRouteId(route.RouteID) !== "");
-    if (currentRoutes.length > 0 && !currentRoutes.some((route) => isCashVanChannel(route.Channel))) {
-      return {
-        state: "route-ineligible",
-        message: "المسار غير مؤهل للتحميل الذكي",
-        targetDate: targetDateIso,
-        route: null,
-      };
-    }
 
     const [productsResult, customersResult, invoicesResult, invoiceItemsResult, returnsResult, returnItemsResult, vanInventoryRecords] = await Promise.all([
       this.rieFacade.getEntityRecords("Products", ctx),
