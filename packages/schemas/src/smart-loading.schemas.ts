@@ -143,8 +143,17 @@ export const smartLoadingVehicleStockUnavailableSessionSchema = z.object({
 });
 export type SmartLoadingVehicleStockUnavailableSession = z.infer<typeof smartLoadingVehicleStockUnavailableSessionSchema>;
 
+export const smartLoadingRouteIneligibleSessionSchema = z.object({
+  state: z.literal("route-ineligible"),
+  message: z.string(),
+  targetDate: z.string(),
+  route: smartLoadingRouteSchema.nullable(),
+});
+export type SmartLoadingRouteIneligibleSession = z.infer<typeof smartLoadingRouteIneligibleSessionSchema>;
+
 export const smartLoadingSessionSchema = z.discriminatedUnion("state", [
   smartLoadingReadySessionSchema,
   smartLoadingVehicleStockUnavailableSessionSchema,
+  smartLoadingRouteIneligibleSessionSchema,
 ]);
 export type SmartLoadingSession = z.infer<typeof smartLoadingSessionSchema>;

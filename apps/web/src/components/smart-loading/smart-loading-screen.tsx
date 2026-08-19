@@ -579,8 +579,8 @@ export function SmartLoadingScreen({
     return (
       <ScreenState
         icon={<Truck />}
-        text={t("smartLoading.vehicleStockUnavailable")}
-        hint={t("smartLoading.vehicleStockUnavailableHint")}
+        text={session?.state === "route-ineligible" ? session.message : t("smartLoading.vehicleStockUnavailable")}
+        hint={session?.state === "route-ineligible" ? undefined : t("smartLoading.vehicleStockUnavailableHint")}
       />
     );
   }
