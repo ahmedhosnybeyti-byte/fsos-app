@@ -19,7 +19,11 @@ FROM node:22-slim AS base
 # ERR_UNKNOWN_BUILTIN_MODULE on Railway's build environment independent of
 # the Node-version issue above. Installing via npm sidesteps corepack
 # entirely and has been confirmed to avoid that failure mode too.
-RUN npm install -g pnpm@11.11.0 turbo@^2.3.3
+# Prisma needs the OpenSSL executable both while generating its client and at
+# runtime to select the correct engine for this Debian-based image.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl \
+  && rm -rf /var/lib/apt/lists/* \
+  && npm install -g pnpm@11.11.0 turbo@^2.3.3
 
 # ---------------------------------------------------------------------------
 # 1. Prune the monorepo down to only what @field-sales-os/api needs.
@@ -51,9 +55,6 @@ RUN turbo run build --filter=@field-sales-os/api...
 FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
-# Prisma detects the platform-specific engine from the OpenSSL executable;
-# node:22-slim does not include it by default.
-RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 COPY --from=installer /app .
 
 EXPOSE 4000
