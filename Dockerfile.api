@@ -51,6 +51,9 @@ RUN turbo run build --filter=@field-sales-os/api...
 FROM base AS runner
 WORKDIR /app
 ENV NODE_ENV=production
+# Prisma detects the platform-specific engine from the OpenSSL executable;
+# node:22-slim does not include it by default.
+RUN apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*
 COPY --from=installer /app .
 
 EXPOSE 4000
