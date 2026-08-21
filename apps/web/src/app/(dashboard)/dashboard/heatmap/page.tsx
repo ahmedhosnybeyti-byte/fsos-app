@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Brain, FileSpreadsheet, Flame, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
-import { HeatmapMap, LAYER_PALETTE, type HeatmapLayerData } from "@/components/heatmap/heatmap-map";
+import { HeatmapMap, LAYER_PALETTE, type HeatmapDisplayMode, type HeatmapLayerData } from "@/components/heatmap/heatmap-map";
 import { useTranslation } from "@/components/translation-provider";
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
 import type { HeatmapDecisionResult, HeatmapPoint, HeatmapQueryResult, HeatmapScopeField } from "@/lib/types";
@@ -111,17 +111,6 @@ export default function HeatmapPage() {
       ),
   });
 
-  const [result, setResult] = useState<HeatmapQueryResult | null>(null);
-  const queryMutation = useMutation({
-    mutationFn: heatmapApi.query,
-    onSuccess: (data) => {
-      setResult(data);
-      setLayerResults(null);
-      toast.success(t("heatmap.pointsToastSuccess", { count: data.usedRows }));
-    },
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : t("heatmap.queryErrorFallback")),
-  });
-
   // Multi-layer mode (Task #251, explicit product request): several values
   // of one dimension (a handful of product categories, or a handful of
   // sales channels/routes/cities/customer classes) shown as SEPARATE
@@ -145,49 +134,11 @@ export default function HeatmapPage() {
     enabled: multiLayerMode,
   });
 
-  const [layerResults, setLayerResults] = useState<HeatmapLayerData[] | null>(null);
-  const multiLayerMutation = useMutation({
-    mutationFn: async () => {
-      const values = Array.from(selectedLayerValues);
-      const responses = await Promise.all(
-        values.map((v) =>
-          heatmapApi.query({
-            metric,
-            dateFrom: dateFrom || undefined,
-            dateTo: dateTo || undefined,
-            priorDateFrom: needsTwoWindows(metric) ? priorDateFrom || undefined : undefined,
-            priorDateTo: needsTwoWindows(metric) ? priorDateTo || undefined : undefined,
-            ...(layerDimension === "category" ? { categoryValue: v } : { scopeField: layerDimension, scopeValues: [v] }),
-          }),
-        ),
-      );
-      const layers: HeatmapLayerData[] = values.map((v, i) => ({
-        id: v,
-        label: v,
-        color: LAYER_PALETTE[i % LAYER_PALETTE.length]!,
-        points: responses[i]!.points,
-        maxValue: responses[i]!.maxValue,
-      }));
-      return layers;
-    },
-    onSuccess: (layers) => {
-      setLayerResults(layers);
-      setResult(null);
-      const totalPoints = layers.reduce((sum, l) => sum + l.points.length, 0);
-      toast.success(t("heatmap.pointsToastSuccess", { count: totalPoints }));
-    },
-    onError: (error) => toast.error(error instanceof ApiError ? error.message : t("heatmap.queryErrorFallback")),
-  });
-
   const canQuery =
     (!needsTwoWindows(metric) || (!!priorDateFrom && !!priorDateTo && !!dateFrom && !!dateTo)) && (!multiLayerMode || selectedLayerValues.size > 0);
 
-  function handleQuery() {
-    if (multiLayerMode) {
-      multiLayerMutation.mutate();
-      return;
-    }
-    queryMutation.mutate({
+  const queryInput = useMemo(
+    () => ({
       metric,
       scopeField: scopeField || undefined,
       scopeValues: scopeField && selectedScopeValues.size > 0 ? Array.from(selectedScopeValues) : undefined,
@@ -196,8 +147,43 @@ export default function HeatmapPage() {
       dateTo: dateTo || undefined,
       priorDateFrom: needsTwoWindows(metric) ? priorDateFrom || undefined : undefined,
       priorDateTo: needsTwoWindows(metric) ? priorDateTo || undefined : undefined,
-    });
-  }
+    }),
+    [metric, scopeField, selectedScopeValues, categoryFilterEnabled, categoryValue, dateFrom, dateTo, priorDateFrom, priorDateTo],
+  );
+
+  const queryResult = useQuery({
+    queryKey: ["heatmap", "query", queryInput],
+    queryFn: ({ signal }) => heatmapApi.query(queryInput, signal),
+    enabled: canQuery && !multiLayerMode,
+  });
+  const multiLayerQuery = useQuery({
+    queryKey: ["heatmap", "layers", metric, layerDimension, Array.from(selectedLayerValues), dateFrom, dateTo, priorDateFrom, priorDateTo],
+    queryFn: async ({ signal }) => {
+      const values = Array.from(selectedLayerValues);
+      const responses = await Promise.all(
+        values.map((value) =>
+          heatmapApi.query({
+            metric,
+            dateFrom: dateFrom || undefined,
+            dateTo: dateTo || undefined,
+            priorDateFrom: needsTwoWindows(metric) ? priorDateFrom || undefined : undefined,
+            priorDateTo: needsTwoWindows(metric) ? priorDateTo || undefined : undefined,
+            ...(layerDimension === "category" ? { categoryValue: value } : { scopeField: layerDimension, scopeValues: [value] }),
+          }, signal),
+        ),
+      );
+      return values.map((value, index): HeatmapLayerData => ({
+        id: value,
+        label: value,
+        color: LAYER_PALETTE[index % LAYER_PALETTE.length]!,
+        points: responses[index]!.points,
+        maxValue: responses[index]!.maxValue,
+      }));
+    },
+    enabled: canQuery && multiLayerMode,
+  });
+  const result = multiLayerMode ? null : (queryResult.data ?? null);
+  const layerResults = multiLayerMode ? (multiLayerQuery.data ?? null) : null;
 
   function handleInterpret() {
     if (!prompt.trim()) return;
@@ -425,10 +411,12 @@ export default function HeatmapPage() {
             </div>
           )}
 
-          <Button disabled={!canQuery || queryMutation.isPending || multiLayerMutation.isPending} onClick={handleQuery}>
-            {queryMutation.isPending || multiLayerMutation.isPending ? <Spinner /> : <Flame className="h-4 w-4" />}
-            {queryMutation.isPending || multiLayerMutation.isPending ? t("heatmap.updatingButton") : t("heatmap.updateMapButton")}
-          </Button>
+          {(queryResult.isFetching || multiLayerQuery.isFetching) && (
+            <span className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner className="h-4 w-4" />
+              {t("heatmap.updatingButton")}
+            </span>
+          )}
         </div>
       </div>
 
@@ -539,6 +527,7 @@ function ResultView({
 }) {
   const { t, locale } = useTranslation();
   const [decision, setDecision] = useState<HeatmapDecisionResult | null>(null);
+  const [mapMode, setMapMode] = useState<HeatmapDisplayMode>("heat");
   const decisionMutation = useMutation({
     mutationFn: heatmapApi.decisionSummary,
     onSuccess: setDecision,
@@ -604,7 +593,19 @@ function ResultView({
           {excludedBadCoordinates > 0 && <Badge variant="warning">{t("heatmap.excludedBadge", { count: excludedBadCoordinates })}</Badge>}
           {layers && <Badge variant="secondary">{t("heatmap.layersBadge", { count: layers.length })}</Badge>}
         </div>
-        <HeatmapMap layers={layers ?? undefined} points={layers ? undefined : result?.points} maxValue={layers ? undefined : result?.maxValue} layersTitle={layersTitle} />
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium text-muted-foreground">نمط الخريطة</span>
+          {([
+            ["heat", "حرارية"],
+            ["bubble", "فقاعية"],
+            ["cluster", "عنقودية"],
+          ] as const).map(([mode, label]) => (
+            <Button key={mode} type="button" size="sm" variant={mapMode === mode ? "default" : "outline"} onClick={() => setMapMode(mode)}>
+              {label}
+            </Button>
+          ))}
+        </div>
+        <HeatmapMap layers={layers ?? undefined} points={layers ? undefined : result?.points} maxValue={layers ? undefined : result?.maxValue} layersTitle={layersTitle} mode={mapMode} />
 
         <div className="space-y-3 border-t border-border pt-4">
           <Button variant="secondary" size="sm" disabled={allPoints.length === 0 || decisionMutation.isPending} onClick={handleGenerateDecisions}>

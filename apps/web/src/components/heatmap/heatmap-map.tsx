@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import type { Map as LeafletMap, HeatLayer } from "leaflet";
+import type { Layer, Map as LeafletMap, HeatLayer } from "leaflet";
 // Stylesheet import is safe statically (no `window` access at module load).
 // The Leaflet JS itself, and leaflet.heat, are only ever imported inside
 // useEffect — same SSR-safety reasoning as route-split-map.tsx.
 import "leaflet/dist/leaflet.css";
-import { heatGradientObject, radiusForZoom } from "@/components/geo-engine/color-scale";
+import { colorForRatio, heatGradientObject, radiusForZoom } from "@/components/geo-engine/color-scale";
 import type { HeatmapPoint } from "@/lib/types";
 
 // 2026-07-21 — multi-layer support (Task #251, product request): the user
@@ -34,6 +34,12 @@ export interface HeatmapLayerData {
   maxValue: number;
 }
 
+export type HeatmapDisplayMode = "heat" | "bubble" | "cluster";
+
+function clusterCellSize(zoom: number): number {
+  return 8 / Math.pow(2, zoom);
+}
+
 // A handful of visually distinct hues, cycled by layer index — same role
 // leaflet.heat's own `gradient` option plays for a single layer, just one
 // solid hot-color per layer instead of a value-driven gradient, so two
@@ -51,6 +57,7 @@ export function HeatmapMap({
   maxValue,
   layers,
   layersTitle,
+  mode = "heat",
 }: {
   points?: HeatmapPoint[];
   maxValue?: number;
@@ -59,10 +66,12 @@ export function HeatmapMap({
   // "القناة") — shown above the toggle list so it's visually obvious which
   // question these checkboxes answer, not just a bare list of values.
   layersTitle?: string;
+  mode?: HeatmapDisplayMode;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const heatLayersRef = useRef<Map<string, HeatLayer>>(new Map());
+  const pointLayersRef = useRef<Layer[]>([]);
   // 2026-07-21 bug fix: the map itself is created asynchronously (dynamic
   // `import("leaflet")` inside the init effect below), so on a HeatmapMap's
   // very first mount — which, in this app, is already carrying real query
@@ -144,69 +153,104 @@ export function HeatmapMap({
     };
   }, [mapReady]);
 
-  // Rebuild every heat layer whenever the underlying data changes (new
-  // query results) or the zoom level changes (radius/blur retune) —
-  // visibility toggling below is a separate, cheaper effect that never
-  // re-fetches or re-builds the heat canvases, and bounds-fitting is a
-  // separate effect further below keyed only on the dataset itself (not
-  // zoom), so it never fights the user's own zoom gesture.
+  // The three display modes consume the exact same query points. Only their
+  // Leaflet layer differs: density canvas, value-sized circles, or zoom-aware
+  // grid clusters. No filtering or aggregation is done in the map component.
   useEffect(() => {
     if (!mapRef.current) return;
     let cancelled = false;
 
     (async () => {
       const L = (await import("leaflet")).default;
-      // The ambient `declare module "leaflet.heat"` in
-      // src/types/leaflet-heat.d.ts doesn't reliably suppress this under
-      // the project's `moduleResolution: "bundler"` setting once the real
-      // (typeless) npm package is actually installed on disk — a known
-      // friction point between shorthand ambient declarations and bundler
-      // resolution. Side-effect-only import (attaches L.heatLayer), so
-      // there's nothing to type here anyway.
-      // @ts-expect-error -- see comment above; no types ship for this package
-      await import("leaflet.heat");
       if (cancelled || !mapRef.current) return;
 
       for (const layer of heatLayersRef.current.values()) layer.remove();
       heatLayersRef.current = new Map();
+      for (const layer of pointLayersRef.current) layer.remove();
+      pointLayersRef.current = [];
 
-      // Real multi-stop blue -> cyan -> green -> yellow -> orange -> red
-      // density gradient (per the client's own reference exports, see
-      // color-scale.ts) when there's exactly one layer on screen — this is
-      // the normal "just show me the heat map" view. With 2+ layers up at
-      // once (the category/channel comparison toggles, Task #251), each
-      // layer keeps its own distinct solid hue instead — a shared gradient
-      // would make overlapping layers indistinguishable from each other,
-      // defeating the whole point of comparing them side by side.
-      const useSharedGradient = resolvedLayers.length === 1;
-      const radius = radiusForZoom(mapRef.current.getZoom());
+      const visibleLayers = resolvedLayers.filter((layerData) => visible[layerData.id] !== false);
+      const entries = visibleLayers.flatMap((layerData) => layerData.points.map((point) => ({ point, color: layerData.color })));
+      if (entries.length === 0) return;
 
-      for (const layerData of resolvedLayers) {
-        if (layerData.points.length === 0) continue;
-        const safeMax = layerData.maxValue > 0 ? layerData.maxValue : 1;
-        const latlngs: [number, number, number][] = layerData.points.map((p) => [p.lat, p.lon, p.value / safeMax]);
+      if (mode === "heat") {
+        // @ts-expect-error -- leaflet.heat ships without usable TypeScript types.
+        await import("leaflet.heat");
+        if (cancelled || !mapRef.current) return;
+        const useSharedGradient = visibleLayers.length === 1;
+        const radius = radiusForZoom(mapRef.current.getZoom());
 
-        const heatLayer = L.heatLayer(latlngs, {
-          radius,
-          blur: radius * 0.85,
-          maxZoom: 17,
-          max: 1,
-          minOpacity: 0.35,
-          gradient: useSharedGradient ? heatGradientObject() : heatGradientFor(layerData.color),
+        for (const layerData of visibleLayers) {
+          const safeMax = layerData.maxValue > 0 ? layerData.maxValue : 1;
+          const latlngs: [number, number, number][] = layerData.points.map((p) => [p.lat, p.lon, p.value / safeMax]);
+          const heatLayer = L.heatLayer(latlngs, {
+            radius,
+            blur: radius * 0.85,
+            maxZoom: 17,
+            max: 1,
+            minOpacity: 0.35,
+            gradient: useSharedGradient ? heatGradientObject() : heatGradientFor(layerData.color),
+          }).addTo(mapRef.current);
+          heatLayersRef.current.set(layerData.id, heatLayer);
+        }
+        return;
+      }
+
+      const maxValue = entries.reduce((max, entry) => Math.max(max, entry.point.value), 0) || 1;
+
+      if (mode === "bubble") {
+        for (const { point, color } of entries) {
+          const ratio = point.value / maxValue;
+          const marker = L.circleMarker([point.lat, point.lon], {
+            radius: 6 + Math.sqrt(ratio) * 28,
+            color: "#ffffff",
+            weight: 1.5,
+            fillColor: visibleLayers.length === 1 ? colorForRatio(ratio) : color,
+            fillOpacity: 0.75,
+          });
+          marker.bindTooltip(`${point.label} — ${Math.round(point.value).toLocaleString("en-US")}`);
+          marker.addTo(mapRef.current);
+          pointLayersRef.current.push(marker);
+        }
+        return;
+      }
+
+      const cellSize = clusterCellSize(mapRef.current.getZoom());
+      const buckets = new Map<string, { latSum: number; lonSum: number; count: number; totalValue: number }>();
+      for (const { point } of entries) {
+        const key = `${Math.floor(point.lat / cellSize)}_${Math.floor(point.lon / cellSize)}`;
+        const bucket = buckets.get(key) ?? { latSum: 0, lonSum: 0, count: 0, totalValue: 0 };
+        bucket.latSum += point.lat;
+        bucket.lonSum += point.lon;
+        bucket.count += 1;
+        bucket.totalValue += point.value;
+        buckets.set(key, bucket);
+      }
+      const values = Array.from(buckets.values());
+      const maxCount = values.reduce((max, bucket) => Math.max(max, bucket.count), 1);
+      const maxClusterValue = values.reduce((max, bucket) => Math.max(max, bucket.totalValue), 1);
+
+      for (const bucket of values) {
+        const ratio = bucket.totalValue / maxClusterValue;
+        const marker = L.circleMarker([bucket.latSum / bucket.count, bucket.lonSum / bucket.count], {
+          radius: 8 + Math.sqrt(bucket.count / maxCount) * 24,
+          color: "#ffffff",
+          weight: bucket.count > 1 ? 2 : 1.5,
+          fillColor: colorForRatio(ratio),
+          fillOpacity: 0.85,
         });
-        if (visible[layerData.id] !== false) heatLayer.addTo(mapRef.current);
-        heatLayersRef.current.set(layerData.id, heatLayer);
+        marker.bindTooltip(`${bucket.count.toLocaleString("en-US")} — ${Math.round(bucket.totalValue).toLocaleString("en-US")}`);
+        marker.on("click", () => mapRef.current?.setView([bucket.latSum / bucket.count, bucket.lonSum / bucket.count], Math.min((mapRef.current?.getZoom() ?? 10) + 3, 16)));
+        marker.addTo(mapRef.current);
+        pointLayersRef.current.push(marker);
       }
     })();
 
     return () => {
       cancelled = true;
     };
-    // Deliberately excludes `visible` — toggling a checkbox shouldn't tear
-    // down and rebuild every heat canvas, only add/remove the one layer
-    // that changed (handled by the effect below).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, zoomTick, JSON.stringify(resolvedLayers.map((l) => ({ id: l.id, maxValue: l.maxValue, points: l.points })))]);
+  }, [mapReady, mode, zoomTick, JSON.stringify({ layers: resolvedLayers, visible })]);
 
   // Bounds-fitting — separate effect, deliberately NOT keyed on `zoomTick`
   // (see the layer-build effect's comment above for why: re-fitting on
@@ -218,18 +262,6 @@ export function HeatmapMap({
     if (allBounds.length > 0) mapRef.current.fitBounds(allBounds, { padding: [24, 24] });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, JSON.stringify(resolvedLayers.map((l) => ({ id: l.id, points: l.points })))]);
-
-  // Cheap add/remove of already-built heat canvases when a checkbox is
-  // toggled — no re-computation of the heat data itself.
-  useEffect(() => {
-    if (!mapRef.current) return;
-    for (const [id, heatLayer] of heatLayersRef.current.entries()) {
-      const shouldShow = visible[id] !== false;
-      const isShown = mapRef.current.hasLayer(heatLayer);
-      if (shouldShow && !isShown) heatLayer.addTo(mapRef.current);
-      else if (!shouldShow && isShown) heatLayer.remove();
-    }
-  }, [visible]);
 
   const showToggles = resolvedLayers.length > 1;
 
