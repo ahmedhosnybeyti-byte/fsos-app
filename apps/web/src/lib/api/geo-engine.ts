@@ -7,7 +7,7 @@ import type { GeoQueryInput, GeoQueryResult, GeoTableQueryInput, GeoTableResult 
 // field set, same entities, explicit "reuse existing services" instruction
 // from the client spec).
 export const geoEngineApi = {
-  query: (input: GeoQueryInput, signal?: AbortSignal) => apiFetch<GeoQueryResult>("/geo-engine/query", { method: "POST", body: input, signal }),
+  query: (input: GeoQueryInput) => apiFetch<GeoQueryResult>("/geo-engine/query", { method: "POST", body: input }),
   // Phase 3 — Invoice-line detail table ("Invoice" step of the drill chain).
   table: (input: GeoTableQueryInput) => apiFetch<GeoTableResult>("/geo-engine/table", { method: "POST", body: input }),
 };
