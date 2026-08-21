@@ -203,7 +203,7 @@ export function HeatmapMap({
         for (const { point, color } of entries) {
           const ratio = point.value / maxValue;
           const marker = L.circleMarker([point.lat, point.lon], {
-            radius: 6 + Math.sqrt(ratio) * 28,
+            radius: 4 + Math.sqrt(ratio) * 16,
             color: "#ffffff",
             weight: 1.5,
             fillColor: visibleLayers.length === 1 ? colorForRatio(ratio) : color,
