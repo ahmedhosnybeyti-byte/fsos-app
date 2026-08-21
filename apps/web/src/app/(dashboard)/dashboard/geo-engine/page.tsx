@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Globe2, Info } from "lucide-react";
 import { geoEngineApi } from "@/lib/api";
@@ -82,20 +82,6 @@ function defaultState(): GeoAnalysisState {
   return { filters: defaultFilters(), kpi: "sales", groupBy: "customer", mode: "heat" };
 }
 
-// Keep the map responsive while a user changes several filters in sequence.
-// The initial value is returned immediately; subsequent values settle after a
-// short pause, so a single final query replaces a burst of intermediate ones.
-function useDebouncedValue<T>(value: T, delayMs: number): T {
-  const [debouncedValue, setDebouncedValue] = useState(value);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedValue(value), delayMs);
-    return () => window.clearTimeout(timer);
-  }, [value, delayMs]);
-
-  return debouncedValue;
-}
-
 export default function GeoEnginePage() {
   const { t } = useTranslation();
   const workspaceRef = useRef<HTMLDivElement>(null);
@@ -117,18 +103,14 @@ export default function GeoEnginePage() {
     () => ({ ...state.filters, kpi: state.kpi, groupBy: state.groupBy }),
     [state.filters, state.kpi, state.groupBy],
   );
-  const debouncedQueryInput = useDebouncedValue(queryInput, 300);
-  const isDebouncing = queryInput !== debouncedQueryInput;
-
   const queryResult = useQuery({
-    queryKey: ["geo-engine", "query", debouncedQueryInput],
-    // React Query aborts the previous key's signal when the settled filters
-    // change. apiFetch forwards it to fetch, preventing stale map/KPI data
-    // from winning a later request.
-    queryFn: ({ signal }) => geoEngineApi.query(debouncedQueryInput, signal),
-    placeholderData: (prev) => prev,
+    queryKey: ["geo-engine", "query", queryInput],
+    // React Query aborts the previous key's signal as soon as a filter or
+    // data-affecting mode changes. apiFetch forwards it to fetch, preventing
+    // a stale map/KPI response from winning the immediately-started request.
+    queryFn: ({ signal }) => geoEngineApi.query(queryInput, signal),
   });
-  const result = isDebouncing ? undefined : queryResult.data;
+  const result = queryResult.data;
 
   function setFilters(next: GeoFilters) {
     setState((prev) => ({ ...prev, filters: next }));
@@ -272,7 +254,7 @@ export default function GeoEnginePage() {
                   </button>
                 ))}
               </div>
-              {(isDebouncing || queryResult.isFetching) && (
+              {queryResult.isFetching && (
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <Spinner className="h-3.5 w-3.5" />
                   {t("geoEngine.loading")}
@@ -287,7 +269,7 @@ export default function GeoEnginePage() {
         {isPermissionDenied ? (
           <p className="py-16 text-center text-sm text-destructive">{t("geoEngine.errorLoad")}</p>
         ) : queryResult.isError || !result ? (
-          isDebouncing || queryResult.isLoading ? (
+          queryResult.isLoading ? (
             <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
               <Spinner className="h-5 w-5" />
               {t("geoEngine.loading")}
