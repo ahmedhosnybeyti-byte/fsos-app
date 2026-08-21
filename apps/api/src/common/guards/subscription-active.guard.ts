@@ -11,6 +11,7 @@ const SHARED_TRIAL_READ_POST_PATHS = new Set([
   "/fsos-360/query", "/fsos-360/filter-options",
   "/decision-analytics-studio/query", "/decision-analytics-studio/table",
   "/geo-engine/query", "/geo-engine/table",
+  "/heatmap/query",
   "/smart-loading/recalculate",
   "/team-performance/query",
 ]);
