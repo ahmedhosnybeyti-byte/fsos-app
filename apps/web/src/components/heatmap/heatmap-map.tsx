@@ -72,6 +72,7 @@ export function HeatmapMap({
   const mapRef = useRef<LeafletMap | null>(null);
   const heatLayersRef = useRef<Map<string, HeatLayer>>(new Map());
   const pointLayersRef = useRef<Layer[]>([]);
+  const hasInitialViewportRef = useRef(false);
   // 2026-07-21 bug fix: the map itself is created asynchronously (dynamic
   // `import("leaflet")` inside the init effect below), so on a HeatmapMap's
   // very first mount — which, in this app, is already carrying real query
@@ -252,14 +253,16 @@ export function HeatmapMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, mode, zoomTick, JSON.stringify({ layers: resolvedLayers, visible })]);
 
-  // Bounds-fitting — separate effect, deliberately NOT keyed on `zoomTick`
-  // (see the layer-build effect's comment above for why: re-fitting on
-  // every zoom the user just performed would fight their own zoom gesture).
+  // Set the initial viewport once. Refreshes only replace the data layers,
+  // preserving the user's current center and zoom.
   useEffect(() => {
-    if (!mapRef.current) return;
+    if (!mapRef.current || hasInitialViewportRef.current) return;
     const allBounds: [number, number][] = [];
     for (const layerData of resolvedLayers) for (const p of layerData.points) allBounds.push([p.lat, p.lon]);
-    if (allBounds.length > 0) mapRef.current.fitBounds(allBounds, { padding: [24, 24] });
+    if (allBounds.length > 0) {
+      mapRef.current.fitBounds(allBounds, { padding: [24, 24] });
+      hasInitialViewportRef.current = true;
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapReady, JSON.stringify(resolvedLayers.map((l) => ({ id: l.id, points: l.points })))]);
 

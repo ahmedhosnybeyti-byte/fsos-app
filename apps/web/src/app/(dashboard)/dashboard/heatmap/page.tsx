@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Brain, FileSpreadsheet, Flame, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -155,6 +155,9 @@ export default function HeatmapPage() {
     queryKey: ["heatmap", "query", queryInput],
     queryFn: ({ signal }) => heatmapApi.query(queryInput, signal),
     enabled: canQuery && !multiLayerMode,
+    // Keep the current map mounted and visible until the replacement layer
+    // data arrives; the Leaflet instance is never torn down for a refresh.
+    placeholderData: (previous) => previous,
   });
   const multiLayerQuery = useQuery({
     queryKey: ["heatmap", "layers", metric, layerDimension, Array.from(selectedLayerValues), dateFrom, dateTo, priorDateFrom, priorDateTo],
@@ -181,9 +184,14 @@ export default function HeatmapPage() {
       }));
     },
     enabled: canQuery && multiLayerMode,
+    placeholderData: (previous) => previous,
   });
-  const result = multiLayerMode ? null : (queryResult.data ?? null);
-  const layerResults = multiLayerMode ? (multiLayerQuery.data ?? null) : null;
+  const lastSingleResultRef = useRef<HeatmapQueryResult | null>(null);
+  const lastLayerResultsRef = useRef<HeatmapLayerData[] | null>(null);
+  if (queryResult.data) lastSingleResultRef.current = queryResult.data;
+  if (multiLayerQuery.data) lastLayerResultsRef.current = multiLayerQuery.data;
+  const result = multiLayerMode ? null : (queryResult.data ?? lastSingleResultRef.current);
+  const layerResults = multiLayerMode ? (multiLayerQuery.data ?? lastLayerResultsRef.current) : null;
 
   function handleInterpret() {
     if (!prompt.trim()) return;
