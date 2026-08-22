@@ -64,6 +64,18 @@ function boolToYesNo(value: boolean | null): string | null {
   return value ? "Yes" : "No";
 }
 
+function stableRows(rows: readonly unknown[]): string {
+  const serialize = (value: unknown): string => {
+    if (value instanceof Date) return JSON.stringify(value.toISOString());
+    if (typeof value === "number") return JSON.stringify(Number(value.toPrecision(15)));
+    if (Array.isArray(value)) return `[${value.map(serialize).join(",")}]`;
+    if (value !== null && typeof value === "object") {
+      return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${serialize((value as Record<string, unknown>)[key])}`).join(",")}}`;
+    }
+    return JSON.stringify(value);
+  };
+  return rows.map(serialize).sort().join("\n");
+}
 // ------------------------------------------------------------------
 // Parsed-dataset cache (2026-07-20, memory-explosion fix).
 //
@@ -253,6 +265,21 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       mergedRows = mergedRows.slice(0, options.limit);
     }
 
+    // Phase 2: Customers remains Excel-served. This detached verification
+    // reads the same active source files from the Postgres shadow and applies
+    // the already-resolved hierarchy scope, filters, and limit. It never
+    // affects this response or any consumer-facing read path.
+    if (entityName === "Customers") {
+      void this.compareCustomersShadow({
+        companyId: options.companyId,
+        matchingFileIds: matchingFiles.map((file) => file.id),
+        headers,
+        routeAllowedValues,
+        filters: options.filters,
+        limit: options.limit,
+        excelRows: mergedRows,
+      }).catch(() => this.logger.log("[CustomersShadowRead] FAIL"));
+    }
     return {
       entityName,
       available: true,
@@ -262,6 +289,43 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
     };
   }
 
+  private async compareCustomersShadow(params: {
+    companyId: string;
+    matchingFileIds: string[];
+    headers: string[];
+    routeAllowedValues: Set<string> | null;
+    filters: readonly EntityFieldFilter[] | undefined;
+    limit: number | undefined;
+    excelRows: DatasetRow[];
+  }): Promise<void> {
+    const { companyId, matchingFileIds, headers, routeAllowedValues, filters, limit, excelRows } = params;
+    const versions = await this.prisma.rieDatasetVersion.findMany({
+      where: { companyId, entityName: "Customers", isActive: true, sourceFileId: { in: matchingFileIds } },
+      select: { sourceFileId: true, rows: { select: { data: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] } },
+    });
+    const versionByFileId = new Map(versions.map((version) => [version.sourceFileId, version]));
+    const shadowRows: DatasetRow[] = [];
+    const seenCustomerCodes = new Set<string>();
+    for (const fileId of matchingFileIds) {
+      const version = versionByFileId.get(fileId);
+      if (!version) { this.logger.log("[CustomersShadowRead] FAIL"); return; }
+      const fileCodes = new Set<string>();
+      for (const row of version.rows.map((item) => item.data as DatasetRow)) {
+        const code = String(row.CustomerCode ?? "").trim().toLowerCase();
+        if (!code || seenCustomerCodes.has(code)) continue;
+        fileCodes.add(code);
+        shadowRows.push(row);
+      }
+      for (const code of fileCodes) seenCustomerCodes.add(code);
+    }
+    let filteredShadowRows = applyHierarchyFilter(shadowRows, headers, routeAllowedValues);
+    if (filters?.length) filteredShadowRows = filteredShadowRows.filter((row) => filters.every((filter) => matchesEntityFilter(row, headers, filter)));
+    if (limit && filteredShadowRows.length > limit) filteredShadowRows = filteredShadowRows.slice(0, limit);
+    const sameCount = excelRows.length === filteredShadowRows.length;
+    const sameCodes = stableRows(excelRows.map((row) => String(row.CustomerCode ?? "").trim()).sort()) === stableRows(filteredShadowRows.map((row) => String(row.CustomerCode ?? "").trim()).sort());
+    const sameData = stableRows(excelRows) === stableRows(filteredShadowRows);
+    this.logger.log(`[CustomersShadowRead] ${sameCount && sameCodes && sameData ? "PASS" : "FAIL"}`);
+  }
   // Returns the cached parsed-and-merged dataset for (companyId, entityName)
   // if the active file set backing it hasn't changed, otherwise parses fresh
   // and caches the result. Concurrent callers for the same key share the
