@@ -711,7 +711,7 @@ export class FilesService {
   }
 
   private async materializeInvoiceItemsShadow(params: { companyId: string; fileId: string; rows: Record<string, unknown>[] }): Promise<void> {
-    return this.materializeEntityShadow({ ...params, entityName: INVOICE_ITEMS_ENTITY, keyColumns: ["InvoiceNo", "LineNo"] });
+    return this.materializeEntityShadow({ ...params, entityName: INVOICE_ITEMS_ENTITY, keyColumns: ["InvoiceNo", "LineNo"], allowDuplicateKeys: true });
   }
 
   /** Write-only shadow materialization for the two invoice datasets. */
@@ -720,31 +720,39 @@ export class FilesService {
     fileId: string;
     entityName: string;
     keyColumns: readonly string[];
+    allowDuplicateKeys?: boolean;
     rows: Record<string, unknown>[];
   }): Promise<void> {
-    const { companyId, fileId, entityName, keyColumns, rows } = params;
-    const entityKeys = rows.map((row) => keyColumns.map((column) => String(row[column] ?? "").trim()).join("␟"));
-    if (entityKeys.some((key) => !key || key.split("␟").some((part) => !part))) {
+    const { companyId, fileId, entityName, keyColumns, allowDuplicateKeys = false, rows } = params;
+    const canonicalKeys = rows.map((row) => keyColumns.map((column) => String(row[column] ?? "").trim()).join("␟"));
+    if (canonicalKeys.some((key) => !key || key.split("␟").some((part) => !part))) {
       throw new Error(`${entityName} shadow materialization requires ${keyColumns.join(", ")} on every row.`);
     }
-    if (new Set(entityKeys).size !== entityKeys.length) {
+    if (!allowDuplicateKeys && new Set(canonicalKeys).size !== canonicalKeys.length) {
       throw new Error(`${entityName} shadow materialization requires unique canonical keys.`);
     }
+    const occurrences = new Map<string, number>();
+    const entityKeys = canonicalKeys.map((key) => {
+      const occurrence = occurrences.get(key) ?? 0;
+      occurrences.set(key, occurrence + 1);
+      return occurrence === 0 ? key : `${key}␟${occurrence}`;
+    });
 
     await this.prisma.$transaction(async (tx) => {
       const version = await tx.rieDatasetVersion.create({
         data: { companyId, sourceFileId: fileId, entityName },
       });
       if (rows.length > 0) {
-        await tx.rieEntityRow.createMany({
-          data: rows.map((data, index) => ({
-            companyId,
-            datasetVersionId: version.id,
-            entityName,
-            entityKey: entityKeys[index]!,
-            data: data as Prisma.InputJsonValue,
-          })),
-        });
+        const data = rows.map((row, index) => ({
+          companyId,
+          datasetVersionId: version.id,
+          entityName,
+          entityKey: entityKeys[index]!,
+          data: row as Prisma.InputJsonValue,
+        }));
+        for (let index = 0; index < data.length; index += 10_000) {
+          await tx.rieEntityRow.createMany({ data: data.slice(index, index + 10_000) });
+        }
       }
 
       const materializedRows = await tx.rieEntityRow.findMany({
@@ -762,7 +770,7 @@ export class FilesService {
         where: { id: version.id },
         data: { status: "ACTIVE", isActive: true, rowCount: rows.length, materializedAt: new Date(), activatedAt: new Date() },
       });
-    }, { timeout: 30_000 });
+    }, { timeout: 600_000 });
   }
 
   // Automatic Employee Account Provisioning (2026-07-19) — runs once per

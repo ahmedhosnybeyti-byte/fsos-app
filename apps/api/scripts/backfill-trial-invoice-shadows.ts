@@ -26,13 +26,13 @@ async function main() {
   const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 
   try {
-    const workbook = XLSX.read(await readFile(workbookPath), { type: "buffer", cellDates: true });
+    const files = await prisma.file.findMany({
+      where: { companyId, datasetType: { in: ENTITIES.map((entity) => entity.entityName) }, isActive: true, status: "READY", datasetTypeConfirmed: true },
+      select: { id: true, datasetType: true, sheetIndex: true },
+    });
+    const workbook = XLSX.read(await readFile(workbookPath), { type: "buffer", cellDates: true, sheets: files.map((file) => file.sheetIndex) });
     for (const entity of ENTITIES) {
-      const file = await prisma.file.findFirst({
-        where: { companyId, datasetType: entity.entityName, isActive: true, status: "READY", datasetTypeConfirmed: true },
-        orderBy: { createdAt: "desc" },
-        select: { id: true, sheetIndex: true },
-      });
+      const file = files.find((candidate) => candidate.datasetType === entity.entityName);
       if (!file) throw new Error(`No active ${entity.entityName} file found.`);
       const existing = await prisma.rieDatasetVersion.findUnique({
         where: { sourceFileId_entityName: { sourceFileId: file.id, entityName: entity.entityName } },
@@ -44,17 +44,25 @@ async function main() {
       const sheetName = workbook.SheetNames[file.sheetIndex];
       const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
       const rows = (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as Record<string, unknown>[];
-      const keys = rows.map((row) => entity.keyColumns.map((column) => String(row[column] ?? "").trim()).join("␟"));
-      if (keys.some((key) => !key || key.split("␟").some((part) => !part)) || new Set(keys).size !== keys.length) {
+      const canonicalKeys = rows.map((row) => entity.keyColumns.map((column) => String(row[column] ?? "").trim()).join("␟"));
+      if (canonicalKeys.some((key) => !key || key.split("␟").some((part) => !part))) {
         throw new Error(`Invalid ${entity.entityName} canonical keys.`);
       }
+      if (entity.entityName === "Invoices" && new Set(canonicalKeys).size !== canonicalKeys.length) throw new Error("Invalid duplicate InvoiceNo.");
+      const occurrences = new Map<string, number>();
+      const keys = canonicalKeys.map((key) => {
+        const occurrence = occurrences.get(key) ?? 0;
+        occurrences.set(key, occurrence + 1);
+        return occurrence === 0 ? key : `${key}␟${occurrence}`;
+      });
 
       await prisma.$transaction(async (tx) => {
         const version = await tx.rieDatasetVersion.create({ data: { companyId, sourceFileId: file.id, entityName: entity.entityName } });
         if (rows.length > 0) {
-          await tx.rieEntityRow.createMany({
-            data: rows.map((data, index) => ({ companyId, datasetVersionId: version.id, entityName: entity.entityName, entityKey: keys[index]!, data: data as never })),
-          });
+          const data = rows.map((row, index) => ({ companyId, datasetVersionId: version.id, entityName: entity.entityName, entityKey: keys[index]!, data: row as never }));
+          for (let index = 0; index < data.length; index += 10_000) {
+            await tx.rieEntityRow.createMany({ data: data.slice(index, index + 10_000) });
+          }
         }
         const shadowRows = await tx.rieEntityRow.findMany({ where: { datasetVersionId: version.id }, select: { entityKey: true, data: true } });
         const excelByKey = new Map(rows.map((row, index) => [keys[index]!, stableJson(row)]));
@@ -66,7 +74,7 @@ async function main() {
           data: { status: "ACTIVE", isActive: true, rowCount: rows.length, materializedAt: new Date(), activatedAt: new Date() },
         });
         console.log(`${entity.entityName}: ${rows.length}`);
-      }, { timeout: 30_000 });
+      }, { timeout: 600_000 });
     }
 
     const [invoices, items] = await Promise.all([
