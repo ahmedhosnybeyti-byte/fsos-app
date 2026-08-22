@@ -242,8 +242,9 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       );
     }
 
-    // Phase 3: Customers is read from the active Postgres materialization.
-    // Other entities retain the established Excel path below.
+    // Phase 3: Customers is the first canonical entity whose served rows are
+    // read from the active Postgres materialization. Other entities retain
+    // the established Excel path below.
     if (entityName === "Customers") {
       return this.getCustomersPostgresRecords(options, matchingFiles, warnings);
     }
@@ -428,6 +429,60 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
     const sameData = stableRows(basicCustomerRows(excelRows)) === stableRows(basicCustomerRows(filteredShadowRows));
     this.logger.log(`[CustomersShadowRead] ${sameCount && sameCodes && sameData ? "PASS" : "FAIL"}`);
   }
+
+  private async compareInvoiceShadow(params: {
+    entityName: "Invoices" | "Invoice Items";
+    companyId: string;
+    matchingFileIds: string[];
+    headers: string[];
+    routeAllowedValues: Set<string> | null;
+    filters: readonly EntityFieldFilter[] | undefined;
+    limit: number | undefined;
+    excelRows: DatasetRow[];
+  }): Promise<void> {
+    const { entityName, companyId, matchingFileIds, headers, routeAllowedValues, filters, limit, excelRows } = params;
+    const versions = await this.prisma.rieDatasetVersion.findMany({
+      where: { companyId, entityName, isActive: true, sourceFileId: { in: matchingFileIds } },
+      select: { id: true, sourceFileId: true },
+    });
+    const rows = await this.prisma.rieEntityRow.findMany({
+      where: { datasetVersionId: { in: versions.map((version) => version.id) } },
+      select: { datasetVersionId: true, data: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+    const rowsByVersion = new Map<string, DatasetRow[]>();
+    for (const row of rows) rowsByVersion.set(row.datasetVersionId, [...(rowsByVersion.get(row.datasetVersionId) ?? []), row.data as DatasetRow]);
+    const versionByFile = new Map(versions.map((version) => [version.sourceFileId, version]));
+    const primaryKey = entityName === "Invoices" ? ["InvoiceNo"] : ["InvoiceNo", "LineNo"];
+    const shadowRows: DatasetRow[] = [];
+    const seenKeys = new Set<string>();
+    for (const fileId of matchingFileIds) {
+      const version = versionByFile.get(fileId);
+      if (!version) return this.logger.log(`[${entityName}ShadowRead] FAIL`);
+      const fileKeys = new Set<string>();
+      for (const row of rowsByVersion.get(version.id) ?? []) {
+        const key = primaryKey.map((column) => String(row[column] ?? "").trim()).join("␟").toLowerCase();
+        if (key && seenKeys.has(key)) continue;
+        if (key) fileKeys.add(key);
+        shadowRows.push(row);
+      }
+      for (const key of fileKeys) seenKeys.add(key);
+    }
+    let filtered = applyHierarchyFilter(shadowRows, headers, routeAllowedValues);
+    if (filters?.length) filtered = filtered.filter((row) => filters.every((filter) => matchesEntityFilter(row, headers, filter)));
+    if (limit && filtered.length > limit) filtered = filtered.slice(0, limit);
+    const keyOf = (row: DatasetRow) => primaryKey.map((column) => String(row[column] ?? "").trim()).join("␟");
+    const pass = excelRows.length === filtered.length
+      && stableRows(excelRows.map(keyOf)) === stableRows(filtered.map(keyOf))
+      && stableRows(excelRows) === stableRows(filtered);
+    this.logger.log(`[${entityName}ShadowRead] ${pass ? "PASS" : "FAIL"}`);
+    if (entityName === "Invoice Items") {
+      const invoices = await this.prisma.rieEntityRow.findMany({ where: { companyId, entityName: "Invoices", datasetVersion: { isActive: true } }, select: { entityKey: true } });
+      const invoiceKeys = new Set(invoices.map((invoice) => invoice.entityKey));
+      this.logger.log(`[InvoiceRelationShadowRead] ${filtered.every((row) => invoiceKeys.has(String(row.InvoiceNo ?? "").trim())) ? "PASS" : "FAIL"}`);
+    }
+  }
+
   // Returns the cached parsed-and-merged dataset for (companyId, entityName)
   // if the active file set backing it hasn't changed, otherwise parses fresh
   // and caches the result. Concurrent callers for the same key share the
