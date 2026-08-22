@@ -36,6 +36,8 @@ const RETURNS_ENTITY = "Returns";
 const RETURN_ITEMS_ENTITY = "Return Items";
 const VAN_INVENTORY_ENTITY = "Van Inventory";
 const VAN_LOADS_ENTITY = "Van Loads";
+const VISITS_ENTITY = "Visits";
+const EMPLOYEES_ENTITY = "Employees";
 
 // Official Import Template field names (PascalCase, exactly as in
 // import-templates.data.ts's IMPORT-SALES-CALENDAR-v1.0 `fields`), in
@@ -255,7 +257,7 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
     if (entityName === "Customers") {
       return this.getCustomersPostgresRecords(options, matchingFiles, warnings);
     }
-    if (entityName === INVOICES_ENTITY || entityName === INVOICE_ITEMS_ENTITY || entityName === COLLECTIONS_ENTITY || entityName === RETURNS_ENTITY || entityName === RETURN_ITEMS_ENTITY || entityName === VAN_INVENTORY_ENTITY || entityName === VAN_LOADS_ENTITY) {
+    if (entityName === INVOICES_ENTITY || entityName === INVOICE_ITEMS_ENTITY || entityName === COLLECTIONS_ENTITY || entityName === RETURNS_ENTITY || entityName === RETURN_ITEMS_ENTITY || entityName === VAN_INVENTORY_ENTITY || entityName === VAN_LOADS_ENTITY || entityName === VISITS_ENTITY || entityName === EMPLOYEES_ENTITY) {
       return this.getMaterializedEntityRecords(entityName, options, matchingFiles, warnings);
     }
 
@@ -391,7 +393,7 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
   }
 
   private async getMaterializedEntityRecords(
-    entityName: typeof INVOICES_ENTITY | typeof INVOICE_ITEMS_ENTITY | typeof COLLECTIONS_ENTITY | typeof RETURNS_ENTITY | typeof RETURN_ITEMS_ENTITY | typeof VAN_INVENTORY_ENTITY | typeof VAN_LOADS_ENTITY,
+    entityName: typeof INVOICES_ENTITY | typeof INVOICE_ITEMS_ENTITY | typeof COLLECTIONS_ENTITY | typeof RETURNS_ENTITY | typeof RETURN_ITEMS_ENTITY | typeof VAN_INVENTORY_ENTITY | typeof VAN_LOADS_ENTITY | typeof VISITS_ENTITY | typeof EMPLOYEES_ENTITY,
     options: EntityQueryOptions,
     matchingFiles: { id: string }[],
     warnings: string[],
