@@ -301,8 +301,19 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
     const { companyId, matchingFileIds, headers, routeAllowedValues, filters, limit, excelRows } = params;
     const versions = await this.prisma.rieDatasetVersion.findMany({
       where: { companyId, entityName: "Customers", isActive: true, sourceFileId: { in: matchingFileIds } },
-      select: { sourceFileId: true, rows: { select: { data: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] } },
+      select: { id: true, sourceFileId: true },
     });
+    const shadowRowsByVersionId = new Map<string, DatasetRow[]>();
+    const versionRows = await this.prisma.rieEntityRow.findMany({
+      where: { datasetVersionId: { in: versions.map((version) => version.id) } },
+      select: { datasetVersionId: true, data: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+    for (const row of versionRows) {
+      const rows = shadowRowsByVersionId.get(row.datasetVersionId) ?? [];
+      rows.push(row.data as DatasetRow);
+      shadowRowsByVersionId.set(row.datasetVersionId, rows);
+    }
     const versionByFileId = new Map(versions.map((version) => [version.sourceFileId, version]));
     const shadowRows: DatasetRow[] = [];
     const seenCustomerCodes = new Set<string>();
