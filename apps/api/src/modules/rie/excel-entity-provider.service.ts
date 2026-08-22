@@ -29,6 +29,8 @@ const ENTITY_PRIMARY_KEY: ReadonlyMap<string, readonly string[]> = new Map(IMPOR
 // real Postgres table instead of re-parsed Excel bytes — see the
 // SALES_CALENDAR_FIELDS block below and the class doc comment.
 const SALES_CALENDAR_ENTITY = "Sales Calendar";
+const INVOICES_ENTITY = "Invoices";
+const INVOICE_ITEMS_ENTITY = "Invoice Items";
 
 // Official Import Template field names (PascalCase, exactly as in
 // import-templates.data.ts's IMPORT-SALES-CALENDAR-v1.0 `fields`), in
@@ -242,11 +244,14 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       );
     }
 
-    // Phase 3: Customers is the first canonical entity whose served rows are
-    // read from the active Postgres materialization. Other entities retain
-    // the established Excel path below.
+    // These entities are served from their active PostgreSQL
+    // materializations. All other entities retain the established Excel
+    // path below.
     if (entityName === "Customers") {
       return this.getCustomersPostgresRecords(options, matchingFiles, warnings);
+    }
+    if (entityName === INVOICES_ENTITY || entityName === INVOICE_ITEMS_ENTITY) {
+      return this.getMaterializedEntityRecords(entityName, options, matchingFiles, warnings);
     }
 
     // Parse + incremental-update merge (see ENTITY_PRIMARY_KEY above), or
@@ -373,6 +378,89 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
 
     return {
       entityName: "Customers",
+      available: true,
+      records: filteredRows as readonly EntityRecord[],
+      fields: headers,
+      warnings,
+    };
+  }
+
+  private async getMaterializedEntityRecords(
+    entityName: typeof INVOICES_ENTITY | typeof INVOICE_ITEMS_ENTITY,
+    options: EntityQueryOptions,
+    matchingFiles: { id: string }[],
+    warnings: string[],
+  ): Promise<EntityQueryResult> {
+    const versions = await this.prisma.rieDatasetVersion.findMany({
+      where: {
+        companyId: options.companyId,
+        entityName,
+        isActive: true,
+        sourceFileId: { in: matchingFiles.map((file) => file.id) },
+      },
+      select: { id: true, sourceFileId: true },
+    });
+    const versionByFileId = new Map(versions.map((version) => [version.sourceFileId, version]));
+    if (versionByFileId.size !== matchingFiles.length) {
+      return {
+        entityName,
+        available: false,
+        unavailableReason: "NO_ACTIVE_DATASET",
+        records: [],
+        fields: [],
+        warnings: [...warnings, `${entityName} PostgreSQL materialization is not active for every active dataset.`],
+      };
+    }
+
+    const rowsByVersionId = new Map<string, DatasetRow[]>();
+    const materializedRows = await this.prisma.rieEntityRow.findMany({
+      where: { datasetVersionId: { in: versions.map((version) => version.id) } },
+      select: { datasetVersionId: true, data: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+    for (const materializedRow of materializedRows) {
+      const rows = rowsByVersionId.get(materializedRow.datasetVersionId) ?? [];
+      rows.push(materializedRow.data as DatasetRow);
+      rowsByVersionId.set(materializedRow.datasetVersionId, rows);
+    }
+
+    // Keep the identical newest-upload-wins merge semantics used by the
+    // Excel provider, including preserving duplicate keys within one file.
+    const primaryKey = ENTITY_PRIMARY_KEY.get(entityName)!;
+    const rows: DatasetRow[] = [];
+    const seenKeys = new Set<string>();
+    for (const file of matchingFiles) {
+      const version = versionByFileId.get(file.id)!;
+      const fileKeys = new Set<string>();
+      for (const row of rowsByVersionId.get(version.id) ?? []) {
+        const keyParts = primaryKey.map((column) => String(row[column] ?? "").trim());
+        if (keyParts.some((part) => part === "")) {
+          rows.push(row);
+          continue;
+        }
+        const key = keyParts.join("␟").toLowerCase();
+        if (seenKeys.has(key)) continue;
+        fileKeys.add(key);
+        rows.push(row);
+      }
+      for (const key of fileKeys) seenKeys.add(key);
+    }
+
+    const headers: string[] = [];
+    for (const row of rows) {
+      for (const field of Object.keys(row)) if (!headers.includes(field)) headers.push(field);
+    }
+    const routeAllowedValues = options.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(options.companyId, options.requestingUser)
+      : null;
+    let filteredRows = applyHierarchyFilter(rows, headers, routeAllowedValues);
+    if (options.filters?.length) {
+      filteredRows = filteredRows.filter((row) => options.filters!.every((filter) => matchesEntityFilter(row, headers, filter)));
+    }
+    if (options.limit && filteredRows.length > options.limit) filteredRows = filteredRows.slice(0, options.limit);
+
+    return {
+      entityName,
       available: true,
       records: filteredRows as readonly EntityRecord[],
       fields: headers,
