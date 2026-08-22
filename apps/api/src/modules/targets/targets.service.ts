@@ -12,18 +12,21 @@ import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { applyHierarchyFilter } from "../files/dataset-query.util";
 import { FilesService } from "../files/files.service";
 import { CanonicalHierarchyResolverService } from "../rie/canonical-hierarchy-resolver.service";
+import { serializeExcelParse } from "../../common/excel-parse-queue";
 
 type SheetRow = Record<string, unknown>;
 
-function readSheetRows(buffer: Buffer, sheetIndex: number): SheetRow[] {
+async function readSheetRows(buffer: Buffer, sheetIndex: number): Promise<SheetRow[]> {
   // 2026-07-20: restrict XLSX.read to the one needed sheet — see the same
   // fix (and its full explanation) in ExcelDatasetEntityProvider.parseDatasetFromFiles.
   // Otherwise every call pays for parsing the entire (potentially
   // multi-sheet batch, tens of MB) workbook just to read one sheet.
-  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, sheets: Array.from(new Set([sheetIndex, 0])) });
-  const sheetName = workbook.SheetNames[sheetIndex] ?? workbook.SheetNames[0];
-  const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
-  return (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as SheetRow[];
+  return serializeExcelParse(() => {
+    const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, sheets: Array.from(new Set([sheetIndex, 0])) });
+    const sheetName = workbook.SheetNames[sheetIndex] ?? workbook.SheetNames[0];
+    const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
+    return (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as SheetRow[];
+  });
 }
 
 // Accepts "2026-07", a Date, or an Excel-style numeric/string date and
@@ -151,7 +154,7 @@ export class TargetsService {
     const file = await this.filesService.findActiveById(companyId, input.fileId);
     if (!file) throw new NotFoundException("Targets dataset not found");
     const buffer = await this.filesService.downloadFileBuffer(file.id, companyId);
-    const rawRows = readSheetRows(buffer, file.sheetIndex);
+    const rawRows = await readSheetRows(buffer, file.sheetIndex);
 
     const requiredCols = [input.repOrTerritoryColumn, input.periodMonthColumn, input.valueColumn];
     if (rawRows.length > 0) {

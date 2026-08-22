@@ -13,6 +13,7 @@ import { ENTITY_DATASET_TYPE_MAP, isEntityMapped } from "./excel-entity-provider
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { PrismaService } from "../../common/prisma";
 import { IMPORT_TEMPLATES } from "../import-validation/import-templates.data";
+import { serializeExcelParse } from "../../common/excel-parse-queue";
 
 // Official primary key per Canonical Entity, straight from the Import
 // Templates — powers the incremental-update merge in getRecords: when a
@@ -363,15 +364,17 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
         // per-sheet parse call, not a post-parse filter). Includes 0 as a
         // fallback target to mirror the `?? workbook.SheetNames[0]` below in
         // case file.sheetIndex is ever missing/out of range.
-        const workbook = XLSX.read(buffer, {
-          type: "buffer",
-          cellDates: true,
-          sheets: Array.from(new Set([file.sheetIndex, 0])),
+        const rows = await serializeExcelParse(() => {
+          const workbook = XLSX.read(buffer, {
+            type: "buffer",
+            cellDates: true,
+            sheets: Array.from(new Set([file.sheetIndex, 0])),
+          });
+          const sheetName = workbook.SheetNames[file.sheetIndex] ?? workbook.SheetNames[0];
+          const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
+          return (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as DatasetRow[];
         });
         const tReadEnd = Date.now();
-        const sheetName = workbook.SheetNames[file.sheetIndex] ?? workbook.SheetNames[0];
-        const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
-        const rows = (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as DatasetRow[];
         const tJsonEnd = Date.now();
         this.logger.log(
           `[ParseTiming] entity=${entityName} file=${file.fileName} (${file.id}) bytes=${buffer.length} rows=${rows.length} ` +

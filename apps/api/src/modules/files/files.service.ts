@@ -18,6 +18,7 @@ import type { ImportTemplate, ValidationReport } from "../import-validation/impo
 import { SubscriptionsService } from "../subscriptions/subscriptions.service";
 import { PlatformSettingsService } from "../platform-settings/platform-settings.service";
 import { UserActivityService } from "../user-activity/user-activity.service";
+import { serializeExcelParse } from "../../common/excel-parse-queue";
 
 const SALES_CALENDAR_ENTITY = "Sales Calendar";
 const EMPLOYEES_ENTITY = "Employees";
@@ -1192,12 +1193,13 @@ export class FilesService {
     // — this file's storageKey may point at a large multi-sheet batch
     // workbook; restrict the parse to the one sheet this record actually
     // maps to instead of parsing every sheet in the workbook.
-    const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, sheets: [file.sheetIndex] });
-    const sheetName = workbook.SheetNames[file.sheetIndex];
-    const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
-    if (!sheet) return { headers: [], rows: [] };
-
-    const allRows = XLSX.utils.sheet_to_json(sheet) as Record<string, unknown>[];
+    const allRows = await serializeExcelParse(() => {
+      const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, sheets: [file.sheetIndex] });
+      const sheetName = workbook.SheetNames[file.sheetIndex];
+      const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
+      return (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as Record<string, unknown>[];
+    });
+    if (allRows.length === 0) return { headers: [], rows: [] };
     const needle = query.trim().toLowerCase();
     if (!needle) return { headers: Object.keys(allRows[0] ?? {}), rows: [] };
 

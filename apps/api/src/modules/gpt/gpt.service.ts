@@ -8,6 +8,7 @@ import { PrismaService, isUniqueConstraintError } from "../../common/prisma";
 import { SubscriptionsService } from "../subscriptions/subscriptions.service";
 import { FilesService } from "../files/files.service";
 import { UsageAnalyticsService } from "../usage-analytics/usage-analytics.service";
+import { serializeExcelParse } from "../../common/excel-parse-queue";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { AnalysisEventService } from "../analysis-studio/analysis-event.service";
 import { PlatformSettingsService } from "../platform-settings/platform-settings.service";
@@ -604,10 +605,12 @@ export class GptService {
     // fix (and its full explanation) in ExcelDatasetEntityProvider.parseDatasetFromFiles.
     // Otherwise every call pays for parsing the entire (potentially
     // multi-sheet batch, tens of MB) workbook just to read one sheet.
-    const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, sheets: Array.from(new Set([file.sheetIndex, 0])) });
-    const sheetName = workbook.SheetNames[file.sheetIndex] ?? workbook.SheetNames[0];
-    const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
-    const allRows = (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as DatasetRow[];
+    const allRows = await serializeExcelParse(() => {
+      const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, sheets: Array.from(new Set([file.sheetIndex, 0])) });
+      const sheetName = workbook.SheetNames[file.sheetIndex] ?? workbook.SheetNames[0];
+      const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
+      return (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as DatasetRow[];
+    });
     const headers = Object.keys(allRows[0] ?? {});
     // Resolved up front so a typo'd name in `columns` fails clearly
     // regardless of aggregate/rows mode, even though projection itself only
@@ -811,10 +814,12 @@ export class GptService {
     if (!file) return null;
 
     const buffer = await this.filesService.downloadFileBuffer(file.id, companyId);
-    const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, sheets: Array.from(new Set([file.sheetIndex, 0])) });
-    const sheetName = workbook.SheetNames[file.sheetIndex] ?? workbook.SheetNames[0];
-    const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
-    const rows = (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as DatasetRow[];
+    const rows = await serializeExcelParse(() => {
+      const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, sheets: Array.from(new Set([file.sheetIndex, 0])) });
+      const sheetName = workbook.SheetNames[file.sheetIndex] ?? workbook.SheetNames[0];
+      const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
+      return (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as DatasetRow[];
+    });
     const headers = Object.keys(rows[0] ?? {});
     return { rows, headers };
   }

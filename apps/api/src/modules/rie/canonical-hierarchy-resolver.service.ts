@@ -4,6 +4,7 @@ import { FilesService } from "../files/files.service";
 import { PrismaService } from "../../common/prisma";
 import { normalizeHeader, type DatasetRow, type HierarchyFilterUser } from "../files/dataset-query.util";
 import { ENTITY_DATASET_TYPE_MAP } from "./excel-entity-provider.mapping";
+import { serializeExcelParse } from "../../common/excel-parse-queue";
 
 // 2026-07-20: same root cause and fix as ExcelDatasetEntityProvider's
 // parsed-dataset cache, applied here too. resolveAllowedRouteIds is called
@@ -290,14 +291,16 @@ export class CanonicalHierarchyResolverService {
         // signature, not once per getRecords() call), Routes/Employees
         // resolution went from "150s+, repeated per entity read" to a
         // handful of seconds, once, per request.
-        const workbook = XLSX.read(buffer, {
-          type: "buffer",
-          cellDates: true,
-          sheets: Array.from(new Set([file.sheetIndex, 0])),
+        const rows = await serializeExcelParse(() => {
+          const workbook = XLSX.read(buffer, {
+            type: "buffer",
+            cellDates: true,
+            sheets: Array.from(new Set([file.sheetIndex, 0])),
+          });
+          const sheetName = workbook.SheetNames[file.sheetIndex] ?? workbook.SheetNames[0];
+          const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
+          return (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as DatasetRow[];
         });
-        const sheetName = workbook.SheetNames[file.sheetIndex] ?? workbook.SheetNames[0];
-        const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
-        const rows = (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as DatasetRow[];
         const tEnd = Date.now();
         this.logger.log(
           `[HierarchyRawParseTiming] entity=${entityName} file=${file.fileName} bytes=${buffer.length} rows=${rows.length} ` +

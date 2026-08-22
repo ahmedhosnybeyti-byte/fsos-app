@@ -8,18 +8,21 @@ import { RieFacade } from "../rie/rie-facade.service";
 import { CanonicalHierarchyResolverService } from "../rie/canonical-hierarchy-resolver.service";
 import type { EntityQueryResult } from "../rie/entity-provider.interface";
 import { balancedRegionGrow, type LatLon } from "./route-balancer.util";
+import { serializeExcelParse } from "../../common/excel-parse-queue";
 
 type SheetRow = Record<string, unknown>;
 
-function readSheetRows(buffer: Buffer, sheetIndex: number): SheetRow[] {
+async function readSheetRows(buffer: Buffer, sheetIndex: number): Promise<SheetRow[]> {
   // 2026-07-20: restrict XLSX.read to the one needed sheet — see the same
   // fix (and its full explanation) in ExcelDatasetEntityProvider.parseDatasetFromFiles.
   // Otherwise every call pays for parsing the entire (potentially
   // multi-sheet batch, tens of MB) workbook just to read one sheet.
-  const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, sheets: Array.from(new Set([sheetIndex, 0])) });
-  const sheetName = workbook.SheetNames[sheetIndex] ?? workbook.SheetNames[0];
-  const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
-  return (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as SheetRow[];
+  return serializeExcelParse(() => {
+    const workbook = XLSX.read(buffer, { type: "buffer", cellDates: true, sheets: Array.from(new Set([sheetIndex, 0])) });
+    const sheetName = workbook.SheetNames[sheetIndex] ?? workbook.SheetNames[0];
+    const sheet = sheetName ? workbook.Sheets[sheetName] : undefined;
+    return (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as SheetRow[];
+  });
 }
 
 function toFiniteNumber(value: unknown): number | null {
@@ -83,7 +86,7 @@ export class RoutePlanningService {
     if (!file) throw new NotFoundException("Dataset not found");
 
     const buffer = await this.filesService.downloadFileBuffer(file.id, companyId);
-    const allRows = readSheetRows(buffer, file.sheetIndex);
+    const allRows = await readSheetRows(buffer, file.sheetIndex);
     if (allRows.length > 0 && !(column in allRows[0]!)) {
       throw new BadRequestException(`Column "${column}" was not found in this dataset`);
     }
