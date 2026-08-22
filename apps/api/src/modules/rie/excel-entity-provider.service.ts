@@ -242,6 +242,12 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       );
     }
 
+    // Phase 3: Customers is read from the active Postgres materialization.
+    // Other entities retain the established Excel path below.
+    if (entityName === "Customers") {
+      return this.getCustomersPostgresRecords(options, matchingFiles, warnings);
+    }
+
     // Parse + incremental-update merge (see ENTITY_PRIMARY_KEY above), or
     // reuse the already-parsed result for this exact set of active files —
     // see "Parsed-dataset cache" comment near the top of this file. This is
@@ -298,6 +304,76 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       entityName,
       available: true,
       records: mergedRows as readonly EntityRecord[],
+      fields: headers,
+      warnings,
+    };
+  }
+
+  private async getCustomersPostgresRecords(
+    options: EntityQueryOptions,
+    matchingFiles: { id: string }[],
+    warnings: string[],
+  ): Promise<EntityQueryResult> {
+    const versions = await this.prisma.rieDatasetVersion.findMany({
+      where: { companyId: options.companyId, entityName: "Customers", isActive: true, sourceFileId: { in: matchingFiles.map((file) => file.id) } },
+      select: { id: true, sourceFileId: true },
+    });
+    const versionByFileId = new Map(versions.map((version) => [version.sourceFileId, version]));
+    if (versionByFileId.size !== matchingFiles.length) {
+      return {
+        entityName: "Customers",
+        available: false,
+        unavailableReason: "NO_ACTIVE_DATASET",
+        records: [],
+        fields: [],
+        warnings: [...warnings, "Customers PostgreSQL materialization is not active for every active dataset."],
+      };
+    }
+
+    const rowsByVersionId = new Map<string, DatasetRow[]>();
+    const materializedRows = await this.prisma.rieEntityRow.findMany({
+      where: { datasetVersionId: { in: versions.map((version) => version.id) } },
+      select: { datasetVersionId: true, data: true },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+    });
+    for (const materializedRow of materializedRows) {
+      const rows = rowsByVersionId.get(materializedRow.datasetVersionId) ?? [];
+      rows.push(materializedRow.data as DatasetRow);
+      rowsByVersionId.set(materializedRow.datasetVersionId, rows);
+    }
+
+    const rows: DatasetRow[] = [];
+    const seenCustomerCodes = new Set<string>();
+    for (const file of matchingFiles) {
+      const version = versionByFileId.get(file.id)!;
+      const fileCodes = new Set<string>();
+      for (const row of rowsByVersionId.get(version.id) ?? []) {
+        const code = String(row.CustomerCode ?? "").trim().toLowerCase();
+        if (!code || seenCustomerCodes.has(code)) continue;
+        fileCodes.add(code);
+        rows.push(row);
+      }
+      for (const code of fileCodes) seenCustomerCodes.add(code);
+    }
+
+    const firstRowFields = rows.length > 0 ? Object.keys(rows[0]!) : [];
+    const headers = [
+      ...CUSTOMERS_BASIC_FIELDS.filter((field) => firstRowFields.includes(field)),
+      ...firstRowFields.filter((field) => !CUSTOMERS_BASIC_FIELDS.includes(field as typeof CUSTOMERS_BASIC_FIELDS[number])),
+    ];
+    const routeAllowedValues = options.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(options.companyId, options.requestingUser)
+      : null;
+    let filteredRows = applyHierarchyFilter(rows, headers, routeAllowedValues);
+    if (options.filters && options.filters.length > 0) {
+      filteredRows = filteredRows.filter((row) => options.filters!.every((filter) => matchesEntityFilter(row, headers, filter)));
+    }
+    if (options.limit && filteredRows.length > options.limit) filteredRows = filteredRows.slice(0, options.limit);
+
+    return {
+      entityName: "Customers",
+      available: true,
+      records: filteredRows as readonly EntityRecord[],
       fields: headers,
       warnings,
     };
