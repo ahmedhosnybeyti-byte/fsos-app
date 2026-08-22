@@ -38,6 +38,12 @@ const VAN_INVENTORY_ENTITY = "Van Inventory";
 const VAN_LOADS_ENTITY = "Van Loads";
 const VISITS_ENTITY = "Visits";
 const EMPLOYEES_ENTITY = "Employees";
+const PRICE_LIST_ENTITY = "Price List";
+const TARGETS_ENTITY = "Targets";
+const PRODUCTS_ENTITY = "Products";
+const ROUTE_ASSIGNMENTS_ENTITY = "Route Assignments";
+const ROUTES_ENTITY = "Routes";
+const BRANCHES_ENTITY = "Branches";
 
 // Official Import Template field names (PascalCase, exactly as in
 // import-templates.data.ts's IMPORT-SALES-CALENDAR-v1.0 `fields`), in
@@ -257,7 +263,7 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
     if (entityName === "Customers") {
       return this.getCustomersPostgresRecords(options, matchingFiles, warnings);
     }
-    if (entityName === INVOICES_ENTITY || entityName === INVOICE_ITEMS_ENTITY || entityName === COLLECTIONS_ENTITY || entityName === RETURNS_ENTITY || entityName === RETURN_ITEMS_ENTITY || entityName === VAN_INVENTORY_ENTITY || entityName === VAN_LOADS_ENTITY || entityName === VISITS_ENTITY || entityName === EMPLOYEES_ENTITY) {
+    if (entityName === INVOICES_ENTITY || entityName === INVOICE_ITEMS_ENTITY || entityName === COLLECTIONS_ENTITY || entityName === RETURNS_ENTITY || entityName === RETURN_ITEMS_ENTITY || entityName === VAN_INVENTORY_ENTITY || entityName === VAN_LOADS_ENTITY || entityName === VISITS_ENTITY || entityName === EMPLOYEES_ENTITY || entityName === PRICE_LIST_ENTITY || entityName === TARGETS_ENTITY || entityName === PRODUCTS_ENTITY || entityName === ROUTE_ASSIGNMENTS_ENTITY || entityName === ROUTES_ENTITY || entityName === BRANCHES_ENTITY) {
       return this.getMaterializedEntityRecords(entityName, options, matchingFiles, warnings);
     }
 
@@ -393,7 +399,7 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
   }
 
   private async getMaterializedEntityRecords(
-    entityName: typeof INVOICES_ENTITY | typeof INVOICE_ITEMS_ENTITY | typeof COLLECTIONS_ENTITY | typeof RETURNS_ENTITY | typeof RETURN_ITEMS_ENTITY | typeof VAN_INVENTORY_ENTITY | typeof VAN_LOADS_ENTITY | typeof VISITS_ENTITY | typeof EMPLOYEES_ENTITY,
+    entityName: typeof INVOICES_ENTITY | typeof INVOICE_ITEMS_ENTITY | typeof COLLECTIONS_ENTITY | typeof RETURNS_ENTITY | typeof RETURN_ITEMS_ENTITY | typeof VAN_INVENTORY_ENTITY | typeof VAN_LOADS_ENTITY | typeof VISITS_ENTITY | typeof EMPLOYEES_ENTITY | typeof PRICE_LIST_ENTITY | typeof TARGETS_ENTITY | typeof PRODUCTS_ENTITY | typeof ROUTE_ASSIGNMENTS_ENTITY | typeof ROUTES_ENTITY | typeof BRANCHES_ENTITY,
     options: EntityQueryOptions,
     matchingFiles: { id: string }[],
     warnings: string[],
