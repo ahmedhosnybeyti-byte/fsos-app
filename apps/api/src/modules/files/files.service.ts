@@ -23,6 +23,7 @@ import { serializeExcelParse } from "../../common/excel-parse-queue";
 const SALES_CALENDAR_ENTITY = "Sales Calendar";
 const EMPLOYEES_ENTITY = "Employees";
 const PROSPECTS_ENTITY = "Prospects";
+const CUSTOMERS_ENTITY = "Customers";
 
 // Sheet Role text -> platform RoleCode, for automatic account provisioning
 // (see provisionEmployeeAccounts). Deliberately keyword-based, not an exact
@@ -571,6 +572,14 @@ export class FilesService {
 
       try {
         const metadata = buildParsedMetadata(workbook.SheetNames, sheet);
+
+        // Phase 1 RIE Scale: materialize Customers into Postgres as a shadow
+        // only. The active RIE provider remains Excel; this write is kept
+        // entirely outside every read path and API contract.
+        if (datasetType === CUSTOMERS_ENTITY) {
+          await this.materializeCustomersShadow({ companyId, fileId: fileRecord.id, rows });
+        }
+
         const updated = await this.prisma.file.update({
           where: { id: fileRecord.id },
           data: { status: "READY", parsedMetadata: metadata as unknown as Prisma.InputJsonValue },
@@ -631,6 +640,54 @@ export class FilesService {
     };
   }
 
+  /**
+   * Stores an exact JSON copy of the validated Customers rows. The version
+   * becomes ACTIVE only after row-count, CustomerCode keys, and row payloads
+   * match the Excel parse. This method is deliberately write-only.
+   */
+  private async materializeCustomersShadow(params: {
+    companyId: string;
+    fileId: string;
+    rows: Record<string, unknown>[];
+  }): Promise<void> {
+    const { companyId, fileId, rows } = params;
+    const customerCodes = rows.map((row) => String(row.CustomerCode ?? "").trim());
+    if (customerCodes.some((key) => !key)) throw new Error("Customers shadow materialization requires CustomerCode on every row.");
+
+    await this.prisma.$transaction(async (tx) => {
+      const version = await tx.rieDatasetVersion.create({
+        data: { companyId, sourceFileId: fileId, entityName: CUSTOMERS_ENTITY },
+      });
+
+      if (rows.length > 0) {
+        await tx.rieEntityRow.createMany({
+          data: rows.map((data, index) => ({
+            companyId,
+            datasetVersionId: version.id,
+            entityName: CUSTOMERS_ENTITY,
+            entityKey: customerCodes[index]!,
+            data: data as Prisma.InputJsonValue,
+          })),
+        });
+      }
+
+      const materializedRows = await tx.rieEntityRow.findMany({
+        where: { datasetVersionId: version.id },
+        select: { entityKey: true, data: true },
+        orderBy: { entityKey: "asc" },
+      });
+      const excelByKey = new Map(rows.map((row, index) => [customerCodes[index]!, JSON.stringify(row)]));
+      const matches = materializedRows.length === rows.length
+        && materializedRows.length === excelByKey.size
+        && materializedRows.every((row) => excelByKey.get(row.entityKey) === JSON.stringify(row.data));
+      if (!matches) throw new Error("Customers Excel/PostgreSQL shadow verification failed.");
+
+      await tx.rieDatasetVersion.update({
+        where: { id: version.id },
+        data: { status: "ACTIVE", isActive: true, rowCount: rows.length, materializedAt: new Date(), activatedAt: new Date() },
+      });
+    });
+  }
   // Automatic Employee Account Provisioning (2026-07-19) — runs once per
   // ACCEPTED Employees sheet, driven entirely from the master data:
   //   - New employee (no User with that email anywhere): account created

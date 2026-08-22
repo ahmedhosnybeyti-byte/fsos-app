@@ -257,6 +257,8 @@ model Company {
   routeAssignments UserRouteAssignment[]
   activityEvents UserActivityEvent[]
   activityDailySummaries UserActivityDailySummary[]
+  rieDatasetVersions RieDatasetVersion[]
+  rieEntityRows RieEntityRow[]
 
   @@map("companies")
 }
@@ -953,12 +955,55 @@ model File {
   targets    Target[]
   salesCalendarDays SalesCalendar[]
   prospects  Prospect[]
+  rieDatasetVersions RieDatasetVersion[]
 
   @@index([companyId, isActive])
   @@index([companyId, datasetType])
   @@index([companyId, batchId])
   @@index([companyId, contentHash])
   @@map("files")
+}
+
+// Phase 1 of the RIE Scale plan: a write-only PostgreSQL shadow of the
+// Customers Excel dataset. No provider or consumer reads these rows yet;
+// Excel remains the system of record and the sole read path.
+model RieDatasetVersion {
+  id           String   @id @default(cuid())
+  companyId    String   @map("company_id")
+  sourceFileId String   @map("source_file_id")
+  entityName   String   @map("entity_name")
+  status       String   @default("MATERIALIZING")
+  isActive     Boolean  @default(false) @map("is_active")
+  rowCount     Int      @default(0) @map("row_count")
+  materializedAt DateTime? @map("materialized_at")
+  activatedAt  DateTime? @map("activated_at")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  sourceFile File @relation(fields: [sourceFileId], references: [id], onDelete: Cascade)
+  rows RieEntityRow[]
+
+  @@unique([sourceFileId, entityName])
+  @@index([companyId, entityName, isActive])
+  @@map("rie_dataset_versions")
+}
+
+model RieEntityRow {
+  id               String   @id @default(cuid())
+  companyId        String   @map("company_id")
+  datasetVersionId String   @map("dataset_version_id")
+  entityName       String   @map("entity_name")
+  entityKey        String   @map("entity_key")
+  data             Json
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  datasetVersion RieDatasetVersion @relation(fields: [datasetVersionId], references: [id], onDelete: Cascade)
+
+  @@unique([datasetVersionId, entityKey])
+  @@index([companyId, entityName, entityKey])
+  @@map("rie_entity_rows")
 }
 
 enum ProspectStatus {
