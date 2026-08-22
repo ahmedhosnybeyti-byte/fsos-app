@@ -24,6 +24,8 @@ const SALES_CALENDAR_ENTITY = "Sales Calendar";
 const EMPLOYEES_ENTITY = "Employees";
 const PROSPECTS_ENTITY = "Prospects";
 const CUSTOMERS_ENTITY = "Customers";
+const INVOICES_ENTITY = "Invoices";
+const INVOICE_ITEMS_ENTITY = "Invoice Items";
 
 // Sheet Role text -> platform RoleCode, for automatic account provisioning
 // (see provisionEmployeeAccounts). Deliberately keyword-based, not an exact
@@ -588,6 +590,12 @@ export class FilesService {
         if (datasetType === CUSTOMERS_ENTITY) {
           await this.materializeCustomersShadow({ companyId, fileId: fileRecord.id, rows });
         }
+        if (datasetType === INVOICES_ENTITY) {
+          await this.materializeInvoicesShadow({ companyId, fileId: fileRecord.id, rows });
+        }
+        if (datasetType === INVOICE_ITEMS_ENTITY) {
+          await this.materializeInvoiceItemsShadow({ companyId, fileId: fileRecord.id, rows });
+        }
 
         const updated = await this.prisma.file.update({
           where: { id: fileRecord.id },
@@ -697,6 +705,66 @@ export class FilesService {
       });
     }, { timeout: 30_000 });
   }
+
+  private async materializeInvoicesShadow(params: { companyId: string; fileId: string; rows: Record<string, unknown>[] }): Promise<void> {
+    return this.materializeEntityShadow({ ...params, entityName: INVOICES_ENTITY, keyColumns: ["InvoiceNo"] });
+  }
+
+  private async materializeInvoiceItemsShadow(params: { companyId: string; fileId: string; rows: Record<string, unknown>[] }): Promise<void> {
+    return this.materializeEntityShadow({ ...params, entityName: INVOICE_ITEMS_ENTITY, keyColumns: ["InvoiceNo", "LineNo"] });
+  }
+
+  /** Write-only shadow materialization for the two invoice datasets. */
+  private async materializeEntityShadow(params: {
+    companyId: string;
+    fileId: string;
+    entityName: string;
+    keyColumns: readonly string[];
+    rows: Record<string, unknown>[];
+  }): Promise<void> {
+    const { companyId, fileId, entityName, keyColumns, rows } = params;
+    const entityKeys = rows.map((row) => keyColumns.map((column) => String(row[column] ?? "").trim()).join("␟"));
+    if (entityKeys.some((key) => !key || key.split("␟").some((part) => !part))) {
+      throw new Error(`${entityName} shadow materialization requires ${keyColumns.join(", ")} on every row.`);
+    }
+    if (new Set(entityKeys).size !== entityKeys.length) {
+      throw new Error(`${entityName} shadow materialization requires unique canonical keys.`);
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const version = await tx.rieDatasetVersion.create({
+        data: { companyId, sourceFileId: fileId, entityName },
+      });
+      if (rows.length > 0) {
+        await tx.rieEntityRow.createMany({
+          data: rows.map((data, index) => ({
+            companyId,
+            datasetVersionId: version.id,
+            entityName,
+            entityKey: entityKeys[index]!,
+            data: data as Prisma.InputJsonValue,
+          })),
+        });
+      }
+
+      const materializedRows = await tx.rieEntityRow.findMany({
+        where: { datasetVersionId: version.id },
+        select: { entityKey: true, data: true },
+        orderBy: { entityKey: "asc" },
+      });
+      const excelByKey = new Map(rows.map((row, index) => [entityKeys[index]!, stableJson(row)]));
+      const matches = materializedRows.length === rows.length
+        && materializedRows.length === excelByKey.size
+        && materializedRows.every((row) => excelByKey.get(row.entityKey) === stableJson(row.data));
+      if (!matches) throw new Error(`${entityName} Excel/PostgreSQL shadow verification failed.`);
+
+      await tx.rieDatasetVersion.update({
+        where: { id: version.id },
+        data: { status: "ACTIVE", isActive: true, rowCount: rows.length, materializedAt: new Date(), activatedAt: new Date() },
+      });
+    }, { timeout: 30_000 });
+  }
+
   // Automatic Employee Account Provisioning (2026-07-19) — runs once per
   // ACCEPTED Employees sheet, driven entirely from the master data:
   //   - New employee (no User with that email anywhere): account created
