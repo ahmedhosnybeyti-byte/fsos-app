@@ -128,6 +128,15 @@ function toStringOrNull(value: unknown): string | null {
   return s === "" ? null : s;
 }
 
+function stableJson(value: unknown): string {
+  if (value instanceof Date) return JSON.stringify(value.toISOString());
+  if (typeof value === "number") return JSON.stringify(Number(value.toPrecision(15)));
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableJson((value as Record<string, unknown>)[key])}`).join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
 // One outcome per sheet that WAS named after an official entity but didn't
 // make it into `accepted` — either it failed structural validation
 // (`report` set) or something else went wrong reading/storing it
@@ -676,17 +685,17 @@ export class FilesService {
         select: { entityKey: true, data: true },
         orderBy: { entityKey: "asc" },
       });
-      const excelByKey = new Map(rows.map((row, index) => [customerCodes[index]!, JSON.stringify(row)]));
+      const excelByKey = new Map(rows.map((row, index) => [customerCodes[index]!, stableJson(row)]));
       const matches = materializedRows.length === rows.length
         && materializedRows.length === excelByKey.size
-        && materializedRows.every((row) => excelByKey.get(row.entityKey) === JSON.stringify(row.data));
+        && materializedRows.every((row) => excelByKey.get(row.entityKey) === stableJson(row.data));
       if (!matches) throw new Error("Customers Excel/PostgreSQL shadow verification failed.");
 
       await tx.rieDatasetVersion.update({
         where: { id: version.id },
         data: { status: "ACTIVE", isActive: true, rowCount: rows.length, materializedAt: new Date(), activatedAt: new Date() },
       });
-    });
+    }, { timeout: 30_000 });
   }
   // Automatic Employee Account Provisioning (2026-07-19) — runs once per
   // ACCEPTED Employees sheet, driven entirely from the master data:
