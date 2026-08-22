@@ -321,7 +321,8 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       const version = versionByFileId.get(fileId);
       if (!version) { this.logger.log("[CustomersShadowRead] FAIL"); return; }
       const fileCodes = new Set<string>();
-      for (const row of version.rows.map((item) => item.data as DatasetRow)) {
+      const fileRows = shadowRowsByVersionId.get(version.id) ?? [];
+      for (const row of fileRows) {
         const code = String(row.CustomerCode ?? "").trim().toLowerCase();
         if (!code || seenCustomerCodes.has(code)) continue;
         fileCodes.add(code);
