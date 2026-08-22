@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, Inject } from "@nestjs/common";
-import { createHash, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { extname } from "node:path";
 import * as argon2 from "argon2";
 import * as XLSX from "xlsx";
@@ -584,6 +584,18 @@ export class FilesService {
       try {
         const metadata = buildParsedMetadata(workbook.SheetNames, sheet);
 
+        // Every accepted canonical entity is ingested incrementally into its
+        // PostgreSQL-backed canonical row store. The comparison is made by
+        // PostgreSQL on the approved template primary key; no previous upload
+        // is read into application memory.
+        await this.ingestCanonicalEntity({
+          companyId,
+          fileId: fileRecord.id,
+          entityName: datasetType,
+          keyColumns: template.primaryKey,
+          rows,
+        });
+
         // Phase 1 RIE Scale: materialize Customers into Postgres as a shadow
         // only. The active RIE provider remains Excel; this write is kept
         // entirely outside every read path and API contract.
@@ -771,6 +783,48 @@ export class FilesService {
         data: { status: "ACTIVE", isActive: true, rowCount: rows.length, materializedAt: new Date(), activatedAt: new Date() },
       });
     }, { timeout: 600_000 });
+  }
+
+  /**
+   * Incremental canonical ingestion for every validated entity template.
+   *
+   * PostgreSQL owns both existence and payload comparison. The conflict key
+   * is the template's approved primary key; `IS DISTINCT FROM` means an
+   * identical JSON payload executes neither an UPDATE nor an updated_at /
+   * source-file change. Historical rows are never selected into Node.js.
+   */
+  private async ingestCanonicalEntity(params: {
+    companyId: string;
+    fileId: string;
+    entityName: string;
+    keyColumns: readonly string[];
+    rows: Record<string, unknown>[];
+  }): Promise<void> {
+    const { companyId, fileId, entityName, keyColumns, rows } = params;
+
+    // Primary-key columns are guaranteed by the approved template. A blank
+    // value cannot identify a record, so preserve the existing tolerant row
+    // ingestion behavior by skipping just that row rather than rejecting an
+    // already accepted sheet.
+    for (const row of rows) {
+      const parts = keyColumns.map((column) => String(row[column] ?? "").trim());
+      if (parts.some((part) => !part)) continue;
+
+      const entityKey = parts.join("␟");
+      const data = JSON.stringify(row);
+      await this.prisma.$executeRaw`
+        INSERT INTO "rie_canonical_entity_rows"
+          ("id", "company_id", "source_file_id", "entity_name", "entity_key", "data", "updated_at")
+        VALUES
+          (${randomUUID()}, ${companyId}, ${fileId}, ${entityName}, ${entityKey}, ${data}::jsonb, CURRENT_TIMESTAMP)
+        ON CONFLICT ("company_id", "entity_name", "entity_key")
+        DO UPDATE SET
+          "data" = EXCLUDED."data",
+          "source_file_id" = EXCLUDED."source_file_id",
+          "updated_at" = CURRENT_TIMESTAMP
+        WHERE "rie_canonical_entity_rows"."data" IS DISTINCT FROM EXCLUDED."data"
+      `;
+    }
   }
 
   // Automatic Employee Account Provisioning (2026-07-19) — runs once per

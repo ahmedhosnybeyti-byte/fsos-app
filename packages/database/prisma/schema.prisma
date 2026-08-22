@@ -259,6 +259,7 @@ model Company {
   activityDailySummaries UserActivityDailySummary[]
   rieDatasetVersions RieDatasetVersion[]
   rieEntityRows RieEntityRow[]
+  rieCanonicalEntityRows RieCanonicalEntityRow[]
 
   @@map("companies")
 }
@@ -956,6 +957,7 @@ model File {
   salesCalendarDays SalesCalendar[]
   prospects  Prospect[]
   rieDatasetVersions RieDatasetVersion[]
+  rieCanonicalEntityRows RieCanonicalEntityRow[]
 
   @@index([companyId, isActive])
   @@index([companyId, datasetType])
@@ -1004,6 +1006,29 @@ model RieEntityRow {
   @@unique([datasetVersionId, entityKey])
   @@index([companyId, entityName, entityKey])
   @@map("rie_entity_rows")
+}
+
+// Canonical, incremental ingestion state for every uploaded RIE entity.
+// This is intentionally separate from the versioned shadow table above:
+// rows are keyed by the approved template primary key, so PostgreSQL can
+// atomically insert, update only changed payloads, and ignore identical rows
+// without the application loading historical entity data into memory.
+model RieCanonicalEntityRow {
+  id           String   @id
+  companyId    String   @map("company_id")
+  sourceFileId String?  @map("source_file_id")
+  entityName   String   @map("entity_name")
+  entityKey    String   @map("entity_key")
+  data         Json
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  company    Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  sourceFile File?   @relation(fields: [sourceFileId], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, entityName, entityKey])
+  @@index([companyId, entityName])
+  @@map("rie_canonical_entity_rows")
 }
 
 enum ProspectStatus {
