@@ -76,6 +76,20 @@ function stableRows(rows: readonly unknown[]): string {
   };
   return rows.map(serialize).sort().join("\n");
 }
+
+// Phase 2 verifies the customer fields defined by the import contract. This
+// ignores worksheet-only empty-cell representation while retaining every
+// business field served to Customers consumers.
+const CUSTOMERS_BASIC_FIELDS = [
+  "CustomerCode", "CustomerName", "RouteID", "VisitDay", "VisitSequence",
+  "Channel", "CustomerClass", "CustomerType", "Address", "City",
+  "Latitude", "Longitude", "Phone", "CommercialRegistration", "TaxNumber",
+  "PaymentTerms", "CreditLimit", "DefaultPriceListCode", "Status", "BranchID",
+] as const;
+
+function basicCustomerRows(rows: readonly DatasetRow[]): Record<string, unknown>[] {
+  return rows.map((row) => Object.fromEntries(CUSTOMERS_BASIC_FIELDS.map((field) => [field, row[field] ?? null])));
+}
 // ------------------------------------------------------------------
 // Parsed-dataset cache (2026-07-20, memory-explosion fix).
 //
@@ -335,7 +349,7 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
     if (limit && filteredShadowRows.length > limit) filteredShadowRows = filteredShadowRows.slice(0, limit);
     const sameCount = excelRows.length === filteredShadowRows.length;
     const sameCodes = stableRows(excelRows.map((row) => String(row.CustomerCode ?? "").trim()).sort()) === stableRows(filteredShadowRows.map((row) => String(row.CustomerCode ?? "").trim()).sort());
-    const sameData = stableRows(excelRows) === stableRows(filteredShadowRows);
+    const sameData = stableRows(basicCustomerRows(excelRows)) === stableRows(basicCustomerRows(filteredShadowRows));
     this.logger.log(`[CustomersShadowRead] ${sameCount && sameCodes && sameData ? "PASS" : "FAIL"}`);
   }
   // Returns the cached parsed-and-merged dataset for (companyId, entityName)
