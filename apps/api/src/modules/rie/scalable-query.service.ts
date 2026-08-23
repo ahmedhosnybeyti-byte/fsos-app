@@ -36,7 +36,10 @@ export class RieScalableQueryService {
     for (const aggregate of input.aggregates ?? []) {
       assertIdentifier(aggregate.as, "aggregate alias");
       if (aggregate.field) assertField({ field: aggregate.field, source: aggregate.source }, aliases);
+      if (aggregate.multiplier) assertField(aggregate.multiplier, aliases);
+      if (aggregate.multiplierFallback) assertField(aggregate.multiplierFallback, aliases);
       if (aggregate.op !== "count" && !aggregate.field) throw new Error(`${aggregate.op} aggregate requires a field.`);
+      if (aggregate.op === "sumProduct" && !aggregate.multiplier) throw new Error("sumProduct aggregate requires a multiplier field.");
     }
     const projection = input.projection.map((field) => {
       const alias = field.as ?? field.field;
@@ -70,7 +73,11 @@ export class RieScalableQueryService {
     const orderedActiveRows = [...activeRows.filter(({ alias }) => alias !== "base" && scopedJoinAliases.has(alias)), activeRows.find(({ alias }) => alias === "base")!, ...activeRows.filter(({ alias }) => alias !== "base" && !scopedJoinAliases.has(alias))];
     const canCollapseScopedJoins = joins.length > 0
       && joins.every((join) => join.type !== "left" && scopedJoinAliases.has(join.alias))
-      && ![...input.projection, ...(input.groupBy ?? []), ...(input.aggregates ?? []).flatMap((aggregate) => aggregate.field ? [{ field: aggregate.field, source: aggregate.source }] : [])]
+      && ![...input.projection, ...(input.groupBy ?? []), ...(input.aggregates ?? []).flatMap((aggregate) => [
+        ...(aggregate.field ? [{ field: aggregate.field, source: aggregate.source }] : []),
+        ...(aggregate.multiplier ? [aggregate.multiplier] : []),
+        ...(aggregate.multiplierFallback ? [aggregate.multiplierFallback] : []),
+      ])]
         .some((field) => field.source && scopedJoinAliases.has(field.source));
     const baseSemiJoins = canCollapseScopedJoins ? [] : joins
       .filter((join) => scopedJoinAliases.has(join.alias) && (join.on.left.source ?? "base") === "base")
@@ -137,6 +144,9 @@ export class RieScalableQueryService {
     addScopedValueScope(predicates, input.scope?.rep, "SalesRepID", aliases, cteAliases, scoped);
     addScopedValueScope(predicates, input.scope?.customer, "CustomerCode", aliases, cteAliases, scoped);
     addScopedValueScope(predicates, input.scope?.product, "ProductCode", aliases, cteAliases, scoped);
+    for (const fieldScope of input.scope?.fields ?? []) {
+      addScopedValueScope(predicates, fieldScope, fieldScope.field, aliases, cteAliases, scoped);
+    }
     if (input.requestingUser) {
       const allowed = await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser);
       const hierarchyRoute = input.hierarchyRoute ?? { field: "RouteID" };
@@ -215,7 +225,18 @@ function aggregateSql(aggregate: RieQueryAggregation): Prisma.Sql {
   if (aggregate.op === "count" && !aggregate.field) return Prisma.sql`COUNT(*) AS ${alias}`;
   const field = textField({ field: aggregate.field!, source: aggregate.source });
   if (aggregate.op === "count") return Prisma.sql`COUNT(NULLIF(BTRIM(COALESCE(${field}, '')), '')) AS ${alias}`;
+  if (aggregate.op === "countDistinct") return Prisma.sql`COUNT(DISTINCT NULLIF(BTRIM(COALESCE(${field}, '')), '')) AS ${alias}`;
   const numeric = Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`;
+  if (aggregate.op === "sumProduct") {
+    const multiplier = textField(aggregate.multiplier!);
+    const numericMultiplier = Prisma.sql`CASE WHEN BTRIM(COALESCE(${multiplier}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${multiplier}, ''))::double precision ELSE NULL END`;
+    if (aggregate.multiplierFallback) {
+      const fallback = textField(aggregate.multiplierFallback);
+      const numericFallback = Prisma.sql`CASE WHEN BTRIM(COALESCE(${fallback}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${fallback}, ''))::double precision ELSE NULL END`;
+      return Prisma.sql`SUM(${numeric} * CASE WHEN ${multiplier} IS NULL THEN ${numericFallback} ELSE ${numericMultiplier} END) AS ${alias}`;
+    }
+    return Prisma.sql`SUM(${numeric} * ${numericMultiplier}) AS ${alias}`;
+  }
   return Prisma.sql`${Prisma.raw({ sum: "SUM", avg: "AVG", min: "MIN", max: "MAX" }[aggregate.op])}(${numeric}) AS ${alias}`;
 }
 function textField(field: RieQueryField): Prisma.Sql { return Prisma.sql`${Prisma.raw(field.source ?? "base")}."data" ->> ${field.field}`; }

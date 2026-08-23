@@ -9,8 +9,12 @@ export interface RieQueryJoin {
   type?: "inner" | "left";
   on: { left: RieQueryField; rightField: string };
 }
-export type RieAggregationOperator = "sum" | "count" | "avg" | "min" | "max";
-export interface RieQueryAggregation { op: RieAggregationOperator; field?: string; source?: string; as: string; }
+export type RieAggregationOperator = "sum" | "count" | "countDistinct" | "sumProduct" | "avg" | "min" | "max";
+/**
+ * `sumProduct` keeps arithmetic at the database grain: it sums `field *
+ * multiplier` after the query's scopes and joins have been applied.
+ */
+export interface RieQueryAggregation { op: RieAggregationOperator; field?: string; source?: string; multiplier?: RieQueryField; multiplierFallback?: RieQueryField; as: string; }
 export interface RieDateScope extends RieQueryField { from?: string | number; to?: string | number; values?: readonly (string | number)[]; }
 export interface RieValueScope extends Partial<RieQueryField> { values: readonly string[]; }
 export interface RieScalableQueryScope {
@@ -19,6 +23,8 @@ export interface RieScalableQueryScope {
   rep?: RieValueScope;
   customer?: RieValueScope;
   product?: RieValueScope;
+  /** Additive exact-match scopes for canonical fields not covered above. */
+  fields?: readonly (RieValueScope & { field: string })[];
 }
 export interface RieQueryPagination { limit?: number; offset?: number; }
 
