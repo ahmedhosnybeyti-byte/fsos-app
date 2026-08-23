@@ -11,6 +11,7 @@ import type {
 } from "./entity-provider.interface";
 import { ENTITY_DATASET_TYPE_MAP, isEntityMapped } from "./excel-entity-provider.mapping";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
+import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { IMPORT_TEMPLATES } from "../import-validation/import-templates.data";
 import { serializeExcelParse } from "../../common/excel-parse-queue";
@@ -333,73 +334,11 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
     matchingFiles: { id: string }[],
     warnings: string[],
   ): Promise<EntityQueryResult> {
-    const versions = await this.prisma.rieDatasetVersion.findMany({
-      where: { companyId: options.companyId, entityName: "Customers", isActive: true, sourceFileId: { in: matchingFiles.map((file) => file.id) } },
-      select: { id: true, sourceFileId: true },
-    });
-    const versionByFileId = new Map(versions.map((version) => [version.sourceFileId, version]));
-    if (versionByFileId.size !== matchingFiles.length) {
-      return {
-        entityName: "Customers",
-        available: false,
-        unavailableReason: "NO_ACTIVE_DATASET",
-        records: [],
-        fields: [],
-        warnings: [...warnings, "Customers PostgreSQL materialization is not active for every active dataset."],
-      };
-    }
-
-    const rowsByVersionId = new Map<string, DatasetRow[]>();
-    const materializedRows = await this.prisma.rieEntityRow.findMany({
-      where: { datasetVersionId: { in: versions.map((version) => version.id) } },
-      select: { datasetVersionId: true, data: true },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    });
-    for (const materializedRow of materializedRows) {
-      const rows = rowsByVersionId.get(materializedRow.datasetVersionId) ?? [];
-      rows.push(materializedRow.data as DatasetRow);
-      rowsByVersionId.set(materializedRow.datasetVersionId, rows);
-    }
-
-    const rows: DatasetRow[] = [];
-    const seenCustomerCodes = new Set<string>();
-    for (const file of matchingFiles) {
-      const version = versionByFileId.get(file.id)!;
-      const fileCodes = new Set<string>();
-      for (const row of rowsByVersionId.get(version.id) ?? []) {
-        const code = String(row.CustomerCode ?? "").trim().toLowerCase();
-        if (!code || seenCustomerCodes.has(code)) continue;
-        fileCodes.add(code);
-        rows.push(row);
-      }
-      for (const code of fileCodes) seenCustomerCodes.add(code);
-    }
-
-    const firstRowFields = rows.length > 0 ? Object.keys(rows[0]!) : [];
-    const headers = [
-      ...CUSTOMERS_BASIC_FIELDS.filter((field) => firstRowFields.includes(field)),
-      ...firstRowFields.filter((field) => !CUSTOMERS_BASIC_FIELDS.includes(field as typeof CUSTOMERS_BASIC_FIELDS[number])),
-    ];
-    const routeAllowedValues = options.requestingUser
-      ? await this.hierarchyResolver.resolveAllowedRouteIds(options.companyId, options.requestingUser)
-      : null;
-    let filteredRows = applyHierarchyFilter(rows, headers, routeAllowedValues);
-    if (options.filters && options.filters.length > 0) {
-      filteredRows = filteredRows.filter((row) => options.filters!.every((filter) => matchesEntityFilter(row, headers, filter)));
-    }
-    if (options.limit && filteredRows.length > options.limit) filteredRows = filteredRows.slice(0, options.limit);
-
-    return {
-      entityName: "Customers",
-      available: true,
-      records: filteredRows as readonly EntityRecord[],
-      fields: headers,
-      warnings,
-    };
+    return this.getMaterializedEntityRecords("Customers", options, matchingFiles, warnings);
   }
 
   private async getMaterializedEntityRecords(
-    entityName: typeof INVOICES_ENTITY | typeof INVOICE_ITEMS_ENTITY | typeof COLLECTIONS_ENTITY | typeof RETURNS_ENTITY | typeof RETURN_ITEMS_ENTITY | typeof VAN_INVENTORY_ENTITY | typeof VAN_LOADS_ENTITY | typeof VISITS_ENTITY | typeof EMPLOYEES_ENTITY | typeof PRICE_LIST_ENTITY | typeof TARGETS_ENTITY | typeof PRODUCTS_ENTITY | typeof ROUTE_ASSIGNMENTS_ENTITY | typeof ROUTES_ENTITY | typeof BRANCHES_ENTITY,
+    entityName: "Customers" | typeof INVOICES_ENTITY | typeof INVOICE_ITEMS_ENTITY | typeof COLLECTIONS_ENTITY | typeof RETURNS_ENTITY | typeof RETURN_ITEMS_ENTITY | typeof VAN_INVENTORY_ENTITY | typeof VAN_LOADS_ENTITY | typeof VISITS_ENTITY | typeof EMPLOYEES_ENTITY | typeof PRICE_LIST_ENTITY | typeof TARGETS_ENTITY | typeof PRODUCTS_ENTITY | typeof ROUTE_ASSIGNMENTS_ENTITY | typeof ROUTES_ENTITY | typeof BRANCHES_ENTITY,
     options: EntityQueryOptions,
     matchingFiles: { id: string }[],
     warnings: string[],
@@ -425,57 +364,63 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       };
     }
 
-    const rowsByVersionId = new Map<string, DatasetRow[]>();
-    const materializedRows = await this.prisma.rieEntityRow.findMany({
-      where: { datasetVersionId: { in: versions.map((version) => version.id) } },
-      select: { datasetVersionId: true, data: true },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    });
-    for (const materializedRow of materializedRows) {
-      const rows = rowsByVersionId.get(materializedRow.datasetVersionId) ?? [];
-      rows.push(materializedRow.data as DatasetRow);
-      rowsByVersionId.set(materializedRow.datasetVersionId, rows);
-    }
-
-    // Keep the identical newest-upload-wins merge semantics used by the
-    // Excel provider, including preserving duplicate keys within one file.
     const primaryKey = ENTITY_PRIMARY_KEY.get(entityName)!;
-    const rows: DatasetRow[] = [];
-    const seenKeys = new Set<string>();
-    for (const file of matchingFiles) {
-      const version = versionByFileId.get(file.id)!;
-      const fileKeys = new Set<string>();
-      for (const row of rowsByVersionId.get(version.id) ?? []) {
-        const keyParts = primaryKey.map((column) => String(row[column] ?? "").trim());
-        if (keyParts.some((part) => part === "")) {
-          rows.push(row);
-          continue;
-        }
-        const key = keyParts.join("␟").toLowerCase();
-        if (seenKeys.has(key)) continue;
-        fileKeys.add(key);
-        rows.push(row);
-      }
-      for (const key of fileKeys) seenKeys.add(key);
-    }
-
-    const headers: string[] = [];
-    for (const row of rows) {
-      for (const field of Object.keys(row)) if (!headers.includes(field)) headers.push(field);
-    }
+    const template = IMPORT_TEMPLATES.find((candidate) => candidate.entity === entityName);
+    const headers = template?.fields.map((field) => field.name) ?? [];
+    const fieldByNormalizedName = new Map(headers.map((field) => [normalizeHeader(field), field]));
     const routeAllowedValues = options.requestingUser
       ? await this.hierarchyResolver.resolveAllowedRouteIds(options.companyId, options.requestingUser)
       : null;
-    let filteredRows = applyHierarchyFilter(rows, headers, routeAllowedValues);
-    if (options.filters?.length) {
-      filteredRows = filteredRows.filter((row) => options.filters!.every((filter) => matchesEntityFilter(row, headers, filter)));
+
+    const selectedFiles = matchingFiles.map((file, precedence) => Prisma.sql`(${file.id}, ${precedence})`);
+    const cell = (alias: string, field: string) => Prisma.sql`LOWER(BTRIM(COALESCE(${Prisma.raw(alias)}."data" ->> ${field}, '')))`;
+    const keyIsBlank = (alias: string) => Prisma.join(primaryKey.map((field) => Prisma.sql`BTRIM(COALESCE(${Prisma.raw(alias)}."data" ->> ${field}, '')) = ''`), " OR ");
+    const sameKey = Prisma.join(primaryKey.map((field) => Prisma.sql`${cell("r", field)} = ${cell("newer", field)}`), " AND ");
+    const clauses: Prisma.Sql[] = [];
+    const routeField = fieldByNormalizedName.get(normalizeHeader("RouteID"));
+    if (routeAllowedValues && routeField) {
+      const allowed = [...routeAllowedValues];
+      clauses.push(allowed.length === 0 ? Prisma.sql`FALSE` : Prisma.sql`${cell("r", routeField)} IN (${Prisma.join(allowed)})`);
     }
-    if (options.limit && filteredRows.length > options.limit) filteredRows = filteredRows.slice(0, options.limit);
+    for (const filter of options.filters ?? []) {
+      const field = fieldByNormalizedName.get(normalizeHeader(filter.field)) ?? filter.field;
+      const valueCell = cell("r", field);
+      if (filter.op === "eq") clauses.push(Prisma.sql`${valueCell} = ${String(filter.value ?? "").trim().toLowerCase()}`);
+      else if (filter.op === "in") {
+        const values = Array.isArray(filter.value) ? filter.value.map((value) => String(value).trim().toLowerCase()) : [];
+        clauses.push(values.length === 0 ? Prisma.sql`FALSE` : Prisma.sql`${valueCell} IN (${Prisma.join(values)})`);
+      } else if (filter.op === "contains") clauses.push(Prisma.sql`${valueCell} LIKE ${`%${String(filter.value ?? "").toLowerCase()}%`}`);
+      else {
+        const values = filter.op === "between" ? filter.value as [unknown, unknown] : [filter.value];
+        const comparable = values.map((value) => typeof value === "number" ? value : Date.parse(String(value)));
+        if (comparable.some((value) => Number.isNaN(value))) clauses.push(Prisma.sql`FALSE`);
+        else {
+          const numericCell = Prisma.sql`CASE WHEN jsonb_typeof(r."data" -> ${field}) = 'number' THEN (r."data" ->> ${field})::double precision WHEN r."data" ->> ${field} ~ '^\\d{4}-\\d{2}-\\d{2}' THEN EXTRACT(EPOCH FROM (r."data" ->> ${field})::timestamptz) * 1000 ELSE NULL END`;
+          clauses.push(filter.op === "gte" ? Prisma.sql`${numericCell} >= ${comparable[0]!}` : filter.op === "lte" ? Prisma.sql`${numericCell} <= ${comparable[0]!}` : Prisma.sql`${numericCell} BETWEEN ${comparable[0]!} AND ${comparable[1]!}`);
+        }
+      }
+    }
+    const whereClause = clauses.length ? Prisma.sql`AND ${Prisma.join(clauses, " AND ")}` : Prisma.empty;
+    const rows = await this.prisma.$queryRaw<Array<{ data: DatasetRow }>>(Prisma.sql`
+      WITH selected_files("source_file_id", precedence) AS (VALUES ${Prisma.join(selectedFiles)}),
+      active_versions AS (
+        SELECT v.id, selected_files.precedence
+        FROM "rie_dataset_versions" v JOIN selected_files ON selected_files."source_file_id" = v."source_file_id"
+        WHERE v."company_id" = ${options.companyId} AND v."entity_name" = ${entityName} AND v."is_active" = TRUE
+      )
+      SELECT r."data" FROM "rie_entity_rows" r JOIN active_versions active ON active.id = r."dataset_version_id"
+      WHERE (${keyIsBlank("r")} OR NOT EXISTS (
+        SELECT 1 FROM "rie_entity_rows" newer JOIN active_versions newer_active ON newer_active.id = newer."dataset_version_id"
+        WHERE newer_active.precedence < active.precedence AND NOT (${keyIsBlank("newer")}) AND ${sameKey}
+      )) ${whereClause}
+      ORDER BY active.precedence ASC, r."created_at" ASC, r.id ASC
+      LIMIT ${options.limit ?? 2147483647}
+    `);
 
     return {
       entityName,
       available: true,
-      records: filteredRows as readonly EntityRecord[],
+      records: rows.map((row) => row.data) as readonly EntityRecord[],
       fields: headers,
       warnings,
     };
