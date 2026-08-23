@@ -8,7 +8,10 @@ test("scalable query sends scoped joins, grouping, aggregation, and pagination t
   const result = await service.query({ companyId: "company-1", requestingUser: { roleCode: "SALES_REP", email: "rep@example.com" }, entityName: "Invoice Items", projection: [{ field: "CustomerCode", as: "customer" }], joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }], aggregates: [{ op: "sum", field: "LineTotal", as: "sales" }], groupBy: [{ field: "CustomerCode" }], scope: { date: { field: "InvoiceDate", source: "invoice", from: "2026-08-01", to: "2026-08-31" }, customer: { values: ["C-1"] } }, pagination: { limit: 1 } });
   assert.equal(result.records.length, 1);
   assert.equal(result.page.hasMore, true);
-  assert.ok(captured?.strings?.join(" ").includes('"rie_canonical_entity_rows"'));
+  const sql = captured?.strings?.join(" ") ?? "";
+  assert.ok(sql.includes('"rie_entity_rows"'));
+  assert.ok(sql.includes('base."company_id"'));
+  assert.ok(sql.includes('invoice."company_id"'));
   assert.ok(captured?.values?.includes("company-1"));
   assert.ok(captured?.values?.includes("rt-1"));
 });
