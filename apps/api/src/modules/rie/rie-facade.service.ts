@@ -222,7 +222,7 @@ export class RieFacade {
     if (options.toTime !== undefined) dates.push(Prisma.sql`${invoiceTime} <= ${options.toTime}`);
     const lineNo = options.aggregate
       ? Prisma.sql`0`
-      : Prisma.sql`COALESCE(NULLIF(BTRIM(li."data" ->> 'LineNo'), '')::double precision, 0)`;
+      : Prisma.sql`COALESCE(NULLIF(BTRIM(item."data" ->> 'LineNo'), '')::double precision, 0)`;
     const groupBy = options.aggregate ? Prisma.sql`1, 3, 4, 5` : Prisma.sql`1, 2, 3, 4, 5`;
     const rows = await this.prisma.$queryRaw<Array<{ invoiceNo: string; lineNo: number; time: Date | null; customerCode: string; productCode: string; amount: number }>>(Prisma.sql`
       WITH selected_invoice_files("source_file_id", precedence) AS (VALUES ${Prisma.join(invoiceFileValues)}),
@@ -266,6 +266,24 @@ export class RieFacade {
     const versions = await this.prisma.rieDatasetVersion.findMany({ where: { companyId: context.companyId, entityName: { in: ["Invoices", "Invoice Items"] }, isActive: true, sourceFileId: { in: [...invoiceFiles, ...itemFiles].map((file) => file.id) } }, select: { entityName: true, sourceFileId: true } });
     const active = new Set(versions.map((version) => `${version.entityName}:${version.sourceFileId}`));
     return invoiceFiles.every((file) => active.has(`Invoices:${file.id}`)) && itemFiles.every((file) => active.has(`Invoice Items:${file.id}`));
+  }
+
+  /** Metadata-only availability check; never materializes canonical rows. */
+  async hasCanonicalEntitySources(context: EntityQueryContext, entityNames: readonly string[]): Promise<boolean> {
+    const files = await this.filesService.listConfirmedActiveForCompany(context.companyId);
+    const expected = entityNames.flatMap((entityName) => {
+      const mapping = ENTITY_DATASET_TYPE_MAP[entityName];
+      return mapping?.datasetType ? [{ entityName, datasetType: mapping.datasetType }] : [];
+    });
+    if (expected.length !== entityNames.length) return false;
+    const fileIds = files.filter((file) => expected.some((item) => item.datasetType === file.datasetType)).map((file) => file.id);
+    if (!fileIds.length) return false;
+    const versions = await this.prisma.rieDatasetVersion.findMany({ where: { companyId: context.companyId, entityName: { in: [...entityNames] }, isActive: true, sourceFileId: { in: fileIds } }, select: { entityName: true, sourceFileId: true } });
+    const active = new Set(versions.map((version) => `${version.entityName}:${version.sourceFileId}`));
+    return expected.every(({ entityName, datasetType }) => {
+      const entityFiles = files.filter((file) => file.datasetType === datasetType);
+      return entityFiles.length > 0 && entityFiles.every((file) => active.has(`${entityName}:${file.id}`));
+    });
   }
 
   // ------------------------------------------------------------------

@@ -46,10 +46,22 @@ async function bootstrap() {
     (req as import("express").Request & { requestId?: string }).requestId = requestId;
     res.setHeader("X-Request-Id", requestId);
     const start = Date.now();
+    const memoryAuditEnabled = process.env.REQUEST_MEMORY_AUDIT_ENABLED === "true";
+    const importantRequest = /^\/api\/v1\/(decision-analytics-studio|dashboard-performance|heatmap|team-performance)/.test(req.path);
+    const rssBefore = memoryAuditEnabled && importantRequest ? process.memoryUsage().rss : 0;
+    let peakRss = rssBefore;
+    const sampler = rssBefore ? setInterval(() => { peakRss = Math.max(peakRss, process.memoryUsage().rss); }, 50) : undefined;
+    sampler?.unref();
 
     requestTraceLogger.log(`IN  id=${requestId} ${req.method} ${req.originalUrl} at=${new Date().toISOString()}`);
     res.on("finish", () => {
       requestTraceLogger.log(`OUT id=${requestId} ${req.method} ${req.originalUrl} status=${res.statusCode} ${Date.now() - start}ms`);
+      if (sampler) clearInterval(sampler);
+      if (rssBefore) {
+        const rssAfter = process.memoryUsage().rss;
+        const mb = (value: number) => Number((value / (1024 * 1024)).toFixed(1));
+        requestTraceLogger.log(JSON.stringify({ event: "request_memory_audit", endpoint: `${req.method} ${req.path}`, durationMs: Date.now() - start, rssBeforeMB: mb(rssBefore), peakRssMB: mb(Math.max(peakRss, rssAfter)), rssAfterMB: mb(rssAfter), deltaRssMB: mb(rssAfter - rssBefore) }));
+      }
     });
 
     next();

@@ -32,6 +32,13 @@ export class RieScalableQueryService {
       aliases.add(join.alias);
     }
     for (const field of [...input.projection, ...(input.groupBy ?? [])]) assertField(field, aliases);
+    for (const order of input.orderBy ?? []) {
+      if (!order.field && !order.aggregate) throw new Error("RIE scalable query order requires a field or aggregate alias.");
+      if (order.field && order.aggregate) throw new Error("RIE scalable query order accepts either a field or aggregate alias.");
+      if (order.field) assertField(order.field, aliases);
+      if (order.aggregate && !input.aggregates?.some((aggregate) => aggregate.as === order.aggregate)) throw new Error(`RIE scalable query order references unknown aggregate "${order.aggregate}".`);
+      if (order.direction && order.direction !== "asc" && order.direction !== "desc") throw new Error("RIE scalable query order direction must be asc or desc.");
+    }
     if (input.hierarchyRoute) assertField(input.hierarchyRoute, aliases);
     for (const aggregate of input.aggregates ?? []) {
       assertIdentifier(aggregate.as, "aggregate alias");
@@ -90,8 +97,9 @@ export class RieScalableQueryService {
     const joinClause = joinSql.length ? Prisma.join(joinSql, " ") : Prisma.empty;
     const where = !canCollapseScopedJoins && predicates.length ? Prisma.sql` AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty;
     const grouping = input.groupBy?.length ? Prisma.sql` GROUP BY ${Prisma.join(input.groupBy.map(textField))}` : Prisma.empty;
-    const ordering = input.groupBy?.length
-      ? Prisma.sql` ORDER BY ${Prisma.join(input.groupBy.map(textField))}`
+    const ordering = input.orderBy?.length
+      ? Prisma.sql` ORDER BY ${Prisma.join(input.orderBy.map((order) => Prisma.sql`${order.aggregate ? quoted(order.aggregate) : textField(order.field!)} ${Prisma.raw((order.direction ?? "asc").toUpperCase())}`))}`
+      : input.groupBy?.length ? Prisma.sql` ORDER BY ${Prisma.join(input.groupBy.map(textField))}`
       : input.aggregates?.length ? Prisma.empty : Prisma.sql` ORDER BY base."entity_key"`;
     const rows = await this.prisma.$queryRaw<EntityRecord[]>(Prisma.sql`
       WITH ${Prisma.join(ctes, ", ")}

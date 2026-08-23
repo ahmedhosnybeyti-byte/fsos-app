@@ -27,6 +27,7 @@ export interface RieScalableQueryScope {
   fields?: readonly (RieValueScope & { field: string })[];
 }
 export interface RieQueryPagination { limit?: number; offset?: number; }
+export interface RieQueryOrder { field?: RieQueryField; aggregate?: string; direction?: "asc" | "desc"; }
 
 /** Read-only contract for PostgreSQL-backed high-cardinality canonical data. */
 export interface RieScalableQuery extends EntityQueryContext {
@@ -39,6 +40,7 @@ export interface RieScalableQuery extends EntityQueryContext {
   aggregates?: readonly RieQueryAggregation[];
   scope?: RieScalableQueryScope;
   pagination?: RieQueryPagination;
+  orderBy?: readonly RieQueryOrder[];
 }
 export interface RieScalableQueryResult {
   records: readonly EntityRecord[];

@@ -361,11 +361,110 @@ export class DecisionAnalyticsStudioService {
 
   async query(user: AuthenticatedUser, input: DecisionQueryInput): Promise<DecisionQueryResult> {
     const { fromTime, toTime, priorFromTime, priorToTime } = this.windowFor(input);
-    const { customerMeta, productMeta, resolveRep, repSupervisorMap, salesRows, invoicesAvailable, collectionsResult, returnsResult, visitsResult, targetsResult } =
-      await this.loadContext(user, { fromTime: Math.min(fromTime, priorFromTime), toTime: Math.max(toTime, priorToTime), aggregate: true });
     const f = this.compileFilters(input);
+    const ctx = this.rieContext(user);
+    const salesJoins = this.decisionJoins();
+    const salesScope = this.decisionScope(f, { field: "InvoiceDate", source: "invoice", from: fromTime, to: toTime }, true);
+    const priorSalesScope = this.decisionScope(f, { field: "InvoiceDate", source: "invoice", from: priorFromTime, to: priorToTime }, true);
+    const salesBase = { ...ctx, entityName: "Invoice Items", joins: salesJoins, hierarchyRoute: { field: "RouteID", source: "invoice" } } as const;
+    const dimension = this.decisionDimension(input.analyzeBy);
+    const [invoicesAvailable, collectionsAvailable, returnsAvailable, visitsAvailable, currentKpis, priorKpis, currentChart, priorChart, heatmapRows, collectionsResult, returnsResult, visitsResult] = await Promise.all([
+      this.rieFacade.hasCanonicalEntitySources(ctx, ["Invoices", "Invoice Items"]),
+      this.rieFacade.hasCanonicalEntitySources(ctx, ["Collections"]),
+      this.rieFacade.hasCanonicalEntitySources(ctx, ["Returns"]),
+      this.rieFacade.hasCanonicalEntitySources(ctx, ["Visits"]),
+      this.rieFacade.queryCanonicalRecords({ ...salesBase, projection: [], scope: salesScope, aggregates: [{ op: "sum", field: "LineTotal", as: "sales" }, { op: "countDistinct", field: "InvoiceNo", as: "ordersCount" }, { op: "countDistinct", field: "CustomerCode", source: "invoice", as: "activeCustomersCount" }], pagination: { limit: 1 } }),
+      this.rieFacade.queryCanonicalRecords({ ...salesBase, projection: [], scope: priorSalesScope, aggregates: [{ op: "sum", field: "LineTotal", as: "salesPrior" }], pagination: { limit: 1 } }),
+      this.rieFacade.queryCanonicalRecords({ ...salesBase, projection: dimension.projection, groupBy: dimension.groupBy, scope: salesScope, aggregates: [{ op: "sum", field: "LineTotal", as: "sales" }, { op: "countDistinct", field: "InvoiceNo", as: "ordersCount" }, { op: "countDistinct", field: "CustomerCode", source: "invoice", as: "activeCustomersCount" }], orderBy: [{ aggregate: "sales", direction: "desc" }], pagination: { limit: 5_000 } }),
+      this.rieFacade.queryCanonicalRecords({ ...salesBase, projection: dimension.projection, groupBy: dimension.groupBy, scope: priorSalesScope, aggregates: [{ op: "sum", field: "LineTotal", as: "salesPrior" }], pagination: { limit: 5_000 } }),
+      this.rieFacade.queryCanonicalRecords({ ...salesBase, projection: [{ field: "CustomerCode", source: "customer", as: "id" }, { field: "CustomerName", source: "customer", as: "name" }, { field: "City", source: "customer", as: "city" }, { field: "Latitude", source: "customer", as: "lat" }, { field: "Longitude", source: "customer", as: "lon" }], groupBy: [{ field: "CustomerCode", source: "customer" }, { field: "CustomerName", source: "customer" }, { field: "City", source: "customer" }, { field: "Latitude", source: "customer" }, { field: "Longitude", source: "customer" }], scope: salesScope, aggregates: [{ op: "sum", field: "LineTotal", as: "sales" }], pagination: { limit: 5_000 } }),
+      this.decisionAggregate(ctx, "Collections", "CollectionDate", "Amount", f, fromTime, toTime),
+      this.decisionAggregate(ctx, "Returns", "ReturnDate", "TotalAmount", f, fromTime, toTime),
+      this.decisionVisits(ctx, f, fromTime, toTime),
+    ]);
 
-    // Customer-level scope check — City/Channel/Branch/Customer filters
+    const current = currentKpis.records[0] ?? {};
+    const prior = priorKpis.records[0] ?? {};
+    const sales = toFiniteNumber(current.sales) ?? 0;
+    const salesPrior = toFiniteNumber(prior.salesPrior) ?? 0;
+    const ordersCount = toFiniteNumber(current.ordersCount) ?? 0;
+    const activeCustomersCount = toFiniteNumber(current.activeCustomersCount) ?? 0;
+    const visit = visitsResult.records[0] ?? {};
+    const totalVisits = toFiniteNumber(visit.totalVisits) ?? 0;
+    const productiveVisits = toFiniteNumber(visit.productiveVisits) ?? 0;
+    const scopedCustomers = toFiniteNumber(visit.scopedCustomers) ?? 0;
+    const chartPrior = new Map(priorChart.records.map((row) => [String(row.key ?? ""), toFiniteNumber(row.salesPrior) ?? 0]));
+    const chart: DecisionChartGroup[] = currentChart.records.map((row) => {
+      const groupSales = toFiniteNumber(row.sales) ?? 0;
+      const previous = chartPrior.get(String(row.key ?? "")) ?? 0;
+      return { key: String(row.key ?? ""), label: String(row.label ?? row.key ?? ""), sales: groupSales, salesPriorPct: previous > 0 ? ((groupSales - previous) / previous) * 100 : null, collections: null, returns: null, ordersCount: toFiniteNumber(row.ordersCount) ?? 0, activeCustomersCount: toFiniteNumber(row.activeCustomersCount) ?? 0, target: null };
+    });
+    const heatmap: DecisionHeatmapTerritory[] = heatmapRows.records.flatMap((row) => {
+      const lat = toFiniteNumber(row.lat); const lon = toFiniteNumber(row.lon); const name = String(row.name ?? row.id ?? "");
+      if (lat === null || lon === null || !isSaneCoordinate(lat, lon)) return [];
+      const cityName = String(row.city ?? "").trim() || name;
+      return [{ id: String(row.id ?? ""), name, cityId: slugify(cityName), cityName, lat, lon, sales: toFiniteNumber(row.sales) ?? 0 }];
+    });
+
+    const sgiData = await this.sgiService.getLatest(user);
+    const insights = await this.insightsFor(ctx, sgiData?.situations ?? [], sgiData?.repDirectory ?? [], f);
+    const lostSalesValue = insights.lostSalesValue;
+    const kpis: DecisionKpiSummary = { sales, salesGrowthPct: invoicesAvailable ? (salesPrior > 0 ? ((sales - salesPrior) / salesPrior) * 100 : null) : null, collections: collectionsAvailable ? toFiniteNumber(collectionsResult.records[0]?.value) ?? 0 : null, returns: returnsAvailable ? toFiniteNumber(returnsResult.records[0]?.value) ?? 0 : null, lostSalesValue, ordersCount, averageOrderValue: ordersCount > 0 ? sales / ordersCount : null, activeCustomersCount, coveragePct: visitsAvailable && scopedCustomers > 0 ? Math.round((toFiniteNumber(visit.visitedCustomers) ?? 0) / scopedCustomers * 100) : null, strikeRatePct: visitsAvailable && totalVisits > 0 ? Math.round(productiveVisits / totalVisits * 100) : null, productivity: visitsAvailable && productiveVisits > 0 ? sales / productiveVisits : null };
+    return { kpis, chart, heatmap, insights: insights.items, generatedAt: new Date().toISOString(), datasetsAvailable: { invoices: invoicesAvailable, collections: collectionsAvailable, returns: returnsAvailable, visits: visitsAvailable } };
+  }
+
+  private decisionJoins() {
+    return [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }, { entityName: "Customers", alias: "customer", on: { left: { field: "CustomerCode", source: "invoice" }, rightField: "CustomerCode" } }, { entityName: "Products", alias: "product", type: "left" as const, on: { left: { field: "ProductCode" }, rightField: "ProductCode" } }, { entityName: "Routes", alias: "route", type: "left" as const, on: { left: { field: "RouteID", source: "customer" }, rightField: "RouteID" } }, { entityName: "Employees", alias: "rep", type: "left" as const, on: { left: { field: "SalesRepID", source: "route" }, rightField: "EmployeeID" } }, { entityName: "Employees", alias: "supervisor", type: "left" as const, on: { left: { field: "DirectManagerID", source: "rep" }, rightField: "EmployeeID" } }];
+  }
+
+  private decisionScope(f: ReturnType<DecisionAnalyticsStudioService["compileFilters"]>, date: { field: string; source: string; from: number; to: number }, includeProduct: boolean) {
+    return { date, fields: [...(f.city ? [{ field: "City", source: "customer", values: [...f.city] }] : []), ...(f.channel ? [{ field: "Channel", source: "customer", values: [...f.channel] }] : []), ...(f.branch ? [{ field: "BranchID", source: "customer", values: [...f.branch] }] : []), ...(f.customer ? [{ field: "CustomerCode", source: "customer", values: [...f.customer] }] : []), ...(includeProduct && f.category ? [{ field: "Category", source: "product", values: [...f.category] }] : []), ...(includeProduct && f.brand ? [{ field: "Brand", source: "product", values: [...f.brand] }] : []), ...(includeProduct && f.product ? [{ field: "ProductCode", source: "product", values: [...f.product] }] : []), ...(f.rep ? [{ field: "Email", source: "rep", values: [...f.rep] }] : []), ...(f.supervisor ? [{ field: "Email", source: "supervisor", values: [...f.supervisor] }] : [])] };
+  }
+
+  private decisionDimension(dimension: DecisionAnalyzeByDimension) {
+    const fields = ({ territory: [{ field: "City", source: "customer", as: "key" }, { field: "City", source: "customer", as: "label" }], channel: [{ field: "Channel", source: "customer", as: "key" }, { field: "Channel", source: "customer", as: "label" }], category: [{ field: "Category", source: "product", as: "key" }, { field: "Category", source: "product", as: "label" }], brand: [{ field: "Brand", source: "product", as: "key" }, { field: "Brand", source: "product", as: "label" }], product: [{ field: "ProductCode", source: "product", as: "key" }, { field: "ProductName", source: "product", as: "label" }], customer: [{ field: "CustomerCode", source: "customer", as: "key" }, { field: "CustomerName", source: "customer", as: "label" }], representative: [{ field: "Email", source: "rep", as: "key" }, { field: "EmployeeName", source: "rep", as: "label" }], supervisor: [{ field: "Email", source: "supervisor", as: "key" }, { field: "EmployeeName", source: "supervisor", as: "label" }] } as const)[dimension];
+    return { projection: fields, groupBy: fields.map(({ field, source }) => ({ field, source })) };
+  }
+
+  private decisionAggregate(ctx: ReturnType<DecisionAnalyticsStudioService["rieContext"]>, entityName: "Collections" | "Returns", dateField: string, amountField: string, f: ReturnType<DecisionAnalyticsStudioService["compileFilters"]>, from: number, to: number) {
+    return this.rieFacade.queryCanonicalRecords({ ...ctx, entityName, projection: [], scope: this.decisionScope(f, { field: dateField, source: "base", from, to }, false), joins: this.customerJoins(), hierarchyRoute: { field: "RouteID", source: "customer" }, aggregates: [{ op: "sum", field: amountField, as: "value" }], pagination: { limit: 1 } });
+  }
+
+  private customerJoins() {
+    return [{ entityName: "Customers", alias: "customer", on: { left: { field: "CustomerCode" }, rightField: "CustomerCode" } }, { entityName: "Routes", alias: "route", type: "left" as const, on: { left: { field: "RouteID", source: "customer" }, rightField: "RouteID" } }, { entityName: "Employees", alias: "rep", type: "left" as const, on: { left: { field: "SalesRepID", source: "route" }, rightField: "EmployeeID" } }, { entityName: "Employees", alias: "supervisor", type: "left" as const, on: { left: { field: "DirectManagerID", source: "rep" }, rightField: "EmployeeID" } }];
+  }
+
+  private async decisionVisits(ctx: ReturnType<DecisionAnalyticsStudioService["rieContext"]>, f: ReturnType<DecisionAnalyticsStudioService["compileFilters"]>, from: number, to: number) {
+    const joins = this.customerJoins();
+    const common = { ...ctx, entityName: "Visits", projection: [], joins, hierarchyRoute: { field: "RouteID", source: "customer" }, scope: this.decisionScope(f, { field: "VisitDate", source: "base", from, to }, false), pagination: { limit: 1 } } as const;
+    const customerScope = this.decisionScope(f, { field: "CustomerCode", source: "base", from: 0, to: 0 }, false);
+    delete (customerScope as { date?: unknown }).date;
+    const [visitCounts, productiveCounts, customerCounts] = await Promise.all([
+      this.rieFacade.queryCanonicalRecords({ ...common, aggregates: [{ op: "count", as: "totalVisits" }, { op: "countDistinct", field: "CustomerCode", as: "visitedCustomers" }] }),
+      this.rieFacade.queryCanonicalRecords({ ...common, scope: { ...common.scope, fields: [...(common.scope.fields ?? []), { field: "VisitStatus", values: ["Productive"] }] }, aggregates: [{ op: "count", as: "productiveVisits" }] }),
+      this.rieFacade.queryCanonicalRecords({ ...ctx, entityName: "Customers", projection: [], joins: [{ entityName: "Routes", alias: "route", type: "left" as const, on: { left: { field: "RouteID" }, rightField: "RouteID" } }, { entityName: "Employees", alias: "rep", type: "left" as const, on: { left: { field: "SalesRepID", source: "route" }, rightField: "EmployeeID" } }, { entityName: "Employees", alias: "supervisor", type: "left" as const, on: { left: { field: "DirectManagerID", source: "rep" }, rightField: "EmployeeID" } }], hierarchyRoute: { field: "RouteID" }, scope: customerScope, aggregates: [{ op: "countDistinct", field: "CustomerCode", as: "scopedCustomers" }], pagination: { limit: 1 } }),
+    ]);
+    return { records: [{ ...(visitCounts.records[0] ?? {}), ...(productiveCounts.records[0] ?? {}), ...(customerCounts.records[0] ?? {}) }] };
+  }
+
+  private async insightsFor(ctx: ReturnType<DecisionAnalyticsStudioService["rieContext"]>, situations: readonly SgiSituation[], repDirectory: readonly { email: string; supervisorEmail: string | null }[], f: ReturnType<DecisionAnalyticsStudioService["compileFilters"]>) {
+    const anyNonPeopleFilterActive = Boolean(f.city || f.channel || f.branch || f.category || f.brand || f.product || f.customer);
+    const customerKeys = situations.filter((s) => s.entityType === "customer").map((s) => s.entityKey.trim()).filter(Boolean);
+    const customerResult = customerKeys.length ? await this.rieFacade.queryCanonicalRecords({ ...ctx, entityName: "Customers", projection: [{ field: "CustomerCode", as: "key" }], joins: [{ entityName: "Routes", alias: "route", type: "left" as const, on: { left: { field: "RouteID" }, rightField: "RouteID" } }, { entityName: "Employees", alias: "rep", type: "left" as const, on: { left: { field: "SalesRepID", source: "route" }, rightField: "EmployeeID" } }, { entityName: "Employees", alias: "supervisor", type: "left" as const, on: { left: { field: "DirectManagerID", source: "rep" }, rightField: "EmployeeID" } }], hierarchyRoute: { field: "RouteID" }, scope: { fields: [...this.decisionScope(f, { field: "CustomerCode", source: "base", from: 0, to: 0 }, false).fields, { field: "CustomerCode", values: customerKeys }] }, pagination: { limit: 5_000 } }) : { records: [] };
+    const scopedCustomers = new Set(customerResult.records.map((row) => String(row.key ?? "").trim()));
+    const repSupervisors = new Map(repDirectory.map((rep) => [rep.email, rep.supervisorEmail]));
+    const filtered = situations.filter((s) => {
+      if (s.entityType === "customer") return scopedCustomers.has(s.entityKey.trim());
+      if (anyNonPeopleFilterActive) return false;
+      if (f.rep && !f.rep.has(s.entityKey.trim())) return false;
+      return !f.supervisor || Boolean(repSupervisors.get(s.entityKey.trim()) && f.supervisor.has(repSupervisors.get(s.entityKey.trim())!));
+    });
+    const severityRank: Record<SgiSituation["severity"], number> = { high: 0, medium: 1, low: 2 };
+    const sorted = [...filtered].sort((a, b) => severityRank[a.severity] - severityRank[b.severity] || Math.abs(b.metricValue - (b.metricValuePrior ?? 0)) - Math.abs(a.metricValue - (a.metricValuePrior ?? 0)));
+    return { lostSalesValue: sorted.filter((s) => s.type === "LOST_SALES").reduce((sum, s) => sum + (s.metricValuePrior ?? 0), 0), items: sorted.slice(0, 8).map((s): DecisionInsightItem => ({ type: s.type, severity: s.severity, label: s.title, detail: s.detail })) };
+  }
+
+/*    // Customer-level scope check — City/Channel/Branch/Customer filters
     // directly, Rep/Supervisor via that customer's OWN Customers.RouteID
     // (current assignment, not each invoice's own RouteID snapshot — a
     // documented simplification: this module scopes people by who owns the
@@ -533,6 +632,7 @@ export class DecisionAnalyticsStudioService {
     };
   }
 
+*/
   // Groups already-filtered current/prior sales rows by the requested
   // Analyze-By dimension. Collections/Returns are not computed per-group
   // (see comment at the return mapping below) — always null, never a
@@ -768,61 +868,25 @@ export class DecisionAnalyticsStudioService {
 
   async table(user: AuthenticatedUser, input: DecisionTableQueryInput): Promise<DecisionTableResult> {
     const { fromTime, toTime } = this.windowFor(input);
-    const { customerMeta, productMeta, resolveRep, salesRows } = await this.loadContext(user, { fromTime, toTime });
     const f = this.compileFilters(input);
-
-    const customerInScope = (code: string): boolean => {
-      const meta = customerMeta.get(code);
-      if (!meta) return false;
-      if (f.city && !f.city.has(meta.city)) return false;
-      if (f.channel && !f.channel.has(meta.channel)) return false;
-      if (f.branch && !f.branch.has(meta.branchId)) return false;
-      if (f.customer && !f.customer.has(code)) return false;
-      if (f.rep || f.supervisor) {
-        const rep = resolveRep(meta.routeId);
-        if (f.rep && (!rep || !f.rep.has(rep.repEmail))) return false;
-        if (f.supervisor && (!rep || !rep.supervisorEmail || !f.supervisor.has(rep.supervisorEmail))) return false;
-      }
-      return true;
-    };
-    const productInScope = (code: string): boolean => {
-      const meta = productMeta.get(code);
-      if (!meta) return !f.category && !f.brand && !f.product;
-      if (f.category && !f.category.has(meta.category)) return false;
-      if (f.brand && !f.brand.has(meta.brand)) return false;
-      if (f.product && !f.product.has(code)) return false;
-      return true;
-    };
-
-    const matching = salesRows.filter((r) => r.time !== null && r.time >= fromTime && r.time <= toTime && customerInScope(r.customerCode) && productInScope(r.productCode));
-    matching.sort((a, b) => (b.time ?? 0) - (a.time ?? 0));
-
-    const totalRows = matching.length;
-    const start = (input.page - 1) * input.pageSize;
-    const page = matching.slice(start, start + input.pageSize);
-
-    const rows: DecisionTableRow[] = page.map((r) => {
-      const c = customerMeta.get(r.customerCode);
-      const p = productMeta.get(r.productCode);
-      const rep = c ? resolveRep(c.routeId) : null;
+    const ctx = this.rieContext(user);
+    const scope = { date: { field: "InvoiceDate", source: "invoice", from: fromTime, to: toTime }, fields: [
+      ...(f.city ? [{ field: "City", source: "customer", values: [...f.city] }] : []), ...(f.channel ? [{ field: "Channel", source: "customer", values: [...f.channel] }] : []), ...(f.branch ? [{ field: "BranchID", source: "customer", values: [...f.branch] }] : []), ...(f.customer ? [{ field: "CustomerCode", source: "customer", values: [...f.customer] }] : []),
+      ...(f.category ? [{ field: "Category", source: "product", values: [...f.category] }] : []), ...(f.brand ? [{ field: "Brand", source: "product", values: [...f.brand] }] : []), ...(f.product ? [{ field: "ProductCode", source: "product", values: [...f.product] }] : []), ...(f.rep ? [{ field: "Email", source: "rep", values: [...f.rep] }] : []), ...(f.supervisor ? [{ field: "Email", source: "supervisor", values: [...f.supervisor] }] : []),
+    ] };
+    const joins = this.decisionJoins();
+    const projection = [{ field: "InvoiceNo", as: "invoiceNo" }, { field: "LineNo", as: "lineNo" }, { field: "LineTotal", as: "amount" }, { field: "InvoiceDate", source: "invoice", as: "date" }, { field: "CustomerCode", source: "invoice", as: "customerCode" }, { field: "CustomerName", source: "customer", as: "customerName" }, { field: "City", source: "customer", as: "city" }, { field: "Channel", source: "customer", as: "channel" }, { field: "ProductCode", as: "productCode" }, { field: "ProductName", source: "product", as: "productName" }, { field: "Category", source: "product", as: "category" }, { field: "Brand", source: "product", as: "brand" }, { field: "EmployeeName", source: "rep", as: "repName" }, { field: "EmployeeName", source: "supervisor", as: "supervisorName" }];
+    const common = { ...ctx, entityName: "Invoice Items", joins, hierarchyRoute: { field: "RouteID", source: "invoice" }, scope };
+    const [pageResult, countResult] = await Promise.all([
+      this.rieFacade.queryCanonicalRecords({ ...common, projection, orderBy: [{ field: { field: "InvoiceDate", source: "invoice" }, direction: "desc" }, { field: { field: "InvoiceNo" }, direction: "asc" }, { field: { field: "LineNo" }, direction: "asc" }], pagination: { limit: input.pageSize, offset: (input.page - 1) * input.pageSize } }),
+      this.rieFacade.queryCanonicalRecords({ ...common, projection: [], aggregates: [{ op: "count", as: "totalRows" }], pagination: { limit: 1 } }),
+    ]);
+    const rows: DecisionTableRow[] = pageResult.records.map((r) => {
       return {
-        invoiceNo: r.invoiceNo,
-        lineNo: r.lineNo,
-        date: r.time !== null ? new Date(r.time).toISOString() : null,
-        customerCode: r.customerCode,
-        customerName: c?.name ?? r.customerCode,
-        city: c?.city ?? "",
-        channel: c?.channel ?? "",
-        productCode: r.productCode,
-        productName: p?.name ?? r.productCode,
-        category: p?.category ?? "",
-        brand: p?.brand ?? "",
-        repName: rep?.repName ?? "",
-        supervisorName: rep?.supervisorName ?? "",
-        amount: r.amount,
+        invoiceNo: String(r.invoiceNo ?? ""), lineNo: toFiniteNumber(r.lineNo) ?? 0, date: r.date ? new Date(String(r.date)).toISOString() : null,
+        customerCode: String(r.customerCode ?? ""), customerName: String(r.customerName ?? r.customerCode ?? ""), city: String(r.city ?? ""), channel: String(r.channel ?? ""), productCode: String(r.productCode ?? ""), productName: String(r.productName ?? r.productCode ?? ""), category: String(r.category ?? ""), brand: String(r.brand ?? ""), repName: String(r.repName ?? ""), supervisorName: String(r.supervisorName ?? ""), amount: toFiniteNumber(r.amount) ?? 0,
       };
     });
-
-    return { rows, page: input.page, pageSize: input.pageSize, totalRows };
+    return { rows, page: input.page, pageSize: input.pageSize, totalRows: toFiniteNumber(countResult.records[0]?.totalRows) ?? 0 };
   }
 }
