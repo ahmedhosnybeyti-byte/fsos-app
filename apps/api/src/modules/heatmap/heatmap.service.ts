@@ -202,13 +202,12 @@ export class HeatmapService {
         SELECT r."data", active.precedence FROM "rie_entity_rows" r JOIN invoice_versions active ON active.id = r."dataset_version_id"
       ),
       invoices AS (
-        SELECT inv.* FROM invoice_rows inv
-        WHERE BTRIM(COALESCE(inv."data" ->> 'InvoiceNo', '')) = '' OR NOT EXISTS (
-          SELECT 1 FROM invoice_rows newer
-          WHERE newer.precedence < inv.precedence
-            AND BTRIM(COALESCE(newer."data" ->> 'InvoiceNo', '')) <> ''
-            AND LOWER(BTRIM(COALESCE(newer."data" ->> 'InvoiceNo', ''))) = LOWER(BTRIM(COALESCE(inv."data" ->> 'InvoiceNo', '')))
-        )
+        SELECT "data", precedence FROM (
+          SELECT inv.*, MIN(inv.precedence) OVER (PARTITION BY LOWER(BTRIM(COALESCE(inv."data" ->> 'InvoiceNo', '')))) AS newest_precedence
+          FROM invoice_rows inv WHERE BTRIM(COALESCE(inv."data" ->> 'InvoiceNo', '')) <> ''
+        ) deduped WHERE precedence = newest_precedence
+        UNION ALL
+        SELECT "data", precedence FROM invoice_rows WHERE BTRIM(COALESCE("data" ->> 'InvoiceNo', '')) = ''
       ),
       selected_item_files("source_file_id", precedence) AS (VALUES ${Prisma.join(itemFiles)}),
       item_versions AS (
@@ -220,15 +219,14 @@ export class HeatmapService {
         SELECT r."data", active.precedence FROM "rie_entity_rows" r JOIN item_versions active ON active.id = r."dataset_version_id"
       ),
       items AS (
-        SELECT item.* FROM item_rows item
-        WHERE BTRIM(COALESCE(item."data" ->> 'InvoiceNo', '')) = '' OR BTRIM(COALESCE(item."data" ->> 'LineNo', '')) = '' OR NOT EXISTS (
-          SELECT 1 FROM item_rows newer
-          WHERE newer.precedence < item.precedence
-            AND BTRIM(COALESCE(newer."data" ->> 'InvoiceNo', '')) <> ''
-            AND BTRIM(COALESCE(newer."data" ->> 'LineNo', '')) <> ''
-            AND LOWER(BTRIM(COALESCE(newer."data" ->> 'InvoiceNo', ''))) = LOWER(BTRIM(COALESCE(item."data" ->> 'InvoiceNo', '')))
-            AND LOWER(BTRIM(COALESCE(newer."data" ->> 'LineNo', ''))) = LOWER(BTRIM(COALESCE(item."data" ->> 'LineNo', '')))
-        )
+        SELECT "data", precedence FROM (
+          SELECT item.*, MIN(item.precedence) OVER (PARTITION BY LOWER(BTRIM(COALESCE(item."data" ->> 'InvoiceNo', ''))), LOWER(BTRIM(COALESCE(item."data" ->> 'LineNo', '')))) AS newest_precedence
+          FROM item_rows item
+          WHERE BTRIM(COALESCE(item."data" ->> 'InvoiceNo', '')) <> '' AND BTRIM(COALESCE(item."data" ->> 'LineNo', '')) <> ''
+        ) deduped WHERE precedence = newest_precedence
+        UNION ALL
+        SELECT "data", precedence FROM item_rows
+        WHERE BTRIM(COALESCE("data" ->> 'InvoiceNo', '')) = '' OR BTRIM(COALESCE("data" ->> 'LineNo', '')) = ''
       )
       ${categoryValue ? Prisma.sql`, selected_product_files("source_file_id", precedence) AS (VALUES ${Prisma.join(productFiles)}),
       product_versions AS (
@@ -240,13 +238,12 @@ export class HeatmapService {
         SELECT r."data", active.precedence FROM "rie_entity_rows" r JOIN product_versions active ON active.id = r."dataset_version_id"
       ),
       products AS (
-        SELECT product.* FROM product_rows product
-        WHERE BTRIM(COALESCE(product."data" ->> 'ProductCode', '')) = '' OR NOT EXISTS (
-          SELECT 1 FROM product_rows newer
-          WHERE newer.precedence < product.precedence
-            AND BTRIM(COALESCE(newer."data" ->> 'ProductCode', '')) <> ''
-            AND LOWER(BTRIM(COALESCE(newer."data" ->> 'ProductCode', ''))) = LOWER(BTRIM(COALESCE(product."data" ->> 'ProductCode', '')))
-        )
+        SELECT "data", precedence FROM (
+          SELECT product.*, MIN(product.precedence) OVER (PARTITION BY LOWER(BTRIM(COALESCE(product."data" ->> 'ProductCode', '')))) AS newest_precedence
+          FROM product_rows product WHERE BTRIM(COALESCE(product."data" ->> 'ProductCode', '')) <> ''
+        ) deduped WHERE precedence = newest_precedence
+        UNION ALL
+        SELECT "data", precedence FROM product_rows WHERE BTRIM(COALESCE("data" ->> 'ProductCode', '')) = ''
       )` : Prisma.empty}
       SELECT BTRIM(COALESCE(inv."data" ->> 'CustomerCode', '')) AS "customerCode",
         SUM(CASE WHEN BTRIM(COALESCE(item."data" ->> 'LineTotal', '')) ~ '^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$'
