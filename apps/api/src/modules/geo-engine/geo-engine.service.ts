@@ -4,6 +4,8 @@ import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
 import { SgiService } from "../sgi/sgi.service";
 import type { EntityQueryResult } from "../rie/entity-provider.interface";
+import { Prisma } from "@field-sales-os/database";
+import { PrismaService } from "../../common/prisma";
 
 // Geo Intelligence Engine — Phase 1 backend (Executive Map Redesign Spec,
 // 2026-07-22, client-approved). See geo-engine.schemas.ts for the full
@@ -89,7 +91,27 @@ export class GeoEngineService {
   constructor(
     private readonly rieFacade: RieFacade,
     private readonly sgiService: SgiService,
+    private readonly prisma: PrismaService,
   ) {}
+
+  /** Runs the Invoice -> Invoice Items join and amount aggregation in Postgres. */
+  private async loadSalesRows(companyId: string, fromTime?: number, toTime?: number, aggregate = false): Promise<SalesRow[]> {
+    const dates: Prisma.Sql[] = [];
+    if (fromTime !== undefined) dates.push(Prisma.sql`(i."data" ->> 'InvoiceDate')::timestamptz >= ${new Date(fromTime)}`);
+    if (toTime !== undefined) dates.push(Prisma.sql`(i."data" ->> 'InvoiceDate')::timestamptz <= ${new Date(toTime)}`);
+    const lineNo = aggregate ? Prisma.sql`0` : Prisma.sql`COALESCE(NULLIF(BTRIM(li."data" ->> 'LineNo'), '')::double precision, 0)`;
+    const groupBy = aggregate ? Prisma.sql`1, 3, 4, 5` : Prisma.sql`1, 2, 3, 4, 5`;
+    const rows = await this.prisma.$queryRaw<Array<{ invoiceNo: string; lineNo: number; time: Date; customerCode: string; productCode: string; amount: number }>>(Prisma.sql`
+      SELECT BTRIM(i."data" ->> 'InvoiceNo') AS "invoiceNo", ${lineNo} AS "lineNo",
+             (i."data" ->> 'InvoiceDate')::timestamptz AS "time", BTRIM(i."data" ->> 'CustomerCode') AS "customerCode", BTRIM(li."data" ->> 'ProductCode') AS "productCode",
+             SUM(COALESCE(NULLIF(REPLACE(BTRIM(li."data" ->> 'LineTotal'), ','), '')::double precision, 0)) AS "amount"
+      FROM "rie_canonical_entity_rows" i JOIN "rie_canonical_entity_rows" li ON li."company_id" = i."company_id" AND li."entity_name" = 'Invoice Items' AND BTRIM(li."data" ->> 'InvoiceNo') = BTRIM(i."data" ->> 'InvoiceNo')
+      WHERE i."company_id" = ${companyId} AND i."entity_name" = 'Invoices' AND BTRIM(i."data" ->> 'InvoiceNo') <> '' AND BTRIM(i."data" ->> 'CustomerCode') <> ''
+      ${dates.length ? Prisma.sql`AND ${Prisma.join(dates, ' AND ')}` : Prisma.empty}
+      GROUP BY ${groupBy}
+    `);
+    return rows.map((row) => ({ ...row, lineNo: Number(row.lineNo), time: row.time.getTime(), amount: Number(row.amount) }));
+  }
 
   private rieContext(user: AuthenticatedUser) {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
@@ -141,14 +163,12 @@ export class GeoEngineService {
     };
   }
 
-  private async loadContext(user: AuthenticatedUser) {
+  private async loadContext(user: AuthenticatedUser, salesRange?: { fromTime: number; toTime: number; aggregate?: boolean }) {
     const ctx = this.rieContext(user);
-    const [customersResult, productsResult, invoicesResult, invoiceItemsResult, routesResult, employeesResult, collectionsResult, returnsResult, visitsResult] =
+    const [customersResult, productsResult, routesResult, employeesResult, collectionsResult, returnsResult, visitsResult] =
       await Promise.all([
         this.rieFacade.getEntityRecords("Customers", ctx),
         this.rieFacade.getEntityRecords("Products", ctx),
-        this.rieFacade.getEntityRecords("Invoices", ctx),
-        this.rieFacade.getEntityRecords("Invoice Items", ctx),
         this.rieFacade.getEntityRecords("Routes", ctx),
         this.rieFacade.getEntityRecords("Employees", ctx),
         this.rieFacade.getEntityRecords("Collections", ctx),
@@ -187,9 +207,12 @@ export class GeoEngineService {
     // performance.service.ts's existing join (see decision-analytics-studio
     // .service.ts's loadContext() comment: an earlier module invented this
     // filter and it silently zeroed sales data; not repeating that mistake).
-    const invoicesAvailable = invoicesResult.available && invoiceItemsResult.available;
-    const salesRows: SalesRow[] = [];
-    if (invoicesAvailable) {
+    const invoiceSources = await this.prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
+      SELECT COUNT(*) AS "count" FROM "rie_canonical_entity_rows" WHERE "company_id" = ${user.companyId!} AND "entity_name" IN ('Invoices', 'Invoice Items') GROUP BY "entity_name"
+    `);
+    const invoicesAvailable = invoiceSources.length === 2 && invoiceSources.every((source) => source.count > 0n);
+    const salesRows = invoicesAvailable ? await this.loadSalesRows(user.companyId!, salesRange?.fromTime, salesRange?.toTime, salesRange?.aggregate ?? false) : [];
+    /* if (invoicesAvailable) {
       const invoiceMeta = new Map<string, { customerCode: string; time: number | null }>();
       for (const inv of invoicesResult.records) {
         const no = String(inv.InvoiceNo ?? "").trim();
@@ -209,7 +232,7 @@ export class GeoEngineService {
           amount: toFiniteNumber(item.LineTotal) ?? 0,
         });
       }
-    }
+    } */
 
     return { customerMeta, productMeta, resolveRep, salesRows, invoicesAvailable, collectionsResult, returnsResult, visitsResult };
   }
@@ -277,9 +300,9 @@ export class GeoEngineService {
   }
 
   async query(user: AuthenticatedUser, input: GeoQueryInput): Promise<GeoQueryResult> {
-    const ctx = await this.loadContext(user);
-    const compiled = this.compileFilters(input);
     const { fromTime, toTime, priorFromTime, priorToTime } = this.windowFor(input);
+    const ctx = await this.loadContext(user, { fromTime: Math.min(fromTime, priorFromTime), toTime: Math.max(toTime, priorToTime), aggregate: true });
+    const compiled = this.compileFilters(input);
 
     const inScopeCustomers = new Map<string, CustomerMeta>();
     for (const [code, meta] of ctx.customerMeta) {
@@ -458,7 +481,7 @@ export class GeoEngineService {
   // per this codebase's established per-module isolation convention.
   async table(user: AuthenticatedUser, input: GeoTableQueryInput): Promise<GeoTableResult> {
     const { fromTime, toTime } = this.windowFor(input);
-    const ctx = await this.loadContext(user);
+    const ctx = await this.loadContext(user, { fromTime, toTime });
     const compiled = this.compileFilters(input);
 
     const inScopeCustomers = new Map<string, CustomerMeta>();
