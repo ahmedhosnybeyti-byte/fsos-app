@@ -3,7 +3,7 @@ import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import type { EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieQueryAggregation, RieQueryField, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieValueScope } from "./scalable-query.types";
+import type { RieDateScope, RieQueryAggregation, RieQueryField, RieQueryJoin, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieValueScope } from "./scalable-query.types";
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
@@ -62,12 +62,26 @@ export class RieScalableQueryService {
     // execution barrier: only rows belonging to active versions can reach a
     // join (especially the Invoice Items -> Invoices fact join).
     const activeRows = [{ entityName: input.entityName, alias: "base" }, ...joins.map(({ entityName, alias }) => ({ entityName, alias }))];
-    const ctes = activeRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias));
-    const joinSql = joins.map((join) => {
+    const ctePredicates = new Map(await Promise.all(activeRows.map(async ({ alias }) => [alias, await this.scopePredicates(input, aliases, alias)] as const)));
+    // A scoped joined entity (for example, Invoices by date) must be produced
+    // before the base fact CTE so it can bound that fact CTE with a semi-join.
+    // The final join remains unchanged, preserving its multiplicity exactly.
+    const scopedJoinAliases = new Set(joins.filter((join) => join.type !== "left" && ctePredicates.get(join.alias)?.length).map((join) => join.alias));
+    const orderedActiveRows = [...activeRows.filter(({ alias }) => alias !== "base" && scopedJoinAliases.has(alias)), activeRows.find(({ alias }) => alias === "base")!, ...activeRows.filter(({ alias }) => alias !== "base" && !scopedJoinAliases.has(alias))];
+    const canCollapseScopedJoins = joins.length > 0
+      && joins.every((join) => join.type !== "left" && scopedJoinAliases.has(join.alias))
+      && ![...input.projection, ...(input.groupBy ?? []), ...(input.aggregates ?? []).flatMap((aggregate) => aggregate.field ? [{ field: aggregate.field, source: aggregate.source }] : [])]
+        .some((field) => field.source && scopedJoinAliases.has(field.source));
+    const baseSemiJoins = canCollapseScopedJoins ? [] : joins
+      .filter((join) => scopedJoinAliases.has(join.alias) && (join.on.left.source ?? "base") === "base")
+      .map((join) => scopedJoinExists(join));
+    const baseSourceJoins = canCollapseScopedJoins ? joins.map(scopedJoin) : [];
+    const ctes = orderedActiveRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias, ctePredicates.get(alias) ?? [], alias === "base" ? baseSemiJoins : [], alias === "base" ? baseSourceJoins : []));
+    const joinSql = (canCollapseScopedJoins ? [] : joins).map((join) => {
       return Prisma.sql`${join.type === "left" ? Prisma.raw("LEFT JOIN") : Prisma.raw("INNER JOIN")} ${activeEntityRowsReference(join.alias)} ON ${normalizedField(join.on.left)} = ${normalizedField({ field: join.on.rightField, source: join.alias })}`;
     });
     const joinClause = joinSql.length ? Prisma.join(joinSql, " ") : Prisma.empty;
-    const where = predicates.length ? Prisma.sql` AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty;
+    const where = !canCollapseScopedJoins && predicates.length ? Prisma.sql` AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty;
     const grouping = input.groupBy?.length ? Prisma.sql` GROUP BY ${Prisma.join(input.groupBy.map(textField))}` : Prisma.empty;
     const ordering = input.groupBy?.length
       ? Prisma.sql` ORDER BY ${Prisma.join(input.groupBy.map(textField))}`
@@ -106,22 +120,35 @@ export class RieScalableQueryService {
     return { entityName: input.entityName, available: true, records, fields: input.projection.map((field) => field.as ?? field.field), warnings: [] };
   }
 
-  private async scopePredicates(input: RieScalableQuery, aliases: Set<string>): Promise<Prisma.Sql[]> {
+  private async scopePredicates(input: RieScalableQuery, aliases: Set<string>, cteAlias?: string): Promise<Prisma.Sql[]> {
     const predicates: Prisma.Sql[] = [];
-    for (const date of asArray(input.scope?.date)) predicates.push(datePredicate(date, aliases));
-    addValueScope(predicates, input.scope?.route, "RouteID", aliases);
-    addValueScope(predicates, input.scope?.rep, "SalesRepID", aliases);
-    addValueScope(predicates, input.scope?.customer, "CustomerCode", aliases);
-    addValueScope(predicates, input.scope?.product, "ProductCode", aliases);
+    const cteAliases = cteAlias ? new Set([...aliases].map((alias) => `${alias}_source`)) : aliases;
+    const scoped = (field: RieQueryField): RieQueryField | null => {
+      const source = field.source ?? "base";
+      if (cteAlias && source !== cteAlias) return null;
+      return cteAlias ? { ...field, source: `${source}_source` } : field;
+    };
+    for (const date of asArray(input.scope?.date)) {
+      assertField(date, aliases);
+      const field = scoped(date);
+      if (field) predicates.push(datePredicate(field, cteAliases));
+    }
+    addScopedValueScope(predicates, input.scope?.route, "RouteID", aliases, cteAliases, scoped);
+    addScopedValueScope(predicates, input.scope?.rep, "SalesRepID", aliases, cteAliases, scoped);
+    addScopedValueScope(predicates, input.scope?.customer, "CustomerCode", aliases, cteAliases, scoped);
+    addScopedValueScope(predicates, input.scope?.product, "ProductCode", aliases, cteAliases, scoped);
     if (input.requestingUser) {
       const allowed = await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser);
-      if (allowed) predicates.push(allowed.size ? inPredicate(input.hierarchyRoute ?? { field: "RouteID" }, [...allowed], aliases) : Prisma.sql`FALSE`);
+      const hierarchyRoute = input.hierarchyRoute ?? { field: "RouteID" };
+      assertField(hierarchyRoute, aliases);
+      const field = scoped(hierarchyRoute);
+      if (field && allowed) predicates.push(allowed.size ? inPredicate(field, [...allowed], cteAliases) : Prisma.sql`FALSE`);
     }
     return predicates;
   }
 }
 
-function activeEntityRowsCte(companyId: string, entityName: string, alias: string): Prisma.Sql {
+function activeEntityRowsCte(companyId: string, entityName: string, alias: string, predicates: readonly Prisma.Sql[], semiJoins: readonly Prisma.Sql[], sourceJoins: readonly Prisma.Sql[]): Prisma.Sql {
   const cte = `${alias}_active`;
   const rowAlias = `${alias}_source`;
   const versionAlias = `${alias}_version`;
@@ -129,12 +156,25 @@ function activeEntityRowsCte(companyId: string, entityName: string, alias: strin
     SELECT ${Prisma.raw(rowAlias)}.*
     FROM "rie_dataset_versions" ${Prisma.raw(versionAlias)}
     INNER JOIN "rie_entity_rows" ${Prisma.raw(rowAlias)} ON ${Prisma.raw(rowAlias)}."dataset_version_id" = ${Prisma.raw(versionAlias)}.id
+    ${sourceJoins.length ? Prisma.join(sourceJoins, " ") : Prisma.empty}
     WHERE ${Prisma.raw(versionAlias)}."company_id" = ${companyId} AND ${Prisma.raw(versionAlias)}."entity_name" = ${entityName} AND ${Prisma.raw(versionAlias)}."is_active" = TRUE
       AND ${Prisma.raw(rowAlias)}."company_id" = ${companyId} AND ${Prisma.raw(rowAlias)}."entity_name" = ${entityName}
+      ${predicates.length ? Prisma.sql`AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty}
+      ${semiJoins.length ? Prisma.sql`AND ${Prisma.join(semiJoins, " AND ")}` : Prisma.empty}
   )`;
 }
 
 function activeEntityRowsReference(alias: string): Prisma.Sql { return Prisma.sql`${Prisma.raw(`${alias}_active`)} ${Prisma.raw(alias)}`; }
+function scopedJoinExists(join: RieQueryJoin): Prisma.Sql {
+  const baseSource = { field: join.on.left.field, source: "base_source" };
+  const scopedSource = { field: join.on.rightField, source: `${join.alias}_scope` };
+  return Prisma.sql`EXISTS (SELECT 1 FROM ${Prisma.raw(`${join.alias}_active`)} ${Prisma.raw(`${join.alias}_scope`)} WHERE ${normalizedField(baseSource)} = ${normalizedField(scopedSource)})`;
+}
+function scopedJoin(join: RieQueryJoin): Prisma.Sql {
+  const baseSource = { field: join.on.left.field, source: "base_source" };
+  const scopedSource = { field: join.on.rightField, source: `${join.alias}_scope` };
+  return Prisma.sql`INNER JOIN ${Prisma.raw(`${join.alias}_active`)} ${Prisma.raw(`${join.alias}_scope`)} ON ${normalizedField(baseSource)} = ${normalizedField(scopedSource)}`;
+}
 
 function normalizePagination(input: RieScalableQuery["pagination"]): { limit: number; offset: number } {
   const limit = input?.limit ?? DEFAULT_PAGE_SIZE;
@@ -145,6 +185,14 @@ function normalizePagination(input: RieScalableQuery["pagination"]): { limit: nu
 }
 function addValueScope(target: Prisma.Sql[], scope: RieValueScope | undefined, defaultField: string, aliases: Set<string>): void {
   if (scope) target.push(inPredicate({ field: scope.field ?? defaultField, source: scope.source }, scope.values, aliases));
+}
+function addScopedValueScope(target: Prisma.Sql[], scope: RieValueScope | undefined, defaultField: string, aliases: Set<string>, cteAliases: Set<string>, scoped: (field: RieQueryField) => RieQueryField | null): void {
+  if (!scope) return;
+  const source = scope.source ?? "base";
+  const field = { field: scope.field ?? defaultField, ...(scope.source ? { source } : {}) };
+  assertField(field, aliases);
+  const mapped = scoped(field);
+  if (mapped) target.push(inPredicate(mapped, scope.values, cteAliases));
 }
 function inPredicate(field: RieQueryField, values: readonly string[], aliases: Set<string>): Prisma.Sql {
   assertField(field, aliases);
