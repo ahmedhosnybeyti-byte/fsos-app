@@ -19,8 +19,6 @@ import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
 import { SgiService } from "../sgi/sgi.service";
 import type { EntityQueryResult } from "../rie/entity-provider.interface";
-import { Prisma } from "@field-sales-os/database";
-import { PrismaService } from "../../common/prisma";
 
 // Decision Analytics Studio — purpose-built minimum backend for this one
 // screen (2026-07-22 product decision: frontend was built first against
@@ -115,38 +113,7 @@ export class DecisionAnalyticsStudioService {
   constructor(
     private readonly rieFacade: RieFacade,
     private readonly sgiService: SgiService,
-    private readonly prisma: PrismaService,
   ) {}
-
-  /**
-   * Invoice lines are the only high-cardinality input for this screen.  Do
-   * the Invoice -> Invoice Items join and line-total aggregation in Postgres;
-   * callers receive one sales grain, never two complete canonical entities.
-   */
-  private async loadSalesRows(companyId: string, fromTime?: number, toTime?: number, aggregate = false): Promise<SalesRow[]> {
-    const dates: Prisma.Sql[] = [];
-    if (fromTime !== undefined) dates.push(Prisma.sql`(i."data" ->> 'InvoiceDate')::timestamptz >= ${new Date(fromTime)}`);
-    if (toTime !== undefined) dates.push(Prisma.sql`(i."data" ->> 'InvoiceDate')::timestamptz <= ${new Date(toTime)}`);
-    const lineNo = aggregate ? Prisma.sql`0` : Prisma.sql`COALESCE(NULLIF(BTRIM(li."data" ->> 'LineNo'), '')::double precision, 0)`;
-    const groupBy = aggregate ? Prisma.sql`1, 3, 4, 5` : Prisma.sql`1, 2, 3, 4, 5`;
-    const rows = await this.prisma.$queryRaw<Array<{ invoiceNo: string; lineNo: number; time: Date; customerCode: string; productCode: string; amount: number }>>(Prisma.sql`
-      SELECT BTRIM(i."data" ->> 'InvoiceNo') AS "invoiceNo",
-             ${lineNo} AS "lineNo",
-             (i."data" ->> 'InvoiceDate')::timestamptz AS "time",
-             BTRIM(i."data" ->> 'CustomerCode') AS "customerCode",
-             BTRIM(li."data" ->> 'ProductCode') AS "productCode",
-             SUM(COALESCE(NULLIF(REPLACE(BTRIM(li."data" ->> 'LineTotal'), ','), '')::double precision, 0)) AS "amount"
-      FROM "rie_canonical_entity_rows" i
-      JOIN "rie_canonical_entity_rows" li
-        ON li."company_id" = i."company_id" AND li."entity_name" = 'Invoice Items'
-       AND BTRIM(li."data" ->> 'InvoiceNo') = BTRIM(i."data" ->> 'InvoiceNo')
-      WHERE i."company_id" = ${companyId} AND i."entity_name" = 'Invoices'
-        AND BTRIM(i."data" ->> 'InvoiceNo') <> '' AND BTRIM(i."data" ->> 'CustomerCode') <> ''
-        ${dates.length ? Prisma.sql`AND ${Prisma.join(dates, ' AND ')}` : Prisma.empty}
-      GROUP BY ${groupBy}
-    `);
-    return rows.map((row) => ({ ...row, lineNo: Number(row.lineNo), time: row.time.getTime(), amount: Number(row.amount) }));
-  }
 
   private rieContext(user: AuthenticatedUser) {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
@@ -276,15 +243,9 @@ export class DecisionAnalyticsStudioService {
       if (rep) repSupervisorMap.set(rep.repEmail, rep.supervisorEmail);
     }
 
-    const invoiceSources = await this.prisma.$queryRaw<Array<{ entityName: string; count: bigint }>>(Prisma.sql`
-      SELECT "entity_name" AS "entityName", COUNT(*) AS "count"
-      FROM "rie_canonical_entity_rows"
-      WHERE "company_id" = ${user.companyId!} AND "entity_name" IN ('Invoices', 'Invoice Items')
-      GROUP BY "entity_name"
-    `);
-    const invoicesAvailable = invoiceSources.length === 2 && invoiceSources.every((source) => source.count > 0n);
+    const invoicesAvailable = await this.rieFacade.hasInvoiceSalesSources(user.companyId!);
     const salesRows: SalesRow[] = invoicesAvailable
-      ? await this.loadSalesRows(user.companyId!, salesRange?.fromTime, salesRange?.toTime, salesRange?.aggregate ?? false)
+      ? await this.rieFacade.getInvoiceSalesRows(user.companyId!, salesRange)
       : [];
     /* if (invoicesAvailable) {
       // No InvoiceStatus filter here — this join used to hard-require
