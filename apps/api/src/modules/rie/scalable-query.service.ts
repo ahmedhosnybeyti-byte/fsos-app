@@ -2,8 +2,8 @@ import { Injectable } from "@nestjs/common";
 import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
-import type { EntityRecord } from "./entity-provider.interface";
-import type { RieDateScope, RieQueryAggregation, RieQueryField, RieScalableQuery, RieScalableQueryResult, RieValueScope } from "./scalable-query.types";
+import type { EntityRecord, EntityQueryResult } from "./entity-provider.interface";
+import type { RieDateScope, RieQueryAggregation, RieQueryField, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieValueScope } from "./scalable-query.types";
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
@@ -74,6 +74,26 @@ export class RieScalableQueryService {
     `);
     const hasMore = rows.length > page.limit;
     return { records: hasMore ? rows.slice(0, page.limit) : rows, page: { ...page, hasMore } };
+  }
+
+  async readEntity(input: RieScalableEntityRead): Promise<EntityQueryResult> {
+    const records: EntityRecord[] = [];
+    let offset = 0;
+    do {
+      const page = await this.query({
+        ...(input.applyHierarchy === false ? { companyId: input.companyId } : { companyId: input.companyId, requestingUser: input.requestingUser }),
+        entityName: input.entityName,
+        projection: input.projection,
+        scope: input.scope,
+        joins: input.joins,
+        hierarchyRoute: input.hierarchyRoute,
+        pagination: { limit: MAX_PAGE_SIZE, offset },
+      });
+      records.push(...page.records);
+      offset += page.records.length;
+      if (!page.page.hasMore) break;
+    } while (true);
+    return { entityName: input.entityName, available: true, records, fields: input.projection.map((field) => field.as ?? field.field), warnings: [] };
   }
 
   private async scopePredicates(input: RieScalableQuery, aliases: Set<string>): Promise<Prisma.Sql[]> {

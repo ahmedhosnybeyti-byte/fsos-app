@@ -145,14 +145,19 @@ export class TeamPerformanceService {
 
   async query(user: AuthenticatedUser, input: TeamPerformanceRieQueryInput): Promise<TeamPerformanceResult> {
     const ctx = this.rieContext(user);
+    const fromTime = Date.parse(input.dateFrom);
+    const toTime = Date.parse(input.dateTo);
+    const priorFromTime = input.priorDateFrom ? Date.parse(input.priorDateFrom) : null;
+    const priorToTime = input.priorDateTo ? Date.parse(input.priorDateTo) : null;
+    const scopeFrom = priorFromTime ?? fromTime; const scopeTo = priorToTime ?? toTime;
     const [routesResult, employeesResult, invoicesResult, invoiceItemsResult, collectionsResult, returnsResult, targetsResult] = await Promise.all([
-      this.rieFacade.getEntityRecords("Routes", ctx),
-      this.rieFacade.getEntityRecords("Employees", ctx),
-      this.rieFacade.getEntityRecords("Invoices", ctx),
-      this.rieFacade.getEntityRecords("Invoice Items", ctx),
-      this.rieFacade.getEntityRecords("Collections", ctx),
-      this.rieFacade.getEntityRecords("Returns", ctx),
-      this.rieFacade.getEntityRecords("Targets", ctx),
+      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Routes", projection: [{ field: "RouteID" }, { field: "SalesRepID" }] }),
+      this.rieFacade.readCanonicalEntity({ companyId: ctx.companyId, entityName: "Employees", applyHierarchy: false, projection: [{ field: "EmployeeID" }, { field: "EmployeeName" }, { field: "Email" }, { field: "DirectManagerID" }] }),
+      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Invoices", projection: [{ field: "InvoiceNo" }, { field: "RouteID" }, { field: "InvoiceDate" }, { field: "CustomerCode" }], scope: { date: { field: "InvoiceDate", from: scopeFrom, to: scopeTo } } }),
+      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Invoice Items", projection: [{ field: "InvoiceNo" }, { field: "LineTotal" }, { field: "ProductCode" }], joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }], hierarchyRoute: { field: "RouteID", source: "invoice" }, scope: { date: { field: "InvoiceDate", source: "invoice", from: scopeFrom, to: scopeTo } } }),
+      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Collections", projection: [{ field: "RouteID" }, { field: "CollectionDate" }, { field: "Amount" }], scope: { date: { field: "CollectionDate", from: scopeFrom, to: scopeTo } } }),
+      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Returns", projection: [{ field: "RouteID" }, { field: "ReturnDate" }, { field: "TotalAmount" }], scope: { date: { field: "ReturnDate", from: scopeFrom, to: scopeTo } } }),
+      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Targets", projection: [{ field: "Year" }, { field: "Month" }, { field: "RouteID" }, { field: "SalesTarget" }, { field: "CollectionTarget" }, { field: "ActiveCustomersTarget" }, { field: "SKUDistributionTarget" }] }),
     ]);
     // Routes/Employees are structural prerequisites for rep identity across
     // the whole platform (same as every migrated screen) — not one of the
@@ -171,11 +176,7 @@ export class TeamPerformanceService {
     const collectionAvailable = collectionsResult.available;
     const returnsAvailable = returnsResult.available;
 
-    const fromTime = Date.parse(input.dateFrom);
-    const toTime = Date.parse(input.dateTo);
     const hasPrior = !!(input.priorDateFrom && input.priorDateTo);
-    const priorFromTime = input.priorDateFrom ? Date.parse(input.priorDateFrom) : null;
-    const priorToTime = input.priorDateTo ? Date.parse(input.priorDateTo) : null;
 
     const acc = new Map<string, RepAccumulator>();
     const currentInvoiceNos = new Set<string>();

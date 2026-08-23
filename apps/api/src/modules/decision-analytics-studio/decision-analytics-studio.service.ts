@@ -182,13 +182,13 @@ export class DecisionAnalyticsStudioService {
       visitsResult,
       targetsResult,
     ] = await Promise.all([
-      this.rieFacade.getEntityRecords("Customers", ctx),
-      this.rieFacade.getEntityRecords("Products", ctx),
-      this.rieFacade.getEntityRecords("Routes", ctx),
-      this.rieFacade.getEntityRecords("Employees", ctx),
-      this.rieFacade.getEntityRecords("Collections", ctx),
-      this.rieFacade.getEntityRecords("Returns", ctx),
-      this.rieFacade.getEntityRecords("Visits", ctx),
+      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Customers", projection: [{ field: "CustomerCode" }, { field: "CustomerName" }, { field: "City" }, { field: "Channel" }, { field: "BranchID" }, { field: "RouteID" }, { field: "Latitude" }, { field: "Longitude" }] }),
+      this.rieFacade.readCanonicalEntity({ companyId: ctx.companyId, entityName: "Products", applyHierarchy: false, projection: [{ field: "ProductCode" }, { field: "ProductName" }, { field: "Category" }, { field: "Brand" }] }),
+      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Routes", projection: [{ field: "RouteID" }, { field: "SalesRepID" }] }),
+      this.rieFacade.readCanonicalEntity({ companyId: ctx.companyId, entityName: "Employees", applyHierarchy: false, projection: [{ field: "EmployeeID" }, { field: "EmployeeName" }, { field: "Email" }, { field: "DirectManagerID" }] }),
+      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Collections", projection: [{ field: "CustomerCode" }, { field: "CollectionDate" }, { field: "Amount" }], scope: salesRange ? { date: { field: "CollectionDate", from: salesRange.fromTime, to: salesRange.toTime } } : undefined }),
+      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Returns", projection: [{ field: "CustomerCode" }, { field: "ReturnDate" }, { field: "TotalAmount" }], scope: salesRange ? { date: { field: "ReturnDate", from: salesRange.fromTime, to: salesRange.toTime } } : undefined }),
+      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Visits", projection: [{ field: "CustomerCode" }, { field: "VisitDate" }, { field: "VisitStatus" }], scope: salesRange ? { date: { field: "VisitDate", from: salesRange.fromTime, to: salesRange.toTime } } : undefined }),
       // Chart Color & Visual Intelligence Standard v1.0 — same RIE
       // Canonical "Targets" entity SGI's TARGET_BEHIND situation already
       // reads (Month/Year/RouteID/SalesTarget), loaded here independently
@@ -196,7 +196,7 @@ export class DecisionAnalyticsStudioService {
       // Optional: a company with no Targets sheet uploaded simply gets an
       // unavailable result, which downstream just means every group's
       // `target` is null (Relative Semantic Coloring), never an error.
-      this.rieFacade.getEntityRecords("Targets", ctx),
+      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Targets", projection: [{ field: "Month" }, { field: "Year" }, { field: "RouteID" }, { field: "SalesTarget" }] }),
     ]);
     this.assertAvailable(customersResult, "العملاء");
 
@@ -704,7 +704,7 @@ export class DecisionAnalyticsStudioService {
     }
 
     if (field === "territory" || field === "channel" || field === "customer") {
-      const result = await this.rieFacade.getEntityRecords("Customers", ctx);
+      const result = await this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Customers", projection: [{ field: "CustomerCode" }, { field: "CustomerName" }, { field: "City" }, { field: "Channel" }] });
       this.assertAvailable(result, "العملاء");
       const seen = new Map<string, string>();
       for (const row of result.records) {
@@ -721,7 +721,7 @@ export class DecisionAnalyticsStudioService {
     }
 
     if (field === "category" || field === "brand" || field === "product") {
-      const result = await this.rieFacade.getEntityRecords("Products", ctx);
+      const result = await this.rieFacade.readCanonicalEntity({ companyId: ctx.companyId, entityName: "Products", applyHierarchy: false, projection: [{ field: "ProductCode" }, { field: "ProductName" }, { field: "Category" }, { field: "Brand" }] });
       this.assertAvailable(result, "المنتجات");
       const seen = new Map<string, string>();
       for (const row of result.records) {
@@ -739,7 +739,10 @@ export class DecisionAnalyticsStudioService {
 
     // representative / supervisor — derived from Routes+Employees via the
     // same resolver used everywhere else in this module.
-    const [routesResult, employeesResult] = await Promise.all([this.rieFacade.getEntityRecords("Routes", ctx), this.rieFacade.getEntityRecords("Employees", ctx)]);
+    const [routesResult, employeesResult] = await Promise.all([
+      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Routes", projection: [{ field: "RouteID" }, { field: "SalesRepID" }] }),
+      this.rieFacade.readCanonicalEntity({ companyId: ctx.companyId, entityName: "Employees", applyHierarchy: false, projection: [{ field: "EmployeeID" }, { field: "EmployeeName" }, { field: "Email" }, { field: "DirectManagerID" }] }),
+    ]);
     this.assertAvailable(routesResult, "المسارات");
     const resolveRep = this.buildRepResolver(routesResult, employeesResult);
     const seen = new Map<string, string>();

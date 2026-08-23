@@ -1,4 +1,5 @@
 import type { EntityQueryContext, EntityRecord } from "./entity-provider.interface";
+import type { EntityQueryResult } from "./entity-provider.interface";
 
 export interface RieQueryField { field: string; source?: string; }
 export interface RieQueryProjection extends RieQueryField { as?: string; }
@@ -37,3 +38,14 @@ export interface RieScalableQueryResult {
   records: readonly EntityRecord[];
   page: { limit: number; offset: number; hasMore: boolean };
 }
+
+/** Compatibility result for callers that still need a bounded row collection. */
+export interface RieScalableEntityRead extends EntityQueryContext {
+  entityName: string;
+  projection: readonly RieQueryProjection[];
+  scope?: RieScalableQueryScope;
+  joins?: readonly RieQueryJoin[];
+  hierarchyRoute?: RieQueryField;
+  applyHierarchy?: boolean;
+}
+export type RieScalableEntityResult = EntityQueryResult;
