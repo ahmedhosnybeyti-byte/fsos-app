@@ -363,7 +363,7 @@ export class DecisionAnalyticsStudioService {
     const { fromTime, toTime, priorFromTime, priorToTime } = this.windowFor(input);
     const f = this.compileFilters(input);
     const ctx = this.rieContext(user);
-    const salesJoins = this.decisionJoins();
+    const salesJoins = this.decisionSalesJoins(input.analyzeBy, f);
     const salesScope = this.decisionScope(f, { field: "InvoiceDate", source: "invoice", from: fromTime, to: toTime }, true);
     const priorSalesScope = this.decisionScope(f, { field: "InvoiceDate", source: "invoice", from: priorFromTime, to: priorToTime }, true);
     const salesBase = { ...ctx, entityName: "Invoice Items", joins: salesJoins, hierarchyRoute: { field: "RouteID", source: "invoice" } } as const;
@@ -415,6 +415,15 @@ export class DecisionAnalyticsStudioService {
 
   private decisionJoins() {
     return [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }, { entityName: "Customers", alias: "customer", on: { left: { field: "CustomerCode", source: "invoice" }, rightField: "CustomerCode" } }, { entityName: "Products", alias: "product", type: "left" as const, on: { left: { field: "ProductCode" }, rightField: "ProductCode" } }, { entityName: "Routes", alias: "route", type: "left" as const, on: { left: { field: "RouteID", source: "customer" }, rightField: "RouteID" } }, { entityName: "Employees", alias: "rep", type: "left" as const, on: { left: { field: "SalesRepID", source: "route" }, rightField: "EmployeeID" } }, { entityName: "Employees", alias: "supervisor", type: "left" as const, on: { left: { field: "DirectManagerID", source: "rep" }, rightField: "EmployeeID" } }];
+  }
+
+  /** Query joins only the dimensions its selected analysis and filters read; table retains the complete display join. */
+  private decisionSalesJoins(dimension: DecisionAnalyzeByDimension, f: ReturnType<DecisionAnalyticsStudioService["compileFilters"]>) {
+    const joins = this.decisionJoins();
+    const needsProduct = dimension === "category" || dimension === "brand" || dimension === "product" || Boolean(f.category || f.brand || f.product);
+    const needsPeople = dimension === "representative" || dimension === "supervisor" || Boolean(f.rep || f.supervisor);
+    if (needsPeople) return joins;
+    return joins.slice(0, needsProduct ? 3 : 2);
   }
 
   private decisionScope(f: ReturnType<DecisionAnalyticsStudioService["compileFilters"]>, date: { field: string; source: string; from: number; to: number } | undefined, includeProduct: boolean, customerSource = "customer") {
