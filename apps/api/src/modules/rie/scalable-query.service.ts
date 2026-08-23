@@ -222,10 +222,10 @@ function datePredicate(scope: RieDateScope, aliases: Set<string>): Prisma.Sql {
 }
 function aggregateSql(aggregate: RieQueryAggregation): Prisma.Sql {
   const alias = quoted(aggregate.as);
-  if (aggregate.op === "count" && !aggregate.field) return Prisma.sql`COUNT(*) AS ${alias}`;
+  if (aggregate.op === "count" && !aggregate.field) return Prisma.sql`COUNT(*)::double precision AS ${alias}`;
   const field = textField({ field: aggregate.field!, source: aggregate.source });
-  if (aggregate.op === "count") return Prisma.sql`COUNT(NULLIF(BTRIM(COALESCE(${field}, '')), '')) AS ${alias}`;
-  if (aggregate.op === "countDistinct") return Prisma.sql`COUNT(DISTINCT NULLIF(BTRIM(COALESCE(${field}, '')), '')) AS ${alias}`;
+  if (aggregate.op === "count") return Prisma.sql`COUNT(NULLIF(BTRIM(COALESCE(${field}, '')), ''))::double precision AS ${alias}`;
+  if (aggregate.op === "countDistinct") return Prisma.sql`COUNT(DISTINCT NULLIF(BTRIM(COALESCE(${field}, '')), ''))::double precision AS ${alias}`;
   const numeric = Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`;
   if (aggregate.op === "sumProduct") {
     const multiplier = textField(aggregate.multiplier!);
