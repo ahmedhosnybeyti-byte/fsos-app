@@ -9,7 +9,7 @@ import type { ExecutionPlan } from "./query-execution.types";
 import type { BusinessRuleFn } from "./business-rules.types";
 import type { RelationshipDefinition } from "./relationship-registry.types";
 import type { RieQueryOptions, RieQueryResult } from "./rie-facade.types";
-import { ENTITY_PROVIDER, type EntityProvider, type EntityQueryContext, type EntityQueryOptions, type EntityQueryResult } from "./entity-provider.interface";
+import { ENTITY_PROVIDER, type EntityFieldFilter, type EntityProvider, type EntityQueryContext, type EntityQueryOptions, type EntityQueryResult } from "./entity-provider.interface";
 import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { FilesService } from "../files/files.service";
@@ -27,6 +27,16 @@ export interface RieInvoiceSalesRow {
   customerCode: string;
   productCode: string;
   amount: number;
+}
+
+/** Fact and large-dimension entities must enter RIE through a bounded scope. */
+export type RieHighCardinalityEntity = "Invoices" | "Invoice Items" | "Visits" | "Collections" | "Returns" | "Customers" | "Van Inventory";
+
+export interface RieScopedEntityQuery extends EntityQueryContext {
+  entityName: RieHighCardinalityEntity;
+  /** At least one server-side predicate, or a bounded limit, is required. */
+  filters?: readonly EntityFieldFilter[];
+  limit?: number;
 }
 
 /**
@@ -143,6 +153,23 @@ export class RieFacade {
 
   getEntityRecords(entityName: string, options: EntityQueryOptions): Promise<EntityQueryResult> {
     return this.entityProvider.getRecords(entityName, options);
+  }
+
+  /**
+   * Guarded read for high-cardinality entities. This is additive: legacy
+   * getEntityRecords callers retain their current behavior until migrated.
+   */
+  getScopedEntityRecords(query: RieScopedEntityQuery): Promise<EntityQueryResult> {
+    if (!query.companyId?.trim()) throw new Error("RIE scoped query requires companyId.");
+    if ((!query.filters || query.filters.length === 0) && (!query.limit || query.limit < 1)) {
+      throw new Error(`RIE scoped query for ${query.entityName} requires filters or a positive limit.`);
+    }
+    return this.entityProvider.getRecords(query.entityName, {
+      companyId: query.companyId,
+      requestingUser: query.requestingUser,
+      filters: query.filters,
+      limit: query.limit,
+    });
   }
 
   /**
