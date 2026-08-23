@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/commo
 import { PrismaService } from "../../common/prisma";
 import { RieFacade } from "../rie/rie-facade.service";
 import { normalizeHeader } from "../files/dataset-query.util";
+import { auditMemory } from "../../common/observability/memory-audit";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 
 // Per-Employee Scoped Excel Export (2026-07-27) — built as the concrete
@@ -184,6 +185,15 @@ export class EmployeeExportService {
   }
 
   async exportForEmployee(
+    companyId: string,
+    requestingUser: AuthenticatedUser,
+    targetEmployeeId: string,
+    dateRange?: { fromDate?: string; toDate?: string },
+  ): Promise<EmployeeExportResult> {
+    return auditMemory("excel-data-export", () => this.exportForEmployeeMeasured(companyId, requestingUser, targetEmployeeId, dateRange), { companyId, targetEmployeeId });
+  }
+
+  private async exportForEmployeeMeasured(
     companyId: string,
     requestingUser: AuthenticatedUser,
     targetEmployeeId: string,

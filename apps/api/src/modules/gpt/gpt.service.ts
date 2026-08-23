@@ -8,6 +8,7 @@ import { PrismaService, isUniqueConstraintError } from "../../common/prisma";
 import { SubscriptionsService } from "../subscriptions/subscriptions.service";
 import { FilesService } from "../files/files.service";
 import { UsageAnalyticsService } from "../usage-analytics/usage-analytics.service";
+import { auditMemory } from "../../common/observability/memory-audit";
 import { serializeExcelParse } from "../../common/excel-parse-queue";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { AnalysisEventService } from "../analysis-studio/analysis-event.service";
@@ -778,6 +779,10 @@ export class GptService {
   // persists exactly what the model sent, and lets the frontend's
   // component registry decide how each block type renders.
   async renderAnalysis(rawApiKey: string, sessionToken: string, event: RenderAnalysisEventInput) {
+    return auditMemory("render-analysis", () => this.renderAnalysisMeasured(rawApiKey, sessionToken, event), { blockCount: event.blocks.length });
+  }
+
+  private async renderAnalysisMeasured(rawApiKey: string, sessionToken: string, event: RenderAnalysisEventInput) {
     const { gpt, session } = await this.assertValidSession(rawApiKey, sessionToken);
 
     const report = await this.analysisEventService.record({
@@ -834,6 +839,10 @@ export class GptService {
   // Routes.BranchID — the only join of its kind in the codebase; every
   // other module reads BranchID straight off the Customers dataset instead.
   async executeReport(rawApiKey: string, sessionToken: string, input: ExecuteReportInput) {
+    return auditMemory("heavy-report", () => this.executeReportMeasured(rawApiKey, sessionToken, input), { reportType: input.reportType });
+  }
+
+  private async executeReportMeasured(rawApiKey: string, sessionToken: string, input: ExecuteReportInput) {
     const { gpt, session } = await this.assertValidSession(rawApiKey, sessionToken);
     const companyId = gpt.companyId;
 
