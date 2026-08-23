@@ -69,6 +69,11 @@ interface SalesJoinedRow {
 
 @Injectable()
 export class HeatmapService {
+  // A dashboard burst commonly asks for the identical sales aggregate many
+  // times at once. Share only the in-flight calculation; completed values
+  // are never cached, so each later request still observes current data.
+  private readonly salesAggregateInFlight = new Map<string, Promise<Map<string, number>>>();
+
   constructor(
     private readonly rieFacade: RieFacade,
     private readonly appConfig: AppConfigService,
@@ -154,6 +159,25 @@ export class HeatmapService {
   // newest-upload-wins semantics in PostgreSQL, then join/filter/aggregate
   // there instead of materializing Invoices and Invoice Items in Node.
   private async aggregateSalesInPostgres(
+    user: AuthenticatedUser,
+    categoryValue?: string,
+    dateFrom?: string,
+    dateTo?: string,
+  ): Promise<Map<string, number>> {
+    const key = JSON.stringify([user.companyId, user.roleCode, user.email.trim().toLowerCase(), categoryValue ?? null, dateFrom ?? null, dateTo ?? null]);
+    const inFlight = this.salesAggregateInFlight.get(key);
+    if (inFlight) return inFlight;
+
+    const pending = this.executeSalesAggregateInPostgres(user, categoryValue, dateFrom, dateTo);
+    this.salesAggregateInFlight.set(key, pending);
+    try {
+      return await pending;
+    } finally {
+      if (this.salesAggregateInFlight.get(key) === pending) this.salesAggregateInFlight.delete(key);
+    }
+  }
+
+  private async executeSalesAggregateInPostgres(
     user: AuthenticatedUser,
     categoryValue?: string,
     dateFrom?: string,
