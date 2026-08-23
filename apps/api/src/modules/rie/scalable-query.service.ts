@@ -239,7 +239,9 @@ function aggregateSql(aggregate: RieQueryAggregation): Prisma.Sql {
   }
   return Prisma.sql`${Prisma.raw({ sum: "SUM", avg: "AVG", min: "MIN", max: "MAX" }[aggregate.op])}(${numeric}) AS ${alias}`;
 }
-function textField(field: RieQueryField): Prisma.Sql { return Prisma.sql`${Prisma.raw(field.source ?? "base")}."data" ->> ${field.field}`; }
+// Field names are validated identifiers.  Keep them as SQL literals rather
+// than bind parameters so SELECT/GROUP BY expressions remain identical.
+function textField(field: RieQueryField): Prisma.Sql { return Prisma.sql`${Prisma.raw(field.source ?? "base")}."data" ->> ${Prisma.raw(`'${field.field}'`)}`; }
 function normalizedField(field: RieQueryField): Prisma.Sql { return Prisma.sql`LOWER(BTRIM(COALESCE(${textField(field)}, '')))`; }
 function quoted(identifier: string): Prisma.Sql { return Prisma.raw(`"${identifier}"`); }
 function assertField(field: RieQueryField, aliases: Set<string>): void {
