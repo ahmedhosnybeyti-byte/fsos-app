@@ -54,6 +54,23 @@ export class DatasetClassifierService {
     return { sheets };
   }
 
+  // Used by ingestion's first pass. The workbook is opened with sheetRows:1,
+  // so type matching can use only sheet names and headers before the selected
+  // sheets are opened for their actual rows.
+  classifyWorkbookHeaders(workbook: XLSX.WorkBook): WorkbookClassification {
+    return this.classifyWorkbook(workbook);
+  }
+
+  enrichSheetRows(sheet: SheetClassification, rows: readonly Record<string, unknown>[]): SheetClassification {
+    const valueAt = (rowIndex: number, colIndex: number): unknown => rows[rowIndex]?.[sheet.headers[colIndex]!];
+    return {
+      ...sheet,
+      rowCount: rows.length,
+      detected: this.extractMetadata(sheet.headers, rows.length, valueAt),
+      columns: this.buildColumnMetadata(sheet.headers, rows.length, valueAt),
+    };
+  }
+
   private classifySheet(workbook: XLSX.WorkBook, sheetName: string, sheetIndex: number): SheetClassification {
     const sheet = workbook.Sheets[sheetName];
     const rows: unknown[][] = sheet ? XLSX.utils.sheet_to_json(sheet, { header: 1, raw: true }) : [];
@@ -74,8 +91,8 @@ export class DatasetClassifierService {
       sheetName,
       headers,
       rowCount: Math.max(rows.length - 1, 0),
-      detected: this.extractMetadata(headers, dataRows),
-      columns: this.buildColumnMetadata(headers, dataRows),
+      detected: this.extractMetadata(headers, dataRows.length, (rowIndex, colIndex) => dataRows[rowIndex]?.[colIndex]),
+      columns: this.buildColumnMetadata(headers, dataRows.length, (rowIndex, colIndex) => dataRows[rowIndex]?.[colIndex]),
     };
   }
 
@@ -85,8 +102,12 @@ export class DatasetClassifierService {
   // inspection, column resolution) from real per-column signal — which
   // headers are numeric/dates and what a low-cardinality column's actual
   // values are — instead of guessing from header names alone.
-  private buildColumnMetadata(headers: string[], dataRows: unknown[][]): ColumnMetadata[] {
-    const sampleRows = dataRows.slice(0, METADATA_ACCURACY_ROW_CAP);
+  private buildColumnMetadata(
+    headers: string[],
+    rowCount: number,
+    valueAt: (rowIndex: number, colIndex: number) => unknown,
+  ): ColumnMetadata[] {
+    const sampleRowCount = Math.min(rowCount, METADATA_ACCURACY_ROW_CAP);
 
     return headers.map((header, colIndex) => {
       let nullable = false;
@@ -100,8 +121,8 @@ export class DatasetClassifierService {
       let dateMax: Date | undefined;
       const distinct = new Set<string>();
 
-      for (const row of sampleRows) {
-        const value = row[colIndex];
+      for (let rowIndex = 0; rowIndex < sampleRowCount; rowIndex++) {
+        const value = valueAt(rowIndex, colIndex);
         if (value === undefined || value === null || value === "") {
           nullable = true;
           continue;
@@ -154,7 +175,11 @@ export class DatasetClassifierService {
 
   // Smart Metadata — independent of dataset-type classification. Applied to
   // whichever sheet is ultimately selected as the dataset.
-  private extractMetadata(headers: string[], dataRows: unknown[][]): DetectedMetadata {
+  private extractMetadata(
+    headers: string[],
+    rowCount: number,
+    valueAt: (rowIndex: number, colIndex: number) => unknown,
+  ): DetectedMetadata {
     const normalizedHeaders = headers.map(normalize);
     const findColumn = (aliases: readonly string[]): number =>
       normalizedHeaders.findIndex((h) => aliases.some((a) => headerMatchesKeyword(h, normalize(a))));
@@ -162,8 +187,8 @@ export class DatasetClassifierService {
     const collectDistinct = (colIndex: number): string[] | undefined => {
       if (colIndex < 0) return undefined;
       const values = new Set<string>();
-      for (const row of dataRows.slice(0, METADATA_ACCURACY_ROW_CAP)) {
-        const v = row[colIndex];
+      for (let rowIndex = 0; rowIndex < Math.min(rowCount, METADATA_ACCURACY_ROW_CAP); rowIndex++) {
+        const v = valueAt(rowIndex, colIndex);
         if (v !== undefined && v !== null && String(v).trim() !== "") values.add(String(v).trim());
         if (values.size > DISTINCT_VALUE_CAP) return [`${values.size}+ distinct values`];
       }
@@ -181,8 +206,8 @@ export class DatasetClassifierService {
     if (dateCol >= 0) {
       let min: Date | undefined;
       let max: Date | undefined;
-      for (const row of dataRows.slice(0, METADATA_ACCURACY_ROW_CAP)) {
-        const v = row[dateCol];
+      for (let rowIndex = 0; rowIndex < Math.min(rowCount, METADATA_ACCURACY_ROW_CAP); rowIndex++) {
+        const v = valueAt(rowIndex, dateCol);
         const d = v instanceof Date ? v : typeof v === "string" ? new Date(v) : undefined;
         if (!d || Number.isNaN(d.getTime())) continue;
         if (!min || d < min) min = d;

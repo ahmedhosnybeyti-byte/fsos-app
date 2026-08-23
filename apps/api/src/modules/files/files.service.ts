@@ -3,7 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { extname } from "node:path";
 import * as argon2 from "argon2";
 import * as XLSX from "xlsx";
-import type { Prisma, File as FileRow } from "@field-sales-os/database";
+import { Prisma, type File as FileRow } from "@field-sales-os/database";
 import { FILE_UPLOAD_LIMITS } from "@field-sales-os/schemas";
 import { PrismaService } from "../../common/prisma";
 import { AuditLogService } from "../audit-log/audit-log.service";
@@ -26,6 +26,7 @@ const PROSPECTS_ENTITY = "Prospects";
 const CUSTOMERS_ENTITY = "Customers";
 const INVOICES_ENTITY = "Invoices";
 const INVOICE_ITEMS_ENTITY = "Invoice Items";
+const POSTGRES_WRITE_BATCH_SIZE = 500;
 
 // Sheet Role text -> platform RoleCode, for automatic account provisioning
 // (see provisionEmployeeAccounts). Deliberately keyword-based, not an exact
@@ -448,9 +449,9 @@ export class FilesService {
     // hash per physical file, stored on every sheet's File row as before.
     const contentHash = createHash("sha256").update(file.buffer).digest("hex");
 
-    let workbook: XLSX.WorkBook;
+    let headerWorkbook: XLSX.WorkBook;
     try {
-      workbook = XLSX.read(file.buffer, { type: "buffer", cellDates: true });
+      headerWorkbook = XLSX.read(file.buffer, { type: "buffer", cellDates: true, sheetRows: 1 });
     } catch {
       throw new BadRequestException("Could not read this file — is it a valid .xlsx or .xls workbook?");
     }
@@ -461,12 +462,13 @@ export class FilesService {
     // opinion on dataset TYPE at all (that guess was removed 2026-07-26) —
     // resolveSheetsAndTemplates above is the sole decider of which sheet(s)
     // get validated or accepted.
-    const classification = this.classifier.classifyWorkbook(workbook);
+    const classification = this.classifier.classifyWorkbookHeaders(headerWorkbook);
     if (classification.sheets.length === 0) {
       throw new BadRequestException("Could not find any readable sheet with data in this file.");
     }
 
     const { toValidate, ignored, ambiguous } = this.resolveSheetsAndTemplates(classification.sheets);
+    const allSheetNames = headerWorkbook.SheetNames;
 
     // An accepted Employees sheet provisions accounts and updates roles. This
     // server-side check runs before storage or processing, so a hand-crafted
@@ -483,6 +485,19 @@ export class FilesService {
       throw new BadRequestException(
         `This file has ${classification.sheets.length} sheets (${classification.sheets.map((s) => s.sheetName).join(", ")}), and none of them is named after an official FSOS entity (${officialNames}). Rename a sheet to match its entity's official name, or upload one sheet per file.`,
       );
+    }
+
+    // The first pass above opens only headers. Parse rows only for sheets
+    // accepted by the official-template matcher, never for ignored sheets.
+    let workbook: XLSX.WorkBook;
+    try {
+      workbook = XLSX.read(file.buffer, {
+        type: "buffer",
+        cellDates: true,
+        sheets: toValidate.map(({ sheet }) => sheet.sheetIndex),
+      });
+    } catch {
+      throw new BadRequestException("Could not read this file — is it a valid .xlsx or .xls workbook?");
     }
 
     const batchId = randomBytes(12).toString("hex");
@@ -582,7 +597,7 @@ export class FilesService {
       });
 
       try {
-        const metadata = buildParsedMetadata(workbook.SheetNames, sheet);
+        const metadata = buildParsedMetadata(allSheetNames, this.classifier.enrichSheetRows(sheet, rows));
 
         // Every accepted canonical entity is ingested incrementally into its
         // PostgreSQL-backed canonical row store. The comparison is made by
@@ -679,43 +694,7 @@ export class FilesService {
     fileId: string;
     rows: Record<string, unknown>[];
   }): Promise<void> {
-    const { companyId, fileId, rows } = params;
-    const customerCodes = rows.map((row) => String(row.CustomerCode ?? "").trim());
-    if (customerCodes.some((key) => !key)) throw new Error("Customers shadow materialization requires CustomerCode on every row.");
-
-    await this.prisma.$transaction(async (tx) => {
-      const version = await tx.rieDatasetVersion.create({
-        data: { companyId, sourceFileId: fileId, entityName: CUSTOMERS_ENTITY },
-      });
-
-      if (rows.length > 0) {
-        await tx.rieEntityRow.createMany({
-          data: rows.map((data, index) => ({
-            companyId,
-            datasetVersionId: version.id,
-            entityName: CUSTOMERS_ENTITY,
-            entityKey: customerCodes[index]!,
-            data: data as Prisma.InputJsonValue,
-          })),
-        });
-      }
-
-      const materializedRows = await tx.rieEntityRow.findMany({
-        where: { datasetVersionId: version.id },
-        select: { entityKey: true, data: true },
-        orderBy: { entityKey: "asc" },
-      });
-      const excelByKey = new Map(rows.map((row, index) => [customerCodes[index]!, stableJson(row)]));
-      const matches = materializedRows.length === rows.length
-        && materializedRows.length === excelByKey.size
-        && materializedRows.every((row) => excelByKey.get(row.entityKey) === stableJson(row.data));
-      if (!matches) throw new Error("Customers Excel/PostgreSQL shadow verification failed.");
-
-      await tx.rieDatasetVersion.update({
-        where: { id: version.id },
-        data: { status: "ACTIVE", isActive: true, rowCount: rows.length, materializedAt: new Date(), activatedAt: new Date() },
-      });
-    }, { timeout: 30_000 });
+    return this.materializeEntityShadow({ ...params, entityName: CUSTOMERS_ENTITY, keyColumns: ["CustomerCode"], timeoutMs: 30_000 });
   }
 
   private async materializeInvoicesShadow(params: { companyId: string; fileId: string; rows: Record<string, unknown>[] }): Promise<void> {
@@ -733,56 +712,50 @@ export class FilesService {
     entityName: string;
     keyColumns: readonly string[];
     allowDuplicateKeys?: boolean;
+    timeoutMs?: number;
     rows: Record<string, unknown>[];
   }): Promise<void> {
-    const { companyId, fileId, entityName, keyColumns, allowDuplicateKeys = false, rows } = params;
-    const canonicalKeys = rows.map((row) => keyColumns.map((column) => String(row[column] ?? "").trim()).join("␟"));
-    if (canonicalKeys.some((key) => !key || key.split("␟").some((part) => !part))) {
-      throw new Error(`${entityName} shadow materialization requires ${keyColumns.join(", ")} on every row.`);
-    }
-    if (!allowDuplicateKeys && new Set(canonicalKeys).size !== canonicalKeys.length) {
-      throw new Error(`${entityName} shadow materialization requires unique canonical keys.`);
-    }
+    const { companyId, fileId, entityName, keyColumns, allowDuplicateKeys = false, timeoutMs = 600_000, rows } = params;
     const occurrences = new Map<string, number>();
-    const entityKeys = canonicalKeys.map((key) => {
-      const occurrence = occurrences.get(key) ?? 0;
-      occurrences.set(key, occurrence + 1);
-      return occurrence === 0 ? key : `${key}␟${occurrence}`;
-    });
+    const seenKeys = new Set<string>();
 
     await this.prisma.$transaction(async (tx) => {
       const version = await tx.rieDatasetVersion.create({
         data: { companyId, sourceFileId: fileId, entityName },
       });
-      if (rows.length > 0) {
-        const data = rows.map((row, index) => ({
-          companyId,
-          datasetVersionId: version.id,
-          entityName,
-          entityKey: entityKeys[index]!,
-          data: row as Prisma.InputJsonValue,
-        }));
-        for (let index = 0; index < data.length; index += 10_000) {
-          await tx.rieEntityRow.createMany({ data: data.slice(index, index + 10_000) });
-        }
-      }
 
-      const materializedRows = await tx.rieEntityRow.findMany({
-        where: { datasetVersionId: version.id },
-        select: { entityKey: true, data: true },
-        orderBy: { entityKey: "asc" },
-      });
-      const excelByKey = new Map(rows.map((row, index) => [entityKeys[index]!, stableJson(row)]));
-      const matches = materializedRows.length === rows.length
-        && materializedRows.length === excelByKey.size
-        && materializedRows.every((row) => excelByKey.get(row.entityKey) === stableJson(row.data));
-      if (!matches) throw new Error(`${entityName} Excel/PostgreSQL shadow verification failed.`);
+      for (let start = 0; start < rows.length; start += POSTGRES_WRITE_BATCH_SIZE) {
+        const batch = rows.slice(start, start + POSTGRES_WRITE_BATCH_SIZE);
+        const expectedByKey = new Map<string, string>();
+        const data: Prisma.RieEntityRowCreateManyInput[] = [];
+        for (const row of batch) {
+          const key = keyColumns.map((column) => String(row[column] ?? "").trim()).join("␟");
+          if (!key || key.split("␟").some((part) => !part)) {
+            throw new Error(`${entityName} shadow materialization requires ${keyColumns.join(", ")} on every row.`);
+          }
+          if (!allowDuplicateKeys && seenKeys.has(key)) throw new Error(`${entityName} shadow materialization requires unique canonical keys.`);
+          seenKeys.add(key);
+          const occurrence = occurrences.get(key) ?? 0;
+          occurrences.set(key, occurrence + 1);
+          const entityKey = occurrence === 0 ? key : `${key}␟${occurrence}`;
+          expectedByKey.set(entityKey, stableJson(row));
+          data.push({ companyId, datasetVersionId: version.id, entityName, entityKey, data: row as Prisma.InputJsonValue });
+        }
+        await tx.rieEntityRow.createMany({ data });
+        const materializedRows = await tx.rieEntityRow.findMany({
+          where: { datasetVersionId: version.id, entityKey: { in: [...expectedByKey.keys()] } },
+          select: { entityKey: true, data: true },
+        });
+        const matches = materializedRows.length === expectedByKey.size
+          && materializedRows.every((row) => expectedByKey.get(row.entityKey) === stableJson(row.data));
+        if (!matches) throw new Error(`${entityName} Excel/PostgreSQL shadow verification failed.`);
+      }
 
       await tx.rieDatasetVersion.update({
         where: { id: version.id },
         data: { status: "ACTIVE", isActive: true, rowCount: rows.length, materializedAt: new Date(), activatedAt: new Date() },
       });
-    }, { timeout: 600_000 });
+    }, { timeout: timeoutMs });
   }
 
   /**
@@ -806,24 +779,26 @@ export class FilesService {
     // value cannot identify a record, so preserve the existing tolerant row
     // ingestion behavior by skipping just that row rather than rejecting an
     // already accepted sheet.
-    for (const row of rows) {
-      const parts = keyColumns.map((column) => String(row[column] ?? "").trim());
-      if (parts.some((part) => !part)) continue;
-
-      const entityKey = parts.join("␟");
-      const data = JSON.stringify(row);
-      await this.prisma.$executeRaw`
+    for (let start = 0; start < rows.length; start += POSTGRES_WRITE_BATCH_SIZE) {
+      const values = rows
+        .slice(start, start + POSTGRES_WRITE_BATCH_SIZE)
+        .flatMap((row) => {
+          const parts = keyColumns.map((column) => String(row[column] ?? "").trim());
+          if (parts.some((part) => !part)) return [];
+          return [Prisma.sql`(${randomUUID()}, ${companyId}, ${fileId}, ${entityName}, ${parts.join("␟")}, ${JSON.stringify(row)}::jsonb, CURRENT_TIMESTAMP)`];
+        });
+      if (values.length === 0) continue;
+      await this.prisma.$executeRaw(Prisma.sql`
         INSERT INTO "rie_canonical_entity_rows"
           ("id", "company_id", "source_file_id", "entity_name", "entity_key", "data", "updated_at")
-        VALUES
-          (${randomUUID()}, ${companyId}, ${fileId}, ${entityName}, ${entityKey}, ${data}::jsonb, CURRENT_TIMESTAMP)
+        VALUES ${Prisma.join(values)}
         ON CONFLICT ("company_id", "entity_name", "entity_key")
         DO UPDATE SET
           "data" = EXCLUDED."data",
           "source_file_id" = EXCLUDED."source_file_id",
           "updated_at" = CURRENT_TIMESTAMP
         WHERE "rie_canonical_entity_rows"."data" IS DISTINCT FROM EXCLUDED."data"
-      `;
+      `);
     }
   }
 
