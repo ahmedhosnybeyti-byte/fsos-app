@@ -58,6 +58,7 @@ export class RieScalableQueryService {
     const predicates = await this.scopePredicates(input, aliases);
     const page = normalizePagination(input.pagination);
     const joinSql = joins.map((join) => Prisma.sql`${join.type === "left" ? Prisma.raw("LEFT JOIN") : Prisma.raw("INNER JOIN")} "rie_canonical_entity_rows" ${Prisma.raw(join.alias)} ON ${Prisma.raw(join.alias)}."company_id" = base."company_id" AND ${Prisma.raw(join.alias)}."entity_name" = ${join.entityName} AND ${normalizedField(join.on.left)} = ${normalizedField({ field: join.on.rightField, source: join.alias })}`);
+    const joinClause = joinSql.length ? Prisma.join(joinSql, " ") : Prisma.empty;
     const where = predicates.length ? Prisma.sql` AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty;
     const grouping = input.groupBy?.length ? Prisma.sql` GROUP BY ${Prisma.join(input.groupBy.map(textField))}` : Prisma.empty;
     const ordering = input.groupBy?.length
@@ -66,7 +67,7 @@ export class RieScalableQueryService {
     const rows = await this.prisma.$queryRaw<EntityRecord[]>(Prisma.sql`
       SELECT ${Prisma.join(select)}
       FROM "rie_canonical_entity_rows" base
-      ${Prisma.join(joinSql, " ")}
+      ${joinClause}
       WHERE base."company_id" = ${input.companyId} AND base."entity_name" = ${input.entityName}${where}
       ${grouping}
       ${ordering}
