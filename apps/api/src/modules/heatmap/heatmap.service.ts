@@ -172,13 +172,11 @@ export class HeatmapService {
     const itemFiles = itemFileIds.map((id, precedence) => Prisma.sql`(${id}, ${precedence})`);
     const productFiles = productFileIds?.map((id, precedence) => Prisma.sql`(${id}, ${precedence})`) ?? [];
     const routeValues = allowedRoutes ? [...allowedRoutes] : [];
-    const routeFilter = allowedRoutes === null
+    const routeFilter = (alias: "inv" | "item") => allowedRoutes === null
       ? Prisma.empty
       : routeValues.length === 0
         ? Prisma.sql`AND FALSE`
-        : Prisma.sql`
-            AND LOWER(BTRIM(COALESCE(inv."data" ->> 'RouteID', ''))) IN (${Prisma.join(routeValues)})
-            AND LOWER(BTRIM(COALESCE(item."data" ->> 'RouteID', ''))) IN (${Prisma.join(routeValues)})`;
+        : Prisma.sql`AND LOWER(BTRIM(COALESCE(${Prisma.raw(alias)}."data" ->> 'RouteID', ''))) IN (${Prisma.join(routeValues)})`;
     const fromTime = dateFrom ? Date.parse(dateFrom) : null;
     const toTime = dateTo ? Date.parse(dateTo) : null;
     const invoiceTime = Prisma.sql`CASE WHEN inv."data" ->> 'InvoiceDate' ~ '^\\d{4}-\\d{2}-\\d{2}' THEN EXTRACT(EPOCH FROM (inv."data" ->> 'InvoiceDate')::timestamptz) * 1000 ELSE NULL END`;
@@ -245,6 +243,15 @@ export class HeatmapService {
       items AS (
         ${itemDedup}
       )
+      , filtered_invoices AS MATERIALIZED (
+        SELECT inv.* FROM invoices inv
+        WHERE BTRIM(COALESCE(inv."data" ->> 'CustomerCode', '')) <> ''
+        ${routeFilter("inv")}
+        ${dateFilter}
+      ), filtered_items AS MATERIALIZED (
+        SELECT item.* FROM items item
+        WHERE TRUE ${routeFilter("item")}
+      )
       ${categoryValue ? Prisma.sql`, selected_product_files("source_file_id", precedence) AS (VALUES ${Prisma.join(productFiles)}),
       product_versions AS (
         SELECT v.id, selected_product_files.precedence
@@ -260,12 +267,10 @@ export class HeatmapService {
       SELECT BTRIM(COALESCE(inv."data" ->> 'CustomerCode', '')) AS "customerCode",
         SUM(CASE WHEN BTRIM(COALESCE(item."data" ->> 'LineTotal', '')) ~ '^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$'
           THEN BTRIM(item."data" ->> 'LineTotal')::double precision ELSE 0 END) AS total
-      FROM invoices inv
-      JOIN items item ON BTRIM(COALESCE(item."data" ->> 'InvoiceNo', '')) = BTRIM(COALESCE(inv."data" ->> 'InvoiceNo', ''))
+      FROM filtered_invoices inv
+      JOIN filtered_items item ON BTRIM(COALESCE(item."data" ->> 'InvoiceNo', '')) = BTRIM(COALESCE(inv."data" ->> 'InvoiceNo', ''))
       ${categoryJoin}
-      WHERE BTRIM(COALESCE(inv."data" ->> 'CustomerCode', '')) <> ''
-      ${routeFilter}
-      ${dateFilter}
+      WHERE TRUE
       ${categoryFilter}
       GROUP BY BTRIM(COALESCE(inv."data" ->> 'CustomerCode', ''))
     `);
