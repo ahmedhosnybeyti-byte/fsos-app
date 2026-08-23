@@ -12,8 +12,11 @@ import {
   type HeatmapScopeField,
   type HeatmapValuesResult,
 } from "@field-sales-os/schemas";
+import { Prisma } from "@field-sales-os/database";
 import { AppConfigService } from "../../common/config/app-config.service";
+import { PrismaService } from "../../common/prisma";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
+import { CanonicalHierarchyResolverService } from "../rie/canonical-hierarchy-resolver.service";
 import { RieFacade } from "../rie/rie-facade.service";
 import type { EntityQueryResult } from "../rie/entity-provider.interface";
 
@@ -69,6 +72,8 @@ export class HeatmapService {
   constructor(
     private readonly rieFacade: RieFacade,
     private readonly appConfig: AppConfigService,
+    private readonly prisma: PrismaService,
+    private readonly hierarchyResolver: CanonicalHierarchyResolverService,
   ) {}
 
   private rieContext(user: AuthenticatedUser) {
@@ -126,6 +131,138 @@ export class HeatmapService {
     return rows;
   }
 
+  private async activeMaterializedFileIds(companyId: string, entityName: string, arabicLabel: string): Promise<string[]> {
+    const files = await this.prisma.file.findMany({
+      where: { companyId, datasetType: entityName, isActive: true, status: "READY", datasetTypeConfirmed: true },
+      orderBy: { createdAt: "desc" },
+      select: { id: true },
+    });
+    if (files.length === 0) {
+      throw new NotFoundException(`بيانات "${arabicLabel}" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.`);
+    }
+    const versions = await this.prisma.rieDatasetVersion.findMany({
+      where: { companyId, entityName, isActive: true, sourceFileId: { in: files.map((file) => file.id) } },
+      select: { sourceFileId: true },
+    });
+    if (versions.length !== files.length) {
+      throw new NotFoundException(`بيانات "${arabicLabel}" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.`);
+    }
+    return files.map((file) => file.id);
+  }
+
+  // Sales heat maps only need totals per customer. Keep the exact RIE
+  // newest-upload-wins semantics in PostgreSQL, then join/filter/aggregate
+  // there instead of materializing Invoices and Invoice Items in Node.
+  private async aggregateSalesInPostgres(
+    user: AuthenticatedUser,
+    categoryValue?: string,
+    dateFrom?: string,
+    dateTo?: string,
+  ): Promise<Map<string, number>> {
+    const [invoiceFileIds, itemFileIds, productFileIds] = await Promise.all([
+      this.activeMaterializedFileIds(user.companyId!, "Invoices", "الفواتير"),
+      this.activeMaterializedFileIds(user.companyId!, "Invoice Items", "أصناف الفاتورة"),
+      categoryValue ? this.activeMaterializedFileIds(user.companyId!, "Products", "المنتجات") : Promise.resolve(null),
+    ]);
+    const allowedRoutes = await this.hierarchyResolver.resolveAllowedRouteIds(user.companyId!, {
+      roleCode: user.roleCode,
+      email: user.email,
+    });
+    const invoiceFiles = invoiceFileIds.map((id, precedence) => Prisma.sql`(${id}, ${precedence})`);
+    const itemFiles = itemFileIds.map((id, precedence) => Prisma.sql`(${id}, ${precedence})`);
+    const productFiles = productFileIds?.map((id, precedence) => Prisma.sql`(${id}, ${precedence})`) ?? [];
+    const routeValues = allowedRoutes ? [...allowedRoutes] : [];
+    const routeFilter = allowedRoutes === null
+      ? Prisma.empty
+      : routeValues.length === 0
+        ? Prisma.sql`AND FALSE`
+        : Prisma.sql`
+            AND LOWER(BTRIM(COALESCE(inv."data" ->> 'RouteID', ''))) IN (${Prisma.join(routeValues)})
+            AND LOWER(BTRIM(COALESCE(item."data" ->> 'RouteID', ''))) IN (${Prisma.join(routeValues)})`;
+    const fromTime = dateFrom ? Date.parse(dateFrom) : null;
+    const toTime = dateTo ? Date.parse(dateTo) : null;
+    const invoiceTime = Prisma.sql`CASE WHEN inv."data" ->> 'InvoiceDate' ~ '^\\d{4}-\\d{2}-\\d{2}' THEN EXTRACT(EPOCH FROM (inv."data" ->> 'InvoiceDate')::timestamptz) * 1000 ELSE NULL END`;
+    const dateFilters: Prisma.Sql[] = [];
+    if (fromTime !== null && Number.isFinite(fromTime)) dateFilters.push(Prisma.sql`${invoiceTime} >= ${fromTime}`);
+    if (toTime !== null && Number.isFinite(toTime)) dateFilters.push(Prisma.sql`${invoiceTime} <= ${toTime}`);
+    const dateFilter = dateFilters.length ? Prisma.sql`AND ${Prisma.join(dateFilters, " AND ")}` : Prisma.empty;
+    const categoryJoin = categoryValue
+      ? Prisma.sql`JOIN products product ON BTRIM(COALESCE(product."data" ->> 'ProductCode', '')) = BTRIM(COALESCE(item."data" ->> 'ProductCode', ''))`
+      : Prisma.empty;
+    const categoryFilter = categoryValue ? Prisma.sql`AND COALESCE(product."data" ->> 'Category', '') = ${categoryValue}` : Prisma.empty;
+
+    const totals = await this.prisma.$queryRaw<Array<{ customerCode: string; total: number }>>(Prisma.sql`
+      WITH selected_invoice_files("source_file_id", precedence) AS (VALUES ${Prisma.join(invoiceFiles)}),
+      invoice_versions AS (
+        SELECT v.id, selected_invoice_files.precedence
+        FROM "rie_dataset_versions" v JOIN selected_invoice_files ON selected_invoice_files."source_file_id" = v."source_file_id"
+        WHERE v."company_id" = ${user.companyId!} AND v."entity_name" = 'Invoices' AND v."is_active" = TRUE
+      ),
+      invoice_rows AS (
+        SELECT r."data", active.precedence FROM "rie_entity_rows" r JOIN invoice_versions active ON active.id = r."dataset_version_id"
+      ),
+      invoices AS (
+        SELECT inv.* FROM invoice_rows inv
+        WHERE BTRIM(COALESCE(inv."data" ->> 'InvoiceNo', '')) = '' OR NOT EXISTS (
+          SELECT 1 FROM invoice_rows newer
+          WHERE newer.precedence < inv.precedence
+            AND BTRIM(COALESCE(newer."data" ->> 'InvoiceNo', '')) <> ''
+            AND LOWER(BTRIM(COALESCE(newer."data" ->> 'InvoiceNo', ''))) = LOWER(BTRIM(COALESCE(inv."data" ->> 'InvoiceNo', '')))
+        )
+      ),
+      selected_item_files("source_file_id", precedence) AS (VALUES ${Prisma.join(itemFiles)}),
+      item_versions AS (
+        SELECT v.id, selected_item_files.precedence
+        FROM "rie_dataset_versions" v JOIN selected_item_files ON selected_item_files."source_file_id" = v."source_file_id"
+        WHERE v."company_id" = ${user.companyId!} AND v."entity_name" = 'Invoice Items' AND v."is_active" = TRUE
+      ),
+      item_rows AS (
+        SELECT r."data", active.precedence FROM "rie_entity_rows" r JOIN item_versions active ON active.id = r."dataset_version_id"
+      ),
+      items AS (
+        SELECT item.* FROM item_rows item
+        WHERE BTRIM(COALESCE(item."data" ->> 'InvoiceNo', '')) = '' OR BTRIM(COALESCE(item."data" ->> 'LineNo', '')) = '' OR NOT EXISTS (
+          SELECT 1 FROM item_rows newer
+          WHERE newer.precedence < item.precedence
+            AND BTRIM(COALESCE(newer."data" ->> 'InvoiceNo', '')) <> ''
+            AND BTRIM(COALESCE(newer."data" ->> 'LineNo', '')) <> ''
+            AND LOWER(BTRIM(COALESCE(newer."data" ->> 'InvoiceNo', ''))) = LOWER(BTRIM(COALESCE(item."data" ->> 'InvoiceNo', '')))
+            AND LOWER(BTRIM(COALESCE(newer."data" ->> 'LineNo', ''))) = LOWER(BTRIM(COALESCE(item."data" ->> 'LineNo', '')))
+        )
+      )
+      ${categoryValue ? Prisma.sql`, selected_product_files("source_file_id", precedence) AS (VALUES ${Prisma.join(productFiles)}),
+      product_versions AS (
+        SELECT v.id, selected_product_files.precedence
+        FROM "rie_dataset_versions" v JOIN selected_product_files ON selected_product_files."source_file_id" = v."source_file_id"
+        WHERE v."company_id" = ${user.companyId!} AND v."entity_name" = 'Products' AND v."is_active" = TRUE
+      ),
+      product_rows AS (
+        SELECT r."data", active.precedence FROM "rie_entity_rows" r JOIN product_versions active ON active.id = r."dataset_version_id"
+      ),
+      products AS (
+        SELECT product.* FROM product_rows product
+        WHERE BTRIM(COALESCE(product."data" ->> 'ProductCode', '')) = '' OR NOT EXISTS (
+          SELECT 1 FROM product_rows newer
+          WHERE newer.precedence < product.precedence
+            AND BTRIM(COALESCE(newer."data" ->> 'ProductCode', '')) <> ''
+            AND LOWER(BTRIM(COALESCE(newer."data" ->> 'ProductCode', ''))) = LOWER(BTRIM(COALESCE(product."data" ->> 'ProductCode', '')))
+        )
+      )` : Prisma.empty}
+      SELECT BTRIM(COALESCE(inv."data" ->> 'CustomerCode', '')) AS "customerCode",
+        SUM(CASE WHEN BTRIM(COALESCE(item."data" ->> 'LineTotal', '')) ~ '^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$'
+          THEN BTRIM(item."data" ->> 'LineTotal')::double precision ELSE 0 END) AS total
+      FROM invoices inv
+      JOIN items item ON BTRIM(COALESCE(item."data" ->> 'InvoiceNo', '')) = BTRIM(COALESCE(inv."data" ->> 'InvoiceNo', ''))
+      ${categoryJoin}
+      WHERE BTRIM(COALESCE(inv."data" ->> 'CustomerCode', '')) <> ''
+      ${routeFilter}
+      ${dateFilter}
+      ${categoryFilter}
+      GROUP BY BTRIM(COALESCE(inv."data" ->> 'CustomerCode', ''))
+    `);
+    return new Map(totals.map((row) => [row.customerCode, Number(row.total)]));
+  }
+
   // sales/returns/collection — a per-customer amount total, optionally
   // date- and (for sales) category-filtered. Mechanically identical
   // aggregation across the three metrics; only which Canonical Entity the
@@ -177,12 +314,7 @@ export class HeatmapService {
     }
 
     // sales
-    const rows = await this.loadSalesJoinedRows(ctx, categoryValue);
-    for (const row of rows) {
-      if (!inWindow(row.time)) continue;
-      valueById.set(row.customerCode, (valueById.get(row.customerCode) ?? 0) + row.amount);
-    }
-    return valueById;
+    return this.aggregateSalesInPostgres(user, categoryValue, dateFrom, dateTo);
   }
 
   // Lost Sales Map (DNA GVE catalog, Part 20.2): "أين تتركز الفرص الضائعة؟"
