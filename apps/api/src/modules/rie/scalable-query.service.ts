@@ -58,9 +58,7 @@ export class RieScalableQueryService {
     const predicates = await this.scopePredicates(input, aliases);
     const page = normalizePagination(input.pagination);
     const joinSql = joins.map((join) => {
-      const versionAlias = `${join.alias}_version`;
-      return Prisma.sql`${join.type === "left" ? Prisma.raw("LEFT JOIN") : Prisma.raw("INNER JOIN")} "rie_entity_rows" ${Prisma.raw(join.alias)} ON ${Prisma.raw(join.alias)}."company_id" = ${input.companyId} AND ${Prisma.raw(join.alias)}."entity_name" = ${join.entityName} AND ${normalizedField(join.on.left)} = ${normalizedField({ field: join.on.rightField, source: join.alias })}
-        ${join.type === "left" ? Prisma.raw("LEFT JOIN") : Prisma.raw("INNER JOIN")} "rie_dataset_versions" ${Prisma.raw(versionAlias)} ON ${Prisma.raw(versionAlias)}.id = ${Prisma.raw(join.alias)}."dataset_version_id" AND ${Prisma.raw(versionAlias)}."company_id" = ${input.companyId} AND ${Prisma.raw(versionAlias)}."entity_name" = ${join.entityName} AND ${Prisma.raw(versionAlias)}."is_active" = TRUE`;
+      return Prisma.sql`${join.type === "left" ? Prisma.raw("LEFT JOIN") : Prisma.raw("INNER JOIN")} ${activeEntityRows(input.companyId, join.entityName, join.alias)} ON ${normalizedField(join.on.left)} = ${normalizedField({ field: join.on.rightField, source: join.alias })}`;
     });
     const joinClause = joinSql.length ? Prisma.join(joinSql, " ") : Prisma.empty;
     const where = predicates.length ? Prisma.sql` AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty;
@@ -70,10 +68,9 @@ export class RieScalableQueryService {
       : input.aggregates?.length ? Prisma.empty : Prisma.sql` ORDER BY base."entity_key"`;
     const rows = await this.prisma.$queryRaw<EntityRecord[]>(Prisma.sql`
       SELECT ${Prisma.join(select)}
-      FROM "rie_entity_rows" base
-      INNER JOIN "rie_dataset_versions" base_version ON base_version.id = base."dataset_version_id"
+      FROM ${activeEntityRows(input.companyId, input.entityName, "base")}
       ${joinClause}
-      WHERE base."company_id" = ${input.companyId} AND base."entity_name" = ${input.entityName} AND base_version."company_id" = ${input.companyId} AND base_version."entity_name" = ${input.entityName} AND base_version."is_active" = TRUE${where}
+      WHERE TRUE${where}
       ${grouping}
       ${ordering}
       LIMIT ${page.limit + 1} OFFSET ${page.offset}
@@ -115,6 +112,18 @@ export class RieScalableQueryService {
     }
     return predicates;
   }
+}
+
+function activeEntityRows(companyId: string, entityName: string, alias: string): Prisma.Sql {
+  const rowAlias = `${alias}_source`;
+  const versionAlias = `${alias}_version`;
+  return Prisma.sql`(
+    SELECT ${Prisma.raw(rowAlias)}.*
+    FROM "rie_dataset_versions" ${Prisma.raw(versionAlias)}
+    INNER JOIN "rie_entity_rows" ${Prisma.raw(rowAlias)} ON ${Prisma.raw(rowAlias)}."dataset_version_id" = ${Prisma.raw(versionAlias)}.id
+    WHERE ${Prisma.raw(versionAlias)}."company_id" = ${companyId} AND ${Prisma.raw(versionAlias)}."entity_name" = ${entityName} AND ${Prisma.raw(versionAlias)}."is_active" = TRUE
+      AND ${Prisma.raw(rowAlias)}."company_id" = ${companyId} AND ${Prisma.raw(rowAlias)}."entity_name" = ${entityName}
+  ) ${Prisma.raw(alias)}`;
 }
 
 function normalizePagination(input: RieScalableQuery["pagination"]): { limit: number; offset: number } {
