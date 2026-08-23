@@ -8,6 +8,7 @@ import { NavigationEngineService } from "./navigation-engine.service";
 import { QueryExecutionEngineService } from "./query-execution-engine.service";
 import { BusinessRulesEngineService } from "./business-rules-engine.service";
 import { RieFacade } from "./rie-facade.service";
+import { RieScalableQueryService } from "./scalable-query.service";
 
 // RIE module — Relationship Intelligence Engine.
 //
@@ -38,6 +39,7 @@ import { RieFacade } from "./rie-facade.service";
     NavigationEngineService,
     QueryExecutionEngineService,
     BusinessRulesEngineService,
+    RieScalableQueryService,
     RieFacade,
   ],
   exports: [
@@ -51,6 +53,7 @@ import { RieFacade } from "./rie-facade.service";
     NavigationEngineService,
     QueryExecutionEngineService,
     BusinessRulesEngineService,
+    RieScalableQueryService,
     // RieFacade is the recommended surface for future consuming Engines —
     // the other exports remain available for callers that need
     // lower-level access, but new modules should prefer RieFacade.

@@ -18,4 +18,6 @@ export * from "./business-rules.types";
 export * from "./business-rules-engine.service";
 export * from "./rie-facade.types";
 export * from "./rie-facade.service";
+export * from "./scalable-query.types";
+export * from "./scalable-query.service";
 export * from "./rie.module";

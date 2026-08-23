@@ -15,6 +15,8 @@ import { PrismaService } from "../../common/prisma";
 import { FilesService } from "../files/files.service";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { ENTITY_DATASET_TYPE_MAP } from "./excel-entity-provider.mapping";
+import { RieScalableQueryService } from "./scalable-query.service";
+import type { RieScalableQuery, RieScalableQueryResult } from "./scalable-query.types";
 
 /**
  * The smallest sales grain used by analytics: an invoice line, or the same
@@ -69,6 +71,7 @@ export class RieFacade {
     private readonly prisma: PrismaService,
     private readonly filesService: FilesService,
     private readonly hierarchyResolver: CanonicalHierarchyResolverService,
+    private readonly scalableQuery: RieScalableQueryService,
   ) {}
 
   // ------------------------------------------------------------------
@@ -170,6 +173,11 @@ export class RieFacade {
       filters: query.filters,
       limit: query.limit,
     });
+  }
+
+  /** Bounded PostgreSQL query surface for high-cardinality canonical data. */
+  queryCanonicalRecords(query: RieScalableQuery): Promise<RieScalableQueryResult> {
+    return this.scalableQuery.query(query);
   }
 
   /**
