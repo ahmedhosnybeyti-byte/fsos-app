@@ -9,7 +9,25 @@ import type { ExecutionPlan } from "./query-execution.types";
 import type { BusinessRuleFn } from "./business-rules.types";
 import type { RelationshipDefinition } from "./relationship-registry.types";
 import type { RieQueryOptions, RieQueryResult } from "./rie-facade.types";
-import { ENTITY_PROVIDER, type EntityProvider, type EntityQueryOptions, type EntityQueryResult } from "./entity-provider.interface";
+import { ENTITY_PROVIDER, type EntityProvider, type EntityQueryContext, type EntityQueryOptions, type EntityQueryResult } from "./entity-provider.interface";
+import { Prisma } from "@field-sales-os/database";
+import { PrismaService } from "../../common/prisma";
+import { FilesService } from "../files/files.service";
+import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
+import { ENTITY_DATASET_TYPE_MAP } from "./excel-entity-provider.mapping";
+
+/**
+ * The smallest sales grain used by analytics: an invoice line, or the same
+ * line collapsed by invoice/product when `aggregate` is requested.
+ */
+export interface RieInvoiceSalesRow {
+  invoiceNo: string;
+  lineNo: number;
+  time: number | null;
+  customerCode: string;
+  productCode: string;
+  amount: number;
+}
 
 /**
  * RIE Integration Layer (RieFacade) — fifth and final operational
@@ -38,6 +56,9 @@ export class RieFacade {
     private readonly queryExecutionEngine: QueryExecutionEngineService,
     private readonly businessRulesEngine: BusinessRulesEngineService,
     @Inject(ENTITY_PROVIDER) private readonly entityProvider: EntityProvider,
+    private readonly prisma: PrismaService,
+    private readonly filesService: FilesService,
+    private readonly hierarchyResolver: CanonicalHierarchyResolverService,
   ) {}
 
   // ------------------------------------------------------------------
@@ -122,6 +143,90 @@ export class RieFacade {
 
   getEntityRecords(entityName: string, options: EntityQueryOptions): Promise<EntityQueryResult> {
     return this.entityProvider.getRecords(entityName, options);
+  }
+
+  /**
+   * Shared PostgreSQL sales read for analytical engines.  Keeping the
+   * high-cardinality Invoices -> Invoice Items join and its aggregation here
+   * prevents each consumer from materializing both canonical entities in
+   * Node merely to join/filter them again.
+   */
+  async getInvoiceSalesRows(
+    context: EntityQueryContext,
+    options: { fromTime?: number; toTime?: number; aggregate?: boolean } = {},
+  ): Promise<RieInvoiceSalesRow[]> {
+    const companyId = context.companyId;
+    const files = await this.filesService.listConfirmedActiveForCompany(companyId);
+    const invoiceFiles = files.filter((file) => file.datasetType === ENTITY_DATASET_TYPE_MAP.Invoices!.datasetType);
+    const itemFiles = files.filter((file) => file.datasetType === ENTITY_DATASET_TYPE_MAP["Invoice Items"]!.datasetType);
+    if (invoiceFiles.length === 0 || itemFiles.length === 0) return [];
+    const activeVersions = await this.prisma.rieDatasetVersion.findMany({
+      where: { companyId, entityName: { in: ["Invoices", "Invoice Items"] }, isActive: true, sourceFileId: { in: [...invoiceFiles, ...itemFiles].map((file) => file.id) } },
+      select: { entityName: true, sourceFileId: true },
+    });
+    const versionKey = new Set(activeVersions.map((version) => `${version.entityName}:${version.sourceFileId}`));
+    if (invoiceFiles.some((file) => !versionKey.has(`Invoices:${file.id}`)) || itemFiles.some((file) => !versionKey.has(`Invoice Items:${file.id}`))) return [];
+
+    const allowedRoutes = context.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(companyId, context.requestingUser)
+      : null;
+    const invoiceFileValues = invoiceFiles.map((file, precedence) => Prisma.sql`(${file.id}, ${precedence})`);
+    const itemFileValues = itemFiles.map((file, precedence) => Prisma.sql`(${file.id}, ${precedence})`);
+    const routeFilter = (alias: string) => !allowedRoutes
+      ? Prisma.empty
+      : allowedRoutes.size === 0
+        ? Prisma.sql`AND FALSE`
+        : Prisma.sql`AND LOWER(BTRIM(COALESCE(${Prisma.raw(alias)}."data" ->> 'RouteID', ''))) IN (${Prisma.join([...allowedRoutes])})`;
+    const invoiceTime = Prisma.sql`CASE WHEN inv."data" ->> 'InvoiceDate' ~ '^\\d{4}-\\d{2}-\\d{2}' THEN EXTRACT(EPOCH FROM (inv."data" ->> 'InvoiceDate')::timestamptz) * 1000 ELSE NULL END`;
+    const dates: Prisma.Sql[] = [];
+    if (options.fromTime !== undefined) dates.push(Prisma.sql`${invoiceTime} >= ${options.fromTime}`);
+    if (options.toTime !== undefined) dates.push(Prisma.sql`${invoiceTime} <= ${options.toTime}`);
+    const lineNo = options.aggregate
+      ? Prisma.sql`0`
+      : Prisma.sql`COALESCE(NULLIF(BTRIM(li."data" ->> 'LineNo'), '')::double precision, 0)`;
+    const groupBy = options.aggregate ? Prisma.sql`1, 3, 4, 5` : Prisma.sql`1, 2, 3, 4, 5`;
+    const rows = await this.prisma.$queryRaw<Array<{ invoiceNo: string; lineNo: number; time: Date | null; customerCode: string; productCode: string; amount: number }>>(Prisma.sql`
+      WITH selected_invoice_files("source_file_id", precedence) AS (VALUES ${Prisma.join(invoiceFileValues)}),
+      invoice_rows AS (
+        SELECT r."data", selected_invoice_files.precedence
+        FROM "rie_entity_rows" r
+        JOIN "rie_dataset_versions" v ON v.id = r."dataset_version_id"
+        JOIN selected_invoice_files ON selected_invoice_files."source_file_id" = v."source_file_id"
+        WHERE v."company_id" = ${companyId} AND v."entity_name" = 'Invoices' AND v."is_active" = TRUE
+      ), invoices AS (
+        SELECT "data" FROM (SELECT invoice_rows.*, MIN(precedence) OVER (PARTITION BY LOWER(BTRIM(COALESCE("data" ->> 'InvoiceNo', '')))) AS newest FROM invoice_rows) dedup
+        WHERE BTRIM(COALESCE("data" ->> 'InvoiceNo', '')) = '' OR precedence = newest
+      ), selected_item_files("source_file_id", precedence) AS (VALUES ${Prisma.join(itemFileValues)}),
+      item_rows AS (
+        SELECT r."data", selected_item_files.precedence
+        FROM "rie_entity_rows" r
+        JOIN "rie_dataset_versions" v ON v.id = r."dataset_version_id"
+        JOIN selected_item_files ON selected_item_files."source_file_id" = v."source_file_id"
+        WHERE v."company_id" = ${companyId} AND v."entity_name" = 'Invoice Items' AND v."is_active" = TRUE
+      ), items AS (
+        SELECT "data" FROM (SELECT item_rows.*, MIN(precedence) OVER (PARTITION BY LOWER(BTRIM(COALESCE("data" ->> 'InvoiceNo', ''))), LOWER(BTRIM(COALESCE("data" ->> 'LineNo', '')))) AS newest FROM item_rows) dedup
+        WHERE BTRIM(COALESCE("data" ->> 'InvoiceNo', '')) = '' OR BTRIM(COALESCE("data" ->> 'LineNo', '')) = '' OR precedence = newest
+      )
+      SELECT BTRIM(inv."data" ->> 'InvoiceNo') AS "invoiceNo", ${lineNo} AS "lineNo",
+             (inv."data" ->> 'InvoiceDate')::timestamptz AS "time", BTRIM(inv."data" ->> 'CustomerCode') AS "customerCode", BTRIM(item."data" ->> 'ProductCode') AS "productCode",
+             SUM(COALESCE(NULLIF(REPLACE(BTRIM(item."data" ->> 'LineTotal'), ',', ''), '')::double precision, 0)) AS "amount"
+      FROM invoices inv JOIN items item ON BTRIM(item."data" ->> 'InvoiceNo') = BTRIM(inv."data" ->> 'InvoiceNo')
+      WHERE BTRIM(inv."data" ->> 'InvoiceNo') <> '' AND BTRIM(inv."data" ->> 'CustomerCode') <> ''
+        ${routeFilter("inv")} ${routeFilter("item")}
+        ${dates.length ? Prisma.sql`AND ${Prisma.join(dates, ' AND ')}` : Prisma.empty}
+      GROUP BY ${groupBy}
+    `);
+    return rows.map((row) => ({ ...row, lineNo: Number(row.lineNo), time: row.time ? row.time.getTime() : null, amount: Number(row.amount) }));
+  }
+
+  async hasInvoiceSalesSources(context: EntityQueryContext): Promise<boolean> {
+    const files = await this.filesService.listConfirmedActiveForCompany(context.companyId);
+    const invoiceFiles = files.filter((file) => file.datasetType === ENTITY_DATASET_TYPE_MAP.Invoices!.datasetType);
+    const itemFiles = files.filter((file) => file.datasetType === ENTITY_DATASET_TYPE_MAP["Invoice Items"]!.datasetType);
+    if (invoiceFiles.length === 0 || itemFiles.length === 0) return false;
+    const versions = await this.prisma.rieDatasetVersion.findMany({ where: { companyId: context.companyId, entityName: { in: ["Invoices", "Invoice Items"] }, isActive: true, sourceFileId: { in: [...invoiceFiles, ...itemFiles].map((file) => file.id) } }, select: { entityName: true, sourceFileId: true } });
+    const active = new Set(versions.map((version) => `${version.entityName}:${version.sourceFileId}`));
+    return invoiceFiles.every((file) => active.has(`Invoices:${file.id}`)) && itemFiles.every((file) => active.has(`Invoice Items:${file.id}`));
   }
 
   // ------------------------------------------------------------------

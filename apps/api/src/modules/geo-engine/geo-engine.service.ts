@@ -141,14 +141,12 @@ export class GeoEngineService {
     };
   }
 
-  private async loadContext(user: AuthenticatedUser) {
+  private async loadContext(user: AuthenticatedUser, salesRange?: { fromTime: number; toTime: number; aggregate?: boolean }) {
     const ctx = this.rieContext(user);
-    const [customersResult, productsResult, invoicesResult, invoiceItemsResult, routesResult, employeesResult, collectionsResult, returnsResult, visitsResult] =
+    const [customersResult, productsResult, routesResult, employeesResult, collectionsResult, returnsResult, visitsResult] =
       await Promise.all([
         this.rieFacade.getEntityRecords("Customers", ctx),
         this.rieFacade.getEntityRecords("Products", ctx),
-        this.rieFacade.getEntityRecords("Invoices", ctx),
-        this.rieFacade.getEntityRecords("Invoice Items", ctx),
         this.rieFacade.getEntityRecords("Routes", ctx),
         this.rieFacade.getEntityRecords("Employees", ctx),
         this.rieFacade.getEntityRecords("Collections", ctx),
@@ -187,9 +185,9 @@ export class GeoEngineService {
     // performance.service.ts's existing join (see decision-analytics-studio
     // .service.ts's loadContext() comment: an earlier module invented this
     // filter and it silently zeroed sales data; not repeating that mistake).
-    const invoicesAvailable = invoicesResult.available && invoiceItemsResult.available;
-    const salesRows: SalesRow[] = [];
-    if (invoicesAvailable) {
+    const invoicesAvailable = await this.rieFacade.hasInvoiceSalesSources(ctx);
+    const salesRows = invoicesAvailable ? await this.rieFacade.getInvoiceSalesRows(ctx, salesRange) : [];
+    /* if (invoicesAvailable) {
       const invoiceMeta = new Map<string, { customerCode: string; time: number | null }>();
       for (const inv of invoicesResult.records) {
         const no = String(inv.InvoiceNo ?? "").trim();
@@ -209,7 +207,7 @@ export class GeoEngineService {
           amount: toFiniteNumber(item.LineTotal) ?? 0,
         });
       }
-    }
+    } */
 
     return { customerMeta, productMeta, resolveRep, salesRows, invoicesAvailable, collectionsResult, returnsResult, visitsResult };
   }
@@ -277,9 +275,9 @@ export class GeoEngineService {
   }
 
   async query(user: AuthenticatedUser, input: GeoQueryInput): Promise<GeoQueryResult> {
-    const ctx = await this.loadContext(user);
-    const compiled = this.compileFilters(input);
     const { fromTime, toTime, priorFromTime, priorToTime } = this.windowFor(input);
+    const ctx = await this.loadContext(user, { fromTime: Math.min(fromTime, priorFromTime), toTime: Math.max(toTime, priorToTime), aggregate: true });
+    const compiled = this.compileFilters(input);
 
     const inScopeCustomers = new Map<string, CustomerMeta>();
     for (const [code, meta] of ctx.customerMeta) {
@@ -458,7 +456,7 @@ export class GeoEngineService {
   // per this codebase's established per-module isolation convention.
   async table(user: AuthenticatedUser, input: GeoTableQueryInput): Promise<GeoTableResult> {
     const { fromTime, toTime } = this.windowFor(input);
-    const ctx = await this.loadContext(user);
+    const ctx = await this.loadContext(user, { fromTime, toTime });
     const compiled = this.compileFilters(input);
 
     const inScopeCustomers = new Map<string, CustomerMeta>();

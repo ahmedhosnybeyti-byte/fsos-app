@@ -170,13 +170,11 @@ export class DecisionAnalyticsStudioService {
   // rows (Invoice Items -> Invoices, same unfiltered join heatmap.service.ts
   // uses). Each caller applies its own window/filters on top of this shared
   // shape.
-  private async loadContext(user: AuthenticatedUser) {
+  private async loadContext(user: AuthenticatedUser, salesRange?: { fromTime: number; toTime: number; aggregate?: boolean }) {
     const ctx = this.rieContext(user);
     const [
       customersResult,
       productsResult,
-      invoicesResult,
-      invoiceItemsResult,
       routesResult,
       employeesResult,
       collectionsResult,
@@ -186,8 +184,6 @@ export class DecisionAnalyticsStudioService {
     ] = await Promise.all([
       this.rieFacade.getEntityRecords("Customers", ctx),
       this.rieFacade.getEntityRecords("Products", ctx),
-      this.rieFacade.getEntityRecords("Invoices", ctx),
-      this.rieFacade.getEntityRecords("Invoice Items", ctx),
       this.rieFacade.getEntityRecords("Routes", ctx),
       this.rieFacade.getEntityRecords("Employees", ctx),
       this.rieFacade.getEntityRecords("Collections", ctx),
@@ -247,9 +243,11 @@ export class DecisionAnalyticsStudioService {
       if (rep) repSupervisorMap.set(rep.repEmail, rep.supervisorEmail);
     }
 
-    const invoicesAvailable = invoicesResult.available && invoiceItemsResult.available;
-    const salesRows: SalesRow[] = [];
-    if (invoicesAvailable) {
+    const invoicesAvailable = await this.rieFacade.hasInvoiceSalesSources(ctx);
+    const salesRows: SalesRow[] = invoicesAvailable
+      ? await this.rieFacade.getInvoiceSalesRows(ctx, salesRange)
+      : [];
+    /* if (invoicesAvailable) {
       // No InvoiceStatus filter here — this join used to hard-require
       // "Confirmed", but that's an invented rule this module was the only
       // one applying: heatmap.service.ts and team-performance.service.ts
@@ -276,7 +274,7 @@ export class DecisionAnalyticsStudioService {
           amount: toFiniteNumber(item.LineTotal) ?? 0,
         });
       }
-    }
+    } */
 
     return {
       customerMeta,
@@ -364,7 +362,7 @@ export class DecisionAnalyticsStudioService {
   async query(user: AuthenticatedUser, input: DecisionQueryInput): Promise<DecisionQueryResult> {
     const { fromTime, toTime, priorFromTime, priorToTime } = this.windowFor(input);
     const { customerMeta, productMeta, resolveRep, repSupervisorMap, salesRows, invoicesAvailable, collectionsResult, returnsResult, visitsResult, targetsResult } =
-      await this.loadContext(user);
+      await this.loadContext(user, { fromTime: Math.min(fromTime, priorFromTime), toTime: Math.max(toTime, priorToTime), aggregate: true });
     const f = this.compileFilters(input);
 
     // Customer-level scope check — City/Channel/Branch/Customer filters
@@ -767,7 +765,7 @@ export class DecisionAnalyticsStudioService {
 
   async table(user: AuthenticatedUser, input: DecisionTableQueryInput): Promise<DecisionTableResult> {
     const { fromTime, toTime } = this.windowFor(input);
-    const { customerMeta, productMeta, resolveRep, salesRows } = await this.loadContext(user);
+    const { customerMeta, productMeta, resolveRep, salesRows } = await this.loadContext(user, { fromTime, toTime });
     const f = this.compileFilters(input);
 
     const customerInScope = (code: string): boolean => {
