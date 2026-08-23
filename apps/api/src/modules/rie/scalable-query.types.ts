@@ -26,6 +26,8 @@ export interface RieScalableQuery extends EntityQueryContext {
   entityName: string;
   projection: readonly RieQueryProjection[];
   joins?: readonly RieQueryJoin[];
+  /** RouteID location used for automatic hierarchy enforcement (base by default). */
+  hierarchyRoute?: RieQueryField;
   groupBy?: readonly RieQueryField[];
   aggregates?: readonly RieQueryAggregation[];
   scope?: RieScalableQueryScope;

@@ -4,6 +4,7 @@ import { PrismaService } from "../../common/prisma";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
 import type { EntityQueryResult } from "../rie/entity-provider.interface";
+import type { RieQueryField, RieScalableQueryScope } from "../rie/scalable-query.types";
 
 // Sales Growth Intelligence (SGI) Phase 1 — the Situation Detection ->
 // Opportunity Discovery -> Recommendation -> Opportunity Scoring pipeline
@@ -186,6 +187,21 @@ export class SgiService {
     return { companyId, requestingUser };
   }
 
+  // Bounded canonical read: facts are narrowed in PostgreSQL before they
+  // reach SGI; reference dimensions fetch only the columns this algorithm
+  // actually consumes. Pagination is drained only after the SQL scope.
+  private async queryRows(entityName: string, ctx: ReturnType<SgiService["rieContext"]>, projection: readonly RieQueryField[], scope?: RieScalableQueryScope, joins?: Parameters<RieFacade["queryCanonicalRecords"]>[0]["joins"], hierarchyRoute?: RieQueryField, applyHierarchy = true): Promise<EntityQueryResult> {
+    const records: Record<string, unknown>[] = [];
+    let offset = 0;
+    do {
+      const page = await this.rieFacade.queryCanonicalRecords({ ...(applyHierarchy ? ctx : { companyId: ctx.companyId }), entityName, projection, scope, joins, hierarchyRoute, pagination: { limit: 5_000, offset } });
+      records.push(...page.records as Record<string, unknown>[]);
+      offset += page.records.length;
+      if (!page.page.hasMore) break;
+    } while (true);
+    return { entityName, available: true, records, fields: projection.map((field) => field.field), warnings: [] };
+  }
+
   // Routes.SalesRepID -> Employees, then Employees.DirectManagerID ->
   // Employees for the supervisor half — identical pattern to
   // team-performance.service.ts's buildRepResolver. Falls back to the bare
@@ -297,22 +313,30 @@ export class SgiService {
   ): Promise<SgiRecalculateResult> {
     const warnings: string[] = [];
     const ctx = this.rieContext(companyId, hierarchyUser);
+    const fromTime = Date.parse(input.dateFrom);
+    const toTime = Date.parse(input.dateTo);
+    const priorFromTime = Date.parse(input.priorDateFrom);
+    const priorToTime = Date.parse(input.priorDateTo);
+    const salesScope = { date: { field: "InvoiceDate", source: "invoice", from: Math.min(fromTime, priorFromTime), to: Math.max(toTime, priorToTime) } } satisfies RieScalableQueryScope;
 
-    const [routesResult, employeesResult, invoicesResult, invoiceItemsResult, customersResult, collectionsResult, targetsResult, productsResult] =
+    const [routesResult, employeesResult, invoiceItemsResult, customersResult, collectionsResult, targetsResult, productsResult] =
       await Promise.all([
-        this.rieFacade.getEntityRecords("Routes", ctx),
-        this.rieFacade.getEntityRecords("Employees", ctx),
-        this.rieFacade.getEntityRecords("Invoices", ctx),
-        this.rieFacade.getEntityRecords("Invoice Items", ctx),
-        this.rieFacade.getEntityRecords("Customers", ctx),
-        this.rieFacade.getEntityRecords("Collections", ctx),
-        this.rieFacade.getEntityRecords("Targets", ctx),
+        this.queryRows("Routes", ctx, [{ field: "RouteID" }, { field: "SalesRepID" }]),
+        this.queryRows("Employees", ctx, [{ field: "EmployeeID" }, { field: "Email" }, { field: "DirectManagerID" }], undefined, undefined, undefined, false),
+        this.queryRows("Invoice Items", ctx, [{ field: "InvoiceNo" }, { field: "LineTotal" }, { field: "ProductCode" }, { field: "Quantity" }, { field: "Unit" }, { field: "InvoiceDate", source: "invoice" }, { field: "CustomerCode", source: "invoice" }, { field: "RouteID", source: "invoice" }], salesScope, [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }], { field: "RouteID", source: "invoice" }),
+        this.queryRows("Customers", ctx, [{ field: "CustomerCode" }, { field: "CustomerName" }]),
+        this.queryRows("Collections", ctx, [{ field: "CustomerCode" }, { field: "CollectionDate" }, { field: "Amount" }], { date: { field: "CollectionDate", from: fromTime, to: toTime } }),
+        this.queryRows("Targets", ctx, [{ field: "Month" }, { field: "Year" }, { field: "RouteID" }, { field: "SalesTarget" }]),
         // GROWTH_OPPORTUNITY only — ProductName/Category for the gap
         // product's label. Optional/degrading like Geo Intelligence's same
         // join: ProductCode itself is used as the label if unavailable,
         // never blocks the other five situation types.
-        this.rieFacade.getEntityRecords("Products", ctx),
+        this.queryRows("Products", ctx, [{ field: "ProductCode" }, { field: "ProductName" }, { field: "Category" }], undefined, undefined, undefined, false),
       ]);
+    // Invoice metadata is projected by the scoped SQL join above. Keep the
+    // established result shape so the downstream business logic is byte-for-
+    // byte unchanged.
+    const invoicesResult: EntityQueryResult = { entityName: "Invoices", available: true, records: invoiceItemsResult.records, fields: ["InvoiceNo", "CustomerCode", "RouteID", "InvoiceDate"], warnings: [] };
     this.assertEntityAvailable(routesResult, "المسارات");
     this.assertEntityAvailable(invoicesResult, "الفواتير");
     this.assertEntityAvailable(invoiceItemsResult, "أصناف الفاتورة");
@@ -337,10 +361,6 @@ export class SgiService {
       if (no && customerCode) invoiceMeta.set(no, { customerCode, routeId, time: toEpochMs(inv.InvoiceDate) });
     }
 
-    const fromTime = Date.parse(input.dateFrom);
-    const toTime = Date.parse(input.dateTo);
-    const priorFromTime = Date.parse(input.priorDateFrom);
-    const priorToTime = Date.parse(input.priorDateTo);
 
     // GROWTH_OPPORTUNITY's product metadata — same optional/degrading join
     // as Geo Intelligence's buildJoinedSalesRows (ProductCode itself is the

@@ -2,6 +2,8 @@ import { Injectable } from "@nestjs/common";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { PrismaService } from "../../common/prisma";
 import { RieFacade } from "../rie/rie-facade.service";
+import type { EntityQueryResult } from "../rie/entity-provider.interface";
+import type { RieQueryField, RieScalableQueryScope } from "../rie/scalable-query.types";
 
 const DAY = 86_400_000;
 const TARGETS = [
@@ -19,12 +21,29 @@ function monthStart(d: Date, delta = 0) { return new Date(Date.UTC(d.getUTCFullY
 export class DashboardPerformanceService {
   constructor(private readonly rie: RieFacade, private readonly prisma: PrismaService) {}
   private ctx(user: AuthenticatedUser) { return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } }; }
+  private async queryRows(entityName: string, ctx: ReturnType<DashboardPerformanceService["ctx"]>, projection: readonly RieQueryField[], scope?: RieScalableQueryScope, joins?: Parameters<RieFacade["queryCanonicalRecords"]>[0]["joins"], hierarchyRoute?: RieQueryField, applyHierarchy = true): Promise<EntityQueryResult> {
+    const records: Record<string, unknown>[] = []; let offset = 0;
+    do {
+      const page = await this.rie.queryCanonicalRecords({ ...(applyHierarchy ? ctx : { companyId: ctx.companyId }), entityName, projection, scope, joins, hierarchyRoute, pagination: { limit: 5_000, offset } });
+      records.push(...page.records as Record<string, unknown>[]); offset += page.records.length;
+      if (!page.page.hasMore) break;
+    } while (true);
+    return { entityName, available: true, records, fields: projection.map((field) => field.field), warnings: [] };
+  }
 
   async get(user: AuthenticatedUser, benchmark: DashboardBenchmark, routeIds?: string[], dateFrom?: string, dateTo?: string, comparisonFrom?: string, comparisonTo?: string) {
     const now = new Date(); const currentFrom = dateFrom ? new Date(`${dateFrom}T00:00:00Z`) : monthStart(now); const currentTo = dateTo ? new Date(`${dateTo}T23:59:59Z`) : now; const comparisonStart = comparisonFrom ? new Date(`${comparisonFrom}T00:00:00Z`) : null; const comparisonEnd = comparisonTo ? new Date(`${comparisonTo}T23:59:59Z`) : null; const start = monthStart(currentFrom); const next = monthStart(currentTo, 1); const ctx = this.ctx(user); const selectedRoutes = routeIds?.length ? new Set(routeIds) : null;
+    const factFrom = (comparisonStart ?? monthStart(currentFrom, -3)).getTime();
+    const factTo = currentTo.getTime();
     const [calendar, invoices, items, collections, returns, visits, products, targets] = await Promise.all([
       this.prisma.salesCalendar.findMany({ where: { companyId: user.companyId!, calendarDate: { gte: start, lt: next }, workingDay: true }, orderBy: { calendarDate: "asc" } }),
-      this.rie.getEntityRecords("Invoices", ctx), this.rie.getEntityRecords("Invoice Items", ctx), this.rie.getEntityRecords("Collections", ctx), this.rie.getEntityRecords("Returns", ctx), this.rie.getEntityRecords("Visits", ctx), this.rie.getEntityRecords("Products", ctx), this.rie.getEntityRecords("Targets", ctx),
+      this.queryRows("Invoices", ctx, [{ field: "InvoiceNo" }, { field: "InvoiceDate" }, { field: "CustomerCode" }, { field: "RouteID" }], { date: { field: "InvoiceDate", from: factFrom, to: factTo } }),
+      this.queryRows("Invoice Items", ctx, [{ field: "InvoiceNo" }, { field: "LineTotal" }, { field: "ProductCode" }, { field: "Quantity" }], { date: { field: "InvoiceDate", source: "invoice", from: factFrom, to: factTo } }, [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }], { field: "RouteID", source: "invoice" }),
+      this.queryRows("Collections", ctx, [{ field: "CollectionDate" }, { field: "RouteID" }, { field: "Amount" }], { date: { field: "CollectionDate", from: factFrom, to: factTo } }),
+      this.queryRows("Returns", ctx, [{ field: "ReturnDate" }, { field: "RouteID" }, { field: "TotalAmount" }], { date: { field: "ReturnDate", from: factFrom, to: factTo } }),
+      this.queryRows("Visits", ctx, [{ field: "VisitDate" }, { field: "Status" }, { field: "VisitStatus" }, { field: "RouteID" }], { date: { field: "VisitDate", from: factFrom, to: factTo } }),
+      this.queryRows("Products", ctx, [{ field: "ProductCode" }, { field: "Weight" }, { field: "UnitWeight" }], undefined, undefined, undefined, false),
+      this.queryRows("Targets", ctx, [...TARGETS.map(([field]) => ({ field })), { field: "Year" }, { field: "Month" }, { field: "RouteID" }]),
     ]);
     const selling = calendar.map((d) => d.calendarDate.getTime()).filter((d) => d >= currentFrom.getTime() && d <= currentTo.getTime());
     const elapsed = selling.length; const total = calendar.length; const warnings: string[] = [];

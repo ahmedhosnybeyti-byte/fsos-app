@@ -32,6 +32,7 @@ export class RieScalableQueryService {
       aliases.add(join.alias);
     }
     for (const field of [...input.projection, ...(input.groupBy ?? [])]) assertField(field, aliases);
+    if (input.hierarchyRoute) assertField(input.hierarchyRoute, aliases);
     for (const aggregate of input.aggregates ?? []) {
       assertIdentifier(aggregate.as, "aggregate alias");
       if (aggregate.field) assertField({ field: aggregate.field, source: aggregate.source }, aliases);
@@ -84,7 +85,7 @@ export class RieScalableQueryService {
     addValueScope(predicates, input.scope?.product, "ProductCode", aliases);
     if (input.requestingUser) {
       const allowed = await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser);
-      if (allowed) predicates.push(allowed.size ? inPredicate({ field: "RouteID" }, [...allowed], aliases) : Prisma.sql`FALSE`);
+      if (allowed) predicates.push(allowed.size ? inPredicate(input.hierarchyRoute ?? { field: "RouteID" }, [...allowed], aliases) : Prisma.sql`FALSE`);
     }
     return predicates;
   }
