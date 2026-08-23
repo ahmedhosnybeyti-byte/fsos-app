@@ -10,21 +10,6 @@ import type { BusinessRuleFn } from "./business-rules.types";
 import type { RelationshipDefinition } from "./relationship-registry.types";
 import type { RieQueryOptions, RieQueryResult } from "./rie-facade.types";
 import { ENTITY_PROVIDER, type EntityProvider, type EntityQueryOptions, type EntityQueryResult } from "./entity-provider.interface";
-import { Prisma } from "@field-sales-os/database";
-import { PrismaService } from "../../common/prisma";
-
-/**
- * The smallest sales grain used by analytics: an invoice line, or the same
- * line collapsed by invoice/product when `aggregate` is requested.
- */
-export interface RieInvoiceSalesRow {
-  invoiceNo: string;
-  lineNo: number;
-  time: number;
-  customerCode: string;
-  productCode: string;
-  amount: number;
-}
 
 /**
  * RIE Integration Layer (RieFacade) — fifth and final operational
@@ -53,7 +38,6 @@ export class RieFacade {
     private readonly queryExecutionEngine: QueryExecutionEngineService,
     private readonly businessRulesEngine: BusinessRulesEngineService,
     @Inject(ENTITY_PROVIDER) private readonly entityProvider: EntityProvider,
-    private readonly prisma: PrismaService,
   ) {}
 
   // ------------------------------------------------------------------
@@ -138,49 +122,6 @@ export class RieFacade {
 
   getEntityRecords(entityName: string, options: EntityQueryOptions): Promise<EntityQueryResult> {
     return this.entityProvider.getRecords(entityName, options);
-  }
-
-  /**
-   * Shared PostgreSQL sales read for analytical engines.  Keeping the
-   * high-cardinality Invoices -> Invoice Items join and its aggregation here
-   * prevents each consumer from materializing both canonical entities in
-   * Node merely to join/filter them again.
-   */
-  async getInvoiceSalesRows(
-    companyId: string,
-    options: { fromTime?: number; toTime?: number; aggregate?: boolean } = {},
-  ): Promise<RieInvoiceSalesRow[]> {
-    const dates: Prisma.Sql[] = [];
-    if (options.fromTime !== undefined) dates.push(Prisma.sql`(i."data" ->> 'InvoiceDate')::timestamptz >= ${new Date(options.fromTime)}`);
-    if (options.toTime !== undefined) dates.push(Prisma.sql`(i."data" ->> 'InvoiceDate')::timestamptz <= ${new Date(options.toTime)}`);
-    const lineNo = options.aggregate
-      ? Prisma.sql`0`
-      : Prisma.sql`COALESCE(NULLIF(BTRIM(li."data" ->> 'LineNo'), '')::double precision, 0)`;
-    const groupBy = options.aggregate ? Prisma.sql`1, 3, 4, 5` : Prisma.sql`1, 2, 3, 4, 5`;
-    const rows = await this.prisma.$queryRaw<Array<{ invoiceNo: string; lineNo: number; time: Date; customerCode: string; productCode: string; amount: number }>>(Prisma.sql`
-      SELECT BTRIM(i."data" ->> 'InvoiceNo') AS "invoiceNo", ${lineNo} AS "lineNo",
-             (i."data" ->> 'InvoiceDate')::timestamptz AS "time", BTRIM(i."data" ->> 'CustomerCode') AS "customerCode", BTRIM(li."data" ->> 'ProductCode') AS "productCode",
-             SUM(COALESCE(NULLIF(REPLACE(BTRIM(li."data" ->> 'LineTotal'), ','), '')::double precision, 0)) AS "amount"
-      FROM "rie_canonical_entity_rows" i
-      JOIN "rie_canonical_entity_rows" li
-        ON li."company_id" = i."company_id" AND li."entity_name" = 'Invoice Items'
-       AND BTRIM(li."data" ->> 'InvoiceNo') = BTRIM(i."data" ->> 'InvoiceNo')
-      WHERE i."company_id" = ${companyId} AND i."entity_name" = 'Invoices'
-        AND BTRIM(i."data" ->> 'InvoiceNo') <> '' AND BTRIM(i."data" ->> 'CustomerCode') <> ''
-        ${dates.length ? Prisma.sql`AND ${Prisma.join(dates, ' AND ')}` : Prisma.empty}
-      GROUP BY ${groupBy}
-    `);
-    return rows.map((row) => ({ ...row, lineNo: Number(row.lineNo), time: row.time.getTime(), amount: Number(row.amount) }));
-  }
-
-  async hasInvoiceSalesSources(companyId: string): Promise<boolean> {
-    const sources = await this.prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
-      SELECT COUNT(*) AS "count"
-      FROM "rie_canonical_entity_rows"
-      WHERE "company_id" = ${companyId} AND "entity_name" IN ('Invoices', 'Invoice Items')
-      GROUP BY "entity_name"
-    `);
-    return sources.length === 2 && sources.every((source) => source.count > 0n);
   }
 
   // ------------------------------------------------------------------
