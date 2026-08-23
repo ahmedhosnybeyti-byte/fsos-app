@@ -11,6 +11,7 @@ import type {
 } from "./entity-provider.interface";
 import { ENTITY_DATASET_TYPE_MAP, isEntityMapped } from "./excel-entity-provider.mapping";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
+import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { IMPORT_TEMPLATES } from "../import-validation/import-templates.data";
 import { serializeExcelParse } from "../../common/excel-parse-queue";
@@ -24,6 +25,7 @@ import { serializeExcelParse } from "../../common/excel-parse-queue";
 // keys override the older version, and nothing requires re-uploading the
 // full history every time.
 const ENTITY_PRIMARY_KEY: ReadonlyMap<string, readonly string[]> = new Map(IMPORT_TEMPLATES.map((t) => [t.entity, t.primaryKey]));
+const POSTGRES_RIE_READ_LIMIT = 10_000;
 
 // Canonical Entity name for the one entity this provider serves out of a
 // real Postgres table instead of re-parsed Excel bytes — see the
@@ -260,11 +262,8 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
     // These entities are served from their active PostgreSQL
     // materializations. All other entities retain the established Excel
     // path below.
-    if (entityName === "Customers") {
-      return this.getCustomersPostgresRecords(options, matchingFiles, warnings);
-    }
-    if (entityName === INVOICES_ENTITY || entityName === INVOICE_ITEMS_ENTITY || entityName === COLLECTIONS_ENTITY || entityName === RETURNS_ENTITY || entityName === RETURN_ITEMS_ENTITY || entityName === VAN_INVENTORY_ENTITY || entityName === VAN_LOADS_ENTITY || entityName === VISITS_ENTITY || entityName === EMPLOYEES_ENTITY || entityName === PRICE_LIST_ENTITY || entityName === TARGETS_ENTITY || entityName === PRODUCTS_ENTITY || entityName === ROUTE_ASSIGNMENTS_ENTITY || entityName === ROUTES_ENTITY || entityName === BRANCHES_ENTITY) {
-      return this.getMaterializedEntityRecords(entityName, options, matchingFiles, warnings);
+    if (entityName === "Customers" || entityName === INVOICES_ENTITY || entityName === INVOICE_ITEMS_ENTITY || entityName === COLLECTIONS_ENTITY || entityName === RETURNS_ENTITY || entityName === RETURN_ITEMS_ENTITY || entityName === VAN_INVENTORY_ENTITY || entityName === VAN_LOADS_ENTITY || entityName === VISITS_ENTITY || entityName === EMPLOYEES_ENTITY || entityName === PRICE_LIST_ENTITY || entityName === TARGETS_ENTITY || entityName === PRODUCTS_ENTITY || entityName === ROUTE_ASSIGNMENTS_ENTITY || entityName === ROUTES_ENTITY || entityName === BRANCHES_ENTITY) {
+      return this.getCanonicalPostgresRecords(entityName, options, matchingFiles, warnings);
     }
 
     // Parse + incremental-update merge (see ENTITY_PRIMARY_KEY above), or
@@ -479,6 +478,97 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       fields: headers,
       warnings,
     };
+  }
+
+  /**
+   * Canonical rows are already merged at ingestion time. Keep every predicate
+   * and the response bound in PostgreSQL: materializing a whole entity in the
+   * API process merely to discard most of it is what made concurrent RIE reads
+   * exhaust the Node heap.
+   */
+  private async getCanonicalPostgresRecords(
+    entityName: string,
+    options: EntityQueryOptions,
+    _matchingFiles: { id: string }[],
+    warnings: string[],
+  ): Promise<EntityQueryResult> {
+    const template = IMPORT_TEMPLATES.find((candidate) => candidate.entity === entityName);
+    if (!template) {
+      return { entityName, available: false, unavailableReason: "NO_DATA_SOURCE_MAPPED", records: [], fields: [], warnings };
+    }
+
+    const fields = template.fields.map((field) => field.name);
+    const fieldByNormalizedName = new Map(fields.map((field) => [normalizeHeader(field), field]));
+    const routeAllowedValues = options.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(options.companyId, options.requestingUser)
+      : null;
+    const clauses: Prisma.Sql[] = [
+      Prisma.sql`r."company_id" = ${options.companyId}`,
+      Prisma.sql`r."entity_name" = ${entityName}`,
+    ];
+    const textCell = (field: string) => Prisma.sql`LOWER(BTRIM(COALESCE(r."data" ->> ${field}, '')))`;
+
+    // applyHierarchyFilter is a no-op when RouteID is absent. Preserve that
+    // behaviour while making the scoped path a database predicate.
+    const routeField = fieldByNormalizedName.get(normalizeHeader("RouteID"));
+    if (routeAllowedValues && routeField) {
+      const allowed = [...routeAllowedValues];
+      clauses.push(allowed.length === 0
+        ? Prisma.sql`FALSE`
+        : Prisma.sql`${textCell(routeField)} IN (${Prisma.join(allowed)})`);
+    }
+
+    for (const filter of options.filters ?? []) {
+      const field = fieldByNormalizedName.get(normalizeHeader(filter.field)) ?? filter.field;
+      const cell = textCell(field);
+      switch (filter.op) {
+        case "eq":
+          clauses.push(Prisma.sql`${cell} = ${String(filter.value ?? "").trim().toLowerCase()}`);
+          break;
+        case "in": {
+          const values = Array.isArray(filter.value)
+            ? filter.value.map((value) => String(value).trim().toLowerCase())
+            : [];
+          clauses.push(values.length === 0 ? Prisma.sql`FALSE` : Prisma.sql`${cell} IN (${Prisma.join(values)})`);
+          break;
+        }
+        case "contains":
+          clauses.push(Prisma.sql`${cell} LIKE ${`%${String(filter.value ?? "").toLowerCase()}%`}`);
+          break;
+        case "gte":
+        case "lte":
+        case "between": {
+          const values = filter.op === "between" ? filter.value as [unknown, unknown] : [filter.value];
+          const comparable = values.map((value) => typeof value === "number" ? value : Date.parse(String(value)));
+          if (comparable.some((value) => Number.isNaN(value))) {
+            clauses.push(Prisma.sql`FALSE`);
+            break;
+          }
+          const numericCell = Prisma.sql`CASE
+            WHEN jsonb_typeof(r."data" -> ${field}) = 'number' THEN (r."data" ->> ${field})::double precision
+            WHEN r."data" ->> ${field} ~ '^\\d{4}-\\d{2}-\\d{2}' THEN EXTRACT(EPOCH FROM (r."data" ->> ${field})::timestamptz) * 1000
+            ELSE NULL
+          END`;
+          clauses.push(filter.op === "gte"
+            ? Prisma.sql`${numericCell} >= ${comparable[0]!}`
+            : filter.op === "lte"
+              ? Prisma.sql`${numericCell} <= ${comparable[0]!}`
+              : Prisma.sql`${numericCell} BETWEEN ${comparable[0]!} AND ${comparable[1]!}`);
+          break;
+        }
+      }
+    }
+
+    const limit = Math.min(options.limit ?? POSTGRES_RIE_READ_LIMIT, POSTGRES_RIE_READ_LIMIT);
+    const rows = await this.prisma.$queryRaw<Array<{ data: DatasetRow }>>(Prisma.sql`
+      SELECT r."data"
+      FROM "rie_canonical_entity_rows" AS r
+      WHERE ${Prisma.join(clauses, " AND ")}
+      ORDER BY r."created_at" ASC, r."id" ASC
+      LIMIT ${limit}
+    `);
+
+    return { entityName, available: true, records: rows.map((row) => row.data) as readonly EntityRecord[], fields, warnings };
   }
 
   private async compareCustomersShadow(params: {
