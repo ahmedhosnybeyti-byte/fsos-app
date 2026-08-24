@@ -77,7 +77,11 @@ export class LostOpportunityService {
       add(runs[2].records, "baseline", -1, false); add(runs[3].records, "recent", -1, false);
       const positive = [...quantities.values()].filter((pair) => pair.baseline > 0);
       const productCodes = [...new Set(positive.map((pair) => pair.productCode))];
-      const products = productCodes.length ? await this.rieFacade.queryCanonicalRecords({ ...input, entityName: "Products", projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }, { field: "Category", as: "category" }], scope: { product: { values: productCodes } }, pagination: { limit: 5_000 } }) : null;
+      // Products is a shared reference dimension without RouteID.  Keep the
+      // lookup bounded to the aggregated result codes, but do not apply the
+      // fact-table route predicate to this dimension (the legacy provider
+      // correctly treated RouteID-less Products as hierarchy-neutral).
+      const products = productCodes.length ? await this.rieFacade.queryCanonicalRecords({ companyId: input.companyId, entityName: "Products", projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }, { field: "Category", as: "category" }], scope: { product: { values: productCodes } }, pagination: { limit: 5_000 } }) : null;
       if (products?.page.hasMore) return { opportunities: [], status: "data-unavailable" };
       const productsByCode = new Map((products?.records ?? []).map((p) => [key(p.productCode), { name: key(p.productName) || key(p.productCode), category: key(p.category) || null }]));
       const opportunities = positive.filter((pair) => pair.recent === 0).map((pair) => ({ customerCode: pair.customerCode, customerName: input.customerNames?.get(pair.customerCode) ?? pair.customerCode, productCode: pair.productCode, productName: productsByCode.get(pair.productCode)?.name ?? pair.productCode, category: productsByCode.get(pair.productCode)?.category ?? null, baselineNetQuantity: pair.baseline, recentNetQuantity: pair.recent, suggestedQuantity: Math.round(pair.baseline / 3) })).sort((a, b) => a.customerName.localeCompare(b.customerName, "ar") || a.productName.localeCompare(b.productName, "ar"));
