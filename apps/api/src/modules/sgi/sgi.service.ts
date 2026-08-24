@@ -30,6 +30,15 @@ function toFiniteNumber(value: unknown): number | null {
   return null;
 }
 
+function toEpochMs(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim() !== "") {
+    const t = Date.parse(value);
+    return Number.isNaN(t) ? null : t;
+  }
+  return null;
+}
+
 // Prisma's Decimal (decimal.js under the hood) has a documented
 // `.toNumber()` — used explicitly rather than relying on implicit
 // `Number(decimalInstance)` coercion behavior. Same helper as
@@ -253,7 +262,7 @@ export class SgiService {
       { field: "CustomerName", source: "customer", as: "customerName" }, { field: "SalesRepID", source: "route", as: "salesRepId" }, { field: "Email", source: "rep", as: "repEmail" },
       { field: "Email", source: "manager", as: "supervisorEmail" }, { field: "ProductName", source: "product", as: "productName" }, { field: "Category", source: "product", as: "productCategory" },
     ] as const;
-    const salesQuery = (from: number, to: number) => this.queryAggregate({ ...ctx, entityName: "Invoice Items", projection: salesGroups, groupBy: salesGroups, joins: [invoiceJoin, routeJoin, repJoin, managerJoin, customerJoin, productJoin], hierarchyRoute: { field: "RouteID", source: "invoice" }, scope: { date: { field: "InvoiceDate", source: "invoice", from, to } }, aggregates: [{ op: "sum", field: "LineTotal", as: "amount" }, { op: "sum", field: "Quantity", as: "quantity" }, { op: "maxText", field: "Unit", as: "unit" }, { op: "count", as: "lineCount" }] });
+    const salesQuery = (from: number, to: number) => this.queryAggregate({ ...ctx, entityName: "Invoice Items", projection: salesGroups, groupBy: salesGroups, joins: [invoiceJoin, routeJoin, repJoin, managerJoin, customerJoin, productJoin], hierarchyRoute: { field: "RouteID", source: "invoice" }, scope: { date: { field: "InvoiceDate", source: "invoice", from, to } }, aggregates: [{ op: "sum", field: "LineTotal", as: "amount" }, { op: "sum", field: "Quantity", as: "quantity" }, { op: "maxText", field: "Unit", as: "unit" }, { op: "maxText", field: "InvoiceDate", source: "invoice", as: "lastPurchaseDate" }, { op: "count", as: "lineCount" }] });
     const [currentSalesRows, priorSalesRows, collectionRows, targetRows] = await Promise.all([
       salesQuery(fromTime, toTime), salesQuery(priorFromTime, priorToTime),
       this.queryAggregate({ ...ctx, entityName: "Collections", projection: [{ field: "CustomerCode", as: "customerCode" }], groupBy: [{ field: "CustomerCode" }], scope: { date: { field: "CollectionDate", from: fromTime, to: toTime } }, aggregates: [{ op: "sum", field: "Amount", as: "amount" }] }),
@@ -287,6 +296,8 @@ export class SgiService {
       if (repEmail && supervisorEmail) repSupervisorMap[repEmail] = supervisorEmail;
 
       const cAcc = getOrCreateCustomer(customers, customerKey, label);
+      const lastPurchaseMs = toEpochMs(item.lastPurchaseDate);
+      if (lastPurchaseMs !== null && (cAcc.lastPurchaseMs === null || lastPurchaseMs > cAcc.lastPurchaseMs)) cAcc.lastPurchaseMs = lastPurchaseMs;
       cAcc.current += amount;
         totalActualCurrent += amount;
         if (repEmail) {
@@ -320,6 +331,8 @@ export class SgiService {
       const customerKey = String(item.customerCode ?? "").trim();
       if (!customerKey) continue;
       const cAcc = getOrCreateCustomer(customers, customerKey, String(item.customerName ?? "").trim() || customerKey);
+      const lastPurchaseMs = toEpochMs(item.lastPurchaseDate);
+      if (lastPurchaseMs !== null && (cAcc.lastPurchaseMs === null || lastPurchaseMs > cAcc.lastPurchaseMs)) cAcc.lastPurchaseMs = lastPurchaseMs;
       const amount = toFiniteNumber(item.amount) ?? 0;
       const productCode = String(item.productCode ?? "").trim();
         cAcc.prior += amount;
