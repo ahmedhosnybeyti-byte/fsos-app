@@ -549,7 +549,7 @@ export class VisitCopilotService {
   // ------------------------------------------------------------------
 
   async dailyBrief(user: AuthenticatedUser, query: VisitCopilotDailyBriefQuery): Promise<DailyBriefResult> {
-    return this.buildDailyBrief(user, query);
+    return auditMemory("visit-copilot-daily-brief", () => this.buildDailyBrief(user, query), { companyId: user.companyId, userId: user.userId });
   }
 
   private async buildDailyBrief(user: AuthenticatedUser, periodInput: PeriodInput): Promise<DailyBriefResult> {

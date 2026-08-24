@@ -3,7 +3,7 @@ import test from "node:test";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 
 test("resolves uploaded Employees -> Routes for multiple unassigned sales reps", async () => {
-  const service = new CanonicalHierarchyResolverService({} as never, {
+  const service = new CanonicalHierarchyResolverService({
     user: { findFirst: async () => ({ id: "user-id" }) },
     userRouteAssignment: { findFirst: async () => null },
   } as never);

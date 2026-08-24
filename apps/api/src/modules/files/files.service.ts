@@ -245,6 +245,11 @@ export interface ReplaceFileOutcome {
 // a real constraint (many more companies, each with large active datasets).
 const FILE_BUFFER_CACHE_TTL_MS = 5 * 60 * 60_000;
 const FILE_BUFFER_CACHE_MAX_ENTRIES = 50;
+// A multi-sheet operational workbook can be tens of MB. Keeping that Buffer
+// alive for a whole work shift pins external memory long after the request
+// that needed it has completed. Large downloads still share their in-flight
+// promise, but are evicted immediately once the caller receives the bytes.
+const FILE_BUFFER_CACHE_MAX_RETAINED_BYTES = 8 * 1024 * 1024;
 
 interface FileBufferCacheEntry {
   buffer: Promise<Buffer>;
@@ -1330,7 +1335,11 @@ export class FilesService {
     this.evictBufferCache();
 
     try {
-      return await buffer;
+      const resolved = await buffer;
+      if (resolved.byteLength > FILE_BUFFER_CACHE_MAX_RETAINED_BYTES && this.bufferCache.get(key)?.buffer === buffer) {
+        this.bufferCache.delete(key);
+      }
+      return resolved;
     } catch (err) {
       const current = this.bufferCache.get(key);
       if (current?.buffer === buffer) this.bufferCache.delete(key);
