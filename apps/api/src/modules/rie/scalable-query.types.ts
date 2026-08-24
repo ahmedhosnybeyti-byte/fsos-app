@@ -54,6 +54,12 @@ export interface RieScalableQuery extends EntityQueryContext {
    * scoped key set once instead of rescanning a materialized CTE per fact row.
    */
   preferHashedScopedSemiJoin?: boolean;
+  /**
+   * Materialize eligible rows from scoped inner joins directly inside the base
+   * CTE before the high-cardinality base fact can be read.  The final join is
+   * retained when it supplies projected or aggregated fields.
+   */
+  driveBaseFromScopedJoins?: boolean;
 }
 export interface RieScalableQueryResult {
   records: readonly EntityRecord[];

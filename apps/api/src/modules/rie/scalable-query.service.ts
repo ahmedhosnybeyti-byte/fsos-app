@@ -100,8 +100,18 @@ export class RieScalableQueryService {
         ...(aggregate.filterPositiveField ? [aggregate.filterPositiveField] : []),
       ])]
         .some((field) => field.source && scopedJoinAliases.has(field.source));
-    const baseSemiJoins = canCollapseScopedJoins ? [] : scopedSemiJoinsFor("base", joins, scopedJoinAliases, input.preferHashedScopedSemiJoin);
-    const baseSourceJoins = canCollapseScopedJoins ? joins.map(scopedJoin) : [];
+    const driveBaseFromScopedJoins = input.driveBaseFromScopedJoins === true;
+    if (driveBaseFromScopedJoins && (!joins.length || !joins.every((join) => join.type !== "left" && scopedJoinAliases.has(join.alias) && (join.on.left.source ?? "base") === "base"))) {
+      throw new Error("RIE base-driving scoped joins require direct scoped inner joins from the base entity.");
+    }
+    // A fact query can require fields from its joined entity in the final
+    // SELECT (so it cannot collapse that join), yet still must only admit fact
+    // rows whose keys exist in the already-scoped joined CTE.  Put that join
+    // inside base_active first; retain the final join and its predicates for
+    // exact result and route-fallback parity.
+    const baseDrivenByScopedJoins = canCollapseScopedJoins || driveBaseFromScopedJoins;
+    const baseSemiJoins = baseDrivenByScopedJoins ? [] : scopedSemiJoinsFor("base", joins, scopedJoinAliases, input.preferHashedScopedSemiJoin);
+    const baseSourceJoins = baseDrivenByScopedJoins ? joins.map(scopedJoin) : [];
     const ctes = orderedActiveRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias, ctePredicates.get(alias) ?? [], alias === "base" ? baseSemiJoins : scopedSemiJoinsFor(alias, joins, scopedJoinAliases), alias === "base" ? baseSourceJoins : []));
     if (input.latestPer) ctes.push(latestPerCte(input.latestPer));
     const baseReference = input.latestPer ? Prisma.sql`base_latest base` : activeEntityRowsReference("base");
