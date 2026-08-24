@@ -49,3 +49,13 @@ test("scalable query supports distinct array aggregation without materializing f
   await service.query({ companyId: "company-1", entityName: "Collections", projection: [], aggregates: [{ op: "arrayAggDistinct", field: "RouteID", as: "routeIds" }], pagination: { limit: 1 } });
   assert.match(captured?.strings?.join(" ") ?? "", /ARRAY_AGG\(DISTINCT/);
 });
+
+test("scalable query keeps the latest snapshot per visible route before aggregation", async () => {
+  let captured: { strings?: readonly string[] } | undefined;
+  const service = new RieScalableQueryService({ $queryRaw: async (query: typeof captured) => { captured = query; return []; } } as never, { resolveAllowedRouteIds: async () => new Set(["R-1"]) } as never);
+  await service.query({ companyId: "company-1", requestingUser: { roleCode: "SALES_REP", email: "rep@example.com" }, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }, { field: "ProductCode", as: "productCode" }], latestPer: { partitionBy: { field: "RouteID" }, orderBy: { field: "ReportDate" } }, groupBy: [{ field: "RouteID" }, { field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], pagination: { limit: 5_000 } });
+  const sql = captured?.strings?.join(" ") ?? "";
+  assert.match(sql, /base_latest AS MATERIALIZED/);
+  assert.match(sql, /MAX\(NULLIF/);
+  assert.match(sql, /FROM base_latest base/);
+});

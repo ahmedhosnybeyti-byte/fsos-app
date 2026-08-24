@@ -3,7 +3,7 @@ import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import type { EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieValueScope } from "./scalable-query.types";
+import type { RieDateScope, RieLatestPerScope, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieValueScope } from "./scalable-query.types";
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
@@ -40,6 +40,13 @@ export class RieScalableQueryService {
       if (order.direction && order.direction !== "asc" && order.direction !== "desc") throw new Error("RIE scalable query order direction must be asc or desc.");
     }
     if (input.hierarchyRoute) assertField(input.hierarchyRoute, aliases);
+    if (input.latestPer) {
+      assertField(input.latestPer.partitionBy, aliases);
+      assertField(input.latestPer.orderBy, aliases);
+      if ((input.latestPer.partitionBy.source ?? "base") !== "base" || (input.latestPer.orderBy.source ?? "base") !== "base") {
+        throw new Error("RIE scalable latestPer fields must belong to the base entity.");
+      }
+    }
     for (const aggregate of input.aggregates ?? []) {
       assertIdentifier(aggregate.as, "aggregate alias");
       if (aggregate.field) assertField({ field: aggregate.field, source: aggregate.source }, aliases);
@@ -96,6 +103,8 @@ export class RieScalableQueryService {
     const baseSemiJoins = canCollapseScopedJoins ? [] : scopedSemiJoinsFor("base", joins, scopedJoinAliases);
     const baseSourceJoins = canCollapseScopedJoins ? joins.map(scopedJoin) : [];
     const ctes = orderedActiveRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias, ctePredicates.get(alias) ?? [], alias === "base" ? baseSemiJoins : scopedSemiJoinsFor(alias, joins, scopedJoinAliases), alias === "base" ? baseSourceJoins : []));
+    if (input.latestPer) ctes.push(latestPerCte(input.latestPer));
+    const baseReference = input.latestPer ? Prisma.sql`base_latest base` : activeEntityRowsReference("base");
     const joinSql = (canCollapseScopedJoins ? [] : joins).map((join) => {
       return Prisma.sql`${join.type === "left" ? Prisma.raw("LEFT JOIN") : Prisma.raw("INNER JOIN")} ${activeEntityRowsReference(join.alias)} ON ${normalizedField(join.on.left)} = ${normalizedField({ field: join.on.rightField, source: join.alias })}`;
     });
@@ -109,7 +118,7 @@ export class RieScalableQueryService {
     const rows = await this.prisma.$queryRaw<EntityRecord[]>(Prisma.sql`
       WITH ${Prisma.join(ctes, ", ")}
       SELECT ${Prisma.join(select)}
-      FROM ${activeEntityRowsReference("base")}
+      FROM ${baseReference}
       ${joinClause}
       WHERE TRUE${where}
       ${grouping}
@@ -189,6 +198,21 @@ function activeEntityRowsCte(companyId: string, entityName: string, alias: strin
       AND ${Prisma.raw(rowAlias)}."company_id" = ${companyId} AND ${Prisma.raw(rowAlias)}."entity_name" = ${entityName}
       ${predicates.length ? Prisma.sql`AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty}
       ${semiJoins.length ? Prisma.sql`AND ${Prisma.join(semiJoins, " AND ")}` : Prisma.empty}
+  )`;
+}
+
+function latestPerCte(scope: RieLatestPerScope): Prisma.Sql {
+  const ordering = textField({ ...scope.orderBy, source: "base" });
+  return Prisma.sql`base_latest AS MATERIALIZED (
+    SELECT base.*
+    FROM base_active base
+    INNER JOIN (
+      SELECT ${normalizedField({ ...scope.partitionBy, source: "base" })} AS partition_key,
+        MAX(NULLIF(BTRIM(COALESCE(${ordering}, '')), '')) AS latest_value
+      FROM base_active base
+      GROUP BY ${normalizedField({ ...scope.partitionBy, source: "base" })}
+    ) latest ON ${normalizedField({ ...scope.partitionBy, source: "base" })} = latest.partition_key
+      AND NULLIF(BTRIM(COALESCE(${ordering}, '')), '') = latest.latest_value
   )`;
 }
 

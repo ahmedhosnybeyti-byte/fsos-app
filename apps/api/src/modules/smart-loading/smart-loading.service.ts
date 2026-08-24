@@ -219,17 +219,16 @@ export class SmartLoadingService {
       return !!value && !normalizeVisitDay(value);
     });
 
-    const latestByRouteRows = await bounded({ ...ctx, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }], groupBy: [{ field: "RouteID" }], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }] });
-    const latestReportIsoByRoute = new Map<string, string>();
-    for (const row of latestByRouteRows) {
-      const routeId = normalizedRouteId(row.routeId);
-      const reportDate = String(row.latestReportDate ?? "").trim().slice(0, 10);
-      if (routeId && reportDate) latestReportIsoByRoute.set(routeId, reportDate);
-    }
-    const activeVehicleRouteIds = new Set(latestReportIsoByRoute.keys());
-    const inventoryByRoute = await Promise.all([...latestReportIsoByRoute.entries()].map(([routeId, reportDate]) => bounded({ ...ctx, entityName: "Van Inventory", projection: [{ field: "ProductCode", as: "productCode" }], groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { route: { values: [routeId] }, date: { field: "ReportDate", values: [reportDate] } } })));
+    // PostgreSQL retains each visible route's latest snapshot before grouping
+    // product quantities, so this remains one bounded RIE query regardless of
+    // route count.
+    const inventoryRows = await bounded({ ...ctx, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }, { field: "ProductCode", as: "productCode" }], latestPer: { partitionBy: { field: "RouteID" }, orderBy: { field: "ReportDate" } }, groupBy: [{ field: "RouteID" }, { field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }] });
+    const activeVehicleRouteIds = new Set<string>();
     const vehicleStockByProduct = new Map<string, number>();
-    for (const rows of inventoryByRoute) for (const row of rows) {
+    for (const row of inventoryRows) {
+      const routeId = normalizedRouteId(row.routeId);
+      if (!routeId) continue;
+      activeVehicleRouteIds.add(routeId);
       const productCode = normalizedProductCode(row.productCode);
       if (productCode) vehicleStockByProduct.set(productCode, (vehicleStockByProduct.get(productCode) ?? 0) + (toFiniteNumber(row.quantity) ?? 0));
     }

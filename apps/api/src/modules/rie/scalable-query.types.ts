@@ -31,6 +31,8 @@ export interface RieScalableQueryScope {
 }
 export interface RieQueryPagination { limit?: number; offset?: number; }
 export interface RieQueryOrder { field?: RieQueryField; aggregate?: string; direction?: "asc" | "desc"; }
+/** Retain only rows at the latest text date/value within each partition. */
+export interface RieLatestPerScope { partitionBy: RieQueryField; orderBy: RieQueryField; }
 
 /** Read-only contract for PostgreSQL-backed high-cardinality canonical data. */
 export interface RieScalableQuery extends EntityQueryContext {
@@ -41,6 +43,8 @@ export interface RieScalableQuery extends EntityQueryContext {
   hierarchyRoute?: RieQueryField;
   groupBy?: readonly RieQueryField[];
   aggregates?: readonly RieQueryAggregation[];
+  /** Applied after company, active-version and hierarchy scopes, before aggregation. */
+  latestPer?: RieLatestPerScope;
   scope?: RieScalableQueryScope;
   pagination?: RieQueryPagination;
   orderBy?: readonly RieQueryOrder[];
