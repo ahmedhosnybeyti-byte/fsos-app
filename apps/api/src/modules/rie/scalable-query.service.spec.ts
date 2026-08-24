@@ -23,3 +23,22 @@ test("scalable query rejects unsafe identifiers and empty scopes fail closed", a
   await assert.rejects(() => service.query({ companyId: "c", entityName: "Customers", projection: [{ field: "CustomerCode; DROP" }] }));
   assert.deepEqual((await service.query({ companyId: "c", entityName: "Customers", projection: [{ field: "CustomerCode" }], scope: { customer: { values: [] } } })).records, []);
 });
+
+test("scopes Customers.City through Invoices before Invoice Items", async () => {
+  let captured: { strings?: readonly string[] } | undefined;
+  const service = new RieScalableQueryService({ $queryRaw: async (query: typeof captured) => { captured = query; return []; } } as never, { resolveAllowedRouteIds: async () => null } as never);
+  await service.query({
+    companyId: "company-1", entityName: "Invoice Items", projection: [],
+    joins: [
+      { entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } },
+      { entityName: "Customers", alias: "customer", on: { left: { field: "CustomerCode", source: "invoice" }, rightField: "CustomerCode" } },
+    ],
+    scope: { date: { field: "InvoiceDate", source: "invoice", from: "2026-08-01", to: "2026-08-31" }, fields: [{ field: "City", source: "customer", values: ["Riyadh"] }] },
+    aggregates: [{ op: "sum", field: "LineTotal", as: "sales" }], pagination: { limit: 1 },
+  });
+  const sql = captured?.strings?.join(" ") ?? "";
+  assert.ok(sql.indexOf("customer_active AS MATERIALIZED") < sql.indexOf("invoice_active AS MATERIALIZED"));
+  assert.ok(sql.indexOf("invoice_active AS MATERIALIZED") < sql.indexOf("base_active AS MATERIALIZED"));
+  assert.match(sql, /FROM customer_active customer_scope/);
+  assert.match(sql, /invoice_source\."data" ->> 'CustomerCode'/);
+});

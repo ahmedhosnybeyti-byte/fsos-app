@@ -77,20 +77,23 @@ export class RieScalableQueryService {
     // before the base fact CTE so it can bound that fact CTE with a semi-join.
     // The final join remains unchanged, preserving its multiplicity exactly.
     const scopedJoinAliases = new Set(joins.filter((join) => join.type !== "left" && ctePredicates.get(join.alias)?.length).map((join) => join.alias));
-    const orderedActiveRows = [...activeRows.filter(({ alias }) => alias !== "base" && scopedJoinAliases.has(alias)), activeRows.find(({ alias }) => alias === "base")!, ...activeRows.filter(({ alias }) => alias !== "base" && !scopedJoinAliases.has(alias))];
+    // A scope can sit behind more than one relationship hop.  For example,
+    // Invoice Items -> Invoices -> Customers.City needs the customer CTE
+    // before the invoice CTE, so City bounds invoices before either can reach
+    // the high-cardinality Invoice Items CTE.
+    const orderedScopedAliases = orderScopedAliases(joins, scopedJoinAliases);
+    const orderedActiveRows = [...orderedScopedAliases.map((alias) => activeRows.find((row) => row.alias === alias)!), activeRows.find(({ alias }) => alias === "base")!, ...activeRows.filter(({ alias }) => alias !== "base" && !scopedJoinAliases.has(alias))];
     const canCollapseScopedJoins = joins.length > 0
-      && joins.every((join) => join.type !== "left" && scopedJoinAliases.has(join.alias))
+      && joins.every((join) => join.type !== "left" && scopedJoinAliases.has(join.alias) && (join.on.left.source ?? "base") === "base")
       && ![...input.projection, ...(input.groupBy ?? []), ...(input.aggregates ?? []).flatMap((aggregate) => [
         ...(aggregate.field ? [{ field: aggregate.field, source: aggregate.source }] : []),
         ...(aggregate.multiplier ? [aggregate.multiplier] : []),
         ...(aggregate.multiplierFallback ? [aggregate.multiplierFallback] : []),
       ])]
         .some((field) => field.source && scopedJoinAliases.has(field.source));
-    const baseSemiJoins = canCollapseScopedJoins ? [] : joins
-      .filter((join) => scopedJoinAliases.has(join.alias) && (join.on.left.source ?? "base") === "base")
-      .map((join) => scopedJoinExists(join));
+    const baseSemiJoins = canCollapseScopedJoins ? [] : scopedSemiJoinsFor("base", joins, scopedJoinAliases);
     const baseSourceJoins = canCollapseScopedJoins ? joins.map(scopedJoin) : [];
-    const ctes = orderedActiveRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias, ctePredicates.get(alias) ?? [], alias === "base" ? baseSemiJoins : [], alias === "base" ? baseSourceJoins : []));
+    const ctes = orderedActiveRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias, ctePredicates.get(alias) ?? [], alias === "base" ? baseSemiJoins : scopedSemiJoinsFor(alias, joins, scopedJoinAliases), alias === "base" ? baseSourceJoins : []));
     const joinSql = (canCollapseScopedJoins ? [] : joins).map((join) => {
       return Prisma.sql`${join.type === "left" ? Prisma.raw("LEFT JOIN") : Prisma.raw("INNER JOIN")} ${activeEntityRowsReference(join.alias)} ON ${normalizedField(join.on.left)} = ${normalizedField({ field: join.on.rightField, source: join.alias })}`;
     });
@@ -184,9 +187,35 @@ function activeEntityRowsCte(companyId: string, entityName: string, alias: strin
 
 function activeEntityRowsReference(alias: string): Prisma.Sql { return Prisma.sql`${Prisma.raw(`${alias}_active`)} ${Prisma.raw(alias)}`; }
 function scopedJoinExists(join: RieQueryJoin): Prisma.Sql {
-  const baseSource = { field: join.on.left.field, source: "base_source" };
+  return scopedJoinExistsFrom("base", join);
+}
+function scopedJoinExistsFrom(sourceAlias: string, join: RieQueryJoin): Prisma.Sql {
+  const baseSource = { field: join.on.left.field, source: `${sourceAlias}_source` };
   const scopedSource = { field: join.on.rightField, source: `${join.alias}_scope` };
   return Prisma.sql`EXISTS (SELECT 1 FROM ${Prisma.raw(`${join.alias}_active`)} ${Prisma.raw(`${join.alias}_scope`)} WHERE ${normalizedField(baseSource)} = ${normalizedField(scopedSource)})`;
+}
+function scopedSemiJoinsFor(sourceAlias: string, joins: readonly RieQueryJoin[], scopedJoinAliases: ReadonlySet<string>): Prisma.Sql[] {
+  return joins
+    .filter((join) => scopedJoinAliases.has(join.alias) && (join.on.left.source ?? "base") === sourceAlias)
+    .map((join) => scopedJoinExistsFrom(sourceAlias, join));
+}
+function orderScopedAliases(joins: readonly RieQueryJoin[], scopedJoinAliases: ReadonlySet<string>): string[] {
+  const ordered: string[] = [];
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (alias: string): void => {
+    if (visited.has(alias)) return;
+    if (visiting.has(alias)) throw new Error("RIE scalable query has cyclic scoped joins.");
+    visiting.add(alias);
+    for (const join of joins) {
+      if (scopedJoinAliases.has(join.alias) && (join.on.left.source ?? "base") === alias) visit(join.alias);
+    }
+    visiting.delete(alias);
+    visited.add(alias);
+    ordered.push(alias);
+  };
+  for (const alias of scopedJoinAliases) visit(alias);
+  return ordered;
 }
 function scopedJoin(join: RieQueryJoin): Prisma.Sql {
   const baseSource = { field: join.on.left.field, source: "base_source" };
