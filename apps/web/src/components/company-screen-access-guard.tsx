@@ -13,7 +13,8 @@ export function CompanyScreenAccessGuard({ user, children }: { user: User; child
   const screen = getCompanyScreenForRoute(pathname);
   const isPlatformSuperAdmin = user.role.code === "SUPER_ADMIN" && user.companyId === null;
   const allowsMandatoryPasswordChange = screen?.featureKey === "account" && user.mustChangePassword;
-  const state = isPlatformSuperAdmin || !screen ? "ENABLED" : getCompanyFeatureAccessState(user.featureAccess, screen.featureKey);
+  const allowsCompanyAdminSmartLoading = user.role.code === "COMPANY_ADMIN" && screen?.featureKey === "smart-loading";
+  const state = isPlatformSuperAdmin || allowsCompanyAdminSmartLoading || !screen ? "ENABLED" : getCompanyFeatureAccessState(user.featureAccess, screen.featureKey);
 
   useEffect(() => {
     if (state === "HIDDEN" && !allowsMandatoryPasswordChange) router.replace("/dashboard");
