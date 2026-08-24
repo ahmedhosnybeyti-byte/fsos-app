@@ -1,6 +1,6 @@
 import type { VisitCopilot360LostOpportunity } from "@/lib/types";
 import { sortDaily360Customers } from "@/lib/daily-360-customer-order";
-import type { HierarchyAccordionNode } from "@/components/ui/hierarchy-accordion-tree";
+import type { HierarchyAccordionLevel, HierarchyAccordionNode } from "@/components/ui/hierarchy-accordion-tree";
 
 export type Daily360ProductGroup = {
   productCode: string;
@@ -35,8 +35,9 @@ export function groupDaily360OpportunityHierarchy(customers: Daily360CustomerGro
     const path = levels.flatMap((level) => customer.hierarchy?.[level] ? [{ level, value: customer.hierarchy[level]! }] : []);
     if (!path.length) {
       let direct = roots.find((node) => node.id === "direct");
-      if (!direct) { direct = { id: "direct", label: "فرص العملاء", leaves: [] }; roots.push(direct); }
+      if (!direct) { direct = { id: "direct", label: "فرص العملاء", level: "customer", opportunityCount: 0, leaves: [] }; roots.push(direct); }
       direct.leaves!.push(customer);
+      direct.opportunityCount += customer.opportunityCount;
       continue;
     }
     let siblings = roots;
@@ -44,7 +45,8 @@ export function groupDaily360OpportunityHierarchy(customers: Daily360CustomerGro
     for (const part of path) {
       const id = `${part.level}:${part.value}`;
       node = siblings.find((candidate) => candidate.id === id);
-      if (!node) { node = { id, label: `${HIERARCHY_LABEL[part.level]}: ${part.value}`, children: [] }; siblings.push(node); }
+      if (!node) { node = { id, label: `${HIERARCHY_LABEL[part.level]}: ${part.value}`, level: part.level as HierarchyAccordionLevel, opportunityCount: 0, children: [] }; siblings.push(node); }
+      node.opportunityCount += customer.opportunityCount;
       siblings = node.children!;
     }
     node!.leaves = [...(node!.leaves ?? []), customer];

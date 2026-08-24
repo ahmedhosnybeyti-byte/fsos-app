@@ -3,6 +3,7 @@ import test from "node:test";
 import type { VisitCopilot360LostOpportunity } from "@/lib/types";
 import {
   daily360CategoryKey,
+  groupDaily360OpportunityHierarchy,
   groupDaily360LostOpportunities,
   toggleDaily360OpenCategory,
   toggleDaily360OpenCustomer,
@@ -28,6 +29,7 @@ function opportunity(input: Partial<VisitCopilot360LostOpportunity> & Pick<Visit
     baselineNetQuantity: input.baselineNetQuantity ?? 3,
     recentNetQuantity: input.recentNetQuantity ?? 0,
     suggestedQuantity: input.suggestedQuantity ?? 1,
+    hierarchy: input.hierarchy,
   };
 }
 
@@ -47,6 +49,20 @@ test("groups multiple products and categories under one customer", () => {
   assert.deepEqual(groups[0]!.categories.map((category) => category.category), ["Beverages", "Dairy"]);
   assert.deepEqual(groups[0]!.categories[1]!.products.map((product) => product.productCode), ["P1", "P3"]);
   assert.equal(groups[0]!.categories[1]!.products[0]!.opportunity.declineValue, 5);
+});
+
+test("hierarchy nodes carry descendant opportunity totals for descending UI sorting", () => {
+  const customers = groupDaily360LostOpportunities([
+    opportunity({ customerCode: "C1", customerName: "First", productCode: "P1", productName: "Milk", hierarchy: { region: null, manager: "Manager A", supervisor: "Supervisor A", salesRep: "Rep A" } }),
+    opportunity({ customerCode: "C1", customerName: "First", productCode: "P2", productName: "Juice", hierarchy: { region: null, manager: "Manager A", supervisor: "Supervisor A", salesRep: "Rep A" } }),
+    opportunity({ customerCode: "C2", customerName: "Second", productCode: "P3", productName: "Water", hierarchy: { region: null, manager: "Manager B", supervisor: "Supervisor B", salesRep: "Rep B" } }),
+  ], "Uncategorized");
+  const nodes = groupDaily360OpportunityHierarchy(customers, "MANAGER");
+
+  assert.equal(nodes.find((node) => node.label.includes("Manager A"))?.opportunityCount, 2);
+  assert.equal(nodes.find((node) => node.label.includes("Manager B"))?.opportunityCount, 1);
+  const rep = nodes.find((node) => node.label.includes("Manager A"))?.children?.[0]?.children?.[0];
+  assert.equal(rep?.leaves?.[0]?.customerCode, "C1");
 });
 
 test("keeps same-named customers separate and preserves first report priority", () => {
