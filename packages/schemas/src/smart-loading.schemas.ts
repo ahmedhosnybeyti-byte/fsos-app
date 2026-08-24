@@ -148,3 +148,37 @@ export const smartLoadingSessionSchema = z.discriminatedUnion("state", [
   smartLoadingVehicleStockUnavailableSessionSchema,
 ]);
 export type SmartLoadingSession = z.infer<typeof smartLoadingSessionSchema>;
+
+// Management view is deliberately read-only. Its scope is resolved on the
+// server from the selected hierarchy member; Route is not a user filter.
+export const smartLoadingManagementQuerySchema = z.object({
+  targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  managerId: z.string().trim().min(1).optional(),
+  supervisorId: z.string().trim().min(1).optional(),
+  salesRepId: z.string().trim().min(1).optional(),
+});
+export type SmartLoadingManagementQuery = z.infer<typeof smartLoadingManagementQuerySchema>;
+
+export const smartLoadingManagementOptionSchema = z.object({ id: z.string(), name: z.string() });
+export type SmartLoadingManagementOption = z.infer<typeof smartLoadingManagementOptionSchema>;
+export const smartLoadingManagementProductSchema = z.object({
+  productCode: z.string(),
+  productName: z.string(),
+  vehicleStock: z.number(),
+  expectedDemand: z.number(),
+  shortageQuantity: z.number(),
+  status: z.enum(["covered", "shortage"]),
+});
+export type SmartLoadingManagementProduct = z.infer<typeof smartLoadingManagementProductSchema>;
+export const smartLoadingManagementResultSchema = z.object({
+  targetDate: z.string(),
+  managers: z.array(smartLoadingManagementOptionSchema),
+  supervisors: z.array(smartLoadingManagementOptionSchema),
+  salesReps: z.array(smartLoadingManagementOptionSchema),
+  selectedSalesRepId: z.string().nullable(),
+  resolvedRouteCount: z.number().int().nonnegative(),
+  coverage: z.number().nullable(),
+  products: z.array(smartLoadingManagementProductSchema),
+  calculatedAt: z.string(),
+});
+export type SmartLoadingManagementResult = z.infer<typeof smartLoadingManagementResultSchema>;

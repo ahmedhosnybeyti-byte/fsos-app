@@ -1,6 +1,6 @@
 import { Body, Controller, ForbiddenException, Get, Post, Query } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
-import { smartLoadingRecalculateInputSchema, smartLoadingStaleDaysThresholdSchema, type SmartLoadingRecalculateInput } from "@field-sales-os/schemas";
+import { smartLoadingManagementQuerySchema, smartLoadingRecalculateInputSchema, smartLoadingStaleDaysThresholdSchema, type SmartLoadingManagementQuery, type SmartLoadingRecalculateInput } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
@@ -13,6 +13,8 @@ export class SmartLoadingController {
   constructor(private readonly smartLoadingService: SmartLoadingService) {}
   @Get("session") @Auth()
   getSession(@CurrentUser() user: AuthenticatedUser, @Query("targetDate") targetDate?: string, @Query("asOfDate") asOfDate?: string, @Query("staleDaysThreshold", new ZodValidationPipe(smartLoadingStaleDaysThresholdSchema)) staleDaysThreshold?: number) { if (!user.companyId) throw new ForbiddenException(); return this.smartLoadingService.getSession(user, targetDate ?? asOfDate, staleDaysThreshold); }
+  @Get("management") @Auth()
+  getManagement(@CurrentUser() user: AuthenticatedUser, @Query(new ZodValidationPipe(smartLoadingManagementQuerySchema)) query: SmartLoadingManagementQuery) { if (!user.companyId) throw new ForbiddenException(); return this.smartLoadingService.getManagement(user, query); }
   @Get("customers/search") @Auth()
   searchCustomers(@CurrentUser() user: AuthenticatedUser, @Query("q") q?: string, @Query("excludeCustomerCodes") excluded?: string) { if (!user.companyId) throw new ForbiddenException(); return this.smartLoadingService.searchCustomers(user, q, excluded?.split(",")); }
   @Post("recalculate") @Auth()

@@ -1,6 +1,7 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from "@nestjs/common";
-import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingPriorityProduct, type SmartLoadingProduct, type SmartLoadingSession, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
+import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingManagementQuery, type SmartLoadingManagementResult, type SmartLoadingPriorityProduct, type SmartLoadingProduct, type SmartLoadingSession, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
+import { PrismaService } from "../../common/prisma";
 import { RieFacade } from "../rie/rie-facade.service";
 import { LostOpportunityService } from "../lost-opportunity/lost-opportunity.service";
 import { selectRoutePriorityProducts } from "./smart-loading-priority";
@@ -177,10 +178,97 @@ function isDateInWindow(date: string, from: string, to: string): boolean {
 export class SmartLoadingService {
   private readonly logger = new Logger(SmartLoadingService.name);
 
-  constructor(private readonly rieFacade: RieFacade, private readonly lostOpportunityService: LostOpportunityService) {}
+  constructor(private readonly rieFacade: RieFacade, private readonly lostOpportunityService: LostOpportunityService, private readonly prisma: PrismaService) {}
 
   private rieContext(user: AuthenticatedUser) {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
+  }
+
+  /**
+   * Management is read-only and never changes the Sales Rep session path.
+   * Routes are derived server-side: the rep's one active operational
+   * assignment wins; otherwise every current Routes.SalesRepID match is
+   * included. Facts are aggregated by PostgreSQL at Product grain.
+   */
+  async getManagement(user: AuthenticatedUser, input: SmartLoadingManagementQuery): Promise<SmartLoadingManagementResult> {
+    if (!user.companyId) throw new ForbiddenException();
+    const ctx = this.rieContext(user);
+    const targetDate = parseTargetDate(input.targetDate);
+    const targetDateIso = isoDay(targetDate.getTime());
+    const bounded = async (query: Parameters<RieFacade["queryCanonicalRecords"]>[0]) => {
+      const result = await this.rieFacade.queryCanonicalRecords({ ...query, pagination: { limit: 5_000 } });
+      if (result.page.hasMore) throw new BadRequestException("Smart Loading management scoped result exceeds its safe response limit.");
+      return result.records;
+    };
+    const routeHierarchy = await bounded({
+      ...ctx,
+      entityName: "Routes",
+      projection: [
+        { field: "RouteID", as: "routeId" },
+        { field: "SalesRepID", as: "salesRepId" }, { field: "EmployeeName", source: "rep", as: "salesRepName" }, { field: "Email", source: "rep", as: "salesRepEmail" },
+        { field: "EmployeeID", source: "supervisor", as: "supervisorId" }, { field: "EmployeeName", source: "supervisor", as: "supervisorName" },
+        { field: "EmployeeID", source: "manager", as: "managerId" }, { field: "EmployeeName", source: "manager", as: "managerName" },
+      ],
+      joins: [
+        { entityName: "Employees", alias: "rep", type: "left", on: { left: { field: "SalesRepID" }, rightField: "EmployeeID" } },
+        { entityName: "Employees", alias: "supervisor", type: "left", on: { left: { field: "DirectManagerID", source: "rep" }, rightField: "EmployeeID" } },
+        { entityName: "Employees", alias: "manager", type: "left", on: { left: { field: "DirectManagerID", source: "supervisor" }, rightField: "EmployeeID" } },
+      ],
+      hierarchyRoute: { field: "RouteID" },
+      groupBy: [
+        { field: "RouteID" }, { field: "SalesRepID" }, { field: "EmployeeName", source: "rep" }, { field: "Email", source: "rep" },
+        { field: "EmployeeID", source: "supervisor" }, { field: "EmployeeName", source: "supervisor" },
+        { field: "EmployeeID", source: "manager" }, { field: "EmployeeName", source: "manager" },
+      ],
+      scope: { fields: [
+        ...(input.managerId ? [{ field: "EmployeeID", source: "manager", values: [input.managerId] }] : []),
+        ...(input.supervisorId ? [{ field: "EmployeeID", source: "supervisor", values: [input.supervisorId] }] : []),
+        ...(input.salesRepId ? [{ field: "SalesRepID", values: [input.salesRepId] }] : []),
+      ] },
+    });
+    const optionRows = routeHierarchy.map((row) => ({
+      routeId: String(row.routeId ?? "").trim(), salesRepId: String(row.salesRepId ?? "").trim(), salesRepName: String(row.salesRepName ?? row.salesRepId ?? "").trim(), salesRepEmail: String(row.salesRepEmail ?? "").trim().toLowerCase(),
+      supervisorId: String(row.supervisorId ?? "").trim(), supervisorName: String(row.supervisorName ?? row.supervisorId ?? "").trim(),
+      managerId: String(row.managerId ?? "").trim(), managerName: String(row.managerName ?? row.managerId ?? "").trim(),
+    })).filter((row) => row.routeId && row.salesRepId);
+    const uniqueOptions = (entries: Array<[string, string]>) => Array.from(new Map(entries.filter(([id]) => !!id)).entries()).map(([id, name]) => ({ id, name: name || id })).sort((a, b) => a.name.localeCompare(b.name, "ar"));
+    const managers = uniqueOptions(optionRows.map((row) => [row.managerId, row.managerName]));
+    const supervisors = uniqueOptions(optionRows.map((row) => [row.supervisorId, row.supervisorName]));
+    const salesReps = uniqueOptions(optionRows.map((row) => [row.salesRepId, row.salesRepName]));
+    if (!input.salesRepId) return { targetDate: targetDateIso, managers, supervisors, salesReps, selectedSalesRepId: null, resolvedRouteCount: 0, coverage: null, products: [], calculatedAt: new Date().toISOString() };
+
+    // The hierarchy query above is also the authorization check: it only
+    // returns Routes already permitted by the caller's RIE route scope.
+    const selected = optionRows.filter((row) => row.salesRepId === input.salesRepId);
+    if (!selected.length) throw new ForbiddenException("Selected sales representative is outside your hierarchy scope.");
+    const repEmail = selected.find((row) => row.salesRepEmail)?.salesRepEmail;
+    const repUser = repEmail ? await this.prisma.user.findFirst({ where: { companyId: user.companyId, email: repEmail }, select: { id: true } }) : null;
+    const activeAssignment = repUser ? await this.prisma.userRouteAssignment.findFirst({ where: { companyId: user.companyId, userId: repUser.id, endedAt: null }, select: { routeId: true } }) : null;
+    const resolvedRouteIds = activeAssignment ? [activeAssignment.routeId] : Array.from(new Set(selected.map((row) => row.routeId)));
+    const routeSet = new Set(selected.map((row) => row.routeId.toLowerCase()));
+    if (activeAssignment && !routeSet.has(activeAssignment.routeId.trim().toLowerCase())) throw new ForbiddenException("Active route assignment is outside your hierarchy scope.");
+    if (!resolvedRouteIds.length) return { targetDate: targetDateIso, managers, supervisors, salesReps, selectedSalesRepId: input.salesRepId, resolvedRouteCount: 0, coverage: null, products: [], calculatedAt: new Date().toISOString() };
+
+    const now = new Date();
+    const windowStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - MONTHS_LOOKBACK, now.getUTCDate())).getTime();
+    const invoiceJoin = [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }] as const;
+    const [stockRows, demandRows] = await Promise.all([
+      bounded({ ...ctx, entityName: "Van Inventory", projection: [{ field: "ProductCode", as: "productCode" }], latestPer: { partitionBy: { field: "RouteID" }, orderBy: { field: "ReportDate" } }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "vehicleStock" }], scope: { route: { values: resolvedRouteIds } } }),
+      bounded({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "windowQuantity" }], scope: { route: { values: resolvedRouteIds, source: "invoice" }, routeFallback: { primary: { field: "RouteID" }, fallback: { field: "RouteID", source: "invoice" }, values: resolvedRouteIds }, date: { field: "InvoiceDate", source: "invoice", from: windowStart, to: targetDateIso } }, driveBaseFromScopedJoins: true }),
+    ]);
+    const codes = Array.from(new Set([...stockRows, ...demandRows].map((row) => String(row.productCode ?? "").trim()).filter(Boolean)));
+    const productRows = codes.length ? await bounded({ companyId: user.companyId, entityName: "Products", projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }], scope: { product: { values: codes } } }) : [];
+    const names = new Map(productRows.map((row) => [String(row.productCode ?? "").trim(), String(row.productName ?? row.productCode ?? "").trim()]));
+    const stock = new Map(stockRows.map((row) => [String(row.productCode ?? "").trim(), toFiniteNumber(row.vehicleStock) ?? 0]));
+    const demand = new Map(demandRows.map((row) => [String(row.productCode ?? "").trim(), (toFiniteNumber(row.windowQuantity) ?? 0) / WEEKS_DIVISOR]));
+    const products = codes.map((productCode) => {
+      const vehicleStock = stock.get(productCode) ?? 0;
+      const expectedDemand = demand.get(productCode) ?? 0;
+      return { productCode, productName: names.get(productCode) ?? productCode, vehicleStock, expectedDemand, shortageQuantity: Math.max(0, expectedDemand - vehicleStock), status: vehicleStock >= expectedDemand ? "covered" as const : "shortage" as const };
+    }).filter((product) => product.expectedDemand > 0 || product.vehicleStock > 0).sort((a, b) => a.productName.localeCompare(b.productName, "ar"));
+    const expectedTotal = products.reduce((total, product) => total + product.expectedDemand, 0);
+    const coveredTotal = products.reduce((total, product) => total + Math.min(product.vehicleStock, product.expectedDemand), 0);
+    return { targetDate: targetDateIso, managers, supervisors, salesReps, selectedSalesRepId: input.salesRepId, resolvedRouteCount: resolvedRouteIds.length, coverage: expectedTotal > 0 ? coveredTotal / expectedTotal : null, products, calculatedAt: new Date().toISOString() };
   }
 
   async getSession(user: AuthenticatedUser, requestedTargetDate?: string, staleDaysThreshold = DEFAULT_SMART_LOADING_STALE_DAYS): Promise<SmartLoadingSession> {
