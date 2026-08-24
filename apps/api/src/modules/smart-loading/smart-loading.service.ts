@@ -258,14 +258,19 @@ export class SmartLoadingService {
     const lastSaleMsByProduct = new Map(lastSaleRows.map((row) => [normalizedProductCode(row.productCode), toEpochMs(row.lastSaleDate)]).filter((entry): entry is [string, number] => !!entry[0] && entry[1] !== null));
     const staleCodes = [...vehicleStockByProduct.entries()].filter(([code, stock]) => isStaleVehicleInventory(stock, lastSaleMsByProduct.get(code) ?? null, staleAsOfDate, staleDaysThreshold)).map(([code]) => code);
     const purchaseRows = staleCodes.length ? await timed("stale-purchases", () => bounded({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }, { field: "CustomerCode", source: "invoice", as: "customerCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }, { field: "CustomerCode", source: "invoice" }], aggregates: [{ op: "sum", field: "Quantity", filterPositiveField: { field: "Quantity" }, as: "totalQuantity" }, { op: "countDistinct", field: "InvoiceNo", filterPositiveField: { field: "Quantity" }, as: "purchaseFrequency" }, { op: "maxText", field: "InvoiceDate", source: "invoice", filterPositiveField: { field: "Quantity" }, as: "lastPurchaseDate" }], scope: { ...salesScope, product: { values: staleCodes } }, preferHashedScopedSemiJoin: true })) : [];
-    const priorityRows = nextRouteCustomers.size && activeVehicleRouteIds.size ? await timed("priority-sales-aggregation", () => bounded({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }, { field: "CustomerCode", source: "invoice", as: "customerCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }, { field: "CustomerCode", source: "invoice" }], aggregates: [{ op: "sum", field: "Quantity", as: "windowQuantity" }, { op: "sum", field: "Quantity", filterPositiveField: { field: "Quantity" }, as: "priorityQuantity" }], scope: { route: { values: [...activeVehicleRouteIds], source: "invoice" }, routeFallback: { primary: { field: "RouteID" }, fallback: { field: "RouteID", source: "invoice" }, values: [...activeVehicleRouteIds] }, customer: { values: [...nextRouteCustomers.keys()], source: "invoice" }, date: { field: "InvoiceDate", source: "invoice", from: windowStartMs, to: nowMs } } })) : [];
+    // The screen consumes priority evidence at Product grain.  Grouping by
+    // Product × Customer made an admin-wide result exceed the bounded RIE
+    // response contract even though the final UI only uses each product's
+    // positive-customer count and quantities.  Keep those exact aggregates
+    // in PostgreSQL so Node receives one small row per product.
+    const priorityRows = nextRouteCustomers.size && activeVehicleRouteIds.size ? await timed("priority-sales-aggregation", () => bounded({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "windowQuantity" }, { op: "sum", field: "Quantity", filterPositiveField: { field: "Quantity" }, as: "priorityQuantity" }, { op: "countDistinct", field: "CustomerCode", source: "invoice", filterPositiveField: { field: "Quantity" }, as: "priorityCustomerCount" }], scope: { route: { values: [...activeVehicleRouteIds], source: "invoice" }, routeFallback: { primary: { field: "RouteID" }, fallback: { field: "RouteID", source: "invoice" }, values: [...activeVehicleRouteIds] }, customer: { values: [...nextRouteCustomers.keys()], source: "invoice" }, date: { field: "InvoiceDate", source: "invoice", from: windowStartMs, to: nowMs } } })) : [];
     const windowQtyByProduct = new Map<string, number>();
-    const prioritySalesByProduct = new Map<string, { customers: Set<string>; totalQuantity: number }>();
+    const prioritySalesByProduct = new Map<string, { customerCount: number; totalQuantity: number }>();
     for (const row of priorityRows) {
-      const productCode = normalizedProductCode(row.productCode), customerCode = String(row.customerCode ?? "").trim(), windowQuantity = toFiniteNumber(row.windowQuantity) ?? 0, priorityQuantity = toFiniteNumber(row.priorityQuantity) ?? 0;
+      const productCode = normalizedProductCode(row.productCode), windowQuantity = toFiniteNumber(row.windowQuantity) ?? 0, priorityQuantity = toFiniteNumber(row.priorityQuantity) ?? 0, priorityCustomerCount = toFiniteNumber(row.priorityCustomerCount) ?? 0;
       if (!productCode) continue;
       windowQtyByProduct.set(productCode, (windowQtyByProduct.get(productCode) ?? 0) + windowQuantity);
-      if (priorityQuantity > 0 && customerCode) { const priority = prioritySalesByProduct.get(productCode) ?? { customers: new Set<string>(), totalQuantity: 0 }; priority.customers.add(customerCode); priority.totalQuantity += priorityQuantity; prioritySalesByProduct.set(productCode, priority); }
+      if (priorityQuantity > 0 && priorityCustomerCount > 0) prioritySalesByProduct.set(productCode, { customerCount: priorityCustomerCount, totalQuantity: priorityQuantity });
     }
     const sessionProductCodes = [...new Set([...vehicleStockByProduct.keys(), ...windowQtyByProduct.keys()])];
     const productRows = sessionProductCodes.length ? await timed("products-lookup", () => bounded({ companyId: ctx.companyId, entityName: "Products", projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }, { field: "Category", as: "category" }], scope: { product: { values: sessionProductCodes } } })) : [];
@@ -354,7 +359,7 @@ export class SmartLoadingService {
         productCode: productMeta.get(productCode)?.code ?? productCode,
         productName: productMeta.get(productCode)?.name ?? productCode,
         category: productMeta.get(productCode)?.category ?? null,
-        routeCustomerCount: value.customers.size,
+        routeCustomerCount: value.customerCount,
         totalQuantity: value.totalQuantity,
         currentVehicleStock: vehicleStockByProduct.get(productCode) ?? null,
       })),
