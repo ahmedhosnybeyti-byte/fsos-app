@@ -3,7 +3,6 @@ import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingPriorityProduct, typ
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
 import { LostOpportunityService } from "../lost-opportunity/lost-opportunity.service";
-import type { EntityQueryResult } from "../rie/entity-provider.interface";
 import { selectRoutePriorityProducts } from "./smart-loading-priority";
 
 // Smart Loading ط£آ¢أ¢â€ڑآ¬أ¢â‚¬â€Œ read-only, computed-on-request from RIE (no new table, no
@@ -182,211 +181,85 @@ export class SmartLoadingService {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
   }
 
-  private async tryEntity(ctx: ReturnType<SmartLoadingService["rieContext"]>, entityName: string): Promise<EntityQueryResult> {
-    try {
-      return await this.rieFacade.getEntityRecords(entityName, ctx);
-    } catch {
-      // Availability is part of the response contract: swallowing a provider
-      // failure as an empty list would incorrectly claim there are no
-      // opportunities.
-      return { entityName, available: false, records: [], fields: [], warnings: [] };
-    }
-  }
-
   async getSession(user: AuthenticatedUser, requestedTargetDate?: string, staleDaysThreshold = DEFAULT_SMART_LOADING_STALE_DAYS): Promise<SmartLoadingSession> {
     if (!user.companyId) throw new ForbiddenException();
     const ctx = this.rieContext(user);
     const targetDate = parseTargetDate(requestedTargetDate);
     const targetDateIso = isoDay(targetDate.getTime());
-    // The stale card belongs to this loading session. Before `isStale` moved
-    // to the API, the UI compared sales against `session.asOfDate` (the
-    // target loading date); retain that same reference date on the server.
     const staleAsOfDate = targetDate;
-
-    const [productsResult, customersResult, invoicesResult, invoiceItemsResult, returnsResult, returnItemsResult, vanInventoryRecords] = await Promise.all([
-      this.rieFacade.getEntityRecords("Products", ctx),
-      this.tryEntity(ctx, "Customers"),
-      this.tryEntity(ctx, "Invoices"),
-      this.tryEntity(ctx, "Invoice Items"),
-      this.tryEntity(ctx, "Returns"),
-      this.tryEntity(ctx, "Return Items"),
-      this.rieFacade.getEntityRecords("Van Inventory", ctx),
-    ]);
-    const customersRecords = customersResult.records;
-    const customerNamesByCode = new Map(
-      customersRecords.map((customer) => [
-        String(customer.CustomerCode ?? "").trim(),
-        String(customer.CustomerName ?? customer.CustomerCode ?? "").trim(),
-      ]),
-    );
-    const invoicesRecords = invoicesResult.records;
-    const invoiceItemsRecords = invoiceItemsResult.records;
-    const returnsRecords = returnsResult.records;
-    const returnItemsRecords = returnItemsResult.records;
-    const lostOpportunityDataUnavailable = !customersResult.available || !invoicesResult.available || !invoiceItemsResult.available;
-
-    const vehicleStockAvailable = vanInventoryRecords.available && vanInventoryRecords.records.length > 0;
-
-    // ---- Van Inventory -> currentVehicleStock. Latest ReportDate only
-    // (a snapshot entity ط£آ¢أ¢â€ڑآ¬أ¢â‚¬â€Œ see canonical-entities.data.ts), same pattern
-    // as visit-copilot.service.ts's latestVanStockSet. RIE hierarchy
-    // scoping has already narrowed `records` to routes the caller may
-    // see (a SALES_REP gets only their own route's rows).
-    const latestReportIsoByRoute = new Map<string, string>();
-    for (const row of vanInventoryRecords.records) {
-      const t = toEpochMs(row.ReportDate);
-      const routeId = normalizedRouteId(row.RouteID);
-      if (!routeId) continue;
-      if (t === null) continue;
-      const d = isoDay(t);
-      const previous = latestReportIsoByRoute.get(routeId);
-      if (!previous || d > previous) latestReportIsoByRoute.set(routeId, d);
-    }
-    const activeVehicleRouteIds = new Set(latestReportIsoByRoute.keys());
-    const vehicleStockByProduct = new Map<string, number>();
-    if (vehicleStockAvailable && activeVehicleRouteIds.size > 0) {
-      for (const row of vanInventoryRecords.records) {
-        const t = toEpochMs(row.ReportDate);
-        const routeId = normalizedRouteId(row.RouteID);
-        if (t === null || !routeId || isoDay(t) !== latestReportIsoByRoute.get(routeId)) continue;
-        const productCode = normalizedProductCode(row.ProductCode);
-        if (!productCode) continue;
-        const qty = toFiniteNumber(row.Quantity) ?? 0;
-        vehicleStockByProduct.set(productCode, (vehicleStockByProduct.get(productCode) ?? 0) + qty);
-      }
-    }
-
-    // ---- Products -> category (+ name fallback).
-    const productMeta = new Map<string, { code: string; name: string; category: string | null }>();
-    if (productsResult.available) {
-      for (const p of productsResult.records) {
-        const code = normalizedProductCode(p.ProductCode);
-        if (!code) continue;
-        productMeta.set(code, {
-          code: String(p.ProductCode ?? code).trim() || code,
-          name: String(p.ProductName ?? p.ProductCode ?? code).trim() || code,
-          category: p.Category ? String(p.Category).trim() || null : null,
-        });
-      }
-    }
-
-    // ---- Lost Opportunity: next-day route customers, customer/product grain.
-    // Route Assignments are not a mapped RIE dataset yet, so the documented
-    // current source is Customers.VisitDay. Values are normalised here rather
-    // than compared as raw display text.
-    const targetRouteWeekday = weekdayForDate(targetDate);
-    const normalizeKey = (value: unknown) => String(value ?? "").trim();
-    const nextRouteCustomers = new Map<string, string>();
-    const routeCustomersByCode = new Map<string, { customerCode: string; customerName: string; routeId: string | null; visitSequence: number | null }>();
-    let hasUnsupportedVisitDayFormat = false;
-    for (const customer of customersRecords) {
-      const rawVisitDay = normalizeKey(customer.VisitDay);
-      const visitDay = normalizeVisitDay(rawVisitDay);
-      if (!visitDay) {
-        if (rawVisitDay) hasUnsupportedVisitDayFormat = true;
-        continue;
-      }
-      if (visitDay !== targetRouteWeekday) continue;
-      const customerCode = normalizeKey(customer.CustomerCode);
-      if (!customerCode) continue;
-      const customerName = normalizeKey(customer.CustomerName) || customerCode;
-      nextRouteCustomers.set(customerCode, customerName);
-      routeCustomersByCode.set(customerCode, { customerCode, customerName, routeId: normalizeKey(customer.RouteID) || null, visitSequence: toFiniteNumber(customer.VisitSequence) });
-    }
-
-    const lostOpportunityResult = await this.lostOpportunityService.detect({
-      ...ctx,
-      selectedDate: targetDateIso,
-      customerCodes: [...nextRouteCustomers.keys()],
-      customerNames: nextRouteCustomers,
-    });
-    const lostOpportunities = lostOpportunityResult.opportunities;
-    const lostOpportunityReason = lostOpportunityDataUnavailable
-      ? "data-unavailable"
-      : nextRouteCustomers.size === 0
-        ? hasUnsupportedVisitDayFormat ? "unsupported-visit-day-format" : "no-tomorrow-route-customers"
-        : lostOpportunityResult.status === "no-customers" ? "no-tomorrow-route-customers" : lostOpportunityResult.status;
-    // ---- Invoices -> per-InvoiceNo customer/date lookup (same join shape
-    // as sgi.service.ts / team-performance.service.ts).
-    const invoiceMetaByNo = new Map<string, { date: number; customerCode: string; routeId: string }>();
-    for (const inv of invoicesRecords) {
-      const no = String(inv.InvoiceNo ?? "").trim();
-      const t = toEpochMs(inv.InvoiceDate);
-      const customerCode = String(inv.CustomerCode ?? "").trim();
-      const routeId = normalizedRouteId(inv.RouteID);
-      if (no && t !== null && customerCode) invoiceMetaByNo.set(no, { date: t, customerCode, routeId });
-    }
-
-    // ---- Invoice Items joined to Invoices -> lastSaleDate + weekly
-    // average, per ProductCode. lastSaleDate is the max InvoiceDate seen
-    // for that product on the RouteID(s) of the current Van Inventory
-    // snapshot. RIE still scopes the records to the caller's company and
-    // hierarchy; the explicit RouteID join prevents another visible van
-    // from changing the stale status of this van's stock.
-    //
-    // weeklyAverageSales (2026-07-28 correction, approved formula):
-    // total sold Quantity over the last 3 months / 12 ط£آ¢أ¢â€ڑآ¬أ¢â‚¬â€Œ NOT a rolling
-    // 4-week window. 2026-07-28 (second correction): "last 3 months" is a
-    // rolling window measured from today's exact date (now minus 3
-    // calendar months, same day-of-month), not calendar-month boundaries ط£آ¢أ¢â€ڑآ¬أ¢â‚¬â€Œ
-    // e.g. run on the 28th, the window starts on the 28th three months
-    // back, not the 1st of that month.
     const now = new Date();
     const threeMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - MONTHS_LOOKBACK, now.getUTCDate()));
     const nowMs = now.getTime();
     const windowStartMs = threeMonthsAgo.getTime();
+    const bounded = async (query: Parameters<RieFacade["queryCanonicalRecords"]>[0]) => {
+      const result = await this.rieFacade.queryCanonicalRecords({ ...query, pagination: { limit: 5_000 } });
+      if (result.page.hasMore) throw new BadRequestException("Smart Loading scoped result exceeds its safe response limit.");
+      return result.records;
+    };
 
-    const lastSaleMsByProduct = new Map<string, number>();
+    // Each RIE call applies company + hierarchy scope in PostgreSQL. Facts
+    // are grouped before leaving PostgreSQL; Node below only combines these
+    // bounded, screen-sized result sets.
+    const targetRouteWeekday = weekdayForDate(targetDate);
+    const [routeCustomerRows, visitDayRows] = await Promise.all([
+      bounded({ ...ctx, entityName: "Customers", projection: [{ field: "CustomerCode", as: "customerCode" }, { field: "CustomerName", as: "customerName" }, { field: "RouteID", as: "routeId" }, { field: "VisitSequence", as: "visitSequence" }], scope: { fields: [{ field: "VisitDay", values: VISIT_DAY_ALIASES[targetRouteWeekday] }] } }),
+      bounded({ ...ctx, entityName: "Customers", projection: [{ field: "VisitDay", as: "visitDay" }], groupBy: [{ field: "VisitDay" }], aggregates: [{ op: "count", as: "count" }] }),
+    ]);
+    const nextRouteCustomers = new Map<string, string>();
+    const routeCustomersByCode = new Map<string, { customerCode: string; customerName: string; routeId: string | null; visitSequence: number | null }>();
+    for (const row of routeCustomerRows) {
+      const customerCode = String(row.customerCode ?? "").trim();
+      if (!customerCode) continue;
+      const customerName = String(row.customerName ?? customerCode).trim() || customerCode;
+      nextRouteCustomers.set(customerCode, customerName);
+      routeCustomersByCode.set(customerCode, { customerCode, customerName, routeId: String(row.routeId ?? "").trim() || null, visitSequence: toFiniteNumber(row.visitSequence) });
+    }
+    const hasUnsupportedVisitDayFormat = visitDayRows.some((row) => {
+      const value = String(row.visitDay ?? "").trim();
+      return !!value && !normalizeVisitDay(value);
+    });
+
+    const latestByRouteRows = await bounded({ ...ctx, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }], groupBy: [{ field: "RouteID" }], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }] });
+    const latestReportIsoByRoute = new Map<string, string>();
+    for (const row of latestByRouteRows) {
+      const routeId = normalizedRouteId(row.routeId);
+      const reportDate = String(row.latestReportDate ?? "").trim().slice(0, 10);
+      if (routeId && reportDate) latestReportIsoByRoute.set(routeId, reportDate);
+    }
+    const activeVehicleRouteIds = new Set(latestReportIsoByRoute.keys());
+    const inventoryByRoute = await Promise.all([...latestReportIsoByRoute.entries()].map(([routeId, reportDate]) => bounded({ ...ctx, entityName: "Van Inventory", projection: [{ field: "ProductCode", as: "productCode" }], groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { route: { values: [routeId] }, date: { field: "ReportDate", values: [reportDate] } } })));
+    const vehicleStockByProduct = new Map<string, number>();
+    for (const rows of inventoryByRoute) for (const row of rows) {
+      const productCode = normalizedProductCode(row.productCode);
+      if (productCode) vehicleStockByProduct.set(productCode, (vehicleStockByProduct.get(productCode) ?? 0) + (toFiniteNumber(row.quantity) ?? 0));
+    }
+    const vehicleStockAvailable = activeVehicleRouteIds.size > 0;
+    const invoiceJoin = [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }] as const;
+    const salesScope = { route: { values: [...activeVehicleRouteIds], source: "invoice" }, routeFallback: { primary: { field: "RouteID" }, fallback: { field: "RouteID", source: "invoice" }, values: [...activeVehicleRouteIds] }, date: { field: "InvoiceDate", source: "invoice", to: targetDateIso } } as const;
+    const lastSaleRows = activeVehicleRouteIds.size ? await bounded({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "maxText", field: "InvoiceDate", source: "invoice", as: "lastSaleDate" }], scope: salesScope }) : [];
+    const lastSaleMsByProduct = new Map(lastSaleRows.map((row) => [normalizedProductCode(row.productCode), toEpochMs(row.lastSaleDate)]).filter((entry): entry is [string, number] => !!entry[0] && entry[1] !== null));
+    const staleCodes = [...vehicleStockByProduct.entries()].filter(([code, stock]) => isStaleVehicleInventory(stock, lastSaleMsByProduct.get(code) ?? null, staleAsOfDate, staleDaysThreshold)).map(([code]) => code);
+    const purchaseRows = staleCodes.length ? await bounded({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }, { field: "CustomerCode", source: "invoice", as: "customerCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }, { field: "CustomerCode", source: "invoice" }], aggregates: [{ op: "sum", field: "Quantity", filterPositiveField: { field: "Quantity" }, as: "totalQuantity" }, { op: "countDistinct", field: "InvoiceNo", filterPositiveField: { field: "Quantity" }, as: "purchaseFrequency" }, { op: "maxText", field: "InvoiceDate", source: "invoice", filterPositiveField: { field: "Quantity" }, as: "lastPurchaseDate" }], scope: { ...salesScope, product: { values: staleCodes } } }) : [];
+    const priorityRows = nextRouteCustomers.size && activeVehicleRouteIds.size ? await bounded({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }, { field: "CustomerCode", source: "invoice", as: "customerCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }, { field: "CustomerCode", source: "invoice" }], aggregates: [{ op: "sum", field: "Quantity", as: "windowQuantity" }, { op: "sum", field: "Quantity", filterPositiveField: { field: "Quantity" }, as: "priorityQuantity" }], scope: { route: { values: [...activeVehicleRouteIds], source: "invoice" }, routeFallback: { primary: { field: "RouteID" }, fallback: { field: "RouteID", source: "invoice" }, values: [...activeVehicleRouteIds] }, customer: { values: [...nextRouteCustomers.keys()], source: "invoice" }, date: { field: "InvoiceDate", source: "invoice", from: windowStartMs, to: nowMs } } }) : [];
     const windowQtyByProduct = new Map<string, number>();
     const prioritySalesByProduct = new Map<string, { customers: Set<string>; totalQuantity: number }>();
-    const customerPurchasesByProduct = new Map<string, Map<string, { totalQuantity: number; invoiceNumbers: Set<string>; lastPurchaseMs: number }>>();
-
-    for (const item of invoiceItemsRecords) {
-      const invoiceNo = String(item.InvoiceNo ?? "").trim();
-      const invoice = invoiceMetaByNo.get(invoiceNo);
-      if (!invoice) continue;
-      // The loading session is a point-in-time operational decision. Sales
-      // entered after its selected target date must not make a SKU appear
-      // recently sold for that earlier operational date.
-      if (!isSaleOnOrBeforeTargetDate(invoice.date, targetDateIso)) continue;
-      if (!isRouteInActiveVehicleScope(item.RouteID, invoice.routeId, activeVehicleRouteIds)) continue;
-      const productCode = normalizedProductCode(item.ProductCode);
+    for (const row of priorityRows) {
+      const productCode = normalizedProductCode(row.productCode), customerCode = String(row.customerCode ?? "").trim(), windowQuantity = toFiniteNumber(row.windowQuantity) ?? 0, priorityQuantity = toFiniteNumber(row.priorityQuantity) ?? 0;
       if (!productCode) continue;
-
-      // Staleness belongs to the stock currently carried by this caller's
-      // vehicle scope. Its last-sale date must therefore use all of that
-      // scope's sales, not just customers scheduled for the next visit.
-      const prevLast = lastSaleMsByProduct.get(productCode);
-      if (prevLast === undefined || invoice.date > prevLast) lastSaleMsByProduct.set(productCode, invoice.date);
-
-      const quantity = toFiniteNumber(item.Quantity) ?? 0;
-      if (quantity > 0) {
-        const purchasesByCustomer = customerPurchasesByProduct.get(productCode) ?? new Map();
-        const purchase = purchasesByCustomer.get(invoice.customerCode) ?? {
-          totalQuantity: 0,
-          invoiceNumbers: new Set<string>(),
-          lastPurchaseMs: invoice.date,
-        };
-        purchase.totalQuantity += quantity;
-        purchase.invoiceNumbers.add(invoiceNo);
-        purchase.lastPurchaseMs = Math.max(purchase.lastPurchaseMs, invoice.date);
-        purchasesByCustomer.set(invoice.customerCode, purchase);
-        customerPurchasesByProduct.set(productCode, purchasesByCustomer);
-      }
-
-      // Demand and priority remain route-visit calculations, so they retain
-      // the next-route-customer filter independently from stale detection.
-      if (!nextRouteCustomers.has(invoice.customerCode)) continue;
-      if (invoice.date >= windowStartMs && invoice.date <= nowMs) {
-        windowQtyByProduct.set(productCode, (windowQtyByProduct.get(productCode) ?? 0) + quantity);
-        if (quantity > 0) {
-          const priority = prioritySalesByProduct.get(productCode) ?? { customers: new Set<string>(), totalQuantity: 0 };
-          priority.customers.add(invoice.customerCode);
-          priority.totalQuantity += quantity;
-          prioritySalesByProduct.set(productCode, priority);
-        }
-      }
+      windowQtyByProduct.set(productCode, (windowQtyByProduct.get(productCode) ?? 0) + windowQuantity);
+      if (priorityQuantity > 0 && customerCode) { const priority = prioritySalesByProduct.get(productCode) ?? { customers: new Set<string>(), totalQuantity: 0 }; priority.customers.add(customerCode); priority.totalQuantity += priorityQuantity; prioritySalesByProduct.set(productCode, priority); }
     }
+    const sessionProductCodes = [...new Set([...vehicleStockByProduct.keys(), ...windowQtyByProduct.keys()])];
+    const productRows = sessionProductCodes.length ? await bounded({ companyId: ctx.companyId, entityName: "Products", projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }, { field: "Category", as: "category" }], scope: { product: { values: sessionProductCodes } } }) : [];
+    const productMeta = new Map(productRows.map((row) => { const code = normalizedProductCode(row.productCode); return [code, { code: String(row.productCode ?? code).trim() || code, name: String(row.productName ?? row.productCode ?? code).trim() || code, category: row.category ? String(row.category).trim() || null : null }] as const; }).filter(([code]) => !!code));
+    const staleCustomerCodes = [...new Set(purchaseRows.map((row) => String(row.customerCode ?? "").trim()).filter(Boolean))];
+    const staleCustomerRows = staleCustomerCodes.length ? await bounded({ ...ctx, entityName: "Customers", projection: [{ field: "CustomerCode", as: "customerCode" }, { field: "CustomerName", as: "customerName" }], scope: { customer: { values: staleCustomerCodes } } }) : [];
+    const customerNamesByCode = new Map(staleCustomerRows.map((row) => [String(row.customerCode ?? "").trim(), String(row.customerName ?? row.customerCode ?? "").trim()]));
+    const customerPurchasesByProduct = new Map<string, Map<string, { totalQuantity: number; purchaseFrequency: number; lastPurchaseMs: number }>>();
+    for (const row of purchaseRows) { const productCode = normalizedProductCode(row.productCode), customerCode = String(row.customerCode ?? "").trim(), lastPurchaseMs = toEpochMs(row.lastPurchaseDate); if (!productCode || !customerCode || lastPurchaseMs === null || (toFiniteNumber(row.totalQuantity) ?? 0) <= 0) continue; const byCustomer = customerPurchasesByProduct.get(productCode) ?? new Map(); byCustomer.set(customerCode, { totalQuantity: toFiniteNumber(row.totalQuantity) ?? 0, purchaseFrequency: toFiniteNumber(row.purchaseFrequency) ?? 0, lastPurchaseMs }); customerPurchasesByProduct.set(productCode, byCustomer); }
+    const lostOpportunityResult = await this.lostOpportunityService.detect({ ...ctx, selectedDate: targetDateIso, customerCodes: [...nextRouteCustomers.keys()], customerNames: nextRouteCustomers });
+    const lostOpportunities = lostOpportunityResult.opportunities;
+    const lostOpportunityReason = nextRouteCustomers.size === 0 ? hasUnsupportedVisitDayFormat ? "unsupported-visit-day-format" : "no-tomorrow-route-customers" : lostOpportunityResult.status === "no-customers" ? "no-tomorrow-route-customers" : lostOpportunityResult.status;
 
     // ---- Assemble one row per product the caller actually has vehicle
     // stock data for (Van Inventory is the driving set ط£آ¢أ¢â€ڑآ¬أ¢â‚¬â€Œ a loading list is
@@ -395,7 +268,6 @@ export class SmartLoadingService {
     const products: SmartLoadingProduct[] = [];
     const attentionList: { id: string; message: string }[] = [];
 
-    const sessionProductCodes = new Set([...vehicleStockByProduct.keys(), ...windowQtyByProduct.keys()]);
     for (const productCode of sessionProductCodes) {
       const currentVehicleStock = vehicleStockAvailable ? vehicleStockByProduct.get(productCode) ?? 0 : null;
       const meta = productMeta.get(productCode);
@@ -424,7 +296,7 @@ export class SmartLoadingService {
       .filter((product) => product.isStale)
       .map((product) => {
         const customerPurchases = [...(customerPurchasesByProduct.get(normalizedProductCode(product.productCode))?.entries() ?? [])];
-        const maxFrequency = Math.max(...customerPurchases.map(([, purchase]) => purchase.invoiceNumbers.size), 1);
+        const maxFrequency = Math.max(...customerPurchases.map(([, purchase]) => purchase.purchaseFrequency), 1);
         const maxQuantity = Math.max(...customerPurchases.map(([, purchase]) => purchase.totalQuantity), 1);
         const earliestPurchaseMs = Math.min(...customerPurchases.map(([, purchase]) => purchase.lastPurchaseMs), 0);
         const latestPurchaseMs = Math.max(...customerPurchases.map(([, purchase]) => purchase.lastPurchaseMs), 0);
@@ -440,9 +312,9 @@ export class SmartLoadingService {
               customerCode,
               customerName: customerNamesByCode.get(customerCode) || customerCode,
               totalQuantity: purchase.totalQuantity,
-              purchaseFrequency: purchase.invoiceNumbers.size,
+              purchaseFrequency: purchase.purchaseFrequency,
               lastPurchaseDate: isoDay(purchase.lastPurchaseMs),
-              rankingScore: purchase.invoiceNumbers.size / maxFrequency + purchase.totalQuantity / maxQuantity + recency,
+              rankingScore: purchase.purchaseFrequency / maxFrequency + purchase.totalQuantity / maxQuantity + recency,
             };
           })
           .sort((a, b) => b.rankingScore - a.rankingScore || b.purchaseFrequency - a.purchaseFrequency || b.totalQuantity - a.totalQuantity || b.lastPurchaseDate.localeCompare(a.lastPurchaseDate) || a.customerName.localeCompare(b.customerName, "ar"))

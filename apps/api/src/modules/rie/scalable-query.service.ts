@@ -3,7 +3,7 @@ import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import type { EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieQueryAggregation, RieQueryField, RieQueryJoin, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieValueScope } from "./scalable-query.types";
+import type { RieDateScope, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieValueScope } from "./scalable-query.types";
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
@@ -45,6 +45,7 @@ export class RieScalableQueryService {
       if (aggregate.field) assertField({ field: aggregate.field, source: aggregate.source }, aliases);
       if (aggregate.multiplier) assertField(aggregate.multiplier, aliases);
       if (aggregate.multiplierFallback) assertField(aggregate.multiplierFallback, aliases);
+      if (aggregate.filterPositiveField) assertField(aggregate.filterPositiveField, aliases);
       if (aggregate.op !== "count" && !aggregate.field) throw new Error(`${aggregate.op} aggregate requires a field.`);
       if (aggregate.op === "sumProduct" && !aggregate.multiplier) throw new Error("sumProduct aggregate requires a multiplier field.");
     }
@@ -89,6 +90,7 @@ export class RieScalableQueryService {
         ...(aggregate.field ? [{ field: aggregate.field, source: aggregate.source }] : []),
         ...(aggregate.multiplier ? [aggregate.multiplier] : []),
         ...(aggregate.multiplierFallback ? [aggregate.multiplierFallback] : []),
+        ...(aggregate.filterPositiveField ? [aggregate.filterPositiveField] : []),
       ])]
         .some((field) => field.source && scopedJoinAliases.has(field.source));
     const baseSemiJoins = canCollapseScopedJoins ? [] : scopedSemiJoinsFor("base", joins, scopedJoinAliases);
@@ -152,6 +154,11 @@ export class RieScalableQueryService {
       if (field) predicates.push(datePredicate(field, cteAliases));
     }
     addScopedValueScope(predicates, input.scope?.route, "RouteID", aliases, cteAliases, scoped);
+    // This predicate intentionally stays at the joined-query level: its
+    // primary/fallback fields live on different entity aliases. The regular
+    // route scope still bounds the joined header CTE before it reaches a
+    // high-cardinality fact join; this adds exact line-route parity.
+    if (!cteAlias && input.scope?.routeFallback) predicates.push(routeFallbackPredicate(input.scope.routeFallback, aliases));
     addScopedValueScope(predicates, input.scope?.rep, "SalesRepID", aliases, cteAliases, scoped);
     addScopedValueScope(predicates, input.scope?.customer, "CustomerCode", aliases, cteAliases, scoped);
     addScopedValueScope(predicates, input.scope?.product, "ProductCode", aliases, cteAliases, scoped);
@@ -245,6 +252,14 @@ function inPredicate(field: RieQueryField, values: readonly string[], aliases: S
   assertField(field, aliases);
   return values.length ? Prisma.sql`${normalizedField(field)} IN (${Prisma.join(values.map((value) => value.trim().toLowerCase()))})` : Prisma.sql`FALSE`;
 }
+function routeFallbackPredicate(scope: RieRouteFallbackScope, aliases: Set<string>): Prisma.Sql {
+  assertField(scope.primary, aliases);
+  assertField(scope.fallback, aliases);
+  if (!scope.values.length) return Prisma.sql`FALSE`;
+  const primary = textField(scope.primary);
+  const fallback = textField(scope.fallback);
+  return Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${primary}, '')), ''), ${fallback}, ''))) IN (${Prisma.join(scope.values.map((value) => value.trim().toLowerCase()))})`;
+}
 function datePredicate(scope: RieDateScope, aliases: Set<string>): Prisma.Sql {
   assertField(scope, aliases);
   const values = scope.values ?? [];
@@ -261,23 +276,27 @@ function aggregateSql(aggregate: RieQueryAggregation): Prisma.Sql {
   const alias = quoted(aggregate.as);
   if (aggregate.op === "count" && !aggregate.field) return Prisma.sql`COUNT(*)::double precision AS ${alias}`;
   const field = textField({ field: aggregate.field!, source: aggregate.source });
+  const positiveFilter = aggregate.filterPositiveField
+    ? Prisma.sql` FILTER (WHERE ${numericField(textField(aggregate.filterPositiveField))} > 0)`
+    : Prisma.empty;
   if (aggregate.op === "count") return Prisma.sql`COUNT(NULLIF(BTRIM(COALESCE(${field}, '')), ''))::double precision AS ${alias}`;
-  if (aggregate.op === "countDistinct") return Prisma.sql`COUNT(DISTINCT NULLIF(BTRIM(COALESCE(${field}, '')), ''))::double precision AS ${alias}`;
+  if (aggregate.op === "countDistinct") return Prisma.sql`(COUNT(DISTINCT NULLIF(BTRIM(COALESCE(${field}, '')), ''))${positiveFilter})::double precision AS ${alias}`;
   if (aggregate.op === "arrayAggDistinct") return Prisma.sql`ARRAY_AGG(DISTINCT NULLIF(BTRIM(COALESCE(${field}, '')), '')) FILTER (WHERE NULLIF(BTRIM(COALESCE(${field}, '')), '') IS NOT NULL) AS ${alias}`;
-  if (aggregate.op === "minText" || aggregate.op === "maxText") return Prisma.sql`${Prisma.raw(aggregate.op === "minText" ? "MIN" : "MAX")}(NULLIF(BTRIM(COALESCE(${field}, '')), '')) AS ${alias}`;
-  const numeric = Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`;
+  if (aggregate.op === "minText" || aggregate.op === "maxText") return Prisma.sql`${Prisma.raw(aggregate.op === "minText" ? "MIN" : "MAX")}(NULLIF(BTRIM(COALESCE(${field}, '')), ''))${positiveFilter} AS ${alias}`;
+  const numeric = numericField(field);
   if (aggregate.op === "sumProduct") {
     const multiplier = textField(aggregate.multiplier!);
     const numericMultiplier = Prisma.sql`CASE WHEN BTRIM(COALESCE(${multiplier}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${multiplier}, ''))::double precision ELSE NULL END`;
     if (aggregate.multiplierFallback) {
       const fallback = textField(aggregate.multiplierFallback);
       const numericFallback = Prisma.sql`CASE WHEN BTRIM(COALESCE(${fallback}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${fallback}, ''))::double precision ELSE NULL END`;
-      return Prisma.sql`SUM(${numeric} * CASE WHEN ${multiplier} IS NULL THEN ${numericFallback} ELSE ${numericMultiplier} END) AS ${alias}`;
+      return Prisma.sql`SUM(${numeric} * CASE WHEN ${multiplier} IS NULL THEN ${numericFallback} ELSE ${numericMultiplier} END)${positiveFilter} AS ${alias}`;
     }
-    return Prisma.sql`SUM(${numeric} * ${numericMultiplier}) AS ${alias}`;
+    return Prisma.sql`SUM(${numeric} * ${numericMultiplier})${positiveFilter} AS ${alias}`;
   }
-  return Prisma.sql`${Prisma.raw({ sum: "SUM", avg: "AVG", min: "MIN", max: "MAX" }[aggregate.op])}(${numeric}) AS ${alias}`;
+  return Prisma.sql`${Prisma.raw({ sum: "SUM", avg: "AVG", min: "MIN", max: "MAX" }[aggregate.op])}(${numeric})${positiveFilter} AS ${alias}`;
 }
+function numericField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`; }
 // Field names are validated identifiers.  Keep them as SQL literals rather
 // than bind parameters so SELECT/GROUP BY expressions remain identical.
 function textField(field: RieQueryField): Prisma.Sql { return Prisma.sql`${Prisma.raw(field.source ?? "base")}."data" ->> ${Prisma.raw(`'${field.field}'`)}`; }

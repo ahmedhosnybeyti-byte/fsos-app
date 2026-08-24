@@ -47,7 +47,7 @@ async function bootstrap() {
     res.setHeader("X-Request-Id", requestId);
     const start = Date.now();
     const memoryAuditEnabled = process.env.REQUEST_MEMORY_AUDIT_ENABLED === "true";
-    const importantRequest = /^\/api\/v1\/(decision-analytics-studio|dashboard-performance|heatmap|team-performance)/.test(req.path);
+    const importantRequest = /^\/api\/v1\/(decision-analytics-studio|dashboard-performance|heatmap|team-performance|smart-loading\/session)/.test(req.path);
     const rssBefore = memoryAuditEnabled && importantRequest ? process.memoryUsage().rss : 0;
     let peakRss = rssBefore;
     const sampler = rssBefore ? setInterval(() => { peakRss = Math.max(peakRss, process.memoryUsage().rss); }, 50) : undefined;
