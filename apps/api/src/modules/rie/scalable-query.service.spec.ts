@@ -42,3 +42,10 @@ test("scopes Customers.City through Invoices before Invoice Items", async () => 
   assert.match(sql, /FROM customer_active customer_scope/);
   assert.match(sql, /invoice_source\."data" ->> 'CustomerCode'/);
 });
+
+test("scalable query supports distinct array aggregation without materializing facts", async () => {
+  let captured: { strings?: readonly string[] } | undefined;
+  const service = new RieScalableQueryService({ $queryRaw: async (query: typeof captured) => { captured = query; return [{ routeIds: ["R-1"] }]; } } as never, { resolveAllowedRouteIds: async () => null } as never);
+  await service.query({ companyId: "company-1", entityName: "Collections", projection: [], aggregates: [{ op: "arrayAggDistinct", field: "RouteID", as: "routeIds" }], pagination: { limit: 1 } });
+  assert.match(captured?.strings?.join(" ") ?? "", /ARRAY_AGG\(DISTINCT/);
+});

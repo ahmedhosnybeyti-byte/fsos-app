@@ -9,7 +9,8 @@ import {
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { retrieveScenarios } from "../assistant/data/scenario-retrieval.util";
 import { RieFacade } from "../rie/rie-facade.service";
-import type { EntityQueryResult } from "../rie/entity-provider.interface";
+import { PrismaService } from "../../common/prisma";
+import type { RieScalableQueryResult } from "../rie/scalable-query.types";
 
 function toFiniteNumber(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -20,37 +21,9 @@ function toFiniteNumber(value: unknown): number | null {
   return null;
 }
 
-function toEpochMs(value: unknown): number | null {
-  if (value instanceof Date) return value.getTime();
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() !== "") {
-    const t = Date.parse(value);
-    return Number.isNaN(t) ? null : t;
-  }
-  return null;
-}
-
-interface ResolvedRep {
-  repKey: string;
-  repName: string;
-  repEmail: string;
-  supervisorEmail: string | null;
-  supervisorName: string | null;
-}
-
-interface RepAccumulator {
-  routeIds: Set<string>;
-  repName: string;
-  repEmail: string;
-  supervisorEmail: string | null;
-  supervisorName: string | null;
-  sales: number;
-  salesPrior: number;
-  collection: number;
-  collectionPrior: number;
-  returns: number;
-  returnsPrior: number;
-}
+type Metric = "sales" | "collection" | "returns";
+type SmallRow = Record<string, unknown>;
+interface RepAccumulator { routeIds: string[]; repName: string; repEmail: string; supervisorEmail: string | null; supervisorName: string | null; sales: number; salesPrior: number; collection: number; collectionPrior: number; returns: number; returnsPrior: number; }
 
 // Migration #7 (ADR-001 / RIE Migration Plan) — RIE-backed, no file/column
 // mapping. FilesService and PrismaService are no longer dependencies of
@@ -82,193 +55,56 @@ interface RepAccumulator {
 // migrated screen.
 @Injectable()
 export class TeamPerformanceService {
-  constructor(private readonly rieFacade: RieFacade) {}
-
-  private assertEntityAvailable(result: EntityQueryResult, arabicLabel: string): void {
-    if (!result.available) {
-      throw new NotFoundException(`بيانات "${arabicLabel}" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.`);
-    }
-  }
+  constructor(private readonly rieFacade: RieFacade, private readonly prisma: PrismaService) {}
 
   private rieContext(user: AuthenticatedUser) {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
   }
 
-  // Routes.SalesRepID -> Employees, then Employees.DirectManagerID ->
-  // Employees again for the supervisor half (product decision #2). Returns
-  // null only when routeId itself is blank; every other gap degrades to a
-  // fallback identifier instead of dropping the row.
-  private buildRepResolver(routesResult: EntityQueryResult, employeesResult: EntityQueryResult): (routeId: string) => ResolvedRep | null {
-    const routeSalesRep = new Map<string, string>();
-    for (const route of routesResult.records) {
-      const routeId = String(route.RouteID ?? "").trim();
-      const salesRepId = String(route.SalesRepID ?? "").trim();
-      if (routeId && salesRepId) routeSalesRep.set(routeId, salesRepId);
-    }
+  private numeric(value: unknown) { return toFiniteNumber(value) ?? 0; }
 
-    const employeeById = new Map<string, { name: string; email: string; managerId: string | null }>();
-    if (employeesResult.available) {
-      for (const emp of employeesResult.records) {
-        const id = String(emp.EmployeeID ?? "").trim();
-        if (!id) continue;
-        const managerId = String(emp.DirectManagerID ?? "").trim();
-        employeeById.set(id, {
-          name: String(emp.EmployeeName ?? id),
-          email: String(emp.Email ?? "").trim() || id,
-          managerId: managerId || null,
-        });
-      }
-    }
-
-    return (routeId: string): ResolvedRep | null => {
-      const trimmedRouteId = routeId.trim();
-      if (!trimmedRouteId) return null;
-
-      const salesRepId = routeSalesRep.get(trimmedRouteId);
-      if (!salesRepId) {
-        return { repKey: trimmedRouteId, repName: trimmedRouteId, repEmail: trimmedRouteId, supervisorEmail: null, supervisorName: null };
-      }
-      const emp = employeeById.get(salesRepId);
-      if (!emp) {
-        return { repKey: salesRepId, repName: salesRepId, repEmail: salesRepId, supervisorEmail: null, supervisorName: null };
-      }
-      const manager = emp.managerId ? employeeById.get(emp.managerId) : undefined;
-      return {
-        repKey: emp.email,
-        repName: emp.name,
-        repEmail: emp.email,
-        supervisorEmail: manager ? manager.email : null,
-        supervisorName: manager ? manager.name : null,
-      };
-    };
+  /**
+   * One bounded, grouped PostgreSQL result. Facts are filtered before their
+   * route/employee joins; Node only merges one already-aggregated row per
+   * rep/category/period. Route IDs are also distinct-aggregated in SQL.
+   */
+  private perRepMetric(ctx: ReturnType<TeamPerformanceService["rieContext"]>, metric: Metric, from: string, to: string, routeIds?: string[]) {
+    const definition = metric === "sales"
+      ? { entityName: "Invoice Items", amount: "LineTotal", date: { field: "InvoiceDate", source: "invoice" }, routeSource: "invoice", joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }] }
+      : metric === "collection"
+        ? { entityName: "Collections", amount: "Amount", date: { field: "CollectionDate" }, routeSource: "base", joins: [] }
+        : { entityName: "Returns", amount: "TotalAmount", date: { field: "ReturnDate" }, routeSource: "base", joins: [] };
+    const route = { entityName: "Routes", alias: "route", type: "left" as const, on: { left: { field: "RouteID", source: definition.routeSource === "base" ? undefined : definition.routeSource }, rightField: "RouteID" } };
+    const rep = { entityName: "Employees", alias: "rep", type: "left" as const, on: { left: { field: "SalesRepID", source: "route" }, rightField: "EmployeeID" } };
+    const manager = { entityName: "Employees", alias: "manager", type: "left" as const, on: { left: { field: "DirectManagerID", source: "rep" }, rightField: "EmployeeID" } };
+    const routeField = { field: "RouteID", ...(definition.routeSource === "base" ? {} : { source: definition.routeSource }) };
+    return this.rieFacade.queryCanonicalRecords({ ...ctx, entityName: definition.entityName, projection: [
+      { field: "SalesRepID", source: "route", as: "salesRepId" }, { field: "EmployeeName", source: "rep", as: "repName" }, { field: "Email", source: "rep", as: "repEmail" }, { field: "Email", source: "manager", as: "supervisorEmail" }, { field: "EmployeeName", source: "manager", as: "supervisorName" },
+    ], groupBy: [{ field: "SalesRepID", source: "route" }, { field: "EmployeeName", source: "rep" }, { field: "Email", source: "rep" }, { field: "Email", source: "manager" }, { field: "EmployeeName", source: "manager" }], joins: [...definition.joins, route, rep, manager], hierarchyRoute: routeField, scope: { date: { ...definition.date, from, to }, ...(routeIds?.length ? { route: { values: routeIds, source: definition.routeSource === "base" ? undefined : definition.routeSource } } : {}) }, aggregates: [{ op: "arrayAggDistinct", field: "RouteID", source: definition.routeSource === "base" ? undefined : definition.routeSource, as: "routeIds" }, { op: "sum", field: definition.amount, as: "value" }], pagination: { limit: 5000 } });
   }
 
   async query(user: AuthenticatedUser, input: TeamPerformanceRieQueryInput): Promise<TeamPerformanceResult> {
     const ctx = this.rieContext(user);
-    const fromTime = Date.parse(input.dateFrom);
-    const toTime = Date.parse(input.dateTo);
-    const priorFromTime = input.priorDateFrom ? Date.parse(input.priorDateFrom) : null;
-    const priorToTime = input.priorDateTo ? Date.parse(input.priorDateTo) : null;
-    const scopeFrom = priorFromTime ?? fromTime; const scopeTo = priorToTime ?? toTime;
-    const [routesResult, employeesResult, invoicesResult, invoiceItemsResult, collectionsResult, returnsResult, targetsResult] = await Promise.all([
-      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Routes", projection: [{ field: "RouteID" }, { field: "SalesRepID" }] }),
-      this.rieFacade.readCanonicalEntity({ companyId: ctx.companyId, entityName: "Employees", applyHierarchy: false, projection: [{ field: "EmployeeID" }, { field: "EmployeeName" }, { field: "Email" }, { field: "DirectManagerID" }] }),
-      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Invoices", projection: [{ field: "InvoiceNo" }, { field: "RouteID" }, { field: "InvoiceDate" }, { field: "CustomerCode" }], scope: { date: { field: "InvoiceDate", from: scopeFrom, to: scopeTo } } }),
-      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Invoice Items", projection: [{ field: "InvoiceNo" }, { field: "LineTotal" }, { field: "ProductCode" }], joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }], hierarchyRoute: { field: "RouteID", source: "invoice" }, scope: { date: { field: "InvoiceDate", source: "invoice", from: scopeFrom, to: scopeTo } } }),
-      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Collections", projection: [{ field: "RouteID" }, { field: "CollectionDate" }, { field: "Amount" }], scope: { date: { field: "CollectionDate", from: scopeFrom, to: scopeTo } } }),
-      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Returns", projection: [{ field: "RouteID" }, { field: "ReturnDate" }, { field: "TotalAmount" }], scope: { date: { field: "ReturnDate", from: scopeFrom, to: scopeTo } } }),
-      this.rieFacade.readCanonicalEntity({ ...ctx, entityName: "Targets", projection: [{ field: "Year" }, { field: "Month" }, { field: "RouteID" }, { field: "SalesTarget" }, { field: "CollectionTarget" }, { field: "ActiveCustomersTarget" }, { field: "SKUDistributionTarget" }] }),
-    ]);
-    // Routes/Employees are structural prerequisites for rep identity across
-    // the whole platform (same as every migrated screen) — not one of the
-    // three independent business categories, so this still hard-fails.
-    this.assertEntityAvailable(routesResult, "المسارات");
-
-    const requestedRouteIds = input.routeIds?.length ? new Set(input.routeIds) : null;
-    const visibleRouteIds = new Set(routesResult.records.map((route) => String(route.RouteID ?? "").trim()).filter(Boolean));
-    const routeAllowed = (routeId: string) => visibleRouteIds.has(routeId) && (!requestedRouteIds || requestedRouteIds.has(routeId));
-    const resolveRep = this.buildRepResolver(routesResult, employeesResult);
-
-    // Sales needs both Invoices (RouteID + InvoiceDate) and Invoice Items
-    // (LineTotal) for the join — either missing means the category as a
-    // whole is unavailable (product decision #3).
-    const salesAvailable = invoicesResult.available && invoiceItemsResult.available;
-    const collectionAvailable = collectionsResult.available;
-    const returnsAvailable = returnsResult.available;
-
     const hasPrior = !!(input.priorDateFrom && input.priorDateTo);
-
+    const [versions, salesCurrent, collectionCurrent, returnsCurrent, salesPrior, collectionPrior, returnsPrior, salesSummary, targetsResult] = await Promise.all([
+      this.prisma.rieDatasetVersion.findMany({ where: { companyId: ctx.companyId, entityName: { in: ["Routes", "Invoices", "Invoice Items", "Collections", "Returns"] }, isActive: true }, select: { entityName: true } }),
+      this.perRepMetric(ctx, "sales", input.dateFrom, input.dateTo, input.routeIds), this.perRepMetric(ctx, "collection", input.dateFrom, input.dateTo, input.routeIds), this.perRepMetric(ctx, "returns", input.dateFrom, input.dateTo, input.routeIds),
+      hasPrior ? this.perRepMetric(ctx, "sales", input.priorDateFrom!, input.priorDateTo!, input.routeIds) : Promise.resolve(null), hasPrior ? this.perRepMetric(ctx, "collection", input.priorDateFrom!, input.priorDateTo!, input.routeIds) : Promise.resolve(null), hasPrior ? this.perRepMetric(ctx, "returns", input.priorDateFrom!, input.priorDateTo!, input.routeIds) : Promise.resolve(null),
+      this.rieFacade.queryCanonicalRecords({ ...ctx, entityName: "Invoice Items", projection: [], joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }], hierarchyRoute: { field: "RouteID", source: "invoice" }, scope: { date: { field: "InvoiceDate", source: "invoice", from: input.dateFrom, to: input.dateTo }, ...(input.routeIds?.length ? { route: { values: input.routeIds, source: "invoice" } } : {}) }, aggregates: [{ op: "countDistinct", field: "CustomerCode", source: "invoice", as: "customers" }, { op: "countDistinct", field: "InvoiceNo", as: "invoices" }, { op: "countDistinct", field: "ProductCode", as: "skus" }], pagination: { limit: 1 } }),
+      this.rieFacade.queryCanonicalRecords({ ...ctx, entityName: "Targets", projection: [], scope: { ...(input.routeIds?.length ? { route: { values: input.routeIds } } : {}), fields: [{ field: "Year", values: [String(new Date(input.dateFrom).getUTCFullYear())] }, { field: "Month", values: [String(new Date(input.dateFrom).getUTCMonth() + 1)] }] }, aggregates: [{ op: "sum", field: "SalesTarget", as: "SalesTarget" }, { op: "sum", field: "CollectionTarget", as: "CollectionTarget" }, { op: "sum", field: "ActiveCustomersTarget", as: "ActiveCustomersTarget" }, { op: "sum", field: "SKUDistributionTarget", as: "SKUDistributionTarget" }], pagination: { limit: 1 } }),
+    ]);
+    const active = new Set(versions.map((version) => version.entityName));
+    if (!active.has("Routes")) throw new NotFoundException('بيانات "المسارات" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.');
+    const salesAvailable = active.has("Invoices") && active.has("Invoice Items"), collectionAvailable = active.has("Collections"), returnsAvailable = active.has("Returns");
     const acc = new Map<string, RepAccumulator>();
-    const currentInvoiceNos = new Set<string>();
-    const currentCustomers = new Set<string>();
-    const currentSkus = new Set<string>();
-    const getOrCreate = (routeId: string): RepAccumulator | null => {
-      if (!routeAllowed(routeId)) return null;
-      const resolved = resolveRep(routeId);
-      if (!resolved) return null;
-      let entry = acc.get(resolved.repKey);
-      if (!entry) {
-        entry = {
-          routeIds: new Set(),
-          repName: resolved.repName,
-          repEmail: resolved.repEmail,
-          supervisorEmail: resolved.supervisorEmail,
-          supervisorName: resolved.supervisorName,
-          sales: 0,
-          salesPrior: 0,
-          collection: 0,
-          collectionPrior: 0,
-          returns: 0,
-          returnsPrior: 0,
-        };
-        acc.set(resolved.repKey, entry);
-      }
-      entry.routeIds.add(routeId);
-      return entry;
-    };
-
-    if (salesAvailable) {
-      // Invoice Items joined to Invoices for RouteID + InvoiceDate — same
-      // join shape as Heat Map/Customer Comparison (REL-CU-002/REL-IN-003),
-      // sourcing LineTotal rather than Invoices.TotalAfterVAT (product
-      // decision #1).
-      const invoiceMeta = new Map<string, { routeId: string; time: number | null; customerCode: string }>();
-      for (const inv of invoicesResult.records) {
-        const no = String(inv.InvoiceNo ?? "").trim();
-        const routeId = String(inv.RouteID ?? "").trim();
-        if (no && routeId) invoiceMeta.set(no, { routeId, time: toEpochMs(inv.InvoiceDate), customerCode: String(inv.CustomerCode ?? "").trim() });
-      }
-      for (const item of invoiceItemsResult.records) {
-        const invoiceNo = String(item.InvoiceNo ?? "").trim();
-        const meta = invoiceMeta.get(invoiceNo);
-        if (!meta || meta.time === null) continue;
-        const amount = toFiniteNumber(item.LineTotal) ?? 0;
-        if (meta.time >= fromTime && meta.time <= toTime) {
-          const entry = getOrCreate(meta.routeId);
-          if (entry) { entry.sales += amount; currentInvoiceNos.add(invoiceNo); if (meta.customerCode) currentCustomers.add(meta.customerCode); const sku = String(item.ProductCode ?? "").trim(); if (sku) currentSkus.add(sku); }
-        }
-        if (hasPrior && priorFromTime !== null && priorToTime !== null && meta.time >= priorFromTime && meta.time <= priorToTime) {
-          const entry = getOrCreate(meta.routeId);
-          if (entry) entry.salesPrior += amount;
-        }
-      }
-    }
-
-    if (collectionAvailable) {
-      for (const row of collectionsResult.records) {
-        const routeId = String(row.RouteID ?? "").trim();
-        if (!routeId || !routeAllowed(routeId)) continue;
-        const t = toEpochMs(row.CollectionDate);
-        if (t === null) continue;
-        const amount = toFiniteNumber(row.Amount) ?? 0;
-        if (t >= fromTime && t <= toTime) {
-          const entry = getOrCreate(routeId);
-          if (entry) entry.collection += amount;
-        }
-        if (hasPrior && priorFromTime !== null && priorToTime !== null && t >= priorFromTime && t <= priorToTime) {
-          const entry = getOrCreate(routeId);
-          if (entry) entry.collectionPrior += amount;
-        }
-      }
-    }
-
-    if (returnsAvailable) {
-      for (const row of returnsResult.records) {
-        const routeId = String(row.RouteID ?? "").trim();
-        if (!routeId || !routeAllowed(routeId)) continue;
-        const t = toEpochMs(row.ReturnDate);
-        if (t === null) continue;
-        const amount = toFiniteNumber(row.TotalAmount) ?? 0;
-        if (t >= fromTime && t <= toTime) {
-          const entry = getOrCreate(routeId);
-          if (entry) entry.returns += amount;
-        }
-        if (hasPrior && priorFromTime !== null && priorToTime !== null && t >= priorFromTime && t <= priorToTime) {
-          const entry = getOrCreate(routeId);
-          if (entry) entry.returnsPrior += amount;
-        }
-      }
-    }
+    const merge = (result: RieScalableQueryResult | null, metric: Metric, prior: boolean) => result?.records.forEach((row) => {
+      const r = row as SmallRow, routeIds = Array.isArray(r.routeIds) ? r.routeIds.map((routeId) => String(routeId).trim()).filter(Boolean) : [], salesRepId = String(r.salesRepId ?? "").trim(), repEmail = String(r.repEmail ?? "").trim() || salesRepId || routeIds[0];
+      if (!routeIds.length || !repEmail) return;
+      let entry = acc.get(repEmail); if (!entry) { entry = { routeIds: [], repName: String(r.repName ?? "").trim() || repEmail, repEmail, supervisorEmail: String(r.supervisorEmail ?? "").trim() || null, supervisorName: String(r.supervisorName ?? "").trim() || null, sales: 0, salesPrior: 0, collection: 0, collectionPrior: 0, returns: 0, returnsPrior: 0 }; acc.set(repEmail, entry); }
+      for (const routeId of routeIds) if (!entry.routeIds.includes(routeId)) entry.routeIds.push(routeId);
+      entry[prior ? `${metric}Prior` as "salesPrior" | "collectionPrior" | "returnsPrior" : metric] += this.numeric(r.value);
+    });
+    merge(salesCurrent, "sales", false); merge(collectionCurrent, "collection", false); merge(returnsCurrent, "returns", false); merge(salesPrior, "sales", true); merge(collectionPrior, "collection", true); merge(returnsPrior, "returns", true);
 
     const reps: TeamPerformanceRepRow[] = Array.from(acc.values()).map((r) => ({
       routeIds: Array.from(r.routeIds),
@@ -286,11 +122,11 @@ export class TeamPerformanceService {
     reps.sort((a, b) => (b.sales ?? 0) - (a.sales ?? 0));
 
     const sum = (field: "sales" | "collection" | "returns") => reps.some((rep) => rep[field] !== null) ? reps.reduce((total, rep) => total + (rep[field] ?? 0), 0) : null;
-    const month = new Date(input.dateFrom).getUTCMonth() + 1;
-    const year = new Date(input.dateFrom).getUTCFullYear();
-    const targetRows = targetsResult.available ? targetsResult.records.filter((row) => Number(row.Year) === year && Number(row.Month) === month && (!requestedRouteIds || routeAllowed(String(row.RouteID ?? "").trim()))) : [];
-    const target = (field: string) => targetRows.reduce((total, row) => total + (toFiniteNumber(row[field]) ?? 0), 0);
-    const summary = { sales: sum("sales"), collections: sum("collection"), productiveCustomers: salesAvailable ? currentCustomers.size : null, averageInvoice: salesAvailable && currentInvoiceNos.size ? (sum("sales") ?? 0) / currentInvoiceNos.size : null, skus: salesAvailable ? currentSkus.size : null, returns: sum("returns") };
+    const aggregate = salesSummary.records[0] as SmallRow | undefined;
+    const targetAggregate = targetsResult.records[0] as SmallRow | undefined;
+    const target = (field: string) => this.numeric(targetAggregate?.[field]);
+    const invoices = this.numeric(aggregate?.invoices);
+    const summary = { sales: sum("sales"), collections: sum("collection"), productiveCustomers: salesAvailable ? this.numeric(aggregate?.customers) : null, averageInvoice: salesAvailable && invoices ? (sum("sales") ?? 0) / invoices : null, skus: salesAvailable ? this.numeric(aggregate?.skus) : null, returns: sum("returns") };
     const targetDefinitions: Array<{ key: string; label: string; actual: number | null; primary: boolean }> = [
       { key: "SalesTarget", label: "Sales target", actual: summary.sales, primary: true }, { key: "CollectionTarget", label: "Collection target", actual: summary.collections, primary: true },
       { key: "ActiveCustomersTarget", label: "Productive customers target", actual: summary.productiveCustomers, primary: false }, { key: "SKUDistributionTarget", label: "SKU distribution target", actual: summary.skus, primary: false },
