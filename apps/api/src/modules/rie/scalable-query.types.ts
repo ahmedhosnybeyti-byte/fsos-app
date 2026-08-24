@@ -9,7 +9,7 @@ export interface RieQueryJoin {
   type?: "inner" | "left";
   on: { left: RieQueryField; rightField: string };
 }
-export type RieAggregationOperator = "sum" | "count" | "countDistinct" | "arrayAggDistinct" | "sumProduct" | "avg" | "min" | "max";
+export type RieAggregationOperator = "sum" | "count" | "countDistinct" | "arrayAggDistinct" | "sumProduct" | "avg" | "min" | "max" | "minText" | "maxText";
 /**
  * `sumProduct` keeps arithmetic at the database grain: it sums `field *
  * multiplier` after the query's scopes and joins have been applied.

@@ -557,16 +557,6 @@ export class VisitCopilotService {
     const range = resolveVisitCopilotPeriod(periodInput);
     const warnings: string[] = [];
 
-    const [customers, invoices, items, collections, targets, calendar, visits] = await Promise.all([
-      this.requireCustomers(ctx),
-      this.tryEntity(ctx, "Invoices", "الفواتير", warnings),
-      this.tryEntity(ctx, "Invoice Items", "أصناف الفاتورة", warnings),
-      this.tryEntity(ctx, "Collections", "التحصيلات", warnings),
-      this.tryEntity(ctx, "Targets", "الأهداف", warnings),
-      this.tryEntity(ctx, "Sales Calendar", "تقويم المبيعات", warnings),
-      this.tryEntity(ctx, "Visits", "الزيارات", warnings),
-    ]);
-
     // Flexible plan date (2026-07-30): `periodInput.date` picks which day's
     // plan this is (defaults to today via resolveVisitCopilotPlanDate).
     // Every "todayIso"/"weekday"/target-month below is now relative to
@@ -581,79 +571,56 @@ export class VisitCopilotService {
     // treat "day" as a UTC calendar day, so this stays consistent with them.
     const planDateAtNoonUtc = new Date(`${todayIso}T12:00:00Z`);
     const weekday = new Intl.DateTimeFormat("en-US", { weekday: "long", timeZone: "UTC" }).format(planDateAtNoonUtc);
+    const month = planDateAtNoonUtc.getUTCMonth() + 1;
+    const year = planDateAtNoonUtc.getUTCFullYear();
+    const monthStart = `${year}-${String(month).padStart(2, "0")}-01`;
+    const nextMonthStart = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+
+    // Daily Brief is deliberately a small-result contract.  The weekday
+    // customer slice is resolved before any fact read; every subsequent
+    // fact query is bounded to those customer codes and aggregates in SQL.
+    const customerResult = await this.rieFacade.queryCanonicalRecords({
+      ...ctx, entityName: "Customers",
+      projection: ["CustomerCode", "CustomerName", "Latitude", "Longitude", "VisitSequence", "Channel"].map((field) => ({ field })),
+      scope: { fields: [{ field: "VisitDay", values: [weekday] }] },
+      pagination: { limit: 5_000 },
+    });
+    if (customerResult.page.hasMore) throw new BadRequestException("عدد عملاء خطة اليوم يتجاوز الحد المدعوم.");
+    const todayCustomers = customerResult.records;
+    const customerCodes = [...new Set(todayCustomers.map((row) => String(row.CustomerCode ?? "").trim()).filter(Boolean))];
+
+    const aggregate = (entityName: string, input: Omit<Parameters<RieFacade["queryCanonicalRecords"]>[0], "companyId" | "requestingUser" | "entityName" | "pagination">) =>
+      this.rieFacade.queryCanonicalRecords({ ...ctx, entityName, ...input, pagination: { limit: 5_000 } });
+    const customerScope = { customer: { values: customerCodes } };
+    const [invoiceHistory, invoicePeriod, salesPeriod, pendingCollections, bouncedCollections, visitHistory, targets, calendar] = await Promise.all([
+      aggregate("Invoices", { projection: [{ field: "CustomerCode", as: "customerCode" }], groupBy: [{ field: "CustomerCode" }], scope: customerScope, aggregates: [{ op: "maxText", field: "InvoiceDate", as: "lastInvoiceDate" }] }),
+      aggregate("Invoices", { projection: [{ field: "CustomerCode", as: "customerCode" }], groupBy: [{ field: "CustomerCode" }], scope: { ...customerScope, date: { field: "InvoiceDate", from: range.from, to: range.to } }, aggregates: [{ op: "count", field: "InvoiceNo", as: "invoiceCount" }] }),
+      aggregate("Invoice Items", { projection: [{ field: "CustomerCode", source: "invoice", as: "customerCode" }], groupBy: [{ field: "CustomerCode", source: "invoice" }], joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }], hierarchyRoute: { field: "RouteID", source: "invoice" }, scope: { ...customerScope, customer: { values: customerCodes, source: "invoice" }, date: { field: "InvoiceDate", source: "invoice", from: range.from, to: range.to } }, aggregates: [{ op: "sum", field: "LineTotal", as: "sales" }] }),
+      aggregate("Collections", { projection: [{ field: "CustomerCode", as: "customerCode" }], groupBy: [{ field: "CustomerCode" }], scope: { ...customerScope, fields: [{ field: "Status", values: ["Pending"] }] }, aggregates: [{ op: "sum", field: "Amount", as: "exposure" }] }),
+      aggregate("Collections", { projection: [{ field: "CustomerCode", as: "customerCode" }], groupBy: [{ field: "CustomerCode" }], scope: { ...customerScope, fields: [{ field: "Status", values: ["Bounced"] }] }, aggregates: [{ op: "sum", field: "Amount", as: "exposure" }] }),
+      aggregate("Visits", { projection: [{ field: "CustomerCode", as: "customerCode" }], groupBy: [{ field: "CustomerCode" }], scope: customerScope, aggregates: [{ op: "maxText", field: "VisitDate", as: "lastVisitDate" }] }),
+      aggregate("Targets", { projection: [], scope: { fields: [{ field: "Year", values: [String(year)] }, { field: "Month", values: [String(month)] }] }, aggregates: [{ op: "count", as: "targetRows" }, { op: "sum", field: "SalesTarget", as: "salesTarget" }] }),
+      this.prisma.salesCalendar.findMany({ where: { companyId: user.companyId!, calendarDate: { gte: new Date(`${monthStart}T00:00:00.000Z`), lt: new Date(`${nextMonthStart}T00:00:00.000Z`) } }, select: { calendarDate: true, workingDay: true } }),
+    ]);
+    for (const result of [invoiceHistory, invoicePeriod, salesPeriod, pendingCollections, bouncedCollections, visitHistory, targets]) if (result.page.hasMore) throw new BadRequestException("نتيجة Daily Brief المجمعة تجاوزت الحد المدعوم.");
+    const numberAt = (row: EntityRecord, field: string) => toFiniteNumber(row[field]) ?? 0;
+    const byCustomer = (result: { records: readonly EntityRecord[] }, field: string) => new Map(result.records.map((row) => [String(row.customerCode ?? "").trim(), row[field]]));
+    const lastInvoiceByCustomer = byCustomer(invoiceHistory, "lastInvoiceDate");
+    const invoiceCountByCustomer = byCustomer(invoicePeriod, "invoiceCount");
+    const salesByCustomer = byCustomer(salesPeriod, "sales");
+    const lastVisitByCustomer = byCustomer(visitHistory, "lastVisitDate");
+    const exposureByCustomer = new Map<string, number>();
+    for (const result of [pendingCollections, bouncedCollections]) for (const row of result.records) {
+      const code = String(row.customerCode ?? "").trim();
+      exposureByCustomer.set(code, (exposureByCustomer.get(code) ?? 0) + numberAt(row, "exposure"));
+    }
 
     // Working day check from Sales Calendar (if present) — a non-working
     // day still returns the list, just flagged. Checked against the
     // SELECTED plan date's calendar row, not necessarily today's.
     let isWorkingDay = true;
-    const todayCalendarRow = calendar.find((row) => isoDayOf(row.CalendarDate) === todayIso);
-    if (todayCalendarRow) isWorkingDay = isTruthyFlag(todayCalendarRow.WorkingDay);
-
-    // Plan basis: customers whose VisitDay matches the selected date's
-    // weekday. Customers.VisitDay is a recurring weekday pattern, not a
-    // dated ledger (no per-calendar-date Route Assignment data exists in
-    // this system — "Route Assignments" is a registered Canonical Entity
-    // with no dataset mapping anywhere, confirmed against
-    // visit-efficiency.service.ts's own disclosed comment), so a future
-    // date shows "whoever is normally visited on that weekday" — an
-    // honest projection from the recurring plan, not a fabricated
-    // date-specific assignment. Never falls back to "today's weekday"
-    // regardless of which date was requested — that would silently ignore
-    // the user's date selection.
-    const weekdayLower = weekday.toLowerCase();
-    const todayCustomers = customers.filter((row) => String(row.VisitDay ?? "").trim().toLowerCase() === weekdayLower);
-
-    // Invoice metadata over ALL invoices (recency gap uses the true last
-    // invoice date, not just the analysis period).
-    const invoiceMeta = new Map<string, { customerCode: string; dateIso: string | null }>();
-    const lastInvoiceIsoByCustomer = new Map<string, string>();
-    for (const inv of invoices) {
-      const no = String(inv.InvoiceNo ?? "").trim();
-      const cust = String(inv.CustomerCode ?? "").trim();
-      if (!no || !cust) continue;
-      const dateIso = isoDayOf(inv.InvoiceDate);
-      invoiceMeta.set(no, { customerCode: cust, dateIso });
-      if (dateIso) {
-        const prev = lastInvoiceIsoByCustomer.get(cust);
-        if (!prev || dateIso > prev) lastInvoiceIsoByCustomer.set(cust, dateIso);
-      }
-    }
-
-    // In-period sales per customer — Invoice Items joined to Invoices by
-    // InvoiceNo→CustomerCode, sum LineTotal (same join shape as
-    // route-planning.service.ts computeSalesByCustomer / REL-CU-002).
-    const salesByCustomer = new Map<string, number>();
-    const invoiceCountByCustomer = new Map<string, number>();
-    for (const [, meta] of invoiceMeta) {
-      if (meta.dateIso && meta.dateIso >= range.from && meta.dateIso <= range.to) {
-        invoiceCountByCustomer.set(meta.customerCode, (invoiceCountByCustomer.get(meta.customerCode) ?? 0) + 1);
-      }
-    }
-    for (const item of items) {
-      const meta = invoiceMeta.get(String(item.InvoiceNo ?? "").trim());
-      if (!meta || !meta.dateIso || meta.dateIso < range.from || meta.dateIso > range.to) continue;
-      const amount = toFiniteNumber(item.LineTotal) ?? 0;
-      salesByCustomer.set(meta.customerCode, (salesByCustomer.get(meta.customerCode) ?? 0) + amount);
-    }
-
-    // Outstanding collections exposure (Pending/Bounced are a stock, not a
-    // flow — counted regardless of the analysis period).
-    const exposureByCustomer = new Map<string, number>();
-    for (const col of collections) {
-      const cust = String(col.CustomerCode ?? "").trim();
-      const status = String(col.Status ?? "").trim().toLowerCase();
-      if (!cust || (status !== "pending" && status !== "bounced")) continue;
-      exposureByCustomer.set(cust, (exposureByCustomer.get(cust) ?? 0) + (toFiniteNumber(col.Amount) ?? 0));
-    }
-
-    const lastVisitIsoByCustomer = new Map<string, string>();
-    for (const visit of visits) {
-      const cust = String(visit.CustomerCode ?? "").trim();
-      const dateIso = isoDayOf(visit.VisitDate);
-      if (!cust || !dateIso) continue;
-      const prev = lastVisitIsoByCustomer.get(cust);
-      if (!prev || dateIso > prev) lastVisitIsoByCustomer.set(cust, dateIso);
-    }
+    const todayCalendarRow = calendar.find((row) => row.calendarDate.toISOString().slice(0, 10) === todayIso);
+    if (todayCalendarRow) isWorkingDay = todayCalendarRow.workingDay ?? true;
 
     // Build per-customer entries with raw score components.
     const periodDays = Math.max(1, daysBetween(range.from, range.to));
@@ -662,9 +629,9 @@ export class VisitCopilotService {
       const lat = toFiniteNumber(row.Latitude);
       const lon = toFiniteNumber(row.Longitude);
       const hasCoords = lat !== null && lon !== null && isSaneCoordinate(lat, lon);
-      const invoiceCount = invoiceCountByCustomer.get(code) ?? 0;
-      const sales = salesByCustomer.get(code) ?? 0;
-      const lastInvoiceIso = lastInvoiceIsoByCustomer.get(code) ?? null;
+      const invoiceCount = toFiniteNumber(invoiceCountByCustomer.get(code)) ?? 0;
+      const sales = toFiniteNumber(salesByCustomer.get(code)) ?? 0;
+      const lastInvoiceIso = isoDayOf(lastInvoiceByCustomer.get(code)) ?? null;
       return {
         customerCode: code,
         customerName: String(row.CustomerName ?? code),
@@ -673,7 +640,7 @@ export class VisitCopilotService {
         visitSequence: toFiniteNumber(row.VisitSequence),
         channel: String(row.Channel ?? "").trim() || null,
         avgOrderValue: invoiceCount > 0 ? round2(sales / invoiceCount) : 0,
-        lastVisitDate: lastVisitIsoByCustomer.get(code) ?? null,
+        lastVisitDate: isoDayOf(lastVisitByCustomer.get(code)) ?? null,
         // never invoiced in the data → treat as the maximum gap (most stale)
         gapDays: lastInvoiceIso ? Math.min(daysBetween(lastInvoiceIso, todayIso), periodDays * 4) : null,
         exposure: exposureByCustomer.get(code) ?? 0,
@@ -760,21 +727,10 @@ export class VisitCopilotService {
     // Calendar if present, else 26). Uses the plan date's month/year, not
     // necessarily the real current month — a rep pre-planning a date next
     // month should see next month's daily target, not this month's.
-    const month = planDateAtNoonUtc.getUTCMonth() + 1;
-    const year = planDateAtNoonUtc.getUTCFullYear();
-    let targetSum = 0;
-    let hasTargetRows = false;
-    for (const t of targets) {
-      if (!matchesMonth(t.Month, month) || (toFiniteNumber(t.Year) ?? -1) !== year) continue;
-      hasTargetRows = true;
-      targetSum += toFiniteNumber(t.SalesTarget) ?? 0;
-    }
-    const monthPrefix = `${year}-${String(month).padStart(2, "0")}`;
-    let workingDaysInMonth = 0;
-    for (const row of calendar) {
-      const dIso = isoDayOf(row.CalendarDate);
-      if (dIso && dIso.startsWith(monthPrefix) && isTruthyFlag(row.WorkingDay)) workingDaysInMonth++;
-    }
+    const target = targets.records[0];
+    const targetSum = target ? numberAt(target, "salesTarget") : 0;
+    const hasTargetRows = (target ? numberAt(target, "targetRows") : 0) > 0;
+    let workingDaysInMonth = calendar.filter((row) => row.workingDay).length;
     if (workingDaysInMonth === 0) workingDaysInMonth = FALLBACK_WORKING_DAYS_PER_MONTH;
     const dailyTargetSales = hasTargetRows ? round2(targetSum / workingDaysInMonth) : null;
 

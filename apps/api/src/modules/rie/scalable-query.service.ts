@@ -264,6 +264,7 @@ function aggregateSql(aggregate: RieQueryAggregation): Prisma.Sql {
   if (aggregate.op === "count") return Prisma.sql`COUNT(NULLIF(BTRIM(COALESCE(${field}, '')), ''))::double precision AS ${alias}`;
   if (aggregate.op === "countDistinct") return Prisma.sql`COUNT(DISTINCT NULLIF(BTRIM(COALESCE(${field}, '')), ''))::double precision AS ${alias}`;
   if (aggregate.op === "arrayAggDistinct") return Prisma.sql`ARRAY_AGG(DISTINCT NULLIF(BTRIM(COALESCE(${field}, '')), '')) FILTER (WHERE NULLIF(BTRIM(COALESCE(${field}, '')), '') IS NOT NULL) AS ${alias}`;
+  if (aggregate.op === "minText" || aggregate.op === "maxText") return Prisma.sql`${Prisma.raw(aggregate.op === "minText" ? "MIN" : "MAX")}(NULLIF(BTRIM(COALESCE(${field}, '')), '')) AS ${alias}`;
   const numeric = Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`;
   if (aggregate.op === "sumProduct") {
     const multiplier = textField(aggregate.multiplier!);
