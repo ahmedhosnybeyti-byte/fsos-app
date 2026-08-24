@@ -1,10 +1,8 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { ForbiddenException, Injectable } from "@nestjs/common";
 import type { SgiLatestResult, SgiRecalculateInput, SgiRecalculateResult, SgiRepDirectoryEntry, SgiSeverity, SgiSituation } from "@field-sales-os/schemas";
 import { PrismaService } from "../../common/prisma";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
-import type { EntityQueryResult } from "../rie/entity-provider.interface";
-import type { RieQueryField, RieScalableQueryScope } from "../rie/scalable-query.types";
 
 // Sales Growth Intelligence (SGI) Phase 1 — the Situation Detection ->
 // Opportunity Discovery -> Recommendation -> Opportunity Scoring pipeline
@@ -21,7 +19,6 @@ import type { RieQueryField, RieScalableQueryScope } from "../rie/scalable-query
 // Employees.DirectManagerID (Migration #7's precedent), resolved directly
 // per rep rather than voted per-row, since it's now a 1:1 employee fact
 // rather than a manually-typed column that could vary row to row.
-type SheetRow = Record<string, unknown>;
 const AI_REPORT_TYPE = "sgi_situations";
 
 function toFiniteNumber(value: unknown): number | null {
@@ -29,16 +26,6 @@ function toFiniteNumber(value: unknown): number | null {
   if (typeof value === "string" && value.trim() !== "") {
     const n = Number(value.replace(/,/g, ""));
     return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
-function toEpochMs(value: unknown): number | null {
-  if (value instanceof Date) return value.getTime();
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() !== "") {
-    const t = Date.parse(value);
-    return Number.isNaN(t) ? null : t;
   }
   return null;
 }
@@ -92,12 +79,6 @@ interface ProductAgg {
 
 interface RepAcc {
   current: number;
-}
-
-interface ResolvedRep {
-  repKey: string;
-  repEmail: string;
-  supervisorEmail: string | null;
 }
 
 function getOrCreateCustomer(map: Map<string, CustomerAcc>, key: string, label: string): CustomerAcc {
@@ -177,75 +158,17 @@ export class SgiService {
     private readonly prisma: PrismaService,
   ) {}
 
-  private assertEntityAvailable(result: EntityQueryResult, arabicLabel: string): void {
-    if (!result.available) {
-      throw new NotFoundException(`بيانات "${arabicLabel}" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.`);
-    }
-  }
-
   private rieContext(companyId: string, requestingUser: { roleCode: string; email: string }) {
     return { companyId, requestingUser };
   }
 
-  // Bounded canonical read: facts are narrowed in PostgreSQL before they
-  // reach SGI; reference dimensions fetch only the columns this algorithm
-  // actually consumes. Pagination is drained only after the SQL scope.
-  private async queryRows(entityName: string, ctx: ReturnType<SgiService["rieContext"]>, projection: readonly RieQueryField[], scope?: RieScalableQueryScope, joins?: Parameters<RieFacade["queryCanonicalRecords"]>[0]["joins"], hierarchyRoute?: RieQueryField, applyHierarchy = true): Promise<EntityQueryResult> {
-    const records: Record<string, unknown>[] = [];
-    let offset = 0;
-    do {
-      const page = await this.rieFacade.queryCanonicalRecords({ ...(applyHierarchy ? ctx : { companyId: ctx.companyId }), entityName, projection, scope, joins, hierarchyRoute, pagination: { limit: 5_000, offset } });
-      records.push(...page.records as Record<string, unknown>[]);
-      offset += page.records.length;
-      if (!page.page.hasMore) break;
-    } while (true);
-    return { entityName, available: true, records, fields: projection.map((field) => field.field), warnings: [] };
-  }
-
-  // Routes.SalesRepID -> Employees, then Employees.DirectManagerID ->
-  // Employees for the supervisor half — identical pattern to
-  // team-performance.service.ts's buildRepResolver. Falls back to the bare
-  // SalesRepID or RouteID when a hop can't be resolved, so rows stay usable
-  // rather than being silently dropped.
-  private buildRepResolver(routesResult: EntityQueryResult, employeesResult: EntityQueryResult): (routeId: string) => ResolvedRep | null {
-    const routeSalesRep = new Map<string, string>();
-    for (const route of routesResult.records) {
-      const routeId = String(route.RouteID ?? "").trim();
-      const salesRepId = String(route.SalesRepID ?? "").trim();
-      if (routeId && salesRepId) routeSalesRep.set(routeId, salesRepId);
-    }
-
-    const employeeById = new Map<string, { email: string; managerId: string | null }>();
-    if (employeesResult.available) {
-      for (const emp of employeesResult.records) {
-        const id = String(emp.EmployeeID ?? "").trim();
-        if (!id) continue;
-        const managerId = String(emp.DirectManagerID ?? "").trim();
-        // Lowercased here — the single source all downstream repEmail/
-        // ownerRepEmail/repSupervisorMap values derive from — so every
-        // later comparison against a lowercased login email (getLatest())
-        // or a lowercased Target.repOrTerritoryKey (TARGET_BEHIND) matches
-        // regardless of the casing used in the uploaded Employees file.
-        employeeById.set(id, { email: (String(emp.Email ?? "").trim() || id).toLowerCase(), managerId: managerId || null });
-      }
-    }
-
-    return (routeId: string): ResolvedRep | null => {
-      const trimmedRouteId = routeId.trim();
-      if (!trimmedRouteId) return null;
-      const salesRepId = routeSalesRep.get(trimmedRouteId);
-      if (!salesRepId) {
-        const key = trimmedRouteId.toLowerCase();
-        return { repKey: key, repEmail: key, supervisorEmail: null };
-      }
-      const emp = employeeById.get(salesRepId);
-      if (!emp) {
-        const key = salesRepId.toLowerCase();
-        return { repKey: key, repEmail: key, supervisorEmail: null };
-      }
-      const manager = emp.managerId ? employeeById.get(emp.managerId) : undefined;
-      return { repKey: emp.email, repEmail: emp.email, supervisorEmail: manager ? manager.email : null };
-    };
+  // SGI facts always enter Node as PostgreSQL/RIE aggregates.  In
+  // particular, this intentionally has no pagination loop: a page boundary
+  // must never turn into an unbounded raw-fact accumulator in the cron.
+  private async queryAggregate(query: Parameters<RieFacade["queryCanonicalRecords"]>[0]): Promise<Record<string, unknown>[]> {
+    const result = await this.rieFacade.queryCanonicalRecords({ ...query, pagination: { limit: 5_000 } });
+    if (result.page.hasMore) throw new Error(`SGI aggregate query for ${query.entityName} exceeded the bounded result contract.`);
+    return result.records as Record<string, unknown>[];
   }
 
   async recalculate(user: AuthenticatedUser, input: SgiRecalculateInput): Promise<SgiRecalculateResult> {
@@ -317,62 +240,26 @@ export class SgiService {
     const toTime = Date.parse(input.dateTo);
     const priorFromTime = Date.parse(input.priorDateFrom);
     const priorToTime = Date.parse(input.priorDateTo);
-    const salesScope = { date: { field: "InvoiceDate", source: "invoice", from: Math.min(fromTime, priorFromTime), to: Math.max(toTime, priorToTime) } } satisfies RieScalableQueryScope;
-
-    const [routesResult, employeesResult, invoiceItemsResult, customersResult, collectionsResult, targetsResult, productsResult] =
-      await Promise.all([
-        this.queryRows("Routes", ctx, [{ field: "RouteID" }, { field: "SalesRepID" }]),
-        this.queryRows("Employees", ctx, [{ field: "EmployeeID" }, { field: "Email" }, { field: "DirectManagerID" }], undefined, undefined, undefined, false),
-        this.queryRows("Invoice Items", ctx, [{ field: "InvoiceNo" }, { field: "LineTotal" }, { field: "ProductCode" }, { field: "Quantity" }, { field: "Unit" }, { field: "InvoiceDate", source: "invoice" }, { field: "CustomerCode", source: "invoice" }, { field: "RouteID", source: "invoice" }], salesScope, [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }], { field: "RouteID", source: "invoice" }),
-        this.queryRows("Customers", ctx, [{ field: "CustomerCode" }, { field: "CustomerName" }]),
-        this.queryRows("Collections", ctx, [{ field: "CustomerCode" }, { field: "CollectionDate" }, { field: "Amount" }], { date: { field: "CollectionDate", from: fromTime, to: toTime } }),
-        this.queryRows("Targets", ctx, [{ field: "Month" }, { field: "Year" }, { field: "RouteID" }, { field: "SalesTarget" }]),
-        // GROWTH_OPPORTUNITY only — ProductName/Category for the gap
-        // product's label. Optional/degrading like Geo Intelligence's same
-        // join: ProductCode itself is used as the label if unavailable,
-        // never blocks the other five situation types.
-        this.queryRows("Products", ctx, [{ field: "ProductCode" }, { field: "ProductName" }, { field: "Category" }], undefined, undefined, undefined, false),
-      ]);
-    // Invoice metadata is projected by the scoped SQL join above. Keep the
-    // established result shape so the downstream business logic is byte-for-
-    // byte unchanged.
-    const invoicesResult: EntityQueryResult = { entityName: "Invoices", available: true, records: invoiceItemsResult.records, fields: ["InvoiceNo", "CustomerCode", "RouteID", "InvoiceDate"], warnings: [] };
-    this.assertEntityAvailable(routesResult, "المسارات");
-    this.assertEntityAvailable(invoicesResult, "الفواتير");
-    this.assertEntityAvailable(invoiceItemsResult, "أصناف الفاتورة");
-    this.assertEntityAvailable(customersResult, "العملاء");
-
-    const resolveRep = this.buildRepResolver(routesResult, employeesResult);
-
-    const customerById = new Map<string, SheetRow>();
-    for (const c of customersResult.records) {
-      const code = String(c.CustomerCode ?? "").trim();
-      if (code && !customerById.has(code)) customerById.set(code, c as SheetRow);
-    }
-
-    // Invoice Items joined to Invoices for CustomerCode/RouteID/InvoiceDate —
-    // same join shape as Heat Map/Team Performance (REL-CU-002/REL-IN-003),
-    // sourcing LineTotal as the sales amount (Migration #7's precedent).
-    const invoiceMeta = new Map<string, { customerCode: string; routeId: string; time: number | null }>();
-    for (const inv of invoicesResult.records) {
-      const no = String(inv.InvoiceNo ?? "").trim();
-      const customerCode = String(inv.CustomerCode ?? "").trim();
-      const routeId = String(inv.RouteID ?? "").trim();
-      if (no && customerCode) invoiceMeta.set(no, { customerCode, routeId, time: toEpochMs(inv.InvoiceDate) });
-    }
-
-
-    // GROWTH_OPPORTUNITY's product metadata — same optional/degrading join
-    // as Geo Intelligence's buildJoinedSalesRows (ProductCode itself is the
-    // label if Products is unavailable or a code isn't found in it).
+    const invoiceJoin = { entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } } as const;
+    const routeJoin = { entityName: "Routes", alias: "route", type: "left" as const, on: { left: { field: "RouteID", source: "invoice" }, rightField: "RouteID" } };
+    const repJoin = { entityName: "Employees", alias: "rep", type: "left" as const, on: { left: { field: "SalesRepID", source: "route" }, rightField: "EmployeeID" } };
+    const managerJoin = { entityName: "Employees", alias: "manager", type: "left" as const, on: { left: { field: "DirectManagerID", source: "rep" }, rightField: "EmployeeID" } };
+    const customerJoin = { entityName: "Customers", alias: "customer", type: "left" as const, on: { left: { field: "CustomerCode", source: "invoice" }, rightField: "CustomerCode" } };
+    const productJoin = { entityName: "Products", alias: "product", type: "left" as const, on: { left: { field: "ProductCode" }, rightField: "ProductCode" } };
+    const targetRouteJoin = { entityName: "Routes", alias: "targetRoute", type: "left" as const, on: { left: { field: "RouteID" }, rightField: "RouteID" } };
+    const targetRepJoin = { entityName: "Employees", alias: "targetRep", type: "left" as const, on: { left: { field: "SalesRepID", source: "targetRoute" }, rightField: "EmployeeID" } };
+    const salesGroups = [
+      { field: "CustomerCode", source: "invoice", as: "customerCode" }, { field: "RouteID", source: "invoice", as: "routeId" }, { field: "ProductCode", as: "productCode" },
+      { field: "CustomerName", source: "customer", as: "customerName" }, { field: "SalesRepID", source: "route", as: "salesRepId" }, { field: "Email", source: "rep", as: "repEmail" },
+      { field: "Email", source: "manager", as: "supervisorEmail" }, { field: "ProductName", source: "product", as: "productName" }, { field: "Category", source: "product", as: "productCategory" },
+    ] as const;
+    const salesQuery = (from: number, to: number) => this.queryAggregate({ ...ctx, entityName: "Invoice Items", projection: salesGroups, groupBy: salesGroups, joins: [invoiceJoin, routeJoin, repJoin, managerJoin, customerJoin, productJoin], hierarchyRoute: { field: "RouteID", source: "invoice" }, scope: { date: { field: "InvoiceDate", source: "invoice", from, to } }, aggregates: [{ op: "sum", field: "LineTotal", as: "amount" }, { op: "sum", field: "Quantity", as: "quantity" }, { op: "maxText", field: "Unit", as: "unit" }, { op: "count", as: "lineCount" }] });
+    const [currentSalesRows, priorSalesRows, collectionRows, targetRows] = await Promise.all([
+      salesQuery(fromTime, toTime), salesQuery(priorFromTime, priorToTime),
+      this.queryAggregate({ ...ctx, entityName: "Collections", projection: [{ field: "CustomerCode", as: "customerCode" }], groupBy: [{ field: "CustomerCode" }], scope: { date: { field: "CollectionDate", from: fromTime, to: toTime } }, aggregates: [{ op: "sum", field: "Amount", as: "amount" }] }),
+      this.queryAggregate({ ...ctx, entityName: "Targets", projection: [{ field: "RouteID", as: "routeId" }, { field: "SalesRepID", source: "targetRoute", as: "salesRepId" }, { field: "Email", source: "targetRep", as: "repEmail" }], groupBy: [{ field: "RouteID" }, { field: "SalesRepID", source: "targetRoute" }, { field: "Email", source: "targetRep" }], joins: [targetRouteJoin, targetRepJoin], scope: { fields: [{ field: "Month", values: [String(new Date(input.dateFrom).getUTCMonth() + 1)] }, { field: "Year", values: [String(new Date(input.dateFrom).getUTCFullYear())] }] }, aggregates: [{ op: "sum", field: "SalesTarget", as: "salesTarget" }] }),
+    ]);
     const productMeta = new Map<string, { name: string; category: string | null }>();
-    if (productsResult.available) {
-      for (const p of productsResult.records) {
-        const code = String(p.ProductCode ?? "").trim();
-        if (!code) continue;
-        productMeta.set(code, { name: String(p.ProductName ?? code).trim() || code, category: p.Category ? String(p.Category).trim() || null : null });
-      }
-    }
 
     const customers = new Map<string, CustomerAcc>();
     const reps = new Map<string, RepAcc>();
@@ -388,41 +275,29 @@ export class SgiService {
     const repProductAgg = new Map<string, Map<string, ProductAgg>>();
     const repActiveCustomers = new Map<string, Set<string>>();
 
-    for (const item of invoiceItemsResult.records) {
-      const invoiceNo = String(item.InvoiceNo ?? "").trim();
-      const meta = invoiceMeta.get(invoiceNo);
-      if (!meta || meta.time === null) continue; // item's invoice not found — dropped, same as every migrated join
-      const customerKey = meta.customerCode;
+    for (const item of currentSalesRows) {
+      const customerKey = String(item.customerCode ?? "").trim();
       if (!customerKey) continue;
-      const t = meta.time;
-      const amount = toFiniteNumber(item.LineTotal) ?? 0;
-      const customerRow = customerById.get(customerKey);
-      const label = customerRow ? String(customerRow.CustomerName ?? "").trim() || customerKey : customerKey;
-
-      const resolved = meta.routeId ? resolveRep(meta.routeId) : null;
-      const repEmail = resolved?.repEmail ?? "";
-      if (resolved?.supervisorEmail) repSupervisorMap[resolved.repEmail] = resolved.supervisorEmail;
+      const amount = toFiniteNumber(item.amount) ?? 0;
+      const label = String(item.customerName ?? "").trim() || customerKey;
+      const routeId = String(item.routeId ?? "").trim();
+      const salesRepId = String(item.salesRepId ?? "").trim();
+      const repEmail = (String(item.repEmail ?? "").trim() || salesRepId || routeId).toLowerCase();
+      const supervisorEmail = String(item.supervisorEmail ?? "").trim().toLowerCase();
+      if (repEmail && supervisorEmail) repSupervisorMap[repEmail] = supervisorEmail;
 
       const cAcc = getOrCreateCustomer(customers, customerKey, label);
-      if (cAcc.lastPurchaseMs === null || t > cAcc.lastPurchaseMs) cAcc.lastPurchaseMs = t;
-
-      // Hoisted above both window branches — PRODUCT_DECLINE needs the
-      // prior-window branch below to know which product each line item was
-      // for too, not just the current-window branch GROWTH_OPPORTUNITY
-      // already used it for.
-      const productCode = String(item.ProductCode ?? "").trim();
-
-      if (t >= fromTime && t <= toTime) {
-        cAcc.current += amount;
+      cAcc.current += amount;
         totalActualCurrent += amount;
         if (repEmail) {
-          cAcc.repVotes.set(repEmail, (cAcc.repVotes.get(repEmail) ?? 0) + 1);
+          cAcc.repVotes.set(repEmail, (cAcc.repVotes.get(repEmail) ?? 0) + (toFiniteNumber(item.lineCount) ?? 0));
           const rAcc = reps.get(repEmail) ?? { current: 0 };
           rAcc.current += amount;
           reps.set(repEmail, rAcc);
         }
 
-        if (productCode) {
+      const productCode = String(item.productCode ?? "").trim();
+      if (productCode) {
           cAcc.products.add(productCode);
           cAcc.productValuesCurrent.set(productCode, (cAcc.productValuesCurrent.get(productCode) ?? 0) + amount);
           if (repEmail) {
@@ -431,45 +306,46 @@ export class SgiService {
             repActiveCustomers.set(repEmail, activeSet);
 
             const productAgg = repProductAgg.get(repEmail) ?? new Map<string, ProductAgg>();
-            const meta2 = productMeta.get(productCode);
+            const meta2 = { name: String(item.productName ?? productCode).trim() || productCode, category: String(item.productCategory ?? "").trim() || null };
+            productMeta.set(productCode, meta2);
             const pAcc = productAgg.get(productCode) ?? { name: meta2?.name ?? productCode, category: meta2?.category ?? null, totalValue: 0, customers: new Set() };
             pAcc.totalValue += amount;
             pAcc.customers.add(customerKey);
             productAgg.set(productCode, pAcc);
             repProductAgg.set(repEmail, productAgg);
           }
-        }
       }
-      if (t >= priorFromTime && t <= priorToTime) {
+    }
+    for (const item of priorSalesRows) {
+      const customerKey = String(item.customerCode ?? "").trim();
+      if (!customerKey) continue;
+      const cAcc = getOrCreateCustomer(customers, customerKey, String(item.customerName ?? "").trim() || customerKey);
+      const amount = toFiniteNumber(item.amount) ?? 0;
+      const productCode = String(item.productCode ?? "").trim();
         cAcc.prior += amount;
         if (productCode) {
           cAcc.productValuesPrior.set(productCode, (cAcc.productValuesPrior.get(productCode) ?? 0) + amount);
           // stoppedProducts (see sgi.schemas.ts): raw as-sold quantity/unit
           // from the prior window only — "كان يسحب X كرتونًا" is what the
           // customer used to buy, which is the prior window by definition.
-          const lineQty = toFiniteNumber(item.Quantity) ?? 0;
+          const lineQty = toFiniteNumber(item.quantity) ?? 0;
           cAcc.productQtyPrior.set(productCode, (cAcc.productQtyPrior.get(productCode) ?? 0) + lineQty);
-          const lineUnit = String(item.Unit ?? "").trim();
+          const lineUnit = String(item.unit ?? "").trim();
           if (lineUnit) cAcc.productUnit.set(productCode, lineUnit);
+          productMeta.set(productCode, { name: String(item.productName ?? productCode).trim() || productCode, category: String(item.productCategory ?? "").trim() || null });
         }
-      }
     }
 
     // ---- Collections, for COLLECTION_RISK — independent category, same
     // "omitted, never zeroed, never blocks the others" rule Migration #7
     // established for Team Performance's per-category availability.
-    if (collectionsResult.available) {
-      for (const row of collectionsResult.records) {
-        const customerKey = String(row.CustomerCode ?? "").trim();
-        if (!customerKey) continue;
-        const t = toEpochMs(row.CollectionDate);
-        if (t === null || t < fromTime || t > toTime) continue;
-        const amount = toFiniteNumber(row.Amount) ?? 0;
+    if (collectionRows.length > 0) {
+      for (const row of collectionRows) {
+        const customerKey = String(row.customerCode ?? "").trim();
+        const amount = toFiniteNumber(row.amount) ?? 0;
         const cAcc = customers.get(customerKey);
         if (cAcc) cAcc.collectionCurrent += amount; // only meaningful for customers seen in Invoices too
       }
-    } else {
-      warnings.push('بيانات "التحصيل" غير متاحة — تم تخطي موقف "مخاطر التحصيل".');
     }
 
     const situations: SgiSituation[] = [];
@@ -497,15 +373,13 @@ export class SgiService {
     // situation types, not used here.
     const [targetPeriodYear, targetPeriodMonthNum] = input.periodMonth.split("-").map(Number) as [number, number];
     const repTargetTotals = new Map<string, number>();
-    if (targetsResult.available) {
-      for (const row of targetsResult.records) {
-        if (toFiniteNumber(row.Month) !== targetPeriodMonthNum || toFiniteNumber(row.Year) !== targetPeriodYear) continue;
-        const routeId = String(row.RouteID ?? "").trim();
+    if (targetRows.length > 0) {
+      for (const row of targetRows) {
+        const routeId = String(row.routeId ?? "").trim();
         if (!routeId) continue;
-        const resolved = resolveRep(routeId);
-        if (!resolved) continue;
-        const salesTarget = toFiniteNumber(row.SalesTarget) ?? 0;
-        repTargetTotals.set(resolved.repEmail, (repTargetTotals.get(resolved.repEmail) ?? 0) + salesTarget);
+        const repEmail = (String(row.repEmail ?? "").trim() || String(row.salesRepId ?? "").trim() || routeId).toLowerCase();
+        const salesTarget = toFiniteNumber(row.salesTarget) ?? 0;
+        repTargetTotals.set(repEmail, (repTargetTotals.get(repEmail) ?? 0) + salesTarget);
       }
     }
 
