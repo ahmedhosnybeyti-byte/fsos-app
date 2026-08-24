@@ -462,6 +462,7 @@ export default function HeatmapPage() {
           metric={metric}
           metricLabels={METRIC_LABELS}
           layersTitle={layerResults ? (layerDimension === "category" ? t("heatmap.categoryLabel") : SCOPE_FIELDS.find((f) => f.value === layerDimension)?.label) : undefined}
+          cityFocusKey={scopeField === "City" && selectedScopeValues.size > 0 && !queryResult.isFetching ? Array.from(selectedScopeValues).sort().join("|") : undefined}
         />
       )}
     </div>
@@ -526,12 +527,14 @@ function ResultView({
   metric,
   metricLabels,
   layersTitle,
+  cityFocusKey,
 }: {
   result: HeatmapQueryResult | null;
   layers: HeatmapLayerData[] | null;
   metric: HeatmapMetric;
   metricLabels: Record<HeatmapMetric, string>;
   layersTitle?: string;
+  cityFocusKey?: string;
 }) {
   const { t, locale } = useTranslation();
   const [decision, setDecision] = useState<HeatmapDecisionResult | null>(null);
@@ -613,7 +616,7 @@ function ResultView({
             </Button>
           ))}
         </div>
-        <HeatmapMap layers={layers ?? undefined} points={layers ? undefined : result?.points} maxValue={layers ? undefined : result?.maxValue} layersTitle={layersTitle} mode={mapMode} />
+        <HeatmapMap layers={layers ?? undefined} points={layers ? undefined : result?.points} maxValue={layers ? undefined : result?.maxValue} layersTitle={layersTitle} mode={mapMode} cityFocusKey={cityFocusKey} />
 
         <div className="space-y-3 border-t border-border pt-4">
           <Button variant="secondary" size="sm" disabled={allPoints.length === 0 || decisionMutation.isPending} onClick={handleGenerateDecisions}>

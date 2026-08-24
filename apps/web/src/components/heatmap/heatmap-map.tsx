@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Layer, Map as LeafletMap, HeatLayer } from "leaflet";
 // Stylesheet import is safe statically (no `window` access at module load).
 // The Leaflet JS itself, and leaflet.heat, are only ever imported inside
@@ -58,6 +58,7 @@ export function HeatmapMap({
   layers,
   layersTitle,
   mode = "heat",
+  cityFocusKey,
 }: {
   points?: HeatmapPoint[];
   maxValue?: number;
@@ -67,12 +68,16 @@ export function HeatmapMap({
   // question these checkboxes answer, not just a bare list of values.
   layersTitle?: string;
   mode?: HeatmapDisplayMode;
+  // Changes only when the Heatmap's City selection changes. It deliberately
+  // moves Leaflet's viewport without recreating the map or its data layers.
+  cityFocusKey?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const heatLayersRef = useRef<Map<string, HeatLayer>>(new Map());
   const pointLayersRef = useRef<Layer[]>([]);
   const hasInitialViewportRef = useRef(false);
+  const lastCityFocusKeyRef = useRef<string | undefined>(undefined);
   // 2026-07-21 bug fix: the map itself is created asynchronously (dynamic
   // `import("leaflet")` inside the init effect below), so on a HeatmapMap's
   // very first mount — which, in this app, is already carrying real query
@@ -92,8 +97,10 @@ export function HeatmapMap({
   // every zoom the user just performed would fight their own zoom gesture.
   const [zoomTick, setZoomTick] = useState(0);
 
-  const resolvedLayers: HeatmapLayerData[] =
-    layers && layers.length > 0 ? layers : [{ id: "__single__", label: "", color: LAYER_PALETTE[0]!, points: points ?? [], maxValue: maxValue ?? 0 }];
+  const resolvedLayers = useMemo<HeatmapLayerData[]>(
+    () => (layers && layers.length > 0 ? layers : [{ id: "__single__", label: "", color: LAYER_PALETTE[0]!, points: points ?? [], maxValue: maxValue ?? 0 }]),
+    [layers, points, maxValue],
+  );
 
   const [visible, setVisible] = useState<Record<string, boolean>>(() => Object.fromEntries(resolvedLayers.map((l) => [l.id, true])));
 
@@ -251,7 +258,7 @@ export function HeatmapMap({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, mode, zoomTick, JSON.stringify({ layers: resolvedLayers, visible })]);
+  }, [mapReady, mode, zoomTick, resolvedLayers, visible]);
 
   // Set the initial viewport once. Refreshes only replace the data layers,
   // preserving the user's current center and zoom.
@@ -264,7 +271,20 @@ export function HeatmapMap({
       hasInitialViewportRef.current = true;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mapReady, JSON.stringify(resolvedLayers.map((l) => ({ id: l.id, points: l.points })))]);
+  }, [mapReady, resolvedLayers]);
+
+  // City selection is a navigation intent, unlike an ordinary data refresh:
+  // fit the new result once, while preserving the existing Leaflet instance,
+  // filters, and display mode. This is intentionally separate from the
+  // initial-viewport effect so user pan/zoom is never overridden on refresh.
+  useEffect(() => {
+    if (!mapRef.current || !cityFocusKey || lastCityFocusKeyRef.current === cityFocusKey) return;
+    const bounds: [number, number][] = [];
+    for (const layerData of resolvedLayers) for (const point of layerData.points) bounds.push([point.lat, point.lon]);
+    if (bounds.length === 0) return;
+    mapRef.current.fitBounds(bounds, { padding: [24, 24] });
+    lastCityFocusKeyRef.current = cityFocusKey;
+  }, [mapReady, cityFocusKey, resolvedLayers]);
 
   const showToggles = resolvedLayers.length > 1;
 
