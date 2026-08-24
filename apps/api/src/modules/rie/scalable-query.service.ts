@@ -56,6 +56,10 @@ export class RieScalableQueryService {
       if (aggregate.op !== "count" && !aggregate.field) throw new Error(`${aggregate.op} aggregate requires a field.`);
       if (aggregate.op === "sumProduct" && !aggregate.multiplier) throw new Error("sumProduct aggregate requires a multiplier field.");
     }
+    if (input.rowFilterPositiveField) {
+      assertField(input.rowFilterPositiveField, aliases);
+      if ((input.rowFilterPositiveField.source ?? "base") !== "base") throw new Error("RIE scalable positive row filter must belong to the base entity.");
+    }
     const projection = input.projection.map((field) => {
       const alias = field.as ?? field.field;
       assertIdentifier(alias, "projection alias");
@@ -102,7 +106,7 @@ export class RieScalableQueryService {
         .some((field) => field.source && scopedJoinAliases.has(field.source));
     const baseSemiJoins = canCollapseScopedJoins ? [] : scopedSemiJoinsFor("base", joins, scopedJoinAliases, input.preferHashedScopedSemiJoin);
     const baseSourceJoins = canCollapseScopedJoins ? joins.map(scopedJoin) : [];
-    const ctes = orderedActiveRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias, ctePredicates.get(alias) ?? [], alias === "base" ? baseSemiJoins : scopedSemiJoinsFor(alias, joins, scopedJoinAliases), alias === "base" ? baseSourceJoins : []));
+    const ctes = orderedActiveRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias, ctePredicates.get(alias) ?? [], alias === "base" ? baseSemiJoins : scopedSemiJoinsFor(alias, joins, scopedJoinAliases), alias === "base" ? baseSourceJoins : [], alias === "base" && input.rowFilterPositiveField ? positiveRowPredicate({ ...input.rowFilterPositiveField, source: "base_source" }) : undefined));
     if (input.latestPer) ctes.push(latestPerCte(input.latestPer));
     const baseReference = input.latestPer ? Prisma.sql`base_latest base` : activeEntityRowsReference("base");
     const joinSql = (canCollapseScopedJoins ? [] : joins).map((join) => {
@@ -185,7 +189,7 @@ export class RieScalableQueryService {
   }
 }
 
-function activeEntityRowsCte(companyId: string, entityName: string, alias: string, predicates: readonly Prisma.Sql[], semiJoins: readonly Prisma.Sql[], sourceJoins: readonly Prisma.Sql[]): Prisma.Sql {
+function activeEntityRowsCte(companyId: string, entityName: string, alias: string, predicates: readonly Prisma.Sql[], semiJoins: readonly Prisma.Sql[], sourceJoins: readonly Prisma.Sql[], rowFilter?: Prisma.Sql): Prisma.Sql {
   const cte = `${alias}_active`;
   const rowAlias = `${alias}_source`;
   const versionAlias = `${alias}_version`;
@@ -197,6 +201,7 @@ function activeEntityRowsCte(companyId: string, entityName: string, alias: strin
     WHERE ${Prisma.raw(versionAlias)}."company_id" = ${companyId} AND ${Prisma.raw(versionAlias)}."entity_name" = ${entityName} AND ${Prisma.raw(versionAlias)}."is_active" = TRUE
       AND ${Prisma.raw(rowAlias)}."company_id" = ${companyId} AND ${Prisma.raw(rowAlias)}."entity_name" = ${entityName}
       ${predicates.length ? Prisma.sql`AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty}
+      ${rowFilter ? Prisma.sql`AND ${rowFilter}` : Prisma.empty}
       ${semiJoins.length ? Prisma.sql`AND ${Prisma.join(semiJoins, " AND ")}` : Prisma.empty}
   )`;
 }
@@ -329,6 +334,7 @@ function aggregateSql(aggregate: RieQueryAggregation): Prisma.Sql {
   return Prisma.sql`${Prisma.raw({ sum: "SUM", avg: "AVG", min: "MIN", max: "MAX" }[aggregate.op])}(${numeric})${positiveFilter} AS ${alias}`;
 }
 function numericField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`; }
+function positiveRowPredicate(field: RieQueryField): Prisma.Sql { return Prisma.sql`${numericField(textField(field))} > 0`; }
 // Field names are validated identifiers.  Keep them as SQL literals rather
 // than bind parameters so SELECT/GROUP BY expressions remain identical.
 function textField(field: RieQueryField): Prisma.Sql { return Prisma.sql`${Prisma.raw(field.source ?? "base")}."data" ->> ${Prisma.raw(`'${field.field}'`)}`; }
