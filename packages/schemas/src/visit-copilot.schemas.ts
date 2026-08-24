@@ -275,6 +275,15 @@ export const visitCopilot360LostOpportunitySchema = z.object({
   baselineNetQuantity: z.number(),
   recentNetQuantity: z.number(),
   suggestedQuantity: z.number(),
+  // Presentation-only path, resolved from the already-authorized Customer ->
+  // Route -> Employee relations. It is deliberately optional so cached
+  // reports from before the hierarchy view remain valid.
+  hierarchy: z.object({
+    region: z.string().nullable(),
+    manager: z.string().nullable(),
+    supervisor: z.string().nullable(),
+    salesRep: z.string().nullable(),
+  }).optional(),
 });
 export type VisitCopilot360LostOpportunity = z.infer<typeof visitCopilot360LostOpportunitySchema>;
 

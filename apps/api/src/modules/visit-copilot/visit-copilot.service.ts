@@ -1425,6 +1425,48 @@ export class VisitCopilotService {
     ));
   }
 
+  /** Presentation-only labels from the already-authorized Customer -> Route -> Employee relations. */
+  private async daily360OpportunityHierarchy(user: AuthenticatedUser, customerCodes: readonly string[]) {
+    const codes = [...new Set(customerCodes.map((value) => value.trim()).filter(Boolean))];
+    if (!codes.length) return new Map<string, { region: string | null; manager: string | null; supervisor: string | null; salesRep: string | null }>();
+
+    const ctx = this.rieContext(user);
+    const customers = await this.rieFacade.queryCanonicalRecords({
+      ...ctx, entityName: "Customers",
+      projection: ["CustomerCode", "RouteID", "RegionID", "RegionName"].map((field) => ({ field })),
+      scope: { customer: { values: codes } }, pagination: { limit: 5_000 },
+    });
+    if (customers.page.hasMore) throw new BadRequestException("نتيجة hierarchy للفرص القائمة تجاوزت الحد المدعوم.");
+
+    const routeIds = [...new Set(customers.records.map((row) => String(row.RouteID ?? "").trim()).filter(Boolean))];
+    const routes = routeIds.length ? await this.rieFacade.queryCanonicalRecords({
+      ...ctx, entityName: "Routes",
+      projection: ["RouteID", "RegionID", "RegionName", "ManagerID", "SupervisorID", "SalesRepID"].map((field) => ({ field })),
+      scope: { fields: [{ field: "RouteID", values: routeIds }] }, pagination: { limit: 5_000 },
+    }) : { records: [], page: { hasMore: false } };
+    if (routes.page.hasMore) throw new BadRequestException("نتيجة مسارات hierarchy للفرص القائمة تجاوزت الحد المدعوم.");
+
+    const routeById = new Map(routes.records.map((row) => [String(row.RouteID ?? "").trim(), row]));
+    const employeeIds = [...new Set(routes.records.flatMap((row) => [row.ManagerID, row.SupervisorID, row.SalesRepID].map((value) => String(value ?? "").trim()).filter(Boolean)))];
+    const employees = employeeIds.length ? await this.rieFacade.queryCanonicalRecords({
+      ...ctx, entityName: "Employees",
+      projection: ["EmployeeID", "EmployeeName"].map((field) => ({ field })),
+      scope: { fields: [{ field: "EmployeeID", values: employeeIds }] }, pagination: { limit: 5_000 },
+    }) : { records: [], page: { hasMore: false } };
+    if (employees.page.hasMore) throw new BadRequestException("نتيجة موظفي hierarchy للفرص القائمة تجاوزت الحد المدعوم.");
+
+    const employeeName = new Map(employees.records.map((row) => [String(row.EmployeeID ?? "").trim(), String(row.EmployeeName ?? row.EmployeeID ?? "").trim()]));
+    const label = (value: unknown) => {
+      const id = String(value ?? "").trim();
+      return id ? employeeName.get(id) || id : null;
+    };
+    return new Map(customers.records.map((customer) => {
+      const route = routeById.get(String(customer.RouteID ?? "").trim());
+      const region = String(customer.RegionName ?? customer.RegionID ?? route?.RegionName ?? route?.RegionID ?? "").trim() || null;
+      return [String(customer.CustomerCode ?? "").trim(), { region, manager: label(route?.ManagerID), supervisor: label(route?.SupervisorID), salesRep: label(route?.SalesRepID) }];
+    }));
+  }
+
   async daily360Summary(user: AuthenticatedUser, query: VisitCopilotDaily360SummaryQuery): Promise<VisitCopilot360Summary> {
     const warnings: string[] = [];
     const narrativeLocale = (query as VisitCopilotDaily360SummaryQuery & { locale?: "ar" | "en" }).locale ?? "ar";
@@ -1465,6 +1507,7 @@ export class VisitCopilotService {
     // same selected-date customer plan and shared engine as Smart Loading.
     const lostOpportunityResult = brief.lostOpportunityResult;
     const visibleLostOpportunities = await this.filterDaily360LostOpportunities(user, lostOpportunityResult.opportunities);
+    const hierarchyByCustomer = await this.daily360OpportunityHierarchy(user, visibleLostOpportunities.map((opportunity) => opportunity.customerCode));
     const lostOpportunities = visibleLostOpportunities.map((opportunity) => {
       const diagnosis = buildDaily360DiagnosisV2({
         productName: opportunity.productName,
@@ -1478,6 +1521,7 @@ export class VisitCopilotService {
       stoppedProducts: [{ productName: opportunity.productName, quantity: opportunity.baselineNetQuantity, unit: "", value: opportunity.suggestedQuantity }],
       diagnosis: diagnosis.diagnosis, visitDecision: diagnosis.visitAction, likelyReason: null, visitGoal: diagnosis.visitGoal, confidence: diagnosis.confidence, extraProductCount: 0,
       customerCode: opportunity.customerCode, productCode: opportunity.productCode, productName: opportunity.productName, category: opportunity.category, baselineNetQuantity: opportunity.baselineNetQuantity, recentNetQuantity: opportunity.recentNetQuantity, suggestedQuantity: opportunity.suggestedQuantity,
+      hierarchy: hierarchyByCustomer.get(opportunity.customerCode),
       };
     });
     // ---- Collections + priority debtors (COLLECTION_RISK situations for

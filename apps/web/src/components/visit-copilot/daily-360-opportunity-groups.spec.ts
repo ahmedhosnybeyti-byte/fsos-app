@@ -72,11 +72,13 @@ test("deduplicates customer-product pairs, uses Uncategorized, and retains oppor
 });
 
 
-test("customer accordion is exclusive by customer code and categories start closed", () => {
-  let openCustomer = "C1";
-  openCustomer = toggleDaily360OpenCustomer(openCustomer, "C2")!;
-  assert.equal(openCustomer, "C2");
-  assert.equal(toggleDaily360OpenCustomer(openCustomer, "C2"), null);
+test("customer accordions are independently toggleable and categories start closed", () => {
+  let openCustomers = new Set(["C1"]);
+  openCustomers = toggleDaily360OpenCustomer(openCustomers, "C2");
+  assert.equal(openCustomers.has("C1"), true);
+  assert.equal(openCustomers.has("C2"), true);
+  openCustomers = toggleDaily360OpenCustomer(openCustomers, "C2");
+  assert.equal(openCustomers.has("C2"), false);
 
   const dairyForFirstCustomer = daily360CategoryKey("C1", "Dairy");
   const dairyForSecondCustomer = daily360CategoryKey("C2", "Dairy");

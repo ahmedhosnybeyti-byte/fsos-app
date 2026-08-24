@@ -1,5 +1,6 @@
 import type { VisitCopilot360LostOpportunity } from "@/lib/types";
 import { sortDaily360Customers } from "@/lib/daily-360-customer-order";
+import type { HierarchyAccordionNode } from "@/components/ui/hierarchy-accordion-tree";
 
 export type Daily360ProductGroup = {
   productCode: string;
@@ -20,14 +21,46 @@ export type Daily360CustomerGroup = {
   totalSuggestedQuantity: number;
   totalDeclineQuantity: number;
   categories: Daily360CategoryGroup[];
+  hierarchy?: VisitCopilot360LostOpportunity["hierarchy"];
 };
 
-/** Keeps the customer accordion exclusive without coupling it to customer names. */
+type HierarchyLevel = "region" | "manager" | "supervisor" | "salesRep";
+const HIERARCHY_LABEL: Record<HierarchyLevel, string> = { region: "المنطقة", manager: "مدير المبيعات", supervisor: "المشرف", salesRep: "مندوب المبيعات" };
+
+/** Uses only hierarchy labels supplied by the server from the current RIE scope. */
+export function groupDaily360OpportunityHierarchy(customers: Daily360CustomerGroup[], roleCode: string | undefined): HierarchyAccordionNode<Daily360CustomerGroup>[] {
+  const levels: HierarchyLevel[] = roleCode === "SUPERVISOR" ? ["salesRep"] : roleCode === "SALES_REP" ? [] : ["region", "manager", "supervisor", "salesRep"];
+  const roots: HierarchyAccordionNode<Daily360CustomerGroup>[] = [];
+  for (const customer of customers) {
+    const path = levels.flatMap((level) => customer.hierarchy?.[level] ? [{ level, value: customer.hierarchy[level]! }] : []);
+    if (!path.length) {
+      let direct = roots.find((node) => node.id === "direct");
+      if (!direct) { direct = { id: "direct", label: "فرص العملاء", leaves: [] }; roots.push(direct); }
+      direct.leaves!.push(customer);
+      continue;
+    }
+    let siblings = roots;
+    let node: HierarchyAccordionNode<Daily360CustomerGroup> | undefined;
+    for (const part of path) {
+      const id = `${part.level}:${part.value}`;
+      node = siblings.find((candidate) => candidate.id === id);
+      if (!node) { node = { id, label: `${HIERARCHY_LABEL[part.level]}: ${part.value}`, children: [] }; siblings.push(node); }
+      siblings = node.children!;
+    }
+    node!.leaves = [...(node!.leaves ?? []), customer];
+  }
+  return roots;
+}
+
+/** Customer accordion state supports independent open/close for every customer. */
 export function toggleDaily360OpenCustomer(
-  currentCustomerCode: string | null,
+  currentCustomerCodes: ReadonlySet<string>,
   customerCode: string,
-): string | null {
-  return currentCustomerCode === customerCode ? null : customerCode;
+): Set<string> {
+  const next = new Set(currentCustomerCodes);
+  if (next.has(customerCode)) next.delete(customerCode);
+  else next.add(customerCode);
+  return next;
 }
 
 /** Category state is scoped to its customer, so equal category labels never collide. */
@@ -107,6 +140,7 @@ export function groupDaily360LostOpportunities(
       totalSuggestedQuantity: customer.opportunities.reduce((sum, opportunity) => sum + opportunity.suggestedQuantity, 0),
       totalDeclineQuantity: customer.opportunities.reduce((sum, opportunity) => sum + opportunity.declineValue, 0),
       categories: groupedCategories,
+      hierarchy: customer.opportunities[0]?.hierarchy,
     };
   });
 

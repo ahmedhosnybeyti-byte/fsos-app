@@ -1700,6 +1700,12 @@ export interface VisitCopilot360LostOpportunity {
   baselineNetQuantity: number;
   recentNetQuantity: number;
   suggestedQuantity: number;
+  hierarchy?: {
+    region: string | null;
+    manager: string | null;
+    supervisor: string | null;
+    salesRep: string | null;
+  };
 }
 
 export interface VisitCopilot360ExecutionStep {

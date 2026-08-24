@@ -16,11 +16,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import type { VisitCopilot360ExecutionStep, VisitCopilotPeriod } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { HierarchyAccordionTree } from "@/components/ui/hierarchy-accordion-tree";
 import { exportDaily360SummaryPdf } from "@/lib/export/daily-360-summary-pdf";
 import { daily360SummaryQuery } from "./daily-360-summary-query";
 import {
   daily360CategoryKey,
   groupDaily360LostOpportunities,
+  groupDaily360OpportunityHierarchy,
   toggleDaily360OpenCategory,
   toggleDaily360OpenCustomer,
   daily360AllowedExclusionActions,
@@ -65,7 +67,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
   const [exporting, setExporting] = useState(false);
   const [isExportExpanded, setIsExportExpanded] = useState(false);
   const [hasInitializedAccordion, setHasInitializedAccordion] = useState(false);
-  const [openCustomerCode, setOpenCustomerCode] = useState<string | null>(null);
+  const [openCustomerCodes, setOpenCustomerCodes] = useState<Set<string>>(() => new Set());
   const [openCategoryKeys, setOpenCategoryKeys] = useState<Set<string>>(() => new Set());
 
   const daily360Query = daily360SummaryQuery({ period, from, to, selectedDate });
@@ -128,10 +130,14 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
     () => groupDaily360LostOpportunities(summary?.lostOpportunities ?? [], t("copilot.summary360Uncategorized")),
     [summary?.lostOpportunities, t],
   );
+  const lostOpportunityHierarchy = useMemo(
+    () => groupDaily360OpportunityHierarchy(lostOpportunityGroups, user?.role.code),
+    [lostOpportunityGroups, user?.role.code],
+  );
 
   useEffect(() => {
     if (!hasInitializedAccordion && lostOpportunityGroups.length > 0) {
-      setOpenCustomerCode(lostOpportunityGroups[0]!.customerCode);
+      setOpenCustomerCodes(new Set([lostOpportunityGroups[0]!.customerCode]));
       setHasInitializedAccordion(true);
     }
   }, [hasInitializedAccordion, lostOpportunityGroups]);
@@ -139,7 +145,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
   useEffect(() => {
     if (!open) {
       setHasInitializedAccordion(false);
-      setOpenCustomerCode(null);
+      setOpenCustomerCodes(new Set());
       setOpenCategoryKeys(new Set());
     }
   }, [open]);
@@ -311,8 +317,18 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                     <p className="text-sm text-muted-foreground">{t(summary.lostOpportunityStatus === "no-customers" ? "copilot.summary360NoCustomers" : summary.lostOpportunityStatus === "no-baseline-sales" ? "copilot.summary360NoBaselineSales" : summary.lostOpportunityStatus === "data-unavailable" ? "copilot.summary360DataUnavailable" : "copilot.summary360NoLostOpportunities")}</p>
                   ) : (
                     <div className="space-y-3">
-                      {lostOpportunityGroups.map((customer, customerIndex) => {
-                        const customerIsOpen = isExportExpanded || openCustomerCode === customer.customerCode;
+                      <HierarchyAccordionTree
+                        nodes={lostOpportunityHierarchy}
+                        expandAllLabel="فتح الكل"
+                        collapseAllLabel="غلق الكل"
+                        onExpandAll={() => {
+                          setOpenCustomerCodes(new Set(lostOpportunityGroups.map((customer) => customer.customerCode)));
+                          setOpenCategoryKeys(new Set(lostOpportunityGroups.flatMap((customer) => customer.categories.map((category) => daily360CategoryKey(customer.customerCode, category.category)))));
+                        }}
+                        onCollapseAll={() => { setOpenCustomerCodes(new Set()); setOpenCategoryKeys(new Set()); }}
+                        renderLeaf={(customer) => {
+                        const customerIndex = lostOpportunityGroups.indexOf(customer);
+                        const customerIsOpen = isExportExpanded || openCustomerCodes.has(customer.customerCode);
                         return (
                           <div key={customer.customerCode} className="glass-card overflow-hidden">
                             <button
@@ -320,7 +336,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                               className="flex w-full flex-wrap items-center gap-2 bg-slate-900 p-4 text-start text-white transition-colors hover:bg-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring dark:bg-slate-950 dark:hover:bg-slate-900"
                               aria-expanded={customerIsOpen}
                               aria-controls={`daily-360-customer-${customer.customerCode}`}
-                              onClick={() => setOpenCustomerCode((current) => toggleDaily360OpenCustomer(current, customer.customerCode))}
+                              onClick={() => setOpenCustomerCodes((current) => toggleDaily360OpenCustomer(current, customer.customerCode))}
                             >
                               <ChevronDown className={cn("h-5 w-5 shrink-0 transition-transform", customerIsOpen && "rotate-180")} aria-hidden />
                               <span className="text-sm font-bold text-white">{customerIndex + 1}. {customer.customerName}</span>
@@ -420,7 +436,8 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                             )}
                           </div>
                         );
-                      })}
+                      }}
+                      />
                     </div>
                   )}
                 </section>
