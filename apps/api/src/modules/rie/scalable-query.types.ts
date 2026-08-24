@@ -48,6 +48,12 @@ export interface RieScalableQuery extends EntityQueryContext {
   scope?: RieScalableQueryScope;
   pagination?: RieQueryPagination;
   orderBy?: readonly RieQueryOrder[];
+  /**
+   * Compiles scoped joins as an uncorrelated membership test.  This preserves
+   * the normalised-equality semantics while allowing PostgreSQL to hash the
+   * scoped key set once instead of rescanning a materialized CTE per fact row.
+   */
+  preferHashedScopedSemiJoin?: boolean;
 }
 export interface RieScalableQueryResult {
   records: readonly EntityRecord[];

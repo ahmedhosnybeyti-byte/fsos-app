@@ -43,6 +43,20 @@ test("scopes Customers.City through Invoices before Invoice Items", async () => 
   assert.match(sql, /invoice_source\."data" ->> 'CustomerCode'/);
 });
 
+test("hashed scoped semi-join compiles stale-style Invoice Items membership once", async () => {
+  let captured: { strings?: readonly string[] } | undefined;
+  const service = new RieScalableQueryService({ $queryRaw: async (query: typeof captured) => { captured = query; return []; } } as never, { resolveAllowedRouteIds: async () => null } as never);
+  await service.query({
+    companyId: "company-1", entityName: "Invoice Items", projection: [{ field: "ProductCode" }],
+    joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }],
+    groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }],
+    scope: { date: { field: "InvoiceDate", source: "invoice", to: "2026-08-31" }, product: { values: ["P-1"] } },
+    preferHashedScopedSemiJoin: true, pagination: { limit: 1 },
+  });
+  const sql = captured?.strings?.join(" ") ?? "";
+  assert.match(sql, /IN \(SELECT .* FROM invoice_active invoice_scope\)/);
+});
+
 test("scalable query supports distinct array aggregation without materializing facts", async () => {
   let captured: { strings?: readonly string[] } | undefined;
   const service = new RieScalableQueryService({ $queryRaw: async (query: typeof captured) => { captured = query; return [{ routeIds: ["R-1"] }]; } } as never, { resolveAllowedRouteIds: async () => null } as never);

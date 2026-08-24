@@ -100,7 +100,7 @@ export class RieScalableQueryService {
         ...(aggregate.filterPositiveField ? [aggregate.filterPositiveField] : []),
       ])]
         .some((field) => field.source && scopedJoinAliases.has(field.source));
-    const baseSemiJoins = canCollapseScopedJoins ? [] : scopedSemiJoinsFor("base", joins, scopedJoinAliases);
+    const baseSemiJoins = canCollapseScopedJoins ? [] : scopedSemiJoinsFor("base", joins, scopedJoinAliases, input.preferHashedScopedSemiJoin);
     const baseSourceJoins = canCollapseScopedJoins ? joins.map(scopedJoin) : [];
     const ctes = orderedActiveRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias, ctePredicates.get(alias) ?? [], alias === "base" ? baseSemiJoins : scopedSemiJoinsFor(alias, joins, scopedJoinAliases), alias === "base" ? baseSourceJoins : []));
     if (input.latestPer) ctes.push(latestPerCte(input.latestPer));
@@ -225,10 +225,18 @@ function scopedJoinExistsFrom(sourceAlias: string, join: RieQueryJoin): Prisma.S
   const scopedSource = { field: join.on.rightField, source: `${join.alias}_scope` };
   return Prisma.sql`EXISTS (SELECT 1 FROM ${Prisma.raw(`${join.alias}_active`)} ${Prisma.raw(`${join.alias}_scope`)} WHERE ${normalizedField(baseSource)} = ${normalizedField(scopedSource)})`;
 }
-function scopedSemiJoinsFor(sourceAlias: string, joins: readonly RieQueryJoin[], scopedJoinAliases: ReadonlySet<string>): Prisma.Sql[] {
+function scopedSemiJoinsFor(sourceAlias: string, joins: readonly RieQueryJoin[], scopedJoinAliases: ReadonlySet<string>, preferHashed = false): Prisma.Sql[] {
   return joins
     .filter((join) => scopedJoinAliases.has(join.alias) && (join.on.left.source ?? "base") === sourceAlias)
-    .map((join) => scopedJoinExistsFrom(sourceAlias, join));
+    .map((join) => preferHashed ? scopedJoinMembershipFrom(sourceAlias, join) : scopedJoinExistsFrom(sourceAlias, join));
+}
+function scopedJoinMembershipFrom(sourceAlias: string, join: RieQueryJoin): Prisma.Sql {
+  // normalizedField always COALESCEs to text, so IN has the same truth table
+  // as EXISTS here.  Unlike a correlated EXISTS over a MATERIALIZED CTE,
+  // PostgreSQL can build one hashed invoice-key set and probe it for each fact.
+  const baseSource = { field: join.on.left.field, source: `${sourceAlias}_source` };
+  const scopedSource = { field: join.on.rightField, source: `${join.alias}_scope` };
+  return Prisma.sql`${normalizedField(baseSource)} IN (SELECT ${normalizedField(scopedSource)} FROM ${Prisma.raw(`${join.alias}_active`)} ${Prisma.raw(`${join.alias}_scope`)})`;
 }
 function orderScopedAliases(joins: readonly RieQueryJoin[], scopedJoinAliases: ReadonlySet<string>): string[] {
   const ordered: string[] = [];
