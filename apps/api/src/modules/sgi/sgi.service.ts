@@ -20,6 +20,7 @@ import { RieFacade } from "../rie/rie-facade.service";
 // per rep rather than voted per-row, since it's now a 1:1 employee fact
 // rather than a manually-typed column that could vary row to row.
 const AI_REPORT_TYPE = "sgi_situations";
+const SGI_SOURCE_ENTITIES = ["Invoices", "Invoice Items", "Routes", "Employees", "Customers", "Products", "Collections", "Targets"] as const;
 
 function toFiniteNumber(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -162,6 +163,12 @@ function assignSeverityByRank<T>(items: T[], impactOf: (item: T) => number): Map
 
 @Injectable()
 export class SgiService {
+  // One shared promise per company makes every SGI consumer converge on the
+  // same bounded refresh.  It is deliberately process-local: the existing
+  // cron/service execution model is single-process and this guard must never
+  // add infrastructure or a distributed full read to the request path.
+  private readonly freshnessInFlight = new Map<string, Promise<void>>();
+
   constructor(
     private readonly rieFacade: RieFacade,
     private readonly prisma: PrismaService,
@@ -178,6 +185,47 @@ export class SgiService {
     const result = await this.rieFacade.queryCanonicalRecords({ ...query, pagination: { limit: 5_000 } });
     if (result.page.hasMore) throw new Error(`SGI aggregate query for ${query.entityName} exceeded the bounded result contract.`);
     return result.records as Record<string, unknown>[];
+  }
+
+  /**
+   * Ensures an already-adopted company's persisted SGI result reflects both
+   * the active UTC day and the latest relevant canonical ingestion change.
+   * A company with no prior SGI report remains a manual-first-use flow.
+   */
+  async ensureFresh(companyId: string): Promise<void> {
+    const inFlight = this.freshnessInFlight.get(companyId);
+    if (inFlight) return inFlight;
+
+    const refresh = this.ensureFreshForCompany(companyId);
+    this.freshnessInFlight.set(companyId, refresh);
+    try {
+      await refresh;
+    } finally {
+      if (this.freshnessInFlight.get(companyId) === refresh) this.freshnessInFlight.delete(companyId);
+    }
+  }
+
+  private async ensureFreshForCompany(companyId: string): Promise<void> {
+    const latest = await this.prisma.aiReport.findFirst({
+      where: { companyId, reportType: AI_REPORT_TYPE },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true, content: true },
+    });
+    if (!latest) return;
+
+    // Metadata-only query: PostgreSQL identifies the newest relevant
+    // ingestion mutation; no canonical/fact payload is read into Node.
+    const latestSourceChange = await this.prisma.rieCanonicalEntityRow.findFirst({
+      where: { companyId, entityName: { in: [...SGI_SOURCE_ENTITIES] } },
+      orderBy: { updatedAt: "desc" },
+      select: { updatedAt: true },
+    });
+    const generatedAt = (latest.content as Partial<SgiRecalculateResult>).generatedAt;
+    const generatedToday = typeof generatedAt === "string" && generatedAt.slice(0, 10) === new Date().toISOString().slice(0, 10);
+    const sourceIsCurrent = !latestSourceChange || latest.createdAt >= latestSourceChange.updatedAt;
+    if (generatedToday && sourceIsCurrent) return;
+
+    await this.recalculateForCompany(companyId);
   }
 
   async recalculate(user: AuthenticatedUser, input: SgiRecalculateInput): Promise<SgiRecalculateResult> {
@@ -816,6 +864,8 @@ export class SgiService {
   async getLatest(user: AuthenticatedUser): Promise<SgiLatestResult | null> {
     if (!user.companyId) throw new ForbiddenException();
     const companyId = user.companyId;
+
+    await this.ensureFresh(companyId);
 
     const row = await this.prisma.aiReport.findFirst({
       where: { companyId, reportType: AI_REPORT_TYPE },
