@@ -366,17 +366,35 @@ export class SmartLoadingService {
   async recalculate(user: AuthenticatedUser, input: SmartLoadingRecalculateInput): Promise<SmartLoadingRecalculateResult> {
     const from = parseAsOfDate(input.fromDate); const to = parseAsOfDate(input.toDate);
     if (from > to) throw new BadRequestException("toDate must be on or after fromDate.");
-    const ctx = this.rieContext(user); const [customers, products, invoices, items, inventory] = await Promise.all([this.rieFacade.getEntityRecords("Customers", ctx), this.rieFacade.getEntityRecords("Products", ctx), this.rieFacade.getEntityRecords("Invoices", ctx), this.rieFacade.getEntityRecords("Invoice Items", ctx), this.rieFacade.getEntityRecords("Van Inventory", ctx)]);
-    if (![customers, products, invoices, items].every((result) => result.available)) throw new BadRequestException("Required RIE data is unavailable.");
-    const allowed = new Set(customers.records.map((row) => String(row.CustomerCode ?? "").trim()));
+    const ctx = this.rieContext(user);
+    const bounded = async (query: Parameters<RieFacade["queryCanonicalRecords"]>[0]) => {
+      const result = await this.rieFacade.queryCanonicalRecords({ ...query, pagination: { limit: 5_000 } });
+      if (result.page.hasMore) throw new BadRequestException("Smart Loading scoped result exceeds its safe response limit.");
+      return result.records;
+    };
+    if (!await this.rieFacade.hasCanonicalEntitySources(ctx, ["Customers", "Products", "Invoices", "Invoice Items"])) {
+      throw new BadRequestException("Required RIE data is unavailable.");
+    }
+    const requestedCustomerCodes = [...new Set(input.customerCodes.map((code) => code.trim()).filter(Boolean))];
+    const customerRows = await bounded({ ...ctx, entityName: "Customers", projection: [{ field: "CustomerCode", as: "customerCode" }], scope: { customer: { values: requestedCustomerCodes } } });
+    const allowed = new Set(customerRows.map((row) => String(row.customerCode ?? "").trim()));
     if (input.customerCodes.some((code) => !allowed.has(code))) throw new ForbiddenException("One or more customers are outside your scope.");
-    const selected = new Set(input.customerCodes.map((code) => code.trim()).filter(Boolean)); const productNames = new Map(products.records.map((row) => [String(row.ProductCode ?? "").trim(), String(row.ProductName ?? row.ProductCode ?? "").trim()]));
-    if (input.confirmedOrders.some((order) => !productNames.has(order.productCode))) throw new BadRequestException("One or more confirmed-order products are unavailable in RIE.");
-    const invoiceMeta = new Map(invoices.records.filter((row) => ["confirmed", "posted"].includes(String(row.InvoiceStatus ?? "").trim().toLowerCase())).map((row) => [String(row.InvoiceNo ?? "").trim(), { customer: String(row.CustomerCode ?? "").trim(), date: toEpochMs(row.InvoiceDate) }]));
-    const net = new Map<string, number>(); const start = from.getTime(); const end = to.getTime() + MS_PER_DAY - 1;
-    for (const row of items.records) { const invoice = invoiceMeta.get(String(row.InvoiceNo ?? "").trim()); const code = String(row.ProductCode ?? "").trim(); if (invoice?.date !== null && invoice && selected.has(invoice.customer) && invoice.date >= start && invoice.date <= end && code) net.set(code, (net.get(code) ?? 0) + (toFiniteNumber(row.Quantity) ?? 0)); }
-    const latest = Math.max(...inventory.records.map((row) => toEpochMs(row.ReportDate) ?? Number.NEGATIVE_INFINITY)); const stock = new Map<string, number>(); for (const row of inventory.records) if (toEpochMs(row.ReportDate) === latest) { const code = String(row.ProductCode ?? "").trim(); stock.set(code, (stock.get(code) ?? 0) + (toFiniteNumber(row.Quantity) ?? 0)); }
+    const [salesRows, latestInventoryRows] = await Promise.all([
+      bounded({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }], joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }], hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "netQuantity" }], scope: { customer: { values: requestedCustomerCodes, source: "invoice" }, date: { field: "InvoiceDate", source: "invoice", from: input.fromDate, to: input.toDate }, fields: [{ field: "InvoiceStatus", source: "invoice", values: ["Confirmed", "Posted"] }] } }),
+      bounded({ ...ctx, entityName: "Van Inventory", projection: [], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }] }),
+    ]);
+    const latestReportDate = String(latestInventoryRows[0]?.latestReportDate ?? "").trim().slice(0, 10);
+    const inventoryRows = latestReportDate
+      ? await bounded({ ...ctx, entityName: "Van Inventory", projection: [{ field: "ProductCode", as: "productCode" }], groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { date: { field: "ReportDate", values: [latestReportDate] } } })
+      : [];
+    const net = new Map<string, number>();
+    for (const row of salesRows) { const code = String(row.productCode ?? "").trim(); if (code) net.set(code, toFiniteNumber(row.netQuantity) ?? 0); }
+    const stock = new Map<string, number>();
+    for (const row of inventoryRows) { const code = String(row.productCode ?? "").trim(); if (code) stock.set(code, toFiniteNumber(row.quantity) ?? 0); }
     const days = Math.floor((to.getTime() - from.getTime()) / MS_PER_DAY) + 1; const orders = new Map(input.confirmedOrders.map((row) => [row.productCode, row.quantity])); const codes = new Set([...net.keys(), ...orders.keys()]);
+    const productRows = codes.size ? await bounded({ companyId: ctx.companyId, entityName: "Products", projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }], scope: { product: { values: [...codes] } } }) : [];
+    const productNames = new Map(productRows.map((row) => [String(row.productCode ?? "").trim(), String(row.productName ?? row.productCode ?? "").trim()]));
+    if (input.confirmedOrders.some((order) => !productNames.has(order.productCode))) throw new BadRequestException("One or more confirmed-order products are unavailable in RIE.");
     return { targetDate: input.targetDate, fromDate: input.fromDate, toDate: input.toDate, calendarDaysInPeriod: days, products: [...codes].map((code) => { const demand = ((net.get(code) ?? 0) / days) * 7 / input.visitsPerWeek; const vehicleStock = stock.get(code) ?? null; const safetyStock = 0; return { productCode: code, productName: productNames.get(code) ?? code, estimatedCustomerDemand: demand, confirmedOrderQuantity: orders.get(code) ?? 0, safetyStock, vehicleStock, suggestedQuantity: demand + (orders.get(code) ?? 0) - safetyStock - (vehicleStock ?? 0) }; }), calculatedAt: new Date().toISOString() };
   }
 }
