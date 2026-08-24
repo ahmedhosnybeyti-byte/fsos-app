@@ -130,6 +130,10 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
     () => groupDaily360LostOpportunities(summary?.lostOpportunities ?? [], t("copilot.summary360Uncategorized")),
     [summary?.lostOpportunities, t],
   );
+  const productNameByCode = useMemo(
+    () => new Map((summary?.lostOpportunities ?? []).map((opportunity) => [opportunity.productCode, opportunity.productName])),
+    [summary?.lostOpportunities],
+  );
   const lostOpportunityHierarchy = useMemo(
     () => groupDaily360OpportunityHierarchy(lostOpportunityGroups, user?.role.code),
     [lostOpportunityGroups, user?.role.code],
@@ -448,7 +452,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                     <div className="space-y-2">
                       {exclusionsQuery.data.map((exclusion) => (
                         <div key={exclusion.id} className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                          <span>{exclusion.productCode} ? {t(`copilot.summary360Scope${exclusion.scopeType}` as TranslationKey)}</span>
+                          <span>{productNameByCode.get(exclusion.productCode) ?? exclusion.productCode} ? {t(`copilot.summary360Scope${exclusion.scopeType}` as TranslationKey)}</span>
                           <Button type="button" size="sm" variant="outline" disabled={revokeExclusionMutation.isPending} onClick={() => revokeExclusionMutation.mutate(exclusion.id)}>{t("copilot.summary360RevokeExclusion")}</Button>
                         </div>
                       ))}
