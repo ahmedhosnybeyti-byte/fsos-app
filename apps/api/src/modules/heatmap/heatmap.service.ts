@@ -67,6 +67,13 @@ interface SalesJoinedRow {
   time: number | null;
 }
 
+interface HeatmapCustomerPoint {
+  id: string;
+  label: string;
+  lat: number | null;
+  lon: number | null;
+}
+
 @Injectable()
 export class HeatmapService {
   // A dashboard burst commonly asks for the identical sales aggregate many
@@ -163,12 +170,13 @@ export class HeatmapService {
     categoryValue?: string,
     dateFrom?: string,
     dateTo?: string,
+    customerCodes?: readonly string[],
   ): Promise<Map<string, number>> {
-    const key = JSON.stringify([user.companyId, user.roleCode, user.email.trim().toLowerCase(), categoryValue ?? null, dateFrom ?? null, dateTo ?? null]);
+    const key = JSON.stringify([user.companyId, user.roleCode, user.email.trim().toLowerCase(), categoryValue ?? null, dateFrom ?? null, dateTo ?? null, customerCodes ?? null]);
     const inFlight = this.salesAggregateInFlight.get(key);
     if (inFlight) return inFlight;
 
-    const pending = this.executeSalesAggregateInPostgres(user, categoryValue, dateFrom, dateTo);
+    const pending = this.executeSalesAggregateInPostgres(user, categoryValue, dateFrom, dateTo, customerCodes);
     this.salesAggregateInFlight.set(key, pending);
     try {
       return await pending;
@@ -182,6 +190,7 @@ export class HeatmapService {
     categoryValue?: string,
     dateFrom?: string,
     dateTo?: string,
+    customerCodes?: readonly string[],
   ): Promise<Map<string, number>> {
     const [invoiceFileIds, itemFileIds, productFileIds] = await Promise.all([
       this.activeMaterializedFileIds(user.companyId!, "Invoices", "الفواتير"),
@@ -208,6 +217,11 @@ export class HeatmapService {
     if (fromTime !== null && Number.isFinite(fromTime)) dateFilters.push(Prisma.sql`${invoiceTime} >= ${fromTime}`);
     if (toTime !== null && Number.isFinite(toTime)) dateFilters.push(Prisma.sql`${invoiceTime} <= ${toTime}`);
     const dateFilter = dateFilters.length ? Prisma.sql`AND ${Prisma.join(dateFilters, " AND ")}` : Prisma.empty;
+    const customerFilter = customerCodes
+      ? customerCodes.length === 0
+        ? Prisma.sql`AND FALSE`
+        : Prisma.sql`AND BTRIM(COALESCE(inv."data" ->> 'CustomerCode', '')) IN (${Prisma.join(customerCodes)})`
+      : Prisma.empty;
     const categoryJoin = categoryValue
       ? Prisma.sql`JOIN products product ON BTRIM(COALESCE(product."data" ->> 'ProductCode', '')) = BTRIM(COALESCE(item."data" ->> 'ProductCode', ''))`
       : Prisma.empty;
@@ -271,6 +285,7 @@ export class HeatmapService {
         SELECT inv.* FROM invoices inv
         WHERE BTRIM(COALESCE(inv."data" ->> 'CustomerCode', '')) <> ''
         ${routeFilter("inv")}
+        ${customerFilter}
         ${dateFilter}
       ), filtered_items AS MATERIALIZED (
         SELECT item.* FROM items item
@@ -311,6 +326,7 @@ export class HeatmapService {
     categoryValue?: string,
     dateFrom?: string,
     dateTo?: string,
+    customerCodes?: readonly string[],
   ): Promise<Map<string, number>> {
     const ctx = this.rieContext(user);
     const fromTime = dateFrom ? Date.parse(dateFrom) : null;
@@ -352,7 +368,68 @@ export class HeatmapService {
     }
 
     // sales
-    return this.aggregateSalesInPostgres(user, categoryValue, dateFrom, dateTo);
+    return this.aggregateSalesInPostgres(user, categoryValue, dateFrom, dateTo, customerCodes);
+  }
+
+  // City is the only scope that routinely narrows a large heat map enough to
+  // change the join plan. Resolve its customer projection in PostgreSQL first
+  // so neither the customer entity nor raw facts are materialized in Node.
+  private async cityCustomerPointsInPostgres(user: AuthenticatedUser, cities: readonly string[]): Promise<HeatmapCustomerPoint[]> {
+    const customerFileIds = await this.activeMaterializedFileIds(user.companyId!, "Customers", "العملاء");
+    const allowedRoutes = await this.hierarchyResolver.resolveAllowedRouteIds(user.companyId!, {
+      roleCode: user.roleCode,
+      email: user.email,
+    });
+    const customerFiles = customerFileIds.map((id, precedence) => Prisma.sql`(${id}, ${precedence})`);
+    const routeValues = allowedRoutes ? [...allowedRoutes] : [];
+    const routeFilter = allowedRoutes === null
+      ? Prisma.empty
+      : routeValues.length === 0
+        ? Prisma.sql`AND FALSE`
+        : Prisma.sql`AND LOWER(BTRIM(COALESCE(cust."data" ->> 'RouteID', ''))) IN (${Prisma.join(routeValues)})`;
+    const customerDedup = customerFileIds.length === 1
+      ? Prisma.sql`SELECT * FROM customer_rows`
+      : Prisma.sql`
+          SELECT "data", precedence FROM (
+            SELECT cust.*, MIN(cust.precedence) OVER (PARTITION BY LOWER(BTRIM(COALESCE(cust."data" ->> 'CustomerCode', '')))) AS newest_precedence
+            FROM customer_rows cust WHERE BTRIM(COALESCE(cust."data" ->> 'CustomerCode', '')) <> ''
+          ) deduped WHERE precedence = newest_precedence
+          UNION ALL
+          SELECT "data", precedence FROM customer_rows WHERE BTRIM(COALESCE("data" ->> 'CustomerCode', '')) = ''`;
+    const rows = await this.prisma.$queryRaw<Array<{ id: string; label: string; lat: string | number | null; lon: string | number | null }>>(Prisma.sql`
+      WITH selected_customer_files("source_file_id", precedence) AS (VALUES ${Prisma.join(customerFiles)}),
+      customer_versions AS (
+        SELECT v.id, selected_customer_files.precedence
+        FROM "rie_dataset_versions" v JOIN selected_customer_files ON selected_customer_files."source_file_id" = v."source_file_id"
+        WHERE v."company_id" = ${user.companyId!} AND v."entity_name" = 'Customers' AND v."is_active" = TRUE
+      ), customer_rows AS (
+        SELECT r."data", active.precedence FROM "rie_entity_rows" r JOIN customer_versions active ON active.id = r."dataset_version_id"
+      ), customers AS (${customerDedup})
+      SELECT BTRIM(COALESCE(cust."data" ->> 'CustomerCode', '')) AS id,
+        COALESCE(cust."data" ->> 'CustomerName', BTRIM(COALESCE(cust."data" ->> 'CustomerCode', ''))) AS label,
+        cust."data" ->> 'Latitude' AS lat, cust."data" ->> 'Longitude' AS lon
+      FROM customers cust
+      WHERE BTRIM(COALESCE(cust."data" ->> 'City', '')) IN (${Prisma.join(cities)})
+        AND BTRIM(COALESCE(cust."data" ->> 'CustomerCode', '')) <> ''
+        ${routeFilter}
+    `);
+    return rows.map((row) => ({ id: row.id, label: row.label, lat: toFiniteNumber(row.lat), lon: toFiniteNumber(row.lon) }));
+  }
+
+  private async cityScopeValuesInPostgres(user: AuthenticatedUser): Promise<string[]> {
+    const customerFileIds = await this.activeMaterializedFileIds(user.companyId!, "Customers", "العملاء");
+    const customerFiles = customerFileIds.map((id, precedence) => Prisma.sql`(${id}, ${precedence})`);
+    const customerDedup = customerFileIds.length === 1
+      ? Prisma.sql`SELECT * FROM customer_rows`
+      : Prisma.sql`SELECT "data", precedence FROM (SELECT cust.*, MIN(cust.precedence) OVER (PARTITION BY LOWER(BTRIM(COALESCE(cust."data" ->> 'CustomerCode', '')))) AS newest_precedence FROM customer_rows cust WHERE BTRIM(COALESCE(cust."data" ->> 'CustomerCode', '')) <> '') deduped WHERE precedence = newest_precedence UNION ALL SELECT "data", precedence FROM customer_rows WHERE BTRIM(COALESCE("data" ->> 'CustomerCode', '')) = ''`;
+    const rows = await this.prisma.$queryRaw<Array<{ value: string }>>(Prisma.sql`
+      WITH selected_customer_files("source_file_id", precedence) AS (VALUES ${Prisma.join(customerFiles)}),
+      customer_versions AS (SELECT v.id, selected_customer_files.precedence FROM "rie_dataset_versions" v JOIN selected_customer_files ON selected_customer_files."source_file_id" = v."source_file_id" WHERE v."company_id" = ${user.companyId!} AND v."entity_name" = 'Customers' AND v."is_active" = TRUE),
+      customer_rows AS (SELECT r."data", active.precedence FROM "rie_entity_rows" r JOIN customer_versions active ON active.id = r."dataset_version_id"),
+      customers AS (${customerDedup})
+      SELECT DISTINCT BTRIM(COALESCE("data" ->> 'City', '')) AS value FROM customers WHERE BTRIM(COALESCE("data" ->> 'City', '')) <> '' ORDER BY value
+    `);
+    return rows.map((row) => row.value);
   }
 
   // Lost Sales Map (DNA GVE catalog, Part 20.2): "أين تتركز الفرص الضائعة؟"
@@ -462,20 +539,31 @@ export class HeatmapService {
 
   async query(user: AuthenticatedUser, input: HeatmapRieQueryInput): Promise<HeatmapQueryResult> {
     const ctx = this.rieContext(user);
-    const customersResult = await this.rieFacade.getEntityRecords("Customers", ctx);
-    this.assertAvailable(customersResult, "العملاء");
-
-    let customerRecords = customersResult.records;
-    if (input.scopeField && input.scopeValues && input.scopeValues.length > 0) {
-      const scopeSet = new Set(input.scopeValues);
-      customerRecords = customerRecords.filter((row) => scopeSet.has(String(row[input.scopeField!] ?? "")));
-      if (customerRecords.length === 0) {
-        throw new BadRequestException(`لا توجد بيانات مطابقة لـ ${input.scopeField} ضمن [${input.scopeValues.join(", ")}]`);
+    const cityScope = input.scopeField === "City" && !!input.scopeValues?.length;
+    let customerRows: HeatmapCustomerPoint[];
+    if (cityScope) {
+      customerRows = await this.cityCustomerPointsInPostgres(user, input.scopeValues!);
+    } else {
+      const customersResult = await this.rieFacade.getEntityRecords("Customers", ctx);
+      this.assertAvailable(customersResult, "العملاء");
+      let customerRecords = customersResult.records;
+      if (input.scopeField && input.scopeValues && input.scopeValues.length > 0) {
+        const scopeSet = new Set(input.scopeValues);
+        customerRecords = customerRecords.filter((row) => scopeSet.has(String(row[input.scopeField!] ?? "")));
       }
+      customerRows = customerRecords.map((row) => ({
+        id: String(row.CustomerCode ?? "").trim(),
+        label: String(row.CustomerName ?? String(row.CustomerCode ?? "").trim()),
+        lat: toFiniteNumber(row.Latitude),
+        lon: toFiniteNumber(row.Longitude),
+      }));
     }
-    if (customerRecords.length > MAX_CUSTOMERS_PER_REQUEST) {
+    if (cityScope && customerRows.length === 0) {
+      throw new BadRequestException(`لا توجد بيانات مطابقة لـ City ضمن [${input.scopeValues!.join(", ")}]`);
+    }
+    if (customerRows.length > MAX_CUSTOMERS_PER_REQUEST) {
       throw new BadRequestException(
-        `${customerRecords.length} customers match this scope, above the ${MAX_CUSTOMERS_PER_REQUEST}-customer limit for one heat map. Narrow the scope and try again.`,
+        `${customerRows.length} customers match this scope, above the ${MAX_CUSTOMERS_PER_REQUEST}-customer limit for one heat map. Narrow the scope and try again.`,
       );
     }
 
@@ -485,21 +573,21 @@ export class HeatmapService {
     } else if (input.metric === "opportunity") {
       valueById = await this.computeOpportunityValues(user, input);
     } else if (input.metric !== "customerCount") {
-      valueById = await this.computeAggregateValues(user, input.metric, input.categoryValue, input.dateFrom, input.dateTo);
+      valueById = await this.computeAggregateValues(user, input.metric, input.categoryValue, input.dateFrom, input.dateTo, cityScope ? customerRows.map((row) => row.id) : undefined);
     }
 
     const points: HeatmapQueryResult["points"] = [];
     let excludedBadCoordinates = 0;
 
-    for (const row of customerRecords) {
-      const lat = toFiniteNumber(row.Latitude);
-      const lon = toFiniteNumber(row.Longitude);
+    for (const row of customerRows) {
+      const lat = row.lat;
+      const lon = row.lon;
       if (lat === null || lon === null || !isSaneCoordinate(lat, lon)) {
         excludedBadCoordinates++;
         continue;
       }
-      const id = String(row.CustomerCode ?? "").trim();
-      const label = String(row.CustomerName ?? id);
+      const id = row.id;
+      const label = row.label;
 
       let value = 1;
       if (input.metric !== "customerCount") {
@@ -511,7 +599,7 @@ export class HeatmapService {
     return {
       metric: input.metric,
       excludedBadCoordinates,
-      totalRows: customerRecords.length,
+      totalRows: customerRows.length,
       usedRows: points.length,
       maxValue: points.reduce((m, p) => Math.max(m, p.value), 0),
       totalValue: points.reduce((s, p) => s + p.value, 0),
@@ -523,6 +611,7 @@ export class HeatmapService {
   // #2's customer-similarity scope-values/category-values. Route Planning
   // keeps using its own GET /route-planning/distinct-values untouched.
   async scopeValues(user: AuthenticatedUser, scopeField: HeatmapScopeField): Promise<HeatmapValuesResult> {
+    if (scopeField === "City") return { values: await this.cityScopeValuesInPostgres(user) };
     const customersResult = await this.rieFacade.getEntityRecords("Customers", this.rieContext(user));
     this.assertAvailable(customersResult, "العملاء");
     const values = new Set<string>();
