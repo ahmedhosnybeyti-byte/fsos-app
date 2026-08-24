@@ -43,8 +43,6 @@ export interface RieScalableQuery extends EntityQueryContext {
   hierarchyRoute?: RieQueryField;
   groupBy?: readonly RieQueryField[];
   aggregates?: readonly RieQueryAggregation[];
-  /** Retain only positive base rows before joining and aggregation. */
-  rowFilterPositiveField?: RieQueryField;
   /** Applied after company, active-version and hierarchy scopes, before aggregation. */
   latestPer?: RieLatestPerScope;
   scope?: RieScalableQueryScope;

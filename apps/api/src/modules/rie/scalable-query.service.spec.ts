@@ -47,27 +47,14 @@ test("hashed scoped semi-join compiles stale-style Invoice Items membership once
   let captured: { strings?: readonly string[] } | undefined;
   const service = new RieScalableQueryService({ $queryRaw: async (query: typeof captured) => { captured = query; return []; } } as never, { resolveAllowedRouteIds: async () => null } as never);
   await service.query({
-    companyId: "company-1", entityName: "Invoice Items", projection: [{ field: "ProductCode" }, { field: "CustomerCode", source: "invoice" }],
+    companyId: "company-1", entityName: "Invoice Items", projection: [{ field: "ProductCode" }],
     joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }],
-    groupBy: [{ field: "ProductCode" }, { field: "CustomerCode", source: "invoice" }], aggregates: [{ op: "maxText", field: "InvoiceDate", source: "invoice", as: "lastPurchaseDate" }],
+    groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }],
     scope: { date: { field: "InvoiceDate", source: "invoice", to: "2026-08-31" }, product: { values: ["P-1"] } },
     preferHashedScopedSemiJoin: true, pagination: { limit: 1 },
   });
   const sql = captured?.strings?.join(" ") ?? "";
   assert.match(sql, /IN \(SELECT .* FROM invoice_active invoice_scope\)/);
-});
-
-test("positive base-row filter is applied before stale-style joins and aggregation", async () => {
-  let captured: { strings?: readonly string[] } | undefined;
-  const service = new RieScalableQueryService({ $queryRaw: async (query: typeof captured) => { captured = query; return []; } } as never, { resolveAllowedRouteIds: async () => null } as never);
-  await service.query({
-    companyId: "company-1", entityName: "Invoice Items", projection: [{ field: "ProductCode" }],
-    joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }],
-    groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", filterPositiveField: { field: "Quantity" }, as: "quantity" }],
-    rowFilterPositiveField: { field: "Quantity" }, scope: { date: { field: "InvoiceDate", source: "invoice", to: "2026-08-31" } }, pagination: { limit: 1 },
-  });
-  const sql = captured?.strings?.join(" ") ?? "";
-  assert.match(sql, /base_source\."data" ->> 'Quantity'.* > 0/);
 });
 
 test("scalable query supports distinct array aggregation without materializing facts", async () => {
