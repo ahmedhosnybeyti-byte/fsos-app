@@ -16,15 +16,22 @@ export class UsageAnalyticsService {
   constructor(private readonly prisma: PrismaService) {}
 
   async recordEvent(params: RecordUsageEventParams) {
-    await this.prisma.gptUsageEvent.create({
-      data: {
-        companyId: params.companyId,
-        userId: params.userId,
-        gptId: params.gptId,
-        eventType: params.eventType,
-        metadata: params.metadata,
-      },
-    });
+    await this.prisma.$transaction([
+      this.prisma.gptUsageEvent.create({
+        data: {
+          companyId: params.companyId,
+          userId: params.userId,
+          gptId: params.gptId,
+          eventType: params.eventType,
+          metadata: params.metadata,
+        },
+      }),
+      this.prisma.platformGptUsageRollup.upsert({
+        where: { eventType: params.eventType },
+        create: { eventType: params.eventType, eventCount: 1 },
+        update: { eventCount: { increment: 1 } },
+      }),
+    ]);
   }
 
   async getCompanyStats(companyId: string) {
@@ -50,20 +57,17 @@ export class UsageAnalyticsService {
       this.prisma.company.count(),
       this.prisma.user.count(),
       this.prisma.subscription.groupBy({ by: ["status"], _count: { _all: true } }),
-      this.prisma.gptUsageEvent.count(),
-      // Same groupBy already used per-company in getCompanyStats above,
-      // just without the companyId filter — lets the admin console's event-
-      // type glossary show real platform-wide counts instead of just labels.
-      this.prisma.gptUsageEvent.groupBy({ by: ["eventType"], _count: { _all: true } }),
+      this.prisma.platformGptUsageRollup.aggregate({ _sum: { eventCount: true } }),
+      this.prisma.platformGptUsageRollup.findMany({ select: { eventType: true, eventCount: true } }),
     ]);
 
     return {
       companiesCount,
       usersCount,
       subscriptionsByStatus: Object.fromEntries(subscriptionsByStatus.map((s) => [s.status, s._count._all])),
-      totalEvents,
+      totalEvents: Number(totalEvents._sum.eventCount ?? 0),
       eventCounts: Object.fromEntries(
-        eventCounts.map((e: { eventType: string; _count: { _all: number } }) => [e.eventType, e._count._all]),
+        eventCounts.map((e) => [e.eventType, Number(e.eventCount)]),
       ),
     };
   }

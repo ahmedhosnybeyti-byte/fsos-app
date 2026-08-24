@@ -1392,6 +1392,16 @@ model GptUsageEvent {
   @@map("gpt_usage_events")
 }
 
+// Single, platform-wide counter per GPT event type. This lets Super Admin
+// read the current usage totals without scanning the historical event log.
+model PlatformGptUsageRollup {
+  eventType  GptUsageEventType @id @map("event_type")
+  eventCount BigInt            @default(0) @map("event_count")
+  updatedAt  DateTime          @updatedAt @map("updated_at")
+
+  @@map("platform_gpt_usage_rollups")
+}
+
 // Stub table: not deeply used in the MVP, but present so persisting
 // GPT-generated analysis output later needs zero migration.
 model AiReport {
