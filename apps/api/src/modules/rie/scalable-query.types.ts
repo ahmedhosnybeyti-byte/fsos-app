@@ -47,6 +47,12 @@ export interface RieScalableQuery extends EntityQueryContext {
   latestPer?: RieLatestPerScope;
   scope?: RieScalableQueryScope;
   pagination?: RieQueryPagination;
+  /**
+   * Reserved for internal, PostgreSQL-aggregated analytical refreshes whose
+   * result is still bounded but can exceed the generic screen page limit.
+   * Never enables raw entity reads or pagination accumulation.
+   */
+  internalAggregate?: boolean;
   orderBy?: readonly RieQueryOrder[];
   /**
    * Compiles scoped joins as an uncorrelated membership test.  This preserves

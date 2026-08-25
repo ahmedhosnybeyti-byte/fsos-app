@@ -7,6 +7,7 @@ import type { RieDateScope, RieLatestPerScope, RieQueryAggregation, RieQueryFiel
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
+const MAX_INTERNAL_AGGREGATE_PAGE_SIZE = 10_000;
 const SAFE_IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*$/;
 
 /**
@@ -74,7 +75,7 @@ export class RieScalableQueryService {
     }
     const select = [...projection, ...(input.aggregates ?? []).map(aggregateSql)];
     const predicates = await this.scopePredicates(input, aliases);
-    const page = normalizePagination(input.pagination);
+    const page = normalizePagination(input.pagination, input.internalAggregate === true);
     // A derived table may be flattened by PostgreSQL, which lets historical
     // versions re-enter a fact join.  Materialized CTEs form the required
     // execution barrier: only rows belonging to active versions can reach a
@@ -272,10 +273,11 @@ function scopedJoin(join: RieQueryJoin): Prisma.Sql {
   return Prisma.sql`INNER JOIN ${Prisma.raw(`${join.alias}_active`)} ${Prisma.raw(`${join.alias}_scope`)} ON ${normalizedField(baseSource)} = ${normalizedField(scopedSource)}`;
 }
 
-function normalizePagination(input: RieScalableQuery["pagination"]): { limit: number; offset: number } {
+function normalizePagination(input: RieScalableQuery["pagination"], internalAggregate: boolean): { limit: number; offset: number } {
   const limit = input?.limit ?? DEFAULT_PAGE_SIZE;
   const offset = input?.offset ?? 0;
-  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_SIZE) throw new Error(`RIE scalable query limit must be an integer between 1 and ${MAX_PAGE_SIZE}.`);
+  const maxLimit = internalAggregate ? MAX_INTERNAL_AGGREGATE_PAGE_SIZE : MAX_PAGE_SIZE;
+  if (!Number.isInteger(limit) || limit < 1 || limit > maxLimit) throw new Error(`RIE scalable query limit must be an integer between 1 and ${maxLimit}.`);
   if (!Number.isInteger(offset) || offset < 0) throw new Error("RIE scalable query offset must be a non-negative integer.");
   return { limit, offset };
 }

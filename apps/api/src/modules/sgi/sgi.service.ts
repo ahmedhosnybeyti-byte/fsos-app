@@ -21,6 +21,11 @@ import { RieFacade } from "../rie/rie-facade.service";
 // rather than a manually-typed column that could vary row to row.
 const AI_REPORT_TYPE = "sgi_situations";
 const SGI_SOURCE_ENTITIES = ["Invoices", "Invoice Items", "Routes", "Employees", "Customers", "Products", "Collections", "Targets"] as const;
+// SGI receives only PostgreSQL-aggregated customer/product rows.  The
+// 5,000-row generic screen limit is too small for the production company's
+// bounded monthly aggregate (and caused refreshes to reject it before any
+// fact row reached Node).  This remains a fixed aggregate-only ceiling.
+const SGI_AGGREGATE_RESULT_LIMIT = 10_000;
 
 function toFiniteNumber(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -182,7 +187,7 @@ export class SgiService {
   // particular, this intentionally has no pagination loop: a page boundary
   // must never turn into an unbounded raw-fact accumulator in the cron.
   private async queryAggregate(query: Parameters<RieFacade["queryCanonicalRecords"]>[0]): Promise<Record<string, unknown>[]> {
-    const result = await this.rieFacade.queryCanonicalRecords({ ...query, pagination: { limit: 5_000 } });
+    const result = await this.rieFacade.queryCanonicalRecords({ ...query, internalAggregate: true, pagination: { limit: SGI_AGGREGATE_RESULT_LIMIT } });
     if (result.page.hasMore) throw new Error(`SGI aggregate query for ${query.entityName} exceeded the bounded result contract.`);
     return result.records as Record<string, unknown>[];
   }
