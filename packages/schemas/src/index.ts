@@ -53,10 +53,6 @@ export {
   smartLoadingLostOpportunityReasonSchema,
   smartLoadingVehicleStockUnavailableSessionSchema,
   smartLoadingSessionSchema,
-  smartLoadingManagementQuerySchema,
-  smartLoadingManagementOptionSchema,
-  smartLoadingManagementProductSchema,
-  smartLoadingManagementResultSchema,
 } from "./smart-loading.schemas";
 export type {
   SmartLoadingPriority,
@@ -76,8 +72,4 @@ export type {
   SmartLoadingLostOpportunityReason,
   SmartLoadingVehicleStockUnavailableSession,
   SmartLoadingSession,
-  SmartLoadingManagementQuery,
-  SmartLoadingManagementOption,
-  SmartLoadingManagementProduct,
-  SmartLoadingManagementResult,
 } from "./smart-loading.schemas";
