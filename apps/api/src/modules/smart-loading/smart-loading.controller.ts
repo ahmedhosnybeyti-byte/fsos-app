@@ -13,6 +13,8 @@ export class SmartLoadingController {
   constructor(private readonly smartLoadingService: SmartLoadingService) {}
   @Get("session") @Auth()
   getSession(@CurrentUser() user: AuthenticatedUser, @Query("targetDate") targetDate?: string, @Query("asOfDate") asOfDate?: string, @Query("staleDaysThreshold", new ZodValidationPipe(smartLoadingStaleDaysThresholdSchema)) staleDaysThreshold?: number) { if (!user.companyId) throw new ForbiddenException(); return this.smartLoadingService.getSession(user, targetDate ?? asOfDate, staleDaysThreshold); }
+  @Get("hierarchy-options") @Auth("COMPANY_ADMIN", "MANAGER", "SUPERVISOR")
+  hierarchyOptions(@CurrentUser() user: AuthenticatedUser, @Query("managerId") managerId?: string, @Query("supervisorId") supervisorId?: string) { if (!user.companyId) throw new ForbiddenException(); return this.smartLoadingService.getHierarchyOptions(user, managerId, supervisorId); }
   @Get("customers/search") @Auth()
   searchCustomers(@CurrentUser() user: AuthenticatedUser, @Query("q") q?: string, @Query("excludeCustomerCodes") excluded?: string) { if (!user.companyId) throw new ForbiddenException(); return this.smartLoadingService.searchCustomers(user, q, excluded?.split(",")); }
   @Post("recalculate") @Auth()

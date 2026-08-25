@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from "@nestjs/common";
-import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingPriorityProduct, type SmartLoadingProduct, type SmartLoadingSession, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
+import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingHierarchyOptions, type SmartLoadingPriorityProduct, type SmartLoadingProduct, type SmartLoadingSession, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
 import { LostOpportunityService } from "../lost-opportunity/lost-opportunity.service";
@@ -181,6 +181,44 @@ export class SmartLoadingService {
 
   private rieContext(user: AuthenticatedUser) {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
+  }
+
+  /**
+   * Small hierarchy dimension for the management-only panel. Routes remains
+   * the scoped base so the canonical RIE hierarchy permission is applied
+   * before the Employees joins. PostgreSQL performs DISTINCT/grouping/sort;
+   * no fact rows or full entity reads leave the database.
+   */
+  async getHierarchyOptions(user: AuthenticatedUser, managerId?: string, supervisorId?: string): Promise<SmartLoadingHierarchyOptions> {
+    const ctx = this.rieContext(user);
+    const clean = (value?: string) => value?.trim() || undefined;
+    const selectedManagerId = clean(managerId);
+    const selectedSupervisorId = clean(supervisorId);
+    const joins = [
+      { entityName: "Employees", alias: "rep", type: "inner" as const, on: { left: { field: "SalesRepID" }, rightField: "EmployeeID" } },
+      { entityName: "Employees", alias: "supervisor", type: "inner" as const, on: { left: { field: "DirectManagerID", source: "rep" }, rightField: "EmployeeID" } },
+      { entityName: "Employees", alias: "manager", type: "inner" as const, on: { left: { field: "DirectManagerID", source: "supervisor" }, rightField: "EmployeeID" } },
+    ];
+    const base = { ...ctx, entityName: "Routes", hierarchyRoute: { field: "RouteID" }, joins, pagination: { limit: 500 } } as const;
+    const options = async (alias: "manager" | "supervisor" | "rep", scopes: readonly { field: string; source: string; values: readonly string[] }[] = []) => {
+      const result = await this.rieFacade.queryCanonicalRecords({
+        ...base,
+        projection: [{ field: "EmployeeID", source: alias, as: "value" }, { field: "EmployeeName", source: alias, as: "label" }],
+        groupBy: [{ field: "EmployeeID", source: alias }, { field: "EmployeeName", source: alias }],
+        orderBy: [{ field: { field: "EmployeeName", source: alias }, direction: "asc" }],
+        ...(scopes.length ? { scope: { fields: scopes } } : {}),
+      });
+      if (result.page.hasMore) throw new BadRequestException("Smart Loading hierarchy options exceed the safe response limit.");
+      return result.records.map((row) => ({ value: String(row.value ?? "").trim(), label: String(row.label ?? row.value ?? "").trim() })).filter((option) => option.value && option.label);
+    };
+    const managerScope = selectedManagerId ? [{ field: "EmployeeID", source: "manager", values: [selectedManagerId] }] : [];
+    const supervisorScope = selectedSupervisorId ? [{ field: "EmployeeID", source: "supervisor", values: [selectedSupervisorId] }] : [];
+    const [managers, supervisors, salesReps] = await Promise.all([
+      options("manager"),
+      options("supervisor", managerScope),
+      options("rep", [...managerScope, ...supervisorScope]),
+    ]);
+    return { managers, supervisors, salesReps };
   }
 
   async getSession(user: AuthenticatedUser, requestedTargetDate?: string, staleDaysThreshold = DEFAULT_SMART_LOADING_STALE_DAYS): Promise<SmartLoadingSession> {
