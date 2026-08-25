@@ -7,7 +7,7 @@ import type { RieDateScope, RieLatestPerScope, RieQueryAggregation, RieQueryFiel
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
-const MAX_INTERNAL_AGGREGATE_PAGE_SIZE = 10_000;
+const MAX_INTERNAL_AGGREGATE_PAGE_SIZE = 25_000;
 const SAFE_IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*$/;
 
 /**

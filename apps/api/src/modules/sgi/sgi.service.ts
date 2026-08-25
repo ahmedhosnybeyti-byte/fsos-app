@@ -25,7 +25,7 @@ const SGI_SOURCE_ENTITIES = ["Invoices", "Invoice Items", "Routes", "Employees",
 // 5,000-row generic screen limit is too small for the production company's
 // bounded monthly aggregate (and caused refreshes to reject it before any
 // fact row reached Node).  This remains a fixed aggregate-only ceiling.
-const SGI_AGGREGATE_RESULT_LIMIT = 10_000;
+const SGI_AGGREGATE_RESULT_LIMIT = 25_000;
 
 function toFiniteNumber(value: unknown): number | null {
   if (typeof value === "number") return Number.isFinite(value) ? value : null;
