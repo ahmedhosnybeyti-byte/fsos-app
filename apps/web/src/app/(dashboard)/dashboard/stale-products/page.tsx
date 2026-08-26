@@ -33,13 +33,14 @@ export default function StaleProductsPage() {
   const { locale, t } = useTranslation();
   const searchParams = useSearchParams();
   const targetDate = searchParams.get("targetDate") ?? undefined;
+  const salesRepId = searchParams.get("salesRepId")?.trim() || undefined;
   const requestedThreshold = Number(searchParams.get("staleDaysThreshold"));
   const staleDaysThreshold = Number.isInteger(requestedThreshold) && requestedThreshold > 0
     ? requestedThreshold
     : DEFAULT_SMART_LOADING_STALE_DAYS;
   const session = useQuery({
-    queryKey: ["smart-loading", "stale-products", targetDate, staleDaysThreshold],
-    queryFn: () => smartLoadingApi.getSession(targetDate, staleDaysThreshold),
+    queryKey: ["smart-loading", "stale-products", targetDate, staleDaysThreshold, salesRepId],
+    queryFn: () => smartLoadingApi.getSession(targetDate, staleDaysThreshold, salesRepId),
   });
   const plans = session.data?.state === "ready" ? session.data.staleProductPlans : [];
   const operationalTargetDate = session.data?.state === "ready" ? session.data.targetDate : targetDate;

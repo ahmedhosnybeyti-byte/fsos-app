@@ -614,7 +614,7 @@ export function SmartLoadingScreen({
         </div>
         <div className="flex flex-wrap gap-2">
           <Button asChild variant="outline">
-            <Link href={`/dashboard/stale-products?targetDate=${targetDate}&staleDaysThreshold=${staleDaysThreshold}`}>
+            <Link href={`/dashboard/stale-products?targetDate=${targetDate}&staleDaysThreshold=${staleDaysThreshold}${salesRepId ? `&salesRepId=${encodeURIComponent(salesRepId)}` : ""}`}>
               <PackagePlus className="h-4 w-4" />
               {t("smartLoading.staleProductsPage")}
             </Link>
