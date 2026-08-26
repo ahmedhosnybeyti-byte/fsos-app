@@ -12,7 +12,7 @@ import { SmartLoadingService } from "./smart-loading.service";
 export class SmartLoadingController {
   constructor(private readonly smartLoadingService: SmartLoadingService) {}
   @Get("session") @Auth()
-  getSession(@CurrentUser() user: AuthenticatedUser, @Query("targetDate") targetDate?: string, @Query("asOfDate") asOfDate?: string, @Query("staleDaysThreshold", new ZodValidationPipe(smartLoadingStaleDaysThresholdSchema)) staleDaysThreshold?: number) { if (!user.companyId) throw new ForbiddenException(); return this.smartLoadingService.getSession(user, targetDate ?? asOfDate, staleDaysThreshold); }
+  getSession(@CurrentUser() user: AuthenticatedUser, @Query("targetDate") targetDate?: string, @Query("asOfDate") asOfDate?: string, @Query("staleDaysThreshold", new ZodValidationPipe(smartLoadingStaleDaysThresholdSchema)) staleDaysThreshold?: number, @Query("salesRepId") salesRepId?: string) { if (!user.companyId) throw new ForbiddenException(); return this.smartLoadingService.getSession(user, targetDate ?? asOfDate, staleDaysThreshold, salesRepId); }
   @Get("hierarchy-options") @Auth("COMPANY_ADMIN", "MANAGER", "SUPERVISOR")
   hierarchyOptions(@CurrentUser() user: AuthenticatedUser, @Query("managerId") managerId?: string, @Query("supervisorId") supervisorId?: string) { if (!user.companyId) throw new ForbiddenException(); return this.smartLoadingService.getHierarchyOptions(user, managerId, supervisorId); }
   @Get("customers/search") @Auth()

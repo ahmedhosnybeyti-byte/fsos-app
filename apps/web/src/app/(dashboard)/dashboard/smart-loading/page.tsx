@@ -15,9 +15,10 @@ function tomorrowIso(): string {
 export default function SmartLoadingPage() {
   const [targetDate, setTargetDate] = useState(tomorrowIso);
   const [staleDaysThreshold, setStaleDaysThreshold] = useState(DEFAULT_SMART_LOADING_STALE_DAYS);
+  const [salesRepId, setSalesRepId] = useState<string>();
   const session = useQuery({
-    queryKey: ["smart-loading", "session", targetDate, staleDaysThreshold],
-    queryFn: () => smartLoadingApi.getSession(targetDate, staleDaysThreshold),
+    queryKey: ["smart-loading", "session", targetDate, staleDaysThreshold, salesRepId],
+    queryFn: () => smartLoadingApi.getSession(targetDate, staleDaysThreshold, salesRepId),
   });
 
   return (
@@ -29,6 +30,7 @@ export default function SmartLoadingPage() {
       onTargetDateChange={setTargetDate}
       staleDaysThreshold={staleDaysThreshold}
       onStaleDaysThresholdChange={setStaleDaysThreshold}
+      onSalesRepChange={setSalesRepId}
       onRetry={async () => {
         const result = await session.refetch();
         if (result.isError) throw result.error;

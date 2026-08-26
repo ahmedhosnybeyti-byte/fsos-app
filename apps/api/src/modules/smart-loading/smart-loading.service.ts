@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger } from "@ne
 import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingHierarchyOptions, type SmartLoadingPriorityProduct, type SmartLoadingProduct, type SmartLoadingSession, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
+import { PrismaService } from "../../common/prisma";
 import { LostOpportunityService } from "../lost-opportunity/lost-opportunity.service";
 import { selectRoutePriorityProducts } from "./smart-loading-priority";
 
@@ -177,7 +178,7 @@ function isDateInWindow(date: string, from: string, to: string): boolean {
 export class SmartLoadingService {
   private readonly logger = new Logger(SmartLoadingService.name);
 
-  constructor(private readonly rieFacade: RieFacade, private readonly lostOpportunityService: LostOpportunityService) {}
+  constructor(private readonly rieFacade: RieFacade, private readonly lostOpportunityService: LostOpportunityService, private readonly prisma: PrismaService) {}
 
   private rieContext(user: AuthenticatedUser) {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
@@ -221,7 +222,38 @@ export class SmartLoadingService {
     return { managers, supervisors, salesReps };
   }
 
-  async getSession(user: AuthenticatedUser, requestedTargetDate?: string, staleDaysThreshold = DEFAULT_SMART_LOADING_STALE_DAYS): Promise<SmartLoadingSession> {
+  private async resolveSelectedSalesRepRoutes(ctx: ReturnType<SmartLoadingService["rieContext"]>, salesRepId: string): Promise<string[]> {
+    const fallback = await this.rieFacade.queryCanonicalRecords({
+      ...ctx,
+      entityName: "Routes",
+      hierarchyRoute: { field: "RouteID" },
+      projection: [{ field: "RouteID", as: "routeId" }],
+      scope: { rep: { values: [salesRepId] } },
+      pagination: { limit: 500 },
+    });
+    if (fallback.page.hasMore) throw new BadRequestException("Smart Loading selected-rep routes exceed the safe response limit.");
+
+    // This query is both the authorization check and the legacy fallback.
+    // A rep outside the requesting manager's RIE scope must never become
+    // addressable merely because they have a database assignment.
+    const fallbackRouteIds = fallback.records.map((row) => String(row.routeId ?? "").trim()).filter(Boolean);
+    if (fallbackRouteIds.length === 0) throw new ForbiddenException();
+
+    const employee = await this.prisma.employee.findFirst({
+      where: { companyId: ctx.companyId, employeeCode: salesRepId },
+      select: { userId: true },
+    });
+    const assignment = employee?.userId
+      ? await this.prisma.userRouteAssignment.findFirst({
+        where: { companyId: ctx.companyId, userId: employee.userId, endedAt: null },
+        orderBy: { startedAt: "desc" },
+        select: { routeId: true },
+      })
+      : null;
+    return assignment ? [assignment.routeId.trim()] : fallbackRouteIds;
+  }
+
+  async getSession(user: AuthenticatedUser, requestedTargetDate?: string, staleDaysThreshold = DEFAULT_SMART_LOADING_STALE_DAYS, salesRepId?: string): Promise<SmartLoadingSession> {
     if (!user.companyId) throw new ForbiddenException();
     const timingStartedAt = performance.now();
     const stageTimingsMs: Record<string, number> = {};
@@ -234,6 +266,25 @@ export class SmartLoadingService {
       }
     };
     const ctx = this.rieContext(user);
+    const selectedSalesRepId = salesRepId?.trim();
+    if (selectedSalesRepId && !["COMPANY_ADMIN", "MANAGER", "SUPERVISOR"].includes(user.roleCode)) {
+      throw new ForbiddenException();
+    }
+    // Resolve a selected rep once, before any fact query. The operational
+    // assignment is authoritative; older companies fall back to Routes.SalesRepID.
+    const selectedRepRouteIds = selectedSalesRepId
+      ? await this.resolveSelectedSalesRepRoutes(ctx, selectedSalesRepId)
+      : null;
+    const withSelectedRepScope = <T extends Parameters<RieFacade["queryCanonicalRecords"]>[0]>(query: T): T => {
+      if (!selectedRepRouteIds) return query;
+      return {
+        ...query,
+        scope: {
+          ...query.scope,
+          route: { values: selectedRepRouteIds },
+        },
+      } as T;
+    };
     const targetDate = parseTargetDate(requestedTargetDate);
     const targetDateIso = isoDay(targetDate.getTime());
     const staleAsOfDate = targetDate;
@@ -252,8 +303,8 @@ export class SmartLoadingService {
     // bounded, screen-sized result sets.
     const targetRouteWeekday = weekdayForDate(targetDate);
     const [routeCustomerRows, visitDayRows] = await Promise.all([
-      timed("route-customers", () => bounded({ ...ctx, entityName: "Customers", projection: [{ field: "CustomerCode", as: "customerCode" }, { field: "CustomerName", as: "customerName" }, { field: "RouteID", as: "routeId" }, { field: "VisitSequence", as: "visitSequence" }], scope: { fields: [{ field: "VisitDay", values: VISIT_DAY_ALIASES[targetRouteWeekday] }] } })),
-      timed("visit-day-aggregation", () => bounded({ ...ctx, entityName: "Customers", projection: [{ field: "VisitDay", as: "visitDay" }], groupBy: [{ field: "VisitDay" }], aggregates: [{ op: "count", as: "count" }] })),
+      timed("route-customers", () => bounded(withSelectedRepScope({ ...ctx, entityName: "Customers", projection: [{ field: "CustomerCode", as: "customerCode" }, { field: "CustomerName", as: "customerName" }, { field: "RouteID", as: "routeId" }, { field: "VisitSequence", as: "visitSequence" }], scope: { fields: [{ field: "VisitDay", values: VISIT_DAY_ALIASES[targetRouteWeekday] }] } }))),
+      timed("visit-day-aggregation", () => bounded(withSelectedRepScope({ ...ctx, entityName: "Customers", projection: [{ field: "VisitDay", as: "visitDay" }], groupBy: [{ field: "VisitDay" }], aggregates: [{ op: "count", as: "count" }] }))),
     ]);
     const nextRouteCustomers = new Map<string, string>();
     const routeCustomersByCode = new Map<string, { customerCode: string; customerName: string; routeId: string | null; visitSequence: number | null }>();
