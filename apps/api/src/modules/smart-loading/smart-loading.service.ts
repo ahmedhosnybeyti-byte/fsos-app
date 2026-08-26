@@ -2,6 +2,7 @@ import { BadRequestException, ForbiddenException, Injectable, Logger } from "@ne
 import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingHierarchyOptions, type SmartLoadingPriorityProduct, type SmartLoadingProduct, type SmartLoadingSession, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
+import { CanonicalHierarchyResolverService } from "../rie/canonical-hierarchy-resolver.service";
 import { PrismaService } from "../../common/prisma";
 import { LostOpportunityService } from "../lost-opportunity/lost-opportunity.service";
 import { selectRoutePriorityProducts } from "./smart-loading-priority";
@@ -178,7 +179,7 @@ function isDateInWindow(date: string, from: string, to: string): boolean {
 export class SmartLoadingService {
   private readonly logger = new Logger(SmartLoadingService.name);
 
-  constructor(private readonly rieFacade: RieFacade, private readonly lostOpportunityService: LostOpportunityService, private readonly prisma: PrismaService) {}
+  constructor(private readonly rieFacade: RieFacade, private readonly lostOpportunityService: LostOpportunityService, private readonly prisma: PrismaService, private readonly hierarchyResolver: CanonicalHierarchyResolverService) {}
 
   private rieContext(user: AuthenticatedUser) {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
@@ -223,6 +224,19 @@ export class SmartLoadingService {
   }
 
   private async resolveSelectedSalesRepRoutes(ctx: ReturnType<SmartLoadingService["rieContext"]>, salesRepId: string): Promise<string[]> {
+    const employee = await this.prisma.employee.findFirst({
+      where: { companyId: ctx.companyId, employeeCode: salesRepId },
+      select: { contactEmail: true, user: { select: { email: true } } },
+    });
+    const salesRepEmail = employee?.user?.email ?? employee?.contactEmail;
+    if (salesRepEmail) {
+      const selectedRepRoutes = await this.hierarchyResolver.resolveAllowedRouteIds(ctx.companyId, { roleCode: "SALES_REP", email: salesRepEmail });
+      const managerAllowedRoutes = await this.hierarchyResolver.resolveAllowedRouteIds(ctx.companyId, ctx.requestingUser);
+      const routeIds = selectedRepRoutes ? [...selectedRepRoutes].map((routeId) => routeId.trim()).filter(Boolean) : [];
+      if (routeIds.length === 0 || (managerAllowedRoutes && routeIds.some((routeId) => !managerAllowedRoutes.has(normalizedRouteId(routeId))))) throw new ForbiddenException();
+      return routeIds;
+    }
+
     const fallback = await this.rieFacade.queryCanonicalRecords({
       ...ctx,
       entityName: "Routes",
@@ -238,19 +252,7 @@ export class SmartLoadingService {
     // addressable merely because they have a database assignment.
     const fallbackRouteIds = fallback.records.map((row) => String(row.routeId ?? "").trim()).filter(Boolean);
     if (fallbackRouteIds.length === 0) throw new ForbiddenException();
-
-    const employee = await this.prisma.employee.findFirst({
-      where: { companyId: ctx.companyId, employeeCode: salesRepId },
-      select: { userId: true },
-    });
-    const assignment = employee?.userId
-      ? await this.prisma.userRouteAssignment.findFirst({
-        where: { companyId: ctx.companyId, userId: employee.userId, endedAt: null },
-        orderBy: { startedAt: "desc" },
-        select: { routeId: true },
-      })
-      : null;
-    return assignment ? [assignment.routeId.trim()] : fallbackRouteIds;
+    return fallbackRouteIds;
   }
 
   async getSession(user: AuthenticatedUser, requestedTargetDate?: string, staleDaysThreshold = DEFAULT_SMART_LOADING_STALE_DAYS, salesRepId?: string): Promise<SmartLoadingSession> {
