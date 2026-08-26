@@ -19,7 +19,7 @@ test("Super Admin reset restores only the target user's Google Discovery quota a
     },
   };
   const audit = { record: async (entry: unknown) => { auditEntry = entry; } };
-  const service = new VisitCopilotService({} as never, {} as never, prisma as never, {} as never, {} as never, {} as never, audit as never, {} as never);
+  const service = new VisitCopilotService({} as never, {} as never, prisma as never, {} as never, {} as never, audit as never, {} as never);
 
   const result = await service.resetDiscoveryDailyLimit(actor("SUPER_ADMIN"), "target-user");
 
@@ -40,7 +40,7 @@ test("Super Admin reset restores only the target user's Google Discovery quota a
 });
 
 test("non-Super Admin roles cannot reset the Discovery limit even through the service", async () => {
-  const service = new VisitCopilotService({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+  const service = new VisitCopilotService({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
   for (const role of ["COMPANY_ADMIN", "MANAGER", "SUPERVISOR", "SALES_REP"] as const) {
     await assert.rejects(() => service.resetDiscoveryDailyLimit(actor(role), "target-user"), { status: 403 });
   }
@@ -53,7 +53,7 @@ test("a user whose daily Discovery quota is exhausted remains blocked until a re
       updateMany: async () => ({ count: 0 }),
     },
   };
-  const service = new VisitCopilotService({} as never, {} as never, prisma as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+  const service = new VisitCopilotService({} as never, {} as never, prisma as never, {} as never, {} as never, {} as never, {} as never);
   const reserve = (service as unknown as { reserveDiscoveryQuota(user: AuthenticatedUser): Promise<number> }).reserveDiscoveryQuota.bind(service);
   await assert.rejects(() => reserve(actor("SALES_REP")), { status: 403 });
 });

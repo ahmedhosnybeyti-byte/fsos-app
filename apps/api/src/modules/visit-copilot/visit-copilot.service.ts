@@ -19,7 +19,7 @@ import {
   type VisitCopilotProspectStatusRequest,
 } from "@field-sales-os/schemas";
 import { lostOpportunityExclusionAppliesToOpportunity, lostOpportunityExclusionScopeKey } from "./lost-opportunity-exclusion-key.util";
-import type { Prospect } from "@field-sales-os/database";
+import { Prisma, type Prospect } from "@field-sales-os/database";
 import { AppConfigService } from "../../common/config/app-config.service";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
@@ -33,7 +33,6 @@ import { isWithinDiscoveryRadius } from "./discovery/radius.util";
 import { resolveMentionedCustomer } from "../local-decision/dictionary-engine";
 import { LocalDecisionEngine } from "../local-decision/rule-engine";
 import { VisitCopilotRuleRegistry } from "./visit-copilot.rules";
-import { SgiService } from "../sgi/sgi.service";
 import { LostOpportunityService, type LostOpportunityResult } from "../lost-opportunity/lost-opportunity.service";
 import { buildCustomerVisitDiagnosisV2, buildDaily360DiagnosisV2, type CustomerVisitDiagnosisV2 } from "./daily-360-diagnosis";
 import { AuditLogService } from "../audit-log/audit-log.service";
@@ -499,9 +498,6 @@ export class VisitCopilotService {
     // data) — the one Visit Copilot read that does NOT go through RIE.
     private readonly prisma: PrismaService,
     private readonly productFit: ProductFitService,
-    // "ملخص اليوم 360°" (2026-07-28): sole facts/numbers source, already
-    // hierarchy-scoped per viewer — see daily360Summary() below.
-    private readonly sgiService: SgiService,
     private readonly lostOpportunityService: LostOpportunityService,
     private readonly auditLogService: AuditLogService,
     private readonly prospectService: ProspectService,
@@ -1467,12 +1463,136 @@ export class VisitCopilotService {
     }));
   }
 
+  /**
+   * Daily 360 is a read-only consumer of SGI. PostgreSQL scopes the persisted
+   * JSONB snapshot before it crosses the process boundary, so this path never
+   * invokes SgiService.getLatest() or its ensureFresh()/recalculation path.
+   */
+  private async readDaily360SgiSnapshot(user: AuthenticatedUser): Promise<{
+    warnings: string[];
+    summary: { highSeverityCount: number; monthlyGoal: { targetTotal: number | null; actualTotal: number; progressPct: number | null } };
+    priorityDebtors: Array<{ customerName: string; amount: number; dueDate: null }>;
+    interventionNeeded: VisitCopilot360Summary["interventionNeeded"];
+    topIssueSituation: SgiSituation | null;
+  } | null> {
+    if (!user.companyId) throw new ForbiddenException();
+
+    type Row = { warnings: unknown; highSeverityCount: number; goalTargetTotal: number | null; goalActualTotal: number; priorityDebtors: unknown; interventionNeeded: unknown; topIssueSituation: unknown };
+    const companyWide = user.roleCode === "COMPANY_ADMIN" || user.roleCode === "SUPER_ADMIN";
+    const rows = await this.prisma.$queryRaw<Row[]>(Prisma.sql`
+      WITH RECURSIVE
+      latest AS (
+        SELECT "content"
+        FROM "ai_reports"
+        WHERE "company_id" = ${user.companyId} AND "report_type" = 'sgi_situations'
+        ORDER BY "created_at" DESC
+        LIMIT 1
+      ),
+      employee_tree AS (
+        SELECT e."id", lower(e."contact_email") AS email
+        FROM "employees" e
+        WHERE e."company_id" = ${user.companyId} AND e."user_id" = ${user.userId}
+        UNION
+        SELECT child."id", lower(child."contact_email") AS email
+        FROM "employees" child
+        INNER JOIN employee_tree parent ON child."manager_id" = parent."id"
+        WHERE child."company_id" = ${user.companyId}
+      ),
+      scoped_rep_emails AS (
+        SELECT lower(${user.email}) AS email WHERE ${user.roleCode} = 'SALES_REP'
+        UNION
+        SELECT lower(mapping.key) AS email
+        FROM latest
+        CROSS JOIN LATERAL jsonb_each_text(COALESCE("content"->'repSupervisorMap', '{}'::jsonb)) AS mapping(key, value)
+        WHERE ${user.roleCode} = 'SUPERVISOR' AND lower(mapping.value) = lower(${user.email})
+        UNION
+        SELECT email FROM employee_tree WHERE ${user.roleCode} = 'MANAGER' AND email IS NOT NULL
+      ),
+      scoped_situations AS (
+        SELECT situation, ordinal
+        FROM latest
+        CROSS JOIN LATERAL jsonb_array_elements(COALESCE("content"->'situations', '[]'::jsonb)) WITH ORDINALITY AS entries(situation, ordinal)
+        WHERE ${companyWide} OR lower(situation->>'ownerRepEmail') IN (SELECT email FROM scoped_rep_emails)
+      ),
+      scoped_goals AS (
+        SELECT goal.value AS goal
+        FROM latest
+        CROSS JOIN LATERAL jsonb_each(COALESCE("content"->'repMonthlyGoals', '{}'::jsonb)) AS goal(email, value)
+        INNER JOIN scoped_rep_emails ON scoped_rep_emails.email = lower(goal.email)
+        WHERE NOT ${companyWide}
+      ),
+      ranked_collections AS (
+        SELECT situation, ordinal,
+          row_number() OVER (ORDER BY (situation->>'metricValue')::double precision DESC, ordinal) AS rank
+        FROM scoped_situations
+        WHERE situation->>'type' = 'COLLECTION_RISK'
+      ),
+      ranked_interventions AS (
+        SELECT situation, ordinal,
+          row_number() OVER (ORDER BY CASE situation->>'severity' WHEN 'high' THEN 0 WHEN 'medium' THEN 1 ELSE 2 END, ordinal) AS rank
+        FROM scoped_situations
+      ),
+      scoped_snapshot AS (
+        SELECT
+          COUNT(*) FILTER (WHERE situation->>'severity' = 'high')::int AS "highSeverityCount"
+        FROM scoped_situations
+      )
+      SELECT
+        COALESCE(latest."content"->'warnings', '[]'::jsonb) AS warnings,
+        scoped_snapshot."highSeverityCount" AS "highSeverityCount",
+        COALESCE((
+          SELECT jsonb_agg(jsonb_build_object('customerName', situation->>'entityLabel', 'amount', (situation->>'metricValue')::double precision, 'dueDate', NULL) ORDER BY rank)
+          FROM ranked_collections WHERE rank <= 5
+        ), '[]'::jsonb) AS "priorityDebtors",
+        COALESCE((
+          SELECT jsonb_agg(jsonb_build_object('name', situation->>'entityLabel', 'reason', situation->>'title', 'severity', situation->>'severity') ORDER BY rank)
+          FROM ranked_interventions WHERE rank <= 6
+        ), '[]'::jsonb) AS "interventionNeeded",
+        COALESCE(
+          (SELECT situation FROM scoped_situations WHERE situation->>'severity' = 'high' ORDER BY ordinal LIMIT 1),
+          (SELECT situation FROM scoped_situations ORDER BY ordinal LIMIT 1)
+        ) AS "topIssueSituation",
+        CASE
+          WHEN ${companyWide} THEN NULLIF(latest."content"->'summary'->'monthlyGoal'->>'targetTotal', '')::double precision
+          WHEN COUNT(scoped_goals.goal) FILTER (WHERE scoped_goals.goal->>'targetTotal' IS NOT NULL) = 0 THEN NULL
+          ELSE SUM((scoped_goals.goal->>'targetTotal')::double precision)
+        END AS "goalTargetTotal",
+        CASE
+          WHEN ${companyWide} THEN COALESCE((latest."content"->'summary'->'monthlyGoal'->>'actualTotal')::double precision, 0)
+          ELSE COALESCE(SUM((scoped_goals.goal->>'actualTotal')::double precision), 0)
+        END AS "goalActualTotal"
+      FROM latest
+      CROSS JOIN scoped_snapshot
+      LEFT JOIN scoped_goals ON TRUE
+      GROUP BY latest."content", scoped_snapshot."highSeverityCount"
+    `);
+    const row = rows[0];
+    if (!row) return null;
+
+    const targetTotal = row.goalTargetTotal;
+    const actualTotal = row.goalActualTotal;
+    return {
+      warnings: Array.isArray(row.warnings) ? row.warnings.filter((warning): warning is string => typeof warning === "string") : [],
+      summary: {
+        highSeverityCount: Number(row.highSeverityCount) || 0,
+        monthlyGoal: {
+          targetTotal,
+          actualTotal,
+          progressPct: targetTotal && targetTotal > 0 ? Math.round((actualTotal / targetTotal) * 100) : null,
+        },
+      },
+      priorityDebtors: Array.isArray(row.priorityDebtors) ? row.priorityDebtors as Array<{ customerName: string; amount: number; dueDate: null }> : [],
+      interventionNeeded: Array.isArray(row.interventionNeeded) ? row.interventionNeeded as VisitCopilot360Summary["interventionNeeded"] : [],
+      topIssueSituation: row.topIssueSituation && typeof row.topIssueSituation === "object" ? row.topIssueSituation as SgiSituation : null,
+    };
+  }
+
   async daily360Summary(user: AuthenticatedUser, query: VisitCopilotDaily360SummaryQuery): Promise<VisitCopilot360Summary> {
     const warnings: string[] = [];
     const narrativeLocale = (query as VisitCopilotDaily360SummaryQuery & { locale?: "ar" | "en" }).locale ?? "ar";
 
     const [sgi, brief, dbUser] = await Promise.all([
-      this.sgiService.getLatest(user),
+      this.readDaily360SgiSnapshot(user),
       this.buildDailyBrief(user, query),
       this.prisma.user.findUnique({ where: { id: user.userId } }),
     ]);
@@ -1482,7 +1602,6 @@ export class VisitCopilotService {
     }
 
     const range = resolveVisitCopilotPeriod(query);
-    const situations: SgiSituation[] = sgi?.situations ?? [];
     const ctx = this.rieContext(user);
 
     const scopeLabelByRole: Record<AuthenticatedUser["roleCode"], string> = {
@@ -1528,11 +1647,7 @@ export class VisitCopilotService {
     // the "who to chase" list; real collected/pending/bounced totals below,
     // computed directly from the Collections entity — was hardcoded to 0
     // before 2026-07-29, this closed that gap).
-    const collectionSituations = situations.filter((s) => s.type === "COLLECTION_RISK");
-    const priorityDebtors = [...collectionSituations]
-      .sort((a, b) => b.metricValue - a.metricValue)
-      .slice(0, 5)
-      .map((s) => ({ customerName: s.entityLabel, amount: s.metricValue, dueDate: null as string | null }));
+    const priorityDebtors = sgi?.priorityDebtors ?? [];
 
     // Collections/Returns read directly here (not via buildDailyBrief,
     // which never touches either entity) — same RIE hierarchy scoping as
@@ -1577,14 +1692,10 @@ export class VisitCopilotService {
 
     // ---- Customers/teams needing intervention — top severity-ranked
     // situations across all types, capped at 6.
-    const severityRank: Record<string, number> = { high: 0, medium: 1, low: 2 };
-    const interventionNeeded = [...situations]
-      .sort((a, b) => severityRank[a.severity]! - severityRank[b.severity]!)
-      .slice(0, 6)
-      .map((s) => ({ name: s.entityLabel, reason: s.title, severity: s.severity }));
+    const interventionNeeded = sgi?.interventionNeeded ?? [];
 
     const highSeverityCount = sgi?.summary.highSeverityCount ?? 0;
-    const topIssueSituation = situations.find((s) => s.severity === "high") ?? situations[0] ?? null;
+    const topIssueSituation = sgi?.topIssueSituation ?? null;
 
     const userName = dbUser?.fullName ?? user.email;
     const roleLabel = this.ROLE_LABEL_AR[user.roleCode];
