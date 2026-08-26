@@ -488,6 +488,13 @@ export class SmartLoadingService {
     const from = parseAsOfDate(input.fromDate); const to = parseAsOfDate(input.toDate);
     if (from > to) throw new BadRequestException("toDate must be on or after fromDate.");
     const ctx = this.rieContext(user);
+    const selectedSalesRepId = input.salesRepId?.trim();
+    if (selectedSalesRepId && !["COMPANY_ADMIN", "MANAGER", "SUPERVISOR"].includes(user.roleCode)) throw new ForbiddenException();
+    const selectedRepRouteIds = selectedSalesRepId ? await this.resolveSelectedSalesRepRoutes(ctx, selectedSalesRepId) : null;
+    const withSelectedRepScope = <T extends Parameters<RieFacade["queryCanonicalRecords"]>[0]>(query: T): T => {
+      if (!selectedRepRouteIds) return query;
+      return { ...query, scope: { ...query.scope, route: { values: selectedRepRouteIds } } } as T;
+    };
     const bounded = async (query: Parameters<RieFacade["queryCanonicalRecords"]>[0]) => {
       const result = await this.rieFacade.queryCanonicalRecords({ ...query, pagination: { limit: 5_000 } });
       if (result.page.hasMore) throw new BadRequestException("Smart Loading scoped result exceeds its safe response limit.");
@@ -497,16 +504,16 @@ export class SmartLoadingService {
       throw new BadRequestException("Required RIE data is unavailable.");
     }
     const requestedCustomerCodes = [...new Set(input.customerCodes.map((code) => code.trim()).filter(Boolean))];
-    const customerRows = await bounded({ ...ctx, entityName: "Customers", projection: [{ field: "CustomerCode", as: "customerCode" }], scope: { customer: { values: requestedCustomerCodes } } });
+    const customerRows = await bounded(withSelectedRepScope({ ...ctx, entityName: "Customers", projection: [{ field: "CustomerCode", as: "customerCode" }], scope: { customer: { values: requestedCustomerCodes } } }));
     const allowed = new Set(customerRows.map((row) => String(row.customerCode ?? "").trim()));
     if (input.customerCodes.some((code) => !allowed.has(code))) throw new ForbiddenException("One or more customers are outside your scope.");
     const [salesRows, latestInventoryRows] = await Promise.all([
-      bounded({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }], joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }], hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "netQuantity" }], scope: { customer: { values: requestedCustomerCodes, source: "invoice" }, date: { field: "InvoiceDate", source: "invoice", from: input.fromDate, to: input.toDate }, fields: [{ field: "InvoiceStatus", source: "invoice", values: ["Confirmed", "Posted"] }] } }),
-      bounded({ ...ctx, entityName: "Van Inventory", projection: [], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }] }),
+      bounded(withSelectedRepScope({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }], joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }], hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "netQuantity" }], scope: { customer: { values: requestedCustomerCodes, source: "invoice" }, date: { field: "InvoiceDate", source: "invoice", from: input.fromDate, to: input.toDate }, fields: [{ field: "InvoiceStatus", source: "invoice", values: ["Confirmed", "Posted"] }] } })),
+      bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }] })),
     ]);
     const latestReportDate = String(latestInventoryRows[0]?.latestReportDate ?? "").trim().slice(0, 10);
     const inventoryRows = latestReportDate
-      ? await bounded({ ...ctx, entityName: "Van Inventory", projection: [{ field: "ProductCode", as: "productCode" }], groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { date: { field: "ReportDate", values: [latestReportDate] } } })
+      ? await bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "ProductCode", as: "productCode" }], groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { date: { field: "ReportDate", values: [latestReportDate] } } }))
       : [];
     const net = new Map<string, number>();
     for (const row of salesRows) { const code = String(row.productCode ?? "").trim(); if (code) net.set(code, toFiniteNumber(row.netQuantity) ?? 0); }

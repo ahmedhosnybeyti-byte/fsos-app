@@ -30,6 +30,7 @@ export default function SmartLoadingPage() {
       onTargetDateChange={setTargetDate}
       staleDaysThreshold={staleDaysThreshold}
       onStaleDaysThresholdChange={setStaleDaysThreshold}
+      salesRepId={salesRepId}
       onSalesRepChange={setSalesRepId}
       onRetry={async () => {
         const result = await session.refetch();

@@ -69,6 +69,7 @@ export function SmartLoadingScreen({
   onTargetDateChange,
   staleDaysThreshold,
   onStaleDaysThresholdChange,
+  salesRepId,
   onSalesRepChange,
 }: {
   session?: SmartLoadingSession;
@@ -79,6 +80,7 @@ export function SmartLoadingScreen({
   onTargetDateChange: (value: string) => void;
   staleDaysThreshold: number;
   onStaleDaysThresholdChange: (value: number) => void;
+  salesRepId?: string;
   onSalesRepChange: (value: string | undefined) => void;
 }) {
   const { locale, t } = useTranslation();
@@ -132,7 +134,7 @@ export function SmartLoadingScreen({
   useEffect(() => {
     if (session?.state !== "ready") return;
     const routeCustomerCodes = session.routeCustomers.map((customer) => customer.customerCode.trim()).filter(Boolean);
-    const routeKey = `${session.targetDate}:${routeCustomerCodes.join(",")}`;
+    const routeKey = `${session.targetDate}:${salesRepId ?? "self"}:${routeCustomerCodes.join(",")}`;
 
     // A different route (including a different rep's route) is a distinct
     // loading session. Never carry its customer selection or operational
@@ -273,11 +275,12 @@ export function SmartLoadingScreen({
   }, [allRows, staleProducts]);
 
   const hasLocalChanges = Object.keys(inputs).length > 0 || removedProductCodes.size > 0 || manuallyAddedProductCodes.size > 0 || Object.keys(lostOpportunityAdditions).length > 0 || Object.keys(lostOpportunityQuantityDrafts).length > 0 || checkedItems.size > 0;
-  function currentRecalculationSnapshot(): SmartLoadingRecalculateInput { return { targetDate, fromDate, toDate, visitsPerWeek, staleDaysThreshold, customerCodes: [...new Set([...selectedCustomerCodes].map((code) => code.trim()).filter(Boolean))], confirmedOrders: Object.entries(confirmedOrdersByProduct).filter(([, quantity]) => Number.isFinite(quantity) && quantity > 0).map(([productCode, quantity]) => ({ productCode, quantity })) }; }
+  function currentRecalculationSnapshot(): SmartLoadingRecalculateInput { return { targetDate, fromDate, toDate, visitsPerWeek, staleDaysThreshold, ...(salesRepId ? { salesRepId } : {}), customerCodes: [...new Set([...selectedCustomerCodes].map((code) => code.trim()).filter(Boolean))], confirmedOrders: Object.entries(confirmedOrdersByProduct).filter(([, quantity]) => Number.isFinite(quantity) && quantity > 0).map(([productCode, quantity]) => ({ productCode, quantity })) }; }
 
   async function applyRecalculation(snapshot = currentRecalculationSnapshot()) {
-    if (snapshot.fromDate > snapshot.toDate) { setRecalculationError(label("smartLoading.invalidDateRange", "The start date must be on or before the end date.")); return; }
-    if (snapshot.customerCodes.length === 0) { setRecalculationError(label("smartLoading.selectCustomer", "Select at least one customer.")); return; }
+    const scopedSnapshot = salesRepId && !snapshot.salesRepId ? { ...snapshot, salesRepId } : snapshot;
+    if (scopedSnapshot.fromDate > scopedSnapshot.toDate) { setRecalculationError(label("smartLoading.invalidDateRange", "The start date must be on or before the end date.")); return; }
+    if (scopedSnapshot.customerCodes.length === 0) { setRecalculationError(label("smartLoading.selectCustomer", "Select at least one customer.")); return; }
     recalculateAbort.current?.abort();
     const controller = new AbortController();
     recalculateAbort.current = controller;
@@ -285,8 +288,8 @@ export function SmartLoadingScreen({
     setRecalculationLoading(true);
     setRecalculationError(null);
     try {
-      const result = await smartLoadingApi.recalculate(snapshot, controller.signal);
-      if (sequence === recalculateSequence.current) { setRecalculation(result); setAppliedInputs(snapshot); setHasUnappliedChanges(false); }
+      const result = await smartLoadingApi.recalculate(scopedSnapshot, controller.signal);
+      if (sequence === recalculateSequence.current) { setRecalculation(result); setAppliedInputs(scopedSnapshot); setHasUnappliedChanges(false); }
     } catch (error) {
       if (sequence === recalculateSequence.current && !(error instanceof DOMException && error.name === "AbortError")) setRecalculationError(label("smartLoading.error", "Unable to calculate loading recommendations. Try again."));
     } finally {
