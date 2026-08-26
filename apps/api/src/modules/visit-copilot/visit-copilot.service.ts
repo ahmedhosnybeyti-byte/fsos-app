@@ -1656,37 +1656,64 @@ export class VisitCopilotService {
     // (range.from/range.to), matching lostOpportunities' scoping rule
     // above: no cross-hierarchy totals, only what's relevant to today's
     // plan.
-    const todayCustomerCodes = new Set(brief.customers.map((c) => c.customerCode));
-    const [collectionsRecords, returnsRecords] = await Promise.all([
-      this.tryEntity(ctx, "Collections", "التحصيلات", warnings),
-      this.tryEntity(ctx, "Returns", "المرتجعات", warnings),
-    ]);
+    const todayCustomerCodes = [...new Set(brief.customers.map((c) => c.customerCode).filter(Boolean))];
+    const aggregateTotal = async (entityName: "Collections" | "Returns", dateField: "CollectionDate" | "ReturnDate", amountField: "Amount" | "TotalAmount", status?: "Collected" | "Bounced") => {
+      const result = await this.rieFacade.queryCanonicalRecords({
+        ...ctx,
+        entityName,
+        projection: [],
+        scope: {
+          customer: { values: todayCustomerCodes },
+          date: { field: dateField, from: range.from, to: range.to },
+          ...(status ? { fields: [{ field: "Status", values: [status] }] } : {}),
+        },
+        aggregates: [{ op: "sum", field: amountField, as: "total" }],
+        pagination: { limit: 1 },
+      });
+      if (result.page.hasMore) throw new Error(`${entityName} aggregate exceeded its one-row contract.`);
+      return toFiniteNumber(result.records[0]?.total) ?? 0;
+    };
 
-    let collectedTotal = 0;
-    let bouncedTotal = 0;
-    for (const row of collectionsRecords) {
-      const customerCode = String(row.CustomerCode ?? "").trim();
-      if (!todayCustomerCodes.has(customerCode)) continue;
-      const dateIso = isoDayOf(row.CollectionDate);
-      if (!dateIso || dateIso < range.from || dateIso > range.to) continue;
-      const amount = toFiniteNumber(row.Amount) ?? 0;
-      const status = String(row.Status ?? "").trim().toLowerCase();
-      if (status === "collected") collectedTotal += amount;
-      else if (status === "bounced") bouncedTotal += amount;
-    }
+    const readCollectionTotals = async (): Promise<{ collected: number; bounced: number }> => {
+      try {
+        const collectionsAvailable = await this.rieFacade.hasCanonicalEntitySources(ctx, ["Collections"]);
+        if (!collectionsAvailable) {
+          warnings.push('بيانات "التحصيلات" غير متاحة — بعض الأرقام قد تكون ناقصة.');
+          return { collected: 0, bounced: 0 };
+        }
+        if (todayCustomerCodes.length === 0) return { collected: 0, bounced: 0 };
+        const [collected, bounced] = await Promise.all([
+          aggregateTotal("Collections", "CollectionDate", "Amount", "Collected"),
+          aggregateTotal("Collections", "CollectionDate", "Amount", "Bounced"),
+        ]);
+        return { collected, bounced };
+      } catch {
+        warnings.push('تعذر قراءة بيانات "التحصيلات" — بعض الأرقام قد تكون ناقصة.');
+        return { collected: 0, bounced: 0 };
+      }
+    };
 
     // ---- Returns — real total + rate (vs. today's route sales total),
     // scoped the same way. "Recurring risks" stays empty until SGI grows a
     // dedicated RETURNS_RISK situation type that names *which* customers
     // return repeatedly — an honest empty list rather than a guessed one.
-    let returnsTotal = 0;
-    for (const row of returnsRecords) {
-      const customerCode = String(row.CustomerCode ?? "").trim();
-      if (!todayCustomerCodes.has(customerCode)) continue;
-      const dateIso = isoDayOf(row.ReturnDate);
-      if (!dateIso || dateIso < range.from || dateIso > range.to) continue;
-      returnsTotal += toFiniteNumber(row.TotalAmount) ?? 0;
-    }
+    const readReturnsTotal = async (): Promise<number> => {
+      try {
+        const returnsAvailable = await this.rieFacade.hasCanonicalEntitySources(ctx, ["Returns"]);
+        if (!returnsAvailable) {
+          warnings.push('بيانات "المرتجعات" غير متاحة — بعض الأرقام قد تكون ناقصة.');
+          return 0;
+        }
+        if (todayCustomerCodes.length === 0) return 0;
+        return aggregateTotal("Returns", "ReturnDate", "TotalAmount");
+      } catch {
+        warnings.push('تعذر قراءة بيانات "المرتجعات" — بعض الأرقام قد تكون ناقصة.');
+        return 0;
+      }
+    };
+    const [collectionTotals, returnsTotal] = await Promise.all([readCollectionTotals(), readReturnsTotal()]);
+    const collectedTotal = collectionTotals.collected;
+    const bouncedTotal = collectionTotals.bounced;
     const returnsRate = brief.expectedSalesTotal > 0 ? round2((returnsTotal / brief.expectedSalesTotal) * 100) : null;
     const returns = { total: round2(returnsTotal), rate: returnsRate, recurringRisks: [] as string[] };
 
