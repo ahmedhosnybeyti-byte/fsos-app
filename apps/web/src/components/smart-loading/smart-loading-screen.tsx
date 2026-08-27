@@ -1001,10 +1001,38 @@ function ProductRow({
   // does not feed the sales-rep loading recommendation calculation.
   const expectedSales = row.product.weeklyAverageSales;
   const stockDifference = row.effectiveVehicleStock === null ? null : row.effectiveVehicleStock - expectedSales;
-  const stockStatus = stockDifference === null ? null : stockDifference < 0 ? label("smartLoading.stockStatusShort", "ناقص") : stockDifference === 0 ? label("smartLoading.stockStatusBalanced", "مناسب") : label("smartLoading.stockStatusExcess", "زائد");
+  const stockCoversExpected = stockDifference !== null && stockDifference >= 0;
+  const stockCoveragePercent = row.effectiveVehicleStock === null ? null : expectedSales <= 0 ? 100 : Math.min(100, Math.max(0, (Math.min(row.effectiveVehicleStock, expectedSales) / expectedSales) * 100));
 
   return (
     <article className="border-t px-3 py-2">
+      {managementView ? (
+        <div className="grid grid-cols-[minmax(9rem,1fr)_repeat(3,minmax(4.5rem,auto))_5rem_auto] items-center gap-3 text-xs">
+          <button onClick={toggle} className="min-w-0 text-right">
+            <p className="truncate text-sm font-medium">{row.product.productName}</p>
+            <p className="truncate text-[11px] text-muted-foreground">{row.product.category ?? t("smartLoading.uncategorized")}</p>
+          </button>
+          <Info label={label("smartLoading.vehicleStock", "رصيد السيارة")} value={row.effectiveVehicleStock === null ? "—" : formatQuantity(row.effectiveVehicleStock, locale)} />
+          <Info label={label("smartLoading.expectedAverageSales", "متوسط المتوقع بيعه")} value={formatQuantity(expectedSales, locale)} />
+          <Info label={label("smartLoading.stockDifference", "الفرق")} value={stockDifference === null ? "—" : formatQuantity(stockDifference, locale)} />
+          <div className="min-w-0">
+            <p className="mb-1 text-[10px] text-muted-foreground">{label("smartLoading.stockStatus", "مؤشر الحالة")}</p>
+            <div className="h-2 overflow-hidden rounded-full bg-muted" aria-label={label("smartLoading.stockStatus", "مؤشر الحالة")}>
+              {stockCoveragePercent !== null && <div className={cn("h-full rounded-full", stockCoversExpected ? "bg-emerald-500" : "bg-red-500")} style={{ width: `${stockCoveragePercent}%` }} />}
+            </div>
+          </div>
+          <Button
+            aria-label={label("smartLoading.removeProduct", "Remove product")}
+            className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive"
+            size="icon"
+            type="button"
+            variant="ghost"
+            onClick={() => removeProduct(row.product.productCode)}
+          >
+            <Minus className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : (
       <div className="grid grid-cols-[1fr_auto] items-center gap-2">
         <button onClick={toggle} className="min-w-0 text-right">
           <p className="truncate text-sm font-medium">{row.product.productName}</p>
@@ -1052,14 +1080,6 @@ function ProductRow({
           )}
         </div>
       </div>
-
-      {managementView && (
-        <div className="mt-2 grid grid-cols-2 gap-2 rounded-md bg-muted/40 p-2 text-xs sm:grid-cols-4">
-          <Info label={label("smartLoading.vehicleStock", "رصيد السيارة")} value={row.effectiveVehicleStock === null ? "—" : formatQuantity(row.effectiveVehicleStock, locale)} />
-          <Info label={label("smartLoading.expectedAverageSales", "متوسط المتوقع بيعه")} value={formatQuantity(expectedSales, locale)} />
-          <Info label={label("smartLoading.stockDifference", "الفرق")} value={stockDifference === null ? "—" : formatQuantity(stockDifference, locale)} />
-          <Info label={label("smartLoading.stockStatus", "الحالة")} value={stockStatus ?? "—"} />
-        </div>
       )}
 
       {hasManualOverride && (
