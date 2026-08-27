@@ -255,7 +255,34 @@ export class SmartLoadingService {
     return fallbackRouteIds;
   }
 
-  async getSession(user: AuthenticatedUser, requestedTargetDate?: string, staleDaysThreshold = DEFAULT_SMART_LOADING_STALE_DAYS, salesRepId?: string): Promise<SmartLoadingSession> {
+  /** Resolves the management filter to a small Route dimension before facts. */
+  private async resolveManagementScopeRouteIds(ctx: ReturnType<SmartLoadingService["rieContext"]>, managerId?: string, supervisorId?: string, selectedRepRouteIds?: readonly string[] | null): Promise<string[] | null> {
+    const selectedManagerId = managerId?.trim();
+    const selectedSupervisorId = supervisorId?.trim();
+    if (!selectedManagerId && !selectedSupervisorId) return selectedRepRouteIds ? [...selectedRepRouteIds] : null;
+    const fields = [
+      ...(selectedManagerId ? [{ field: "EmployeeID", source: "manager", values: [selectedManagerId] }] : []),
+      ...(selectedSupervisorId ? [{ field: "EmployeeID", source: "supervisor", values: [selectedSupervisorId] }] : []),
+    ];
+    const result = await this.rieFacade.queryCanonicalRecords({
+      ...ctx,
+      entityName: "Routes",
+      hierarchyRoute: { field: "RouteID" },
+      joins: [
+        { entityName: "Employees", alias: "rep", type: "inner", on: { left: { field: "SalesRepID" }, rightField: "EmployeeID" } },
+        { entityName: "Employees", alias: "supervisor", type: "inner", on: { left: { field: "DirectManagerID", source: "rep" }, rightField: "EmployeeID" } },
+        { entityName: "Employees", alias: "manager", type: "inner", on: { left: { field: "DirectManagerID", source: "supervisor" }, rightField: "EmployeeID" } },
+      ],
+      projection: [{ field: "RouteID", as: "routeId" }],
+      groupBy: [{ field: "RouteID" }],
+      scope: { ...(selectedRepRouteIds ? { route: { values: selectedRepRouteIds } } : {}), fields },
+      pagination: { limit: 500 },
+    });
+    if (result.page.hasMore) throw new BadRequestException("Smart Loading management scope exceeds the safe route limit.");
+    return result.records.map((row) => String(row.routeId ?? "").trim()).filter(Boolean);
+  }
+
+  async getSession(user: AuthenticatedUser, requestedTargetDate?: string, staleDaysThreshold = DEFAULT_SMART_LOADING_STALE_DAYS, salesRepId?: string, managerId?: string, supervisorId?: string): Promise<SmartLoadingSession> {
     if (!user.companyId) throw new ForbiddenException();
     const timingStartedAt = performance.now();
     const stageTimingsMs: Record<string, number> = {};
@@ -269,7 +296,7 @@ export class SmartLoadingService {
     };
     const ctx = this.rieContext(user);
     const selectedSalesRepId = salesRepId?.trim();
-    if (selectedSalesRepId && !["COMPANY_ADMIN", "MANAGER", "SUPERVISOR"].includes(user.roleCode)) {
+    if ((selectedSalesRepId || managerId?.trim() || supervisorId?.trim()) && !["COMPANY_ADMIN", "MANAGER", "SUPERVISOR"].includes(user.roleCode)) {
       throw new ForbiddenException();
     }
     // Resolve a selected rep once, before any fact query. The operational
@@ -277,13 +304,14 @@ export class SmartLoadingService {
     const selectedRepRouteIds = selectedSalesRepId
       ? await this.resolveSelectedSalesRepRoutes(ctx, selectedSalesRepId)
       : null;
+    const scopedRouteIds = await this.resolveManagementScopeRouteIds(ctx, managerId, supervisorId, selectedRepRouteIds);
     const withSelectedRepScope = <T extends Parameters<RieFacade["queryCanonicalRecords"]>[0]>(query: T): T => {
-      if (!selectedRepRouteIds) return query;
+      if (!scopedRouteIds) return query;
       return {
         ...query,
         scope: {
           ...query.scope,
-          route: { values: selectedRepRouteIds },
+          route: { values: scopedRouteIds },
         },
       } as T;
     };

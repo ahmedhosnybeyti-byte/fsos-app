@@ -16,9 +16,12 @@ export default function SmartLoadingPage() {
   const [targetDate, setTargetDate] = useState(tomorrowIso);
   const [staleDaysThreshold, setStaleDaysThreshold] = useState(DEFAULT_SMART_LOADING_STALE_DAYS);
   const [salesRepId, setSalesRepId] = useState<string>();
+  const [managerId, setManagerId] = useState<string>();
+  const [supervisorId, setSupervisorId] = useState<string>();
   const session = useQuery({
-    queryKey: ["smart-loading", "session", targetDate, staleDaysThreshold, salesRepId],
-    queryFn: () => smartLoadingApi.getSession(targetDate, staleDaysThreshold, salesRepId),
+    queryKey: ["smart-loading", "session", targetDate, staleDaysThreshold, salesRepId, managerId, supervisorId],
+    queryFn: () => smartLoadingApi.getSession(targetDate, staleDaysThreshold, salesRepId, managerId, supervisorId),
+    placeholderData: (previous) => previous,
   });
 
   return (
@@ -32,6 +35,11 @@ export default function SmartLoadingPage() {
       onStaleDaysThresholdChange={setStaleDaysThreshold}
       salesRepId={salesRepId}
       onSalesRepChange={setSalesRepId}
+      onManagementScopeChange={({ managerId: nextManagerId, supervisorId: nextSupervisorId, salesRepId: nextSalesRepId }) => {
+        setManagerId(nextManagerId);
+        setSupervisorId(nextSupervisorId);
+        setSalesRepId(nextSalesRepId);
+      }}
       onRetry={async () => {
         const result = await session.refetch();
         if (result.isError) throw result.error;
