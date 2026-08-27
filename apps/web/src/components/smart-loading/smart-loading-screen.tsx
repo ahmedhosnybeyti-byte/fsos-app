@@ -1017,9 +1017,7 @@ function ProductRow({
           <Info label={label("smartLoading.stockDifference", "الفرق")} value={stockDifference === null ? "—" : formatQuantity(stockDifference, locale)} />
           <div className="min-w-0">
             <p className="mb-1 text-[10px] text-muted-foreground">{label("smartLoading.stockStatus", "مؤشر الحالة")}</p>
-            <div className="h-2 overflow-hidden rounded-full bg-muted" aria-label={label("smartLoading.stockStatus", "مؤشر الحالة")}>
-              {stockCoveragePercent !== null && <div className={cn("h-full rounded-full", stockCoversExpected ? "bg-emerald-500" : "bg-red-500")} style={{ width: `${stockCoveragePercent}%` }} />}
-            </div>
+            {stockCoveragePercent === null ? "—" : <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold", stockCoversExpected ? "bg-emerald-500/15 text-emerald-700" : "bg-red-500/15 text-red-700")} aria-label={label("smartLoading.stockStatus", "مؤشر الحالة")}><span aria-hidden="true">{stockCoversExpected ? "↑" : "↓"}</span>{formatQuantity(Math.round(stockCoveragePercent), locale)}%</span>}
           </div>
           <Button
             aria-label={label("smartLoading.removeProduct", "Remove product")}
