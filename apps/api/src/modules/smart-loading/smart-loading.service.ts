@@ -372,7 +372,16 @@ export class SmartLoadingService {
     const customerPurchasesByProduct = new Map<string, Map<string, { totalQuantity: number; purchaseFrequency: number; lastPurchaseMs: number }>>();
     for (const row of purchaseRows) { const productCode = normalizedProductCode(row.productCode), customerCode = String(row.customerCode ?? "").trim(), lastPurchaseMs = toEpochMs(row.lastPurchaseDate); if (!productCode || !customerCode || lastPurchaseMs === null || (toFiniteNumber(row.totalQuantity) ?? 0) <= 0) continue; const byCustomer = customerPurchasesByProduct.get(productCode) ?? new Map(); byCustomer.set(customerCode, { totalQuantity: toFiniteNumber(row.totalQuantity) ?? 0, purchaseFrequency: toFiniteNumber(row.purchaseFrequency) ?? 0, lastPurchaseMs }); customerPurchasesByProduct.set(productCode, byCustomer); }
     const lostOpportunityResult = await timed("lost-opportunities", () => this.lostOpportunityService.detect({ ...ctx, selectedDate: targetDateIso, customerCodes: [...nextRouteCustomers.keys()], customerNames: nextRouteCustomers }));
-    const lostOpportunities = lostOpportunityResult.opportunities;
+    const lostOpportunityRouteIds = [...new Set(lostOpportunityResult.opportunities.map((opportunity) => normalizedRouteId(routeCustomersByCode.get(opportunity.customerCode)?.routeId)).filter(Boolean))];
+    const lostOpportunityProductCodes = [...new Set(lostOpportunityResult.opportunities.map((opportunity) => normalizedProductCode(opportunity.productCode)).filter(Boolean))];
+    const lostOpportunityStockRows = lostOpportunityRouteIds.length && lostOpportunityProductCodes.length
+      ? await timed("lost-opportunity-route-product-stock", () => bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }, { field: "ProductCode", as: "productCode" }], latestPer: { partitionBy: { field: "RouteID" }, orderBy: { field: "ReportDate" } }, groupBy: [{ field: "RouteID" }, { field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { route: { values: lostOpportunityRouteIds }, product: { values: lostOpportunityProductCodes } } })))
+      : [];
+    const lostOpportunityStockByRouteProduct = new Map(lostOpportunityStockRows.map((row) => [`${normalizedRouteId(row.routeId)}\u0000${normalizedProductCode(row.productCode)}`, toFiniteNumber(row.quantity) ?? 0] as const));
+    const lostOpportunities = lostOpportunityResult.opportunities.filter((opportunity) => {
+      const routeId = normalizedRouteId(routeCustomersByCode.get(opportunity.customerCode)?.routeId);
+      return !!routeId && (lostOpportunityStockByRouteProduct.get(`${routeId}\u0000${normalizedProductCode(opportunity.productCode)}`) ?? 0) <= 0;
+    });
     const lostOpportunityReason = nextRouteCustomers.size === 0 ? hasUnsupportedVisitDayFormat ? "unsupported-visit-day-format" : "no-tomorrow-route-customers" : lostOpportunityResult.status === "no-customers" ? "no-tomorrow-route-customers" : lostOpportunityResult.status;
 
     // ---- Assemble one row per product the caller actually has vehicle

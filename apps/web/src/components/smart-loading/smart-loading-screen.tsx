@@ -197,18 +197,6 @@ export function SmartLoadingScreen({
     if (session?.state !== "ready") return [];
     return groupLostOpportunities(session.lostOpportunities, lostOpportunityQuantityDrafts, "", t("smartLoading.uncategorized"), appliedInputs?.visitsPerWeek ?? 1);
   }, [appliedInputs?.visitsPerWeek, lostOpportunityQuantityDrafts, session, t]);
-  const visibleLostOpportunities = useMemo(() => {
-    if (session?.state !== "ready") return [];
-    const vehicleStockByProduct = new Map(session.products.map((product) => [product.productCode, product.currentVehicleStock]));
-    return session.lostOpportunities.filter((opportunity) => {
-      const vehicleStock = vehicleStockByProduct.get(opportunity.productCode);
-      return vehicleStock !== null && vehicleStock !== undefined && vehicleStock <= 0;
-    });
-  }, [session]);
-  const visibleLostOpportunityGroups = useMemo(
-    () => groupLostOpportunities(visibleLostOpportunities, lostOpportunityQuantityDrafts, "", t("smartLoading.uncategorized"), appliedInputs?.visitsPerWeek ?? 1),
-    [appliedInputs?.visitsPerWeek, lostOpportunityQuantityDrafts, t, visibleLostOpportunities],
-  );
 
   const allRows = useMemo<Row[]>(() => {
     if (session?.state !== "ready") return [];
@@ -633,7 +621,7 @@ export function SmartLoadingScreen({
           </Button>
           <Button variant="outline" onClick={() => { setLostOpportunitiesOpen(true); setLostOpportunityWarning(null); }}>
             <AlertTriangle className="h-4 w-4 text-amber-600" />
-            {t("smartLoading.lostOpportunities")} ({formatQuantity(visibleLostOpportunityGroups.reduce((sum, category) => sum + category.products.reduce((productSum, product) => productSum + product.customers.length, 0), 0), locale)})
+            {t("smartLoading.lostOpportunities")} ({formatQuantity(lostOpportunityGroups.reduce((sum, category) => sum + category.products.reduce((productSum, product) => productSum + product.customers.length, 0), 0), locale)})
           </Button>
           <div className="relative">
             <Button variant="outline" onClick={() => void (isSessionClosed ? exportExcel() : closeAndExport())}><Download className="h-4 w-4" />{isSessionClosed ? (locale === "ar" ? "تنزيل ملف المستودع" : "Download warehouse file") : (locale === "ar" ? "إغلاق وتصدير التحميل" : "Close and export loading")}</Button>
@@ -704,7 +692,7 @@ export function SmartLoadingScreen({
 
       {lostOpportunitiesOpen && (
         <LostOpportunitiesDialog
-          opportunities={visibleLostOpportunities}
+          opportunities={session.lostOpportunities}
           quantityDrafts={lostOpportunityQuantityDrafts}
           additions={lostOpportunityAdditions}
           products={session.products}
