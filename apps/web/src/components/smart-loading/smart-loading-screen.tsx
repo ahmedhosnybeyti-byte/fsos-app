@@ -769,6 +769,7 @@ export function SmartLoadingScreen({
                     <ProductRow
                       key={row.product.productCode}
                       row={row}
+                      managementView={isManagementRole(user?.role.code)}
                       open={openRows.has(row.product.productCode)}
                       toggle={() =>
                         setOpenRows((current) => {
@@ -974,6 +975,7 @@ function LostOpportunitiesDialog({
 
 function ProductRow({
   row,
+  managementView,
   open,
   toggle,
   setInput,
@@ -981,6 +983,7 @@ function ProductRow({
   removeProduct,
 }: {
   row: Row;
+  managementView: boolean;
   open: boolean;
   toggle: () => void;
   setInput: (productCode: string, key: keyof Inputs, value: string) => void;
@@ -993,6 +996,12 @@ function ProductRow({
     return translated === key ? fallback : translated;
   };
   const hasManualOverride = row.input.manual !== undefined;
+  // Both inputs are already Route -> Product rollups performed by the
+  // Smart Loading RIE queries. This is presentation-only: it deliberately
+  // does not feed the sales-rep loading recommendation calculation.
+  const expectedSales = row.product.weeklyAverageSales;
+  const stockDifference = row.effectiveVehicleStock === null ? null : row.effectiveVehicleStock - expectedSales;
+  const stockStatus = stockDifference === null ? null : stockDifference < 0 ? label("smartLoading.stockStatusShort", "ناقص") : stockDifference === 0 ? label("smartLoading.stockStatusBalanced", "مناسب") : label("smartLoading.stockStatusExcess", "زائد");
 
   return (
     <article className="border-t px-3 py-2">
@@ -1043,6 +1052,15 @@ function ProductRow({
           )}
         </div>
       </div>
+
+      {managementView && (
+        <div className="mt-2 grid grid-cols-2 gap-2 rounded-md bg-muted/40 p-2 text-xs sm:grid-cols-4">
+          <Info label={label("smartLoading.vehicleStock", "رصيد السيارة")} value={row.effectiveVehicleStock === null ? "—" : formatQuantity(row.effectiveVehicleStock, locale)} />
+          <Info label={label("smartLoading.expectedAverageSales", "متوسط المتوقع بيعه")} value={formatQuantity(expectedSales, locale)} />
+          <Info label={label("smartLoading.stockDifference", "الفرق")} value={stockDifference === null ? "—" : formatQuantity(stockDifference, locale)} />
+          <Info label={label("smartLoading.stockStatus", "الحالة")} value={stockStatus ?? "—"} />
+        </div>
+      )}
 
       {hasManualOverride && (
         <p className="mt-1 text-[11px] text-amber-700">
