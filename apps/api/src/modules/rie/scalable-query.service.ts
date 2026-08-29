@@ -216,7 +216,12 @@ export class RieScalableQueryService {
       )
       SELECT product_code AS "productCode", SUM(quantity)::double precision AS quantity,
         MAX(last_sale_date) AS "lastSaleDate", BOOL_OR(is_stale) AS "isStale",
-        SUM(COUNT(*) FILTER (WHERE is_stale)) OVER ()::double precision AS "staleRouteProductCount"
+        SUM(COUNT(*) FILTER (WHERE is_stale)) OVER ()::double precision AS "staleRouteProductCount",
+        COALESCE(JSONB_AGG(JSONB_BUILD_OBJECT(
+          'routeId', route_id,
+          'currentVehicleStock', quantity,
+          'lastSaleDate', last_sale_date
+        ) ORDER BY route_id) FILTER (WHERE is_stale), '[]'::jsonb) AS "staleRouteProducts"
       FROM route_stale
       GROUP BY product_code
       ORDER BY product_code

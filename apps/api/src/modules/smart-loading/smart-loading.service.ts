@@ -163,6 +163,10 @@ export function managementStaleRouteProductCount(rows: readonly { staleRouteProd
   return rows[0]?.staleRouteProductCount ?? 0;
 }
 
+export function managementStaleRouteProductCases(rows: readonly { productCode: string; staleRouteProducts: readonly { routeId: string; currentVehicleStock: number; lastSaleDate: string | null }[] }[]) {
+  return rows.flatMap((row) => row.staleRouteProducts.map((routeProduct) => ({ productCode: normalizedProductCode(row.productCode), ...routeProduct })));
+}
+
 export function parseTargetDate(value: string | undefined): Date {
   const tomorrow = nextRouteDate(companyCalendarDate());
   const date = value ? parseAsOfDate(value) : tomorrow;
@@ -454,6 +458,21 @@ export class SmartLoadingService {
     const sessionProductCodes = [...new Set([...vehicleStockByProduct.keys(), ...windowQtyByProduct.keys()])];
     const productRows = sessionProductCodes.length ? await timed("products-lookup", () => bounded("products-lookup", { companyId: ctx.companyId, entityName: "Products", projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }, { field: "Category", as: "category" }], scope: { product: { values: sessionProductCodes } } })) : [];
     const productMeta = new Map(productRows.map((row) => { const code = normalizedProductCode(row.productCode); return [code, { code: String(row.productCode ?? code).trim() || code, name: String(row.productName ?? row.productCode ?? code).trim() || code, category: row.category ? String(row.category).trim() || null : null }] as const; }).filter(([code]) => !!code));
+    const managementStaleRouteProducts = useManagementStaleGrain
+      ? managementStaleRouteProductCases(managementStaleRows)
+        .filter((routeProduct) => routeProduct.productCode && routeProduct.lastSaleDate !== null)
+        .map((routeProduct) => {
+          const meta = productMeta.get(routeProduct.productCode);
+          return {
+            routeId: routeProduct.routeId,
+            productCode: meta?.code ?? routeProduct.productCode,
+            productName: meta?.name ?? routeProduct.productCode,
+            category: meta?.category ?? null,
+            currentVehicleStock: routeProduct.currentVehicleStock,
+            lastSaleDate: routeProduct.lastSaleDate!,
+          };
+        })
+      : null;
     const customerPurchasesByProduct = new Map<string, Map<string, { totalQuantity: number; purchaseFrequency: number; lastPurchaseMs: number }>>();
     const customerNamesByCode = new Map<string, string>();
     for (const row of purchaseRows) for (const purchase of row.customers ?? []) { const productCode = normalizedProductCode(row.productCode), customerCode = String(purchase.customerCode ?? "").trim(), lastPurchaseMs = toEpochMs(purchase.lastPurchaseDate); if (!productCode || !customerCode || lastPurchaseMs === null || (toFiniteNumber(purchase.totalQuantity) ?? 0) <= 0) continue; const byCustomer = customerPurchasesByProduct.get(productCode) ?? new Map(); byCustomer.set(customerCode, { totalQuantity: toFiniteNumber(purchase.totalQuantity) ?? 0, purchaseFrequency: toFiniteNumber(purchase.purchaseFrequency) ?? 0, lastPurchaseMs }); customerPurchasesByProduct.set(productCode, byCustomer); customerNamesByCode.set(customerCode, String(purchase.customerName ?? customerCode).trim() || customerCode); }
@@ -559,6 +578,7 @@ export class SmartLoadingService {
       state: "ready",
       products,
       staleCount,
+      managementStaleRouteProducts,
       staleProductPlans,
       attention: attentionList,
       calculatedAt: new Date(nowMs).toISOString(),

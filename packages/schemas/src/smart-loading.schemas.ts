@@ -56,6 +56,17 @@ export const smartLoadingStaleProductPlanSchema = z.object({
 });
 export type SmartLoadingStaleProductPlan = z.infer<typeof smartLoadingStaleProductPlanSchema>;
 
+/** Management-only popup detail: each stale Route × Product state remains distinct. */
+export const smartLoadingManagementStaleRouteProductSchema = z.object({
+  routeId: z.string(),
+  productCode: z.string(),
+  productName: z.string(),
+  category: z.string().nullable(),
+  currentVehicleStock: z.number(),
+  lastSaleDate: z.string(),
+});
+export type SmartLoadingManagementStaleRouteProduct = z.infer<typeof smartLoadingManagementStaleRouteProductSchema>;
+
 export const smartLoadingRouteSchema = z.object({
   targetDate: z.string(),
   customerCount: z.number().int().nonnegative(),
@@ -128,6 +139,7 @@ export const smartLoadingReadySessionSchema = z.object({
   state: z.literal("ready"),
   products: z.array(smartLoadingProductSchema),
   staleCount: z.number().int().nonnegative(),
+  managementStaleRouteProducts: z.array(smartLoadingManagementStaleRouteProductSchema).nullable(),
   staleProductPlans: z.array(smartLoadingStaleProductPlanSchema),
   attention: z.array(smartLoadingAttentionSchema),
   asOfDate: z.string(),

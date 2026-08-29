@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { isRouteInActiveVehicleScope, isSaleOnOrBeforeTargetDate, isStaleVehicleInventory, managementStaleRouteProductCount, normalizedProductCode, rollupManagementStaleProductCodes } from "./smart-loading.service";
+import { isRouteInActiveVehicleScope, isSaleOnOrBeforeTargetDate, isStaleVehicleInventory, managementStaleRouteProductCases, managementStaleRouteProductCount, normalizedProductCode, rollupManagementStaleProductCodes } from "./smart-loading.service";
 import { RieScalableQueryService } from "../rie/scalable-query.service";
 
 const asOfDate = new Date("2026-08-10T00:00:00.000Z");
@@ -64,8 +64,16 @@ test("management rollup keeps Route B stale when the same SKU sold on Route A", 
 });
 
 test("management RIE stale rollup returns Product grain for more than 5,000 route scopes", async () => {
+  const expected = [{
+    productCode: "sku-1",
+    quantity: 5_001,
+    lastSaleDate: "2026-08-01",
+    isStale: true,
+    staleRouteProductCount: 5_001,
+    staleRouteProducts: Array.from({ length: 5_001 }, (_, index) => ({ routeId: `route-${index}`, currentVehicleStock: 1, lastSaleDate: "2026-08-01" })),
+  }];
   const query = new RieScalableQueryService(
-    { $queryRaw: async () => [{ productCode: "sku-1", quantity: 5_001, lastSaleDate: "2026-08-01", isStale: true, staleRouteProductCount: 5_001 }] } as never,
+    { $queryRaw: async () => expected } as never,
     { resolveAllowedRouteIds: async () => null } as never,
   );
   const rows = await query.queryRouteProductStaleness({
@@ -75,11 +83,22 @@ test("management RIE stale rollup returns Product grain for more than 5,000 rout
     routeIds: Array.from({ length: 5_001 }, (_, index) => `route-${index}`),
   });
 
-  assert.deepEqual(rows, [{ productCode: "sku-1", quantity: 5_001, lastSaleDate: "2026-08-01", isStale: true, staleRouteProductCount: 5_001 }]);
+  assert.deepEqual(rows, expected);
+  assert.equal(rows[0]?.staleRouteProducts.length, 5_001);
 });
 
 test("management counts the same stale product once for each stale route", () => {
   assert.equal(managementStaleRouteProductCount([{ staleRouteProductCount: 3 }]), 3);
+});
+
+test("management popup retains three stale Route × Product cases for the same product", () => {
+  const cases = managementStaleRouteProductCases([{ productCode: "sku-1", staleRouteProducts: [
+    { routeId: "route-a", currentVehicleStock: 1, lastSaleDate: "2026-08-01" },
+    { routeId: "route-b", currentVehicleStock: 1, lastSaleDate: "2026-08-01" },
+    { routeId: "route-c", currentVehicleStock: 1, lastSaleDate: "2026-08-01" },
+  ] }]);
+  assert.equal(cases.length, 3);
+  assert.deepEqual(cases.map((item) => item.routeId), ["route-a", "route-b", "route-c"]);
 });
 
 test("stale purchases keep the same evidence past 5,000 Product × Customer rows without a bounded response", async () => {

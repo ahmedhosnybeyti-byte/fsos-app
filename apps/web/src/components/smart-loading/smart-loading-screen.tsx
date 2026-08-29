@@ -23,7 +23,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTranslation } from "@/components/translation-provider";
 import { useAuth } from "@/hooks/use-auth";
-import type { SmartLoadingLostOpportunity, SmartLoadingPriorityProduct, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
+import type { SmartLoadingLostOpportunity, SmartLoadingManagementStaleRouteProduct, SmartLoadingPriorityProduct, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
 import { smartLoadingApi } from "@/lib/api/smart-loading";
 import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult, type SmartLoadingRouteCustomer } from "@field-sales-os/schemas";
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
@@ -727,7 +727,9 @@ export function SmartLoadingScreen({
       )}
 
       {panel === "priority" && <PriorityProductsPopover groups={priorityGroups} openGroups={openPriorityGroups} onToggleGroup={(category) => setOpenPriorityGroups((current) => { const next = new Set(current); next.has(category) ? next.delete(category) : next.add(category); return next; })} onClose={() => setPanel(null)} />}
-      {panel === "stale" && <ProductListPopover rows={staleRows} stale referenceDate={staleReferenceDate} onClose={() => setPanel(null)} />}
+      {panel === "stale" && (session.managementStaleRouteProducts !== null
+        ? <ManagementStaleRouteProductPopover cases={session.managementStaleRouteProducts} referenceDate={staleReferenceDate} onClose={() => setPanel(null)} />
+        : <ProductListPopover rows={staleRows} stale referenceDate={staleReferenceDate} onClose={() => setPanel(null)} />)}
 
       <Card className="glass-card">
         <CardHeader className="pb-3">
@@ -1499,6 +1501,29 @@ function SmartLoadingPhaseTwo(props: SmartLoadingPhaseTwoProps) {
     </section>
     {editorOpen && <RouteEditorDialog session={props.session} label={props.label} query={customerQuery} searchResults={customerResults} exceptionalCustomers={draftExceptionalCustomers} selected={draftCustomerCodes} onQueryChange={setCustomerQuery} onToggleRoute={toggleRouteCustomer} onAddExceptional={addExceptional} onRemoveExceptional={removeExceptional} onClose={() => setEditorOpen(false)} onApply={applyCustomers} />}
   </>;
+}
+
+function ManagementStaleRouteProductPopover({ cases, referenceDate, onClose }: { cases: SmartLoadingManagementStaleRouteProduct[]; referenceDate: Date; onClose: () => void }) {
+  const { locale, t } = useTranslation();
+  const [openCategories, setOpenCategories] = useState<Set<string>>(new Set());
+  const groups = useMemo(() => cases.reduce<Record<string, SmartLoadingManagementStaleRouteProduct[]>>((current, item) => {
+    const category = item.category ?? t("smartLoading.uncategorized");
+    (current[category] ??= []).push(item);
+    return current;
+  }, {}), [cases, t]);
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/20 pt-24" onClick={onClose}>
+      <Card className="w-[min(92vw,520px)] shadow-xl" onClick={(event) => event.stopPropagation()}>
+        <CardHeader className="flex-row items-center justify-between p-4"><CardTitle>{t("smartLoading.staleProductsPanelTitle")}</CardTitle><Button size="sm" variant="ghost" onClick={onClose}>{t("smartLoading.close")}</Button></CardHeader>
+        <CardContent className="max-h-[60vh] overflow-y-auto p-4 pt-0 space-y-2">
+          {Object.entries(groups).map(([category, items]) => {
+            const open = openCategories.has(category);
+            return <section key={category} className="rounded border"><button className="flex w-full items-center justify-between px-2 py-1.5 text-right text-xs font-semibold" onClick={() => setOpenCategories((current) => { const next = new Set(current); if (next.has(category)) next.delete(category); else next.add(category); return next; })} type="button"><span>{category} ({formatQuantity(items.length, locale)})</span><ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !open && "-rotate-90")} /></button>{open && <div className="max-h-56 overflow-y-auto border-t px-2">{items.map((item) => <div key={`${item.routeId}\u0000${item.productCode}`} className="grid grid-cols-[1fr_auto] gap-2 border-b py-1.5 text-xs last:border-0"><span className="min-w-0 truncate font-medium">{item.productName}<span className="block text-muted-foreground">{item.routeId}</span></span><span className="text-left text-muted-foreground">{t("smartLoading.vehicleStock")} {formatQuantity(item.currentVehicleStock, locale)} · {t("smartLoading.lastSale")} {formatGregorianDate(item.lastSaleDate) ?? "—"} · {daysSinceLastSale(item.lastSaleDate, referenceDate) ?? "—"} {t("smartLoading.staleDaysUnit")}</span></div>)}</div>}</section>;
+          })}
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 function isManagementRole(roleCode: string | undefined) {

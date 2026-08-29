@@ -86,6 +86,13 @@ export interface RieRouteProductStalenessRow {
   isStale: boolean;
   /** Total stale Route × Product states in the management scope. */
   staleRouteProductCount: number;
+  /** Stale Route × Product states packed by PostgreSQL for the management popup. */
+  staleRouteProducts: RieStaleRouteProduct[];
+}
+export interface RieStaleRouteProduct {
+  routeId: string;
+  currentVehicleStock: number;
+  lastSaleDate: string | null;
 }
 
 /** Product-grain stale-purchase evidence; Product × Customer stays inside SQL. */

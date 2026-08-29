@@ -1749,7 +1749,7 @@ export interface VisitCopilot360Summary {
   warnings: string[];
 }
 
-export type { SmartLoadingPriority, SmartLoadingProduct, SmartLoadingRoute, SmartLoadingRouteCustomer, SmartLoadingCustomerSearchResult, SmartLoadingPriorityProduct, SmartLoadingAttention, SmartLoadingReadySession, SmartLoadingStaleProductCustomer, SmartLoadingStaleProductPlan, SmartLoadingLostOpportunity, SmartLoadingLostOpportunityReason, SmartLoadingVehicleStockUnavailableSession, SmartLoadingSession, SmartLoadingRecalculateInput, SmartLoadingRecalculatedProduct, SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
+export type { SmartLoadingPriority, SmartLoadingProduct, SmartLoadingRoute, SmartLoadingRouteCustomer, SmartLoadingCustomerSearchResult, SmartLoadingPriorityProduct, SmartLoadingAttention, SmartLoadingReadySession, SmartLoadingStaleProductCustomer, SmartLoadingStaleProductPlan, SmartLoadingManagementStaleRouteProduct, SmartLoadingLostOpportunity, SmartLoadingLostOpportunityReason, SmartLoadingVehicleStockUnavailableSession, SmartLoadingSession, SmartLoadingRecalculateInput, SmartLoadingRecalculatedProduct, SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
 // FSOS 360 ? mirrors the published unified workspace API contract.
 export type Fsos360AnalysisFocus = "company" | "region" | "branch" | "manager" | "supervisor" | "route" | "sales-rep" | "customer" | "brand" | "category" | "product";
 export type Fsos360Availability = "available" | "partial" | "unavailable" | "not-applicable" | "pending-business-approval";
