@@ -668,7 +668,7 @@ export function SmartLoadingScreen({
         onStaleDaysThresholdChange={(value) => { onStaleDaysThresholdChange(Math.max(1, value)); setHasUnappliedChanges(true); }}
         selectedCustomerCodes={selectedCustomerCodes}
         exceptionalCustomers={exceptionalCustomers}
-        loadingSummary={{ productsToLoad: rows.length, totalQuantity: rows.reduce((sum, row) => sum + row.suggested, 0), priorityProducts: priorityProducts.length, staleProducts: staleProducts.length }}
+        loadingSummary={{ productsToLoad: rows.length, totalQuantity: rows.reduce((sum, row) => sum + row.suggested, 0), priorityProducts: priorityProducts.length, staleProducts: session?.state === "ready" ? session.staleCount : staleProducts.length }}
         confirmedOrders={confirmedOrdersByProduct}
         confirmedProductCode={confirmedProductCode}
         confirmedQuantity={confirmedQuantity}

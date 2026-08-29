@@ -127,6 +127,7 @@ export type SmartLoadingLostOpportunityReason = z.infer<typeof smartLoadingLostO
 export const smartLoadingReadySessionSchema = z.object({
   state: z.literal("ready"),
   products: z.array(smartLoadingProductSchema),
+  staleCount: z.number().int().nonnegative(),
   staleProductPlans: z.array(smartLoadingStaleProductPlanSchema),
   attention: z.array(smartLoadingAttentionSchema),
   asOfDate: z.string(),

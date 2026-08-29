@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { isRouteInActiveVehicleScope, isSaleOnOrBeforeTargetDate, isStaleVehicleInventory, normalizedProductCode, rollupManagementStaleProductCodes } from "./smart-loading.service";
+import { isRouteInActiveVehicleScope, isSaleOnOrBeforeTargetDate, isStaleVehicleInventory, managementStaleRouteProductCount, normalizedProductCode, rollupManagementStaleProductCodes } from "./smart-loading.service";
 import { RieScalableQueryService } from "../rie/scalable-query.service";
 
 const asOfDate = new Date("2026-08-10T00:00:00.000Z");
@@ -65,7 +65,7 @@ test("management rollup keeps Route B stale when the same SKU sold on Route A", 
 
 test("management RIE stale rollup returns Product grain for more than 5,000 route scopes", async () => {
   const query = new RieScalableQueryService(
-    { $queryRaw: async () => [{ productCode: "sku-1", quantity: 5_001, lastSaleDate: "2026-08-01", isStale: true }] } as never,
+    { $queryRaw: async () => [{ productCode: "sku-1", quantity: 5_001, lastSaleDate: "2026-08-01", isStale: true, staleRouteProductCount: 5_001 }] } as never,
     { resolveAllowedRouteIds: async () => null } as never,
   );
   const rows = await query.queryRouteProductStaleness({
@@ -75,7 +75,11 @@ test("management RIE stale rollup returns Product grain for more than 5,000 rout
     routeIds: Array.from({ length: 5_001 }, (_, index) => `route-${index}`),
   });
 
-  assert.deepEqual(rows, [{ productCode: "sku-1", quantity: 5_001, lastSaleDate: "2026-08-01", isStale: true }]);
+  assert.deepEqual(rows, [{ productCode: "sku-1", quantity: 5_001, lastSaleDate: "2026-08-01", isStale: true, staleRouteProductCount: 5_001 }]);
+});
+
+test("management counts the same stale product once for each stale route", () => {
+  assert.equal(managementStaleRouteProductCount([{ staleRouteProductCount: 3 }]), 3);
 });
 
 test("stale purchases keep the same evidence past 5,000 Product × Customer rows without a bounded response", async () => {

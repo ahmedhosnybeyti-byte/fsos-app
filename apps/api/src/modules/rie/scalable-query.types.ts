@@ -84,6 +84,8 @@ export interface RieRouteProductStalenessRow {
   quantity: number;
   lastSaleDate: string | null;
   isStale: boolean;
+  /** Total stale Route × Product states in the management scope. */
+  staleRouteProductCount: number;
 }
 
 /** Product-grain stale-purchase evidence; Product × Customer stays inside SQL. */

@@ -158,6 +158,11 @@ export function rollupManagementStaleProductCodes(
   return staleProductCodes;
 }
 
+/** The SQL rollup owns this total; every returned Product row carries it. */
+export function managementStaleRouteProductCount(rows: readonly { staleRouteProductCount: number }[]): number {
+  return rows[0]?.staleRouteProductCount ?? 0;
+}
+
 export function parseTargetDate(value: string | undefined): Date {
   const tomorrow = nextRouteDate(companyCalendarDate());
   const date = value ? parseAsOfDate(value) : tomorrow;
@@ -428,6 +433,9 @@ export class SmartLoadingService {
     const staleCodes = useManagementStaleGrain
       ? managementStaleRows.filter((row) => row.isStale).map((row) => normalizedProductCode(row.productCode)).filter(Boolean)
       : [...vehicleStockByProduct.entries()].filter(([code, stock]) => isStaleVehicleInventory(stock, lastSaleMsByProduct.get(code) ?? null, staleAsOfDate, staleDaysThreshold)).map(([code]) => code);
+    const staleCount = useManagementStaleGrain
+      ? managementStaleRouteProductCount(managementStaleRows)
+      : staleCodes.length;
     const purchaseRows = staleCodes.length ? await timed("stale-purchases", () => this.rieFacade.queryStalePurchases({ ...ctx, routeIds: [...activeVehicleRouteIds], productCodes: staleCodes, targetDate: targetDateIso })) : [];
     // The screen consumes priority evidence at Product grain.  Grouping by
     // Product × Customer made an admin-wide result exceed the bounded RIE
@@ -550,6 +558,7 @@ export class SmartLoadingService {
     return {
       state: "ready",
       products,
+      staleCount,
       staleProductPlans,
       attention: attentionList,
       calculatedAt: new Date(nowMs).toISOString(),

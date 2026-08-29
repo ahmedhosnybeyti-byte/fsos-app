@@ -215,7 +215,8 @@ export class RieScalableQueryService {
         LEFT JOIN sales_by_route_product sales ON sales.route_id = inventory.route_id AND sales.product_code = inventory.product_code
       )
       SELECT product_code AS "productCode", SUM(quantity)::double precision AS quantity,
-        MAX(last_sale_date) AS "lastSaleDate", BOOL_OR(is_stale) AS "isStale"
+        MAX(last_sale_date) AS "lastSaleDate", BOOL_OR(is_stale) AS "isStale",
+        SUM(COUNT(*) FILTER (WHERE is_stale)) OVER ()::double precision AS "staleRouteProductCount"
       FROM route_stale
       GROUP BY product_code
       ORDER BY product_code
