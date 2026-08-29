@@ -209,7 +209,7 @@ export class RieScalableQueryService {
         GROUP BY ${effectiveSaleRoute}, ${itemProduct}
       ),
       route_stale AS MATERIALIZED (
-        SELECT inventory.product_code, inventory.quantity, sales.last_sale_date,
+        SELECT inventory.route_id, inventory.product_code, inventory.quantity, sales.last_sale_date,
           (inventory.quantity > 0 AND sales.last_sale_date IS NOT NULL AND (${targetDate}::date - sales.last_sale_date::date) > ${input.staleDaysThreshold}) AS is_stale
         FROM inventory_by_route_product inventory
         LEFT JOIN sales_by_route_product sales ON sales.route_id = inventory.route_id AND sales.product_code = inventory.product_code
