@@ -16,7 +16,7 @@ import { FilesService } from "../files/files.service";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { ENTITY_DATASET_TYPE_MAP } from "./excel-entity-provider.mapping";
 import { RieScalableQueryService } from "./scalable-query.service";
-import type { RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult } from "./scalable-query.types";
+import type { RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery } from "./scalable-query.types";
 
 /**
  * The smallest sales grain used by analytics: an invoice line, or the same
@@ -182,6 +182,10 @@ export class RieFacade {
 
   queryRouteProductStaleness(query: RieRouteProductStalenessQuery): Promise<RieRouteProductStalenessRow[]> {
     return this.scalableQuery.queryRouteProductStaleness(query);
+  }
+
+  queryStalePurchases(query: RieStalePurchasesQuery): Promise<RieStalePurchaseRow[]> {
+    return this.scalableQuery.queryStalePurchases(query);
   }
 
   readCanonicalEntity(query: RieScalableEntityRead): Promise<EntityQueryResult> {

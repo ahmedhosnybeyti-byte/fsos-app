@@ -86,6 +86,25 @@ export interface RieRouteProductStalenessRow {
   isStale: boolean;
 }
 
+/** Product-grain stale-purchase evidence; Product × Customer stays inside SQL. */
+export interface RieStalePurchasesQuery extends EntityQueryContext {
+  /** Routes holding active vehicle inventory for the current session. */
+  routeIds: readonly string[];
+  productCodes: readonly string[];
+  targetDate: string;
+}
+export interface RieStalePurchaseCustomer {
+  customerCode: string;
+  customerName: string;
+  totalQuantity: number;
+  purchaseFrequency: number;
+  lastPurchaseDate: string | null;
+}
+export interface RieStalePurchaseRow {
+  productCode: string;
+  customers: RieStalePurchaseCustomer[];
+}
+
 /** Compatibility result for callers that still need a bounded row collection. */
 export interface RieScalableEntityRead extends EntityQueryContext {
   entityName: string;

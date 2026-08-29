@@ -3,7 +3,7 @@ import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import type { EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieLatestPerScope, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieValueScope } from "./scalable-query.types";
+import type { RieDateScope, RieLatestPerScope, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
@@ -219,6 +219,77 @@ export class RieScalableQueryService {
       FROM route_stale
       GROUP BY product_code
       ORDER BY product_code
+    `);
+    return rows;
+  }
+
+  /**
+   * Builds stale-customer evidence at Product grain. The screen still gets the
+   * exact customer-level ranking inputs, but the Product × Customer relation
+   * is aggregated and packed by PostgreSQL before it crosses the RIE boundary.
+   */
+  async queryStalePurchases(input: RieStalePurchasesQuery): Promise<RieStalePurchaseRow[]> {
+    if (!input.companyId?.trim()) throw new Error("RIE stale purchases requires companyId.");
+    if (!input.routeIds.length || !input.productCodes.length) return [];
+    const targetDate = normalizeDate(input.targetDate);
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const requestedRoutes = [...new Set(input.routeIds.map((routeId) => routeId.trim().toLowerCase()).filter(Boolean))];
+    const effectiveRoutes = allowedRoutes === null
+      ? requestedRoutes
+      : requestedRoutes.filter((routeId) => allowedRoutes.has(routeId));
+    if (!effectiveRoutes.length) return [];
+    const productCodes = [...new Set(input.productCodes.map((code) => code.trim().toLowerCase()).filter(Boolean))];
+    if (!productCodes.length) return [];
+    const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [
+      Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${targetDate}`,
+      Prisma.sql`${normalizedField({ field: "RouteID", source: "invoice_source" })} IN (${Prisma.join(effectiveRoutes)})`,
+    ], [], []);
+    const itemCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], []);
+    const customerCte = activeEntityRowsCte(input.companyId, "Customers", "customer", [], [], []);
+    const itemInvoiceNo = normalizedField({ field: "InvoiceNo", source: "item" });
+    const invoiceNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
+    const itemProductText = textField({ field: "ProductCode", source: "item" });
+    const itemProduct = normalizedField({ field: "ProductCode", source: "item" });
+    const customerCode = textField({ field: "CustomerCode", source: "invoice" });
+    const itemRoute = textField({ field: "RouteID", source: "item" });
+    const invoiceRoute = textField({ field: "RouteID", source: "invoice" });
+    const effectiveSaleRoute = Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${itemRoute}, '')), ''), ${invoiceRoute}, '')))`;
+    const quantity = numericField(textField({ field: "Quantity", source: "item" }));
+    const invoiceDate = dateText(textField({ field: "InvoiceDate", source: "invoice" }));
+    const rows = await this.prisma.$queryRaw<RieStalePurchaseRow[]>(Prisma.sql`
+      WITH ${invoiceCte}, ${itemCte}, ${customerCte},
+      purchase_by_product_customer AS MATERIALIZED (
+        SELECT ${itemProductText} AS product_code, ${customerCode} AS customer_code,
+          SUM(${quantity}) FILTER (WHERE ${quantity} > 0)::double precision AS total_quantity,
+          COUNT(DISTINCT NULLIF(BTRIM(COALESCE(${textField({ field: "InvoiceNo", source: "item" })}, '')), '')) FILTER (WHERE ${quantity} > 0)::double precision AS purchase_frequency,
+          MAX(${invoiceDate}) FILTER (WHERE ${quantity} > 0) AS last_purchase_date
+        FROM item_active item
+        INNER JOIN invoice_active invoice ON ${itemInvoiceNo} = ${invoiceNo}
+        WHERE ${itemProduct} IN (${Prisma.join(productCodes)})
+          AND ${effectiveSaleRoute} IN (${Prisma.join(effectiveRoutes)})
+        GROUP BY ${itemProductText}, ${customerCode}
+      ),
+      customer_names AS MATERIALIZED (
+        SELECT DISTINCT ON (BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "customer" })}, '')))
+          BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "customer" })}, '')) AS customer_code,
+          BTRIM(COALESCE(${textField({ field: "CustomerName", source: "customer" })}, ${textField({ field: "CustomerCode", source: "customer" })}, '')) AS customer_name
+        FROM customer_active customer
+        ORDER BY BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "customer" })}, '')), customer."entity_key" DESC
+      )
+      SELECT purchases.product_code AS "productCode",
+        JSONB_AGG(JSONB_BUILD_OBJECT(
+          'customerCode', purchases.customer_code,
+          'customerName', COALESCE(names.customer_name, BTRIM(COALESCE(purchases.customer_code, ''))),
+          'totalQuantity', purchases.total_quantity,
+          'purchaseFrequency', purchases.purchase_frequency,
+          'lastPurchaseDate', purchases.last_purchase_date
+        ) ORDER BY purchases.customer_code) AS customers
+      FROM purchase_by_product_customer purchases
+      LEFT JOIN customer_names names ON names.customer_code = BTRIM(COALESCE(purchases.customer_code, ''))
+      GROUP BY purchases.product_code
+      ORDER BY purchases.product_code
     `);
     return rows;
   }

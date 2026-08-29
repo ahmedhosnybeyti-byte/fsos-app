@@ -77,3 +77,30 @@ test("management RIE stale rollup returns Product grain for more than 5,000 rout
 
   assert.deepEqual(rows, [{ productCode: "sku-1", quantity: 5_001, lastSaleDate: "2026-08-01", isStale: true }]);
 });
+
+test("stale purchases keep the same evidence past 5,000 Product × Customer rows without a bounded response", async () => {
+  const expected = [{
+    productCode: "sku-1",
+    customers: Array.from({ length: 5_001 }, (_, index) => ({
+      customerCode: `customer-${index}`,
+      customerName: `Customer ${index}`,
+      totalQuantity: 1,
+      purchaseFrequency: 1,
+      lastPurchaseDate: "2026-08-01",
+    })),
+  }];
+  const query = new RieScalableQueryService(
+    { $queryRaw: async () => expected } as never,
+    { resolveAllowedRouteIds: async () => null } as never,
+  );
+
+  const rows = await query.queryStalePurchases({
+    companyId: "company-1",
+    routeIds: ["route-1"],
+    productCodes: ["sku-1"],
+    targetDate: "2026-08-10",
+  });
+
+  assert.deepEqual(rows, expected);
+  assert.equal(rows[0]?.customers.length, 5_001);
+});
