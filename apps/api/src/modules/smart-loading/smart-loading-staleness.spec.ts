@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import { isRouteInActiveVehicleScope, isSaleOnOrBeforeTargetDate, isStaleVehicleInventory, normalizedProductCode, rollupManagementStaleProductCodes } from "./smart-loading.service";
+import { RieScalableQueryService } from "../rie/scalable-query.service";
 
 const asOfDate = new Date("2026-08-10T00:00:00.000Z");
 const daysAgo = (days: number) => asOfDate.getTime() - days * 86_400_000;
@@ -60,4 +61,19 @@ test("management rollup keeps Route B stale when the same SKU sold on Route A", 
   ]);
 
   assert.deepEqual([...rollupManagementStaleProductCodes(stock, lastSales, asOfDate, 4)], ["sku-1"]);
+});
+
+test("management RIE stale rollup returns Product grain for more than 5,000 route scopes", async () => {
+  const query = new RieScalableQueryService(
+    { $queryRaw: async () => [{ productCode: "sku-1", quantity: 5_001, lastSaleDate: "2026-08-01", isStale: true }] } as never,
+    { resolveAllowedRouteIds: async () => null } as never,
+  );
+  const rows = await query.queryRouteProductStaleness({
+    companyId: "company-1",
+    targetDate: "2026-08-10",
+    staleDaysThreshold: 4,
+    routeIds: Array.from({ length: 5_001 }, (_, index) => `route-${index}`),
+  });
+
+  assert.deepEqual(rows, [{ productCode: "sku-1", quantity: 5_001, lastSaleDate: "2026-08-01", isStale: true }]);
 });

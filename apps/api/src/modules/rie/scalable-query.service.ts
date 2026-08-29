@@ -3,7 +3,7 @@ import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import type { EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieLatestPerScope, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieValueScope } from "./scalable-query.types";
+import type { RieDateScope, RieLatestPerScope, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieValueScope } from "./scalable-query.types";
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
@@ -138,6 +138,89 @@ export class RieScalableQueryService {
     `);
     const hasMore = rows.length > page.limit;
     return { records: hasMore ? rows.slice(0, page.limit) : rows, page: { ...page, hasMore } };
+  }
+
+  /**
+   * Calculates Smart Loading staleness at Route × Product entirely in
+   * PostgreSQL, then returns the existing Product-grain screen contract.
+   * This deliberately never exposes the high-cardinality intermediate set.
+   */
+  async queryRouteProductStaleness(input: RieRouteProductStalenessQuery): Promise<RieRouteProductStalenessRow[]> {
+    if (!input.companyId?.trim()) throw new Error("RIE route-product staleness requires companyId.");
+    const targetDate = normalizeDate(input.targetDate);
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const allowedRouteIds = allowedRoutes
+      ? new Set([...allowedRoutes].map((routeId) => routeId.trim().toLowerCase()).filter(Boolean))
+      : null;
+    const requestedRoutes = input.routeIds === undefined || input.routeIds === null
+      ? null
+      : new Set(input.routeIds.map((routeId) => routeId.trim().toLowerCase()).filter(Boolean));
+    const effectiveRoutes = allowedRouteIds
+      ? [...allowedRouteIds].filter((routeId) => requestedRoutes === null || requestedRoutes.has(routeId))
+      : requestedRoutes === null ? null : [...requestedRoutes];
+    const routeScope = (field: RieQueryField): Prisma.Sql => effectiveRoutes === null
+      ? Prisma.empty
+      : effectiveRoutes.length
+        ? Prisma.sql` AND ${normalizedField(field)} IN (${Prisma.join(effectiveRoutes)})`
+        : Prisma.sql` AND FALSE`;
+    const inventoryRoute = { field: "RouteID", source: "inventory_source" };
+    const inventoryDate = textField({ field: "ReportDate", source: "inventory_source" });
+    const invoiceRoute = { field: "RouteID", source: "invoice_source" };
+    const invoiceDate = textField({ field: "InvoiceDate", source: "invoice_source" });
+    const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [
+      Prisma.sql`${dateText(inventoryDate)} <= ${targetDate}${routeScope(inventoryRoute)}`,
+    ], [], []);
+    const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [
+      Prisma.sql`${dateText(invoiceDate)} <= ${targetDate}${routeScope(invoiceRoute)}`,
+    ], [], []);
+    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], []);
+    const inventoryRouteText = normalizedField({ field: "RouteID", source: "inventory" });
+    const itemRouteText = normalizedField({ field: "RouteID", source: "item" });
+    const invoiceRouteText = normalizedField({ field: "RouteID", source: "invoice" });
+    const effectiveSaleRoute = Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "RouteID", source: "item" })}, '')), ''), ${textField({ field: "RouteID", source: "invoice" })}, '')))`;
+    const inventoryProduct = normalizedField({ field: "ProductCode", source: "inventory" });
+    const itemProduct = normalizedField({ field: "ProductCode", source: "item" });
+    const inventoryQuantity = numericField(textField({ field: "Quantity", source: "inventory" }));
+    const invoiceNo = normalizedField({ field: "InvoiceNo", source: "item" });
+    const invoiceJoinNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
+    const saleDate = dateText(textField({ field: "InvoiceDate", source: "invoice" }));
+    const rows = await this.prisma.$queryRaw<RieRouteProductStalenessRow[]>(Prisma.sql`
+      WITH ${inventoryCte}, ${invoiceCte}, ${itemsCte},
+      inventory_latest AS MATERIALIZED (
+        SELECT ${inventoryRouteText} AS route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) AS report_date
+        FROM inventory_active inventory
+        GROUP BY ${inventoryRouteText}
+      ),
+      inventory_by_route_product AS MATERIALIZED (
+        SELECT ${inventoryRouteText} AS route_id, ${inventoryProduct} AS product_code, SUM(${inventoryQuantity})::double precision AS quantity
+        FROM inventory_active inventory
+        INNER JOIN inventory_latest latest ON latest.route_id = ${inventoryRouteText}
+          AND NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '') = latest.report_date
+        GROUP BY ${inventoryRouteText}, ${inventoryProduct}
+      ),
+      sales_by_route_product AS MATERIALIZED (
+        SELECT ${effectiveSaleRoute} AS route_id, ${itemProduct} AS product_code, MAX(${saleDate}) AS last_sale_date
+        FROM item_active item
+        INNER JOIN invoice_active invoice ON ${invoiceNo} = ${invoiceJoinNo}
+        INNER JOIN (SELECT DISTINCT route_id FROM inventory_by_route_product) stocked_routes ON stocked_routes.route_id = ${effectiveSaleRoute}
+        WHERE ${itemProduct} <> ''
+        GROUP BY ${effectiveSaleRoute}, ${itemProduct}
+      ),
+      route_stale AS MATERIALIZED (
+        SELECT inventory.product_code, inventory.quantity, sales.last_sale_date,
+          (inventory.quantity > 0 AND sales.last_sale_date IS NOT NULL AND (${targetDate}::date - sales.last_sale_date::date) > ${input.staleDaysThreshold}) AS is_stale
+        FROM inventory_by_route_product inventory
+        LEFT JOIN sales_by_route_product sales ON sales.route_id = inventory.route_id AND sales.product_code = inventory.product_code
+      )
+      SELECT product_code AS "productCode", SUM(quantity)::double precision AS quantity,
+        MAX(last_sale_date) AS "lastSaleDate", BOOL_OR(is_stale) AS "isStale"
+      FROM route_stale
+      GROUP BY product_code
+      ORDER BY product_code
+    `);
+    return rows;
   }
 
   async readEntity(input: RieScalableEntityRead): Promise<EntityQueryResult> {
@@ -341,6 +424,8 @@ function aggregateSql(aggregate: RieQueryAggregation): Prisma.Sql {
   return Prisma.sql`${Prisma.raw({ sum: "SUM", avg: "AVG", min: "MIN", max: "MAX" }[aggregate.op])}(${numeric})${positiveFilter} AS ${alias}`;
 }
 function numericField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`; }
+/** Matches RIE date filtering while making the route-stale subtraction safe. */
+function dateText(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN ${field} ~ '^\\d{4}-\\d{2}-\\d{2}' THEN LEFT(${field}, 10) ELSE NULL END`; }
 // Field names are validated identifiers.  Keep them as SQL literals rather
 // than bind parameters so SELECT/GROUP BY expressions remain identical.
 function textField(field: RieQueryField): Prisma.Sql { return Prisma.sql`${Prisma.raw(field.source ?? "base")}."data" ->> ${Prisma.raw(`'${field.field}'`)}`; }

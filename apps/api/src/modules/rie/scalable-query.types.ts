@@ -72,6 +72,20 @@ export interface RieScalableQueryResult {
   page: { limit: number; offset: number; hasMore: boolean };
 }
 
+/** Product-grain management stale rollup; Route × Product remains SQL-only. */
+export interface RieRouteProductStalenessQuery extends EntityQueryContext {
+  /** null/undefined means the caller's full hierarchy scope; [] means no routes. */
+  routeIds?: readonly string[] | null;
+  targetDate: string;
+  staleDaysThreshold: number;
+}
+export interface RieRouteProductStalenessRow {
+  productCode: string;
+  quantity: number;
+  lastSaleDate: string | null;
+  isStale: boolean;
+}
+
 /** Compatibility result for callers that still need a bounded row collection. */
 export interface RieScalableEntityRead extends EntityQueryContext {
   entityName: string;

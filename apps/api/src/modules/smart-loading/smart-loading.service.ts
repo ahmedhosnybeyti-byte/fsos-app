@@ -379,35 +379,34 @@ export class SmartLoadingService {
       return !!value && !normalizeVisitDay(value);
     });
 
-    // Keep the existing per-route latest-snapshot eligibility. Management
-    // needs Route × Product only for the stale decision; all visible values
-    // remain rolled up at the existing Product grain.
-    const [activeVehicleRouteRows, inventoryRows] = await Promise.all([
+    // Management keeps Route × Product inside RIE/PostgreSQL and receives
+    // only the established Product-grain result. Sales Rep remains unchanged.
+    const [activeVehicleRouteRows, inventoryRows, managementStaleRows] = await Promise.all([
       timed("active-vehicle-routes", () => bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }], groupBy: [{ field: "RouteID" }], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
-      timed("latest-inventory", () => bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: useManagementStaleGrain ? [{ field: "RouteID", as: "routeId" }, { field: "ProductCode", as: "productCode" }] : [{ field: "ProductCode", as: "productCode" }], latestPer: { partitionBy: { field: "RouteID" }, orderBy: { field: "ReportDate" } }, groupBy: useManagementStaleGrain ? [{ field: "RouteID" }, { field: "ProductCode" }] : [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
+      useManagementStaleGrain
+        ? Promise.resolve([])
+        : timed("latest-inventory", () => bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "ProductCode", as: "productCode" }], latestPer: { partitionBy: { field: "RouteID" }, orderBy: { field: "ReportDate" } }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
+      useManagementStaleGrain
+        ? timed("management-stale-rollup", () => this.rieFacade.queryRouteProductStaleness({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, staleDaysThreshold }))
+        : Promise.resolve([]),
     ]);
     const activeVehicleRouteIds = new Set<string>();
     const vehicleStockByProduct = new Map<string, number>();
-    const vehicleStockByRouteProduct = new Map<string, number>();
     for (const row of activeVehicleRouteRows) {
       const routeId = normalizedRouteId(row.routeId);
       if (!routeId) continue;
       activeVehicleRouteIds.add(routeId);
     }
-    for (const row of inventoryRows) {
+    for (const row of useManagementStaleGrain ? managementStaleRows : inventoryRows) {
       const productCode = normalizedProductCode(row.productCode);
       const quantity = toFiniteNumber(row.quantity) ?? 0;
       if (!productCode) continue;
       vehicleStockByProduct.set(productCode, (vehicleStockByProduct.get(productCode) ?? 0) + quantity);
-      if (useManagementStaleGrain) {
-        const routeId = normalizedRouteId(row.routeId);
-        if (routeId) vehicleStockByRouteProduct.set(routeProductKey(routeId, productCode), quantity);
-      }
     }
     const vehicleStockAvailable = activeVehicleRouteIds.size > 0;
     const invoiceJoin = [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }] as const;
     const salesScope = { route: { values: [...activeVehicleRouteIds], source: "invoice" }, routeFallback: { primary: { field: "RouteID" }, fallback: { field: "RouteID", source: "invoice" }, values: [...activeVehicleRouteIds] }, date: { field: "InvoiceDate", source: "invoice", to: targetDateIso } } as const;
-    const lastSaleRows = activeVehicleRouteIds.size ? await timed("sales-last-sale-aggregation", () => bounded({ ...ctx, entityName: "Invoice Items", projection: useManagementStaleGrain ? [{ field: "ProductCode", as: "productCode" }, { field: "RouteID", as: "itemRouteId" }, { field: "RouteID", source: "invoice", as: "invoiceRouteId" }] : [{ field: "ProductCode", as: "productCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: useManagementStaleGrain ? [{ field: "ProductCode" }, { field: "RouteID" }, { field: "RouteID", source: "invoice" }] : [{ field: "ProductCode" }], aggregates: [{ op: "maxText", field: "InvoiceDate", source: "invoice", as: "lastSaleDate" }], scope: salesScope, driveBaseFromScopedJoins: true })) : [];
+    const lastSaleRows = !useManagementStaleGrain && activeVehicleRouteIds.size ? await timed("sales-last-sale-aggregation", () => bounded({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "maxText", field: "InvoiceDate", source: "invoice", as: "lastSaleDate" }], scope: salesScope, driveBaseFromScopedJoins: true })) : [];
     const lastSaleMsByProduct = new Map<string, number>();
     for (const row of lastSaleRows) {
       const productCode = normalizedProductCode(row.productCode);
@@ -416,19 +415,15 @@ export class SmartLoadingService {
         lastSaleMsByProduct.set(productCode, lastSaleMs);
       }
     }
-    const lastSaleMsByRouteProduct = new Map<string, number>();
     if (useManagementStaleGrain) {
-      for (const row of lastSaleRows) {
+      for (const row of managementStaleRows) {
         const productCode = normalizedProductCode(row.productCode);
         const lastSaleMs = toEpochMs(row.lastSaleDate);
-        if (!productCode || lastSaleMs === null || !isRouteInActiveVehicleScope(row.itemRouteId, row.invoiceRouteId, activeVehicleRouteIds)) continue;
-        const routeId = normalizedRouteId(row.itemRouteId) || normalizedRouteId(row.invoiceRouteId);
-        const key = routeProductKey(routeId, productCode);
-        if (lastSaleMs > (lastSaleMsByRouteProduct.get(key) ?? Number.NEGATIVE_INFINITY)) lastSaleMsByRouteProduct.set(key, lastSaleMs);
+        if (productCode && lastSaleMs !== null) lastSaleMsByProduct.set(productCode, lastSaleMs);
       }
     }
     const staleCodes = useManagementStaleGrain
-      ? [...rollupManagementStaleProductCodes(vehicleStockByRouteProduct, lastSaleMsByRouteProduct, staleAsOfDate, staleDaysThreshold)]
+      ? managementStaleRows.filter((row) => row.isStale).map((row) => normalizedProductCode(row.productCode)).filter(Boolean)
       : [...vehicleStockByProduct.entries()].filter(([code, stock]) => isStaleVehicleInventory(stock, lastSaleMsByProduct.get(code) ?? null, staleAsOfDate, staleDaysThreshold)).map(([code]) => code);
     const purchaseRows = staleCodes.length ? await timed("stale-purchases", () => bounded({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }, { field: "CustomerCode", source: "invoice", as: "customerCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }, { field: "CustomerCode", source: "invoice" }], aggregates: [{ op: "sum", field: "Quantity", filterPositiveField: { field: "Quantity" }, as: "totalQuantity" }, { op: "countDistinct", field: "InvoiceNo", filterPositiveField: { field: "Quantity" }, as: "purchaseFrequency" }, { op: "maxText", field: "InvoiceDate", source: "invoice", filterPositiveField: { field: "Quantity" }, as: "lastPurchaseDate" }], scope: { ...salesScope, product: { values: staleCodes } }, preferHashedScopedSemiJoin: true })) : [];
     // The screen consumes priority evidence at Product grain.  Grouping by
