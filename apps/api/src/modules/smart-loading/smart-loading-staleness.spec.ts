@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { isRouteInActiveVehicleScope, isSaleOnOrBeforeTargetDate, isStaleVehicleInventory, normalizedProductCode } from "./smart-loading.service";
+import { isRouteInActiveVehicleScope, isSaleOnOrBeforeTargetDate, isStaleVehicleInventory, normalizedProductCode, rollupManagementStaleProductCodes } from "./smart-loading.service";
 
 const asOfDate = new Date("2026-08-10T00:00:00.000Z");
 const daysAgo = (days: number) => asOfDate.getTime() - days * 86_400_000;
@@ -46,4 +46,18 @@ test("marks the four RT-12 stocked SKUs stale on 2026-12-31 at a four-day thresh
   for (const lastSaleDate of ["2026-12-23", "2026-12-26", "2026-12-23", "2026-12-23"]) {
     assert.equal(isStaleVehicleInventory(1, Date.parse(`${lastSaleDate}T00:00:00.000Z`), new Date("2026-12-31T00:00:00.000Z"), 4), true);
   }
+});
+
+test("management rollup keeps Route B stale when the same SKU sold on Route A", () => {
+  const key = (routeId: string, productCode: string) => `${routeId}\u0000${productCode}`;
+  const stock = new Map([
+    [key("route-a", "sku-1"), 5],
+    [key("route-b", "sku-1"), 5],
+  ]);
+  const lastSales = new Map([
+    [key("route-a", "sku-1"), Date.parse("2026-08-09T00:00:00.000Z")],
+    [key("route-b", "sku-1"), Date.parse("2026-08-01T00:00:00.000Z")],
+  ]);
+
+  assert.deepEqual([...rollupManagementStaleProductCodes(stock, lastSales, asOfDate, 4)], ["sku-1"]);
 });
