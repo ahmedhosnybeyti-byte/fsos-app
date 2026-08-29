@@ -351,9 +351,12 @@ export class SmartLoadingService {
     const threeMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - MONTHS_LOOKBACK, now.getUTCDate()));
     const nowMs = now.getTime();
     const windowStartMs = threeMonthsAgo.getTime();
-    const bounded = async (query: Parameters<RieFacade["queryCanonicalRecords"]>[0]) => {
+    const bounded = async (queryName: string, query: Parameters<RieFacade["queryCanonicalRecords"]>[0]) => {
       const result = await this.rieFacade.queryCanonicalRecords({ ...query, pagination: { limit: 5_000 } });
-      if (result.page.hasMore) throw new BadRequestException("Smart Loading scoped result exceeds its safe response limit.");
+      if (result.page.hasMore) {
+        this.logger.warn(`[SMART_LOADING_LIMIT_DIAG] queryName=${queryName} limit=${result.page.limit} hasMore=${result.page.hasMore}`);
+        throw new BadRequestException("Smart Loading scoped result exceeds its safe response limit.");
+      }
       return result.records;
     };
 
@@ -362,8 +365,8 @@ export class SmartLoadingService {
     // bounded, screen-sized result sets.
     const targetRouteWeekday = weekdayForDate(targetDate);
     const [routeCustomerRows, visitDayRows] = await Promise.all([
-      timed("route-customers", () => bounded(withSelectedRepScope({ ...ctx, entityName: "Customers", projection: [{ field: "CustomerCode", as: "customerCode" }, { field: "CustomerName", as: "customerName" }, { field: "RouteID", as: "routeId" }, { field: "VisitSequence", as: "visitSequence" }], scope: { fields: [{ field: "VisitDay", values: VISIT_DAY_ALIASES[targetRouteWeekday] }] } }))),
-      timed("visit-day-aggregation", () => bounded(withSelectedRepScope({ ...ctx, entityName: "Customers", projection: [{ field: "VisitDay", as: "visitDay" }], groupBy: [{ field: "VisitDay" }], aggregates: [{ op: "count", as: "count" }] }))),
+      timed("route-customers", () => bounded("route-customers", withSelectedRepScope({ ...ctx, entityName: "Customers", projection: [{ field: "CustomerCode", as: "customerCode" }, { field: "CustomerName", as: "customerName" }, { field: "RouteID", as: "routeId" }, { field: "VisitSequence", as: "visitSequence" }], scope: { fields: [{ field: "VisitDay", values: VISIT_DAY_ALIASES[targetRouteWeekday] }] } }))),
+      timed("visit-day-aggregation", () => bounded("visit-day-aggregation", withSelectedRepScope({ ...ctx, entityName: "Customers", projection: [{ field: "VisitDay", as: "visitDay" }], groupBy: [{ field: "VisitDay" }], aggregates: [{ op: "count", as: "count" }] }))),
     ]);
     const nextRouteCustomers = new Map<string, string>();
     const routeCustomersByCode = new Map<string, { customerCode: string; customerName: string; routeId: string | null; visitSequence: number | null }>();
@@ -382,10 +385,10 @@ export class SmartLoadingService {
     // Management keeps Route × Product inside RIE/PostgreSQL and receives
     // only the established Product-grain result. Sales Rep remains unchanged.
     const [activeVehicleRouteRows, inventoryRows, managementStaleRows] = await Promise.all([
-      timed("active-vehicle-routes", () => bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }], groupBy: [{ field: "RouteID" }], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
+      timed("active-vehicle-routes", () => bounded("active-vehicle-routes", withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }], groupBy: [{ field: "RouteID" }], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
       useManagementStaleGrain
         ? Promise.resolve([])
-        : timed("latest-inventory", () => bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "ProductCode", as: "productCode" }], latestPer: { partitionBy: { field: "RouteID" }, orderBy: { field: "ReportDate" } }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
+        : timed("latest-inventory", () => bounded("latest-inventory", withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "ProductCode", as: "productCode" }], latestPer: { partitionBy: { field: "RouteID" }, orderBy: { field: "ReportDate" } }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
       useManagementStaleGrain
         ? timed("management-stale-rollup", () => this.rieFacade.queryRouteProductStaleness({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, staleDaysThreshold }))
         : Promise.resolve([]),
@@ -406,7 +409,7 @@ export class SmartLoadingService {
     const vehicleStockAvailable = activeVehicleRouteIds.size > 0;
     const invoiceJoin = [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }] as const;
     const salesScope = { route: { values: [...activeVehicleRouteIds], source: "invoice" }, routeFallback: { primary: { field: "RouteID" }, fallback: { field: "RouteID", source: "invoice" }, values: [...activeVehicleRouteIds] }, date: { field: "InvoiceDate", source: "invoice", to: targetDateIso } } as const;
-    const lastSaleRows = !useManagementStaleGrain && activeVehicleRouteIds.size ? await timed("sales-last-sale-aggregation", () => bounded({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "maxText", field: "InvoiceDate", source: "invoice", as: "lastSaleDate" }], scope: salesScope, driveBaseFromScopedJoins: true })) : [];
+    const lastSaleRows = !useManagementStaleGrain && activeVehicleRouteIds.size ? await timed("sales-last-sale-aggregation", () => bounded("sales-last-sale-aggregation", { ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "maxText", field: "InvoiceDate", source: "invoice", as: "lastSaleDate" }], scope: salesScope, driveBaseFromScopedJoins: true })) : [];
     const lastSaleMsByProduct = new Map<string, number>();
     for (const row of lastSaleRows) {
       const productCode = normalizedProductCode(row.productCode);
@@ -425,13 +428,13 @@ export class SmartLoadingService {
     const staleCodes = useManagementStaleGrain
       ? managementStaleRows.filter((row) => row.isStale).map((row) => normalizedProductCode(row.productCode)).filter(Boolean)
       : [...vehicleStockByProduct.entries()].filter(([code, stock]) => isStaleVehicleInventory(stock, lastSaleMsByProduct.get(code) ?? null, staleAsOfDate, staleDaysThreshold)).map(([code]) => code);
-    const purchaseRows = staleCodes.length ? await timed("stale-purchases", () => bounded({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }, { field: "CustomerCode", source: "invoice", as: "customerCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }, { field: "CustomerCode", source: "invoice" }], aggregates: [{ op: "sum", field: "Quantity", filterPositiveField: { field: "Quantity" }, as: "totalQuantity" }, { op: "countDistinct", field: "InvoiceNo", filterPositiveField: { field: "Quantity" }, as: "purchaseFrequency" }, { op: "maxText", field: "InvoiceDate", source: "invoice", filterPositiveField: { field: "Quantity" }, as: "lastPurchaseDate" }], scope: { ...salesScope, product: { values: staleCodes } }, preferHashedScopedSemiJoin: true })) : [];
+    const purchaseRows = staleCodes.length ? await timed("stale-purchases", () => bounded("stale-purchases", { ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }, { field: "CustomerCode", source: "invoice", as: "customerCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }, { field: "CustomerCode", source: "invoice" }], aggregates: [{ op: "sum", field: "Quantity", filterPositiveField: { field: "Quantity" }, as: "totalQuantity" }, { op: "countDistinct", field: "InvoiceNo", filterPositiveField: { field: "Quantity" }, as: "purchaseFrequency" }, { op: "maxText", field: "InvoiceDate", source: "invoice", filterPositiveField: { field: "Quantity" }, as: "lastPurchaseDate" }], scope: { ...salesScope, product: { values: staleCodes } }, preferHashedScopedSemiJoin: true })) : [];
     // The screen consumes priority evidence at Product grain.  Grouping by
     // Product × Customer made an admin-wide result exceed the bounded RIE
     // response contract even though the final UI only uses each product's
     // positive-customer count and quantities.  Keep those exact aggregates
     // in PostgreSQL so Node receives one small row per product.
-    const priorityRows = nextRouteCustomers.size && activeVehicleRouteIds.size ? await timed("priority-sales-aggregation", () => bounded({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "windowQuantity" }, { op: "sum", field: "Quantity", filterPositiveField: { field: "Quantity" }, as: "priorityQuantity" }, { op: "countDistinct", field: "CustomerCode", source: "invoice", filterPositiveField: { field: "Quantity" }, as: "priorityCustomerCount" }], scope: { route: { values: [...activeVehicleRouteIds], source: "invoice" }, routeFallback: { primary: { field: "RouteID" }, fallback: { field: "RouteID", source: "invoice" }, values: [...activeVehicleRouteIds] }, customer: { values: [...nextRouteCustomers.keys()], source: "invoice" }, date: { field: "InvoiceDate", source: "invoice", from: windowStartMs, to: nowMs } } })) : [];
+    const priorityRows = nextRouteCustomers.size && activeVehicleRouteIds.size ? await timed("priority-sales-aggregation", () => bounded("priority-sales-aggregation", { ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "windowQuantity" }, { op: "sum", field: "Quantity", filterPositiveField: { field: "Quantity" }, as: "priorityQuantity" }, { op: "countDistinct", field: "CustomerCode", source: "invoice", filterPositiveField: { field: "Quantity" }, as: "priorityCustomerCount" }], scope: { route: { values: [...activeVehicleRouteIds], source: "invoice" }, routeFallback: { primary: { field: "RouteID" }, fallback: { field: "RouteID", source: "invoice" }, values: [...activeVehicleRouteIds] }, customer: { values: [...nextRouteCustomers.keys()], source: "invoice" }, date: { field: "InvoiceDate", source: "invoice", from: windowStartMs, to: nowMs } } })) : [];
     const windowQtyByProduct = new Map<string, number>();
     const prioritySalesByProduct = new Map<string, { customerCount: number; totalQuantity: number }>();
     for (const row of priorityRows) {
@@ -441,10 +444,10 @@ export class SmartLoadingService {
       if (priorityQuantity > 0 && priorityCustomerCount > 0) prioritySalesByProduct.set(productCode, { customerCount: priorityCustomerCount, totalQuantity: priorityQuantity });
     }
     const sessionProductCodes = [...new Set([...vehicleStockByProduct.keys(), ...windowQtyByProduct.keys()])];
-    const productRows = sessionProductCodes.length ? await timed("products-lookup", () => bounded({ companyId: ctx.companyId, entityName: "Products", projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }, { field: "Category", as: "category" }], scope: { product: { values: sessionProductCodes } } })) : [];
+    const productRows = sessionProductCodes.length ? await timed("products-lookup", () => bounded("products-lookup", { companyId: ctx.companyId, entityName: "Products", projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }, { field: "Category", as: "category" }], scope: { product: { values: sessionProductCodes } } })) : [];
     const productMeta = new Map(productRows.map((row) => { const code = normalizedProductCode(row.productCode); return [code, { code: String(row.productCode ?? code).trim() || code, name: String(row.productName ?? row.productCode ?? code).trim() || code, category: row.category ? String(row.category).trim() || null : null }] as const; }).filter(([code]) => !!code));
     const staleCustomerCodes = [...new Set(purchaseRows.map((row) => String(row.customerCode ?? "").trim()).filter(Boolean))];
-    const staleCustomerRows = staleCustomerCodes.length ? await timed("stale-customers-lookup", () => bounded({ ...ctx, entityName: "Customers", projection: [{ field: "CustomerCode", as: "customerCode" }, { field: "CustomerName", as: "customerName" }], scope: { customer: { values: staleCustomerCodes } } })) : [];
+    const staleCustomerRows = staleCustomerCodes.length ? await timed("stale-customers-lookup", () => bounded("stale-customers-lookup", { ...ctx, entityName: "Customers", projection: [{ field: "CustomerCode", as: "customerCode" }, { field: "CustomerName", as: "customerName" }], scope: { customer: { values: staleCustomerCodes } } })) : [];
     const customerNamesByCode = new Map(staleCustomerRows.map((row) => [String(row.customerCode ?? "").trim(), String(row.customerName ?? row.customerCode ?? "").trim()]));
     const customerPurchasesByProduct = new Map<string, Map<string, { totalQuantity: number; purchaseFrequency: number; lastPurchaseMs: number }>>();
     for (const row of purchaseRows) { const productCode = normalizedProductCode(row.productCode), customerCode = String(row.customerCode ?? "").trim(), lastPurchaseMs = toEpochMs(row.lastPurchaseDate); if (!productCode || !customerCode || lastPurchaseMs === null || (toFiniteNumber(row.totalQuantity) ?? 0) <= 0) continue; const byCustomer = customerPurchasesByProduct.get(productCode) ?? new Map(); byCustomer.set(customerCode, { totalQuantity: toFiniteNumber(row.totalQuantity) ?? 0, purchaseFrequency: toFiniteNumber(row.purchaseFrequency) ?? 0, lastPurchaseMs }); customerPurchasesByProduct.set(productCode, byCustomer); }
@@ -452,7 +455,7 @@ export class SmartLoadingService {
     const lostOpportunityRouteIds = [...new Set(lostOpportunityResult.opportunities.map((opportunity) => normalizedRouteId(routeCustomersByCode.get(opportunity.customerCode)?.routeId)).filter(Boolean))];
     const lostOpportunityProductCodes = [...new Set(lostOpportunityResult.opportunities.map((opportunity) => normalizedProductCode(opportunity.productCode)).filter(Boolean))];
     const lostOpportunityStockRows = lostOpportunityRouteIds.length && lostOpportunityProductCodes.length
-      ? await timed("lost-opportunity-route-product-stock", () => bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }, { field: "ProductCode", as: "productCode" }], latestPer: { partitionBy: { field: "RouteID" }, orderBy: { field: "ReportDate" } }, groupBy: [{ field: "RouteID" }, { field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { route: { values: lostOpportunityRouteIds }, product: { values: lostOpportunityProductCodes } } })))
+      ? await timed("lost-opportunity-route-product-stock", () => bounded("lost-opportunity-route-product-stock", withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }, { field: "ProductCode", as: "productCode" }], latestPer: { partitionBy: { field: "RouteID" }, orderBy: { field: "ReportDate" } }, groupBy: [{ field: "RouteID" }, { field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { route: { values: lostOpportunityRouteIds }, product: { values: lostOpportunityProductCodes } } })))
       : [];
     const lostOpportunityStockByRouteProduct = new Map(lostOpportunityStockRows.map((row) => [`${normalizedRouteId(row.routeId)}\u0000${normalizedProductCode(row.productCode)}`, toFiniteNumber(row.quantity) ?? 0] as const));
     const lostOpportunities = lostOpportunityResult.opportunities.filter((opportunity) => {
