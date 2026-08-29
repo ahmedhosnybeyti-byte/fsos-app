@@ -3,7 +3,7 @@ import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import type { EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieLatestPerScope, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
+import type { RieDateScope, RieLatestPerScope, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
@@ -227,6 +227,86 @@ export class RieScalableQueryService {
       ORDER BY product_code
     `);
     return rows;
+  }
+
+  /**
+   * Calculates management stock alignment as Route × Product first, so a
+   * surplus on one route cannot cover a shortage on another route.
+   */
+  async queryManagementStockAlignment(input: RieManagementStockAlignmentQuery): Promise<RieManagementStockAlignmentRow> {
+    if (!input.companyId?.trim()) throw new Error("RIE management stock alignment requires companyId.");
+    const targetDate = normalizeDate(input.targetDate);
+    const salesFrom = normalizeDate(input.salesFrom);
+    const salesTo = normalizeDate(input.salesTo);
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const allowedRouteIds = allowedRoutes
+      ? new Set([...allowedRoutes].map((routeId) => routeId.trim().toLowerCase()).filter(Boolean))
+      : null;
+    const requestedRoutes = input.routeIds === undefined || input.routeIds === null
+      ? null
+      : new Set(input.routeIds.map((routeId) => routeId.trim().toLowerCase()).filter(Boolean));
+    const effectiveRoutes = allowedRouteIds
+      ? [...allowedRouteIds].filter((routeId) => requestedRoutes === null || requestedRoutes.has(routeId))
+      : requestedRoutes === null ? null : [...requestedRoutes];
+    const routeScope = (field: RieQueryField): Prisma.Sql => effectiveRoutes === null
+      ? Prisma.empty
+      : effectiveRoutes.length
+        ? Prisma.sql` AND ${normalizedField(field)} IN (${Prisma.join(effectiveRoutes)})`
+        : Prisma.sql` AND FALSE`;
+    const customerCodes = [...new Set(input.customerCodes.map((code) => code.trim().toLowerCase()).filter(Boolean))];
+    const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [
+      Prisma.sql`${dateText(textField({ field: "ReportDate", source: "inventory_source" }))} <= ${targetDate}${routeScope({ field: "RouteID", source: "inventory_source" })}`,
+    ], [], []);
+    const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [
+      Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} >= ${salesFrom} AND ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${salesTo}${routeScope({ field: "RouteID", source: "invoice_source" })}${customerCodes.length ? Prisma.sql` AND ${normalizedField({ field: "CustomerCode", source: "invoice_source" })} IN (${Prisma.join(customerCodes)})` : Prisma.sql` AND FALSE`}`,
+    ], [], []);
+    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], []);
+    const inventoryRoute = normalizedField({ field: "RouteID", source: "inventory" });
+    const inventoryProduct = normalizedField({ field: "ProductCode", source: "inventory" });
+    const inventoryQuantity = numericField(textField({ field: "Quantity", source: "inventory" }));
+    const itemProduct = normalizedField({ field: "ProductCode", source: "item" });
+    const itemQuantity = numericField(textField({ field: "Quantity", source: "item" }));
+    const invoiceNo = normalizedField({ field: "InvoiceNo", source: "item" });
+    const invoiceJoinNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
+    const effectiveSaleRoute = Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "RouteID", source: "item" })}, '')), ''), ${textField({ field: "RouteID", source: "invoice" })}, '')))`;
+    const rows = await this.prisma.$queryRaw<RieManagementStockAlignmentRow[]>(Prisma.sql`
+      WITH ${inventoryCte}, ${invoiceCte}, ${itemsCte},
+      inventory_latest AS MATERIALIZED (
+        SELECT ${inventoryRoute} AS route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) AS report_date
+        FROM inventory_active inventory
+        GROUP BY ${inventoryRoute}
+      ),
+      stock_by_route_product AS MATERIALIZED (
+        SELECT ${inventoryRoute} AS route_id, ${inventoryProduct} AS product_code, SUM(${inventoryQuantity})::double precision AS current_stock
+        FROM inventory_active inventory
+        INNER JOIN inventory_latest latest ON latest.route_id = ${inventoryRoute}
+          AND NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '') = latest.report_date
+        GROUP BY ${inventoryRoute}, ${inventoryProduct}
+      ),
+      expected_by_route_product AS MATERIALIZED (
+        SELECT ${effectiveSaleRoute} AS route_id, ${itemProduct} AS product_code, SUM(${itemQuantity})::double precision / 12.0 AS expected_sales
+        FROM item_active item
+        INNER JOIN invoice_active invoice ON ${invoiceNo} = ${invoiceJoinNo}
+        WHERE ${itemProduct} <> '' AND ${effectiveSaleRoute} <> ''
+        GROUP BY ${effectiveSaleRoute}, ${itemProduct}
+      ),
+      route_product_alignment AS MATERIALIZED (
+        SELECT COALESCE(stock.route_id, expected.route_id) AS route_id,
+          COALESCE(stock.product_code, expected.product_code) AS product_code,
+          COALESCE(stock.current_stock, 0)::double precision AS current_stock,
+          COALESCE(expected.expected_sales, 0)::double precision AS expected_sales
+        FROM stock_by_route_product stock
+        FULL OUTER JOIN expected_by_route_product expected ON expected.route_id = stock.route_id AND expected.product_code = stock.product_code
+      )
+      SELECT CASE
+        WHEN COALESCE(SUM(expected_sales), 0) = 0 THEN 100::double precision
+        ELSE LEAST(100::double precision, (SUM(LEAST(current_stock, expected_sales)) / SUM(expected_sales)) * 100)
+      END AS "alignmentPercent"
+      FROM route_product_alignment
+    `);
+    return rows[0] ?? { alignmentPercent: 100 };
   }
 
   /**

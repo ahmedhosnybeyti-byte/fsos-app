@@ -749,6 +749,12 @@ export function SmartLoadingScreen({
           <CardDescription>{t("smartLoading.recommendationsDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
+          {managementView && session.managementStockAlignmentPercent !== null && (
+            <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2 text-sm">
+              <span className="font-medium">{label("smartLoading.managementStockAlignment", "Management Stock Alignment")}</span>
+              <span className="text-lg font-semibold">{formatQuantity(Math.round(session.managementStockAlignmentPercent), locale)}%</span>
+            </div>
+          )}
           {managementView && recommendationRows.length > 0 && (
             <div className="grid grid-cols-[minmax(9rem,1fr)_repeat(3,minmax(4.5rem,auto))_5rem_auto] items-end gap-3 px-3 pb-1 text-[10px] font-medium text-muted-foreground">
               <span>{label("smartLoading.product", "الصنف")}</span>

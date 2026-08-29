@@ -87,6 +87,28 @@ test("management RIE stale rollup returns Product grain for more than 5,000 rout
   assert.equal(rows[0]?.staleRouteProducts.length, 5_001);
 });
 
+test("management stock alignment keeps Route A's shortage despite Route B's surplus", async () => {
+  const expected = { alignmentPercent: 85 };
+  let statement: { strings: readonly string[] } | undefined;
+  const query = new RieScalableQueryService(
+    { $queryRaw: async (sql: { strings: readonly string[] }) => { statement = sql; return [expected]; } } as never,
+    { resolveAllowedRouteIds: async () => null } as never,
+  );
+  const result = await query.queryManagementStockAlignment({
+    companyId: "company-1",
+    routeIds: ["route-a", "route-b"],
+    targetDate: "2026-08-10",
+    salesFrom: "2026-05-10",
+    salesTo: "2026-08-10",
+    customerCodes: ["customer-a", "customer-b"],
+  });
+
+  // Route A: MIN(7, 10) = 7; Route B: MIN(15, 10) = 10; 17 / 20 = 85%.
+  assert.equal(result.alignmentPercent, 85);
+  assert.match(statement!.strings.join("?"), /FULL OUTER JOIN expected_by_route_product/);
+  assert.match(statement!.strings.join("?"), /SUM\(LEAST\(current_stock, expected_sales\)\)/);
+});
+
 test("management counts the same stale product once for each stale route", () => {
   assert.equal(managementStaleRouteProductCount([{ staleRouteProductCount: 3 }]), 3);
 });

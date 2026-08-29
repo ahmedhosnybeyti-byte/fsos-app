@@ -95,6 +95,19 @@ export interface RieStaleRouteProduct {
   lastSaleDate: string | null;
 }
 
+/** Management stock alignment is evaluated at Route × Product in PostgreSQL. */
+export interface RieManagementStockAlignmentQuery extends EntityQueryContext {
+  /** null/undefined means the caller's full hierarchy scope; [] means no routes. */
+  routeIds?: readonly string[] | null;
+  targetDate: string;
+  salesFrom: string;
+  salesTo: string;
+  customerCodes: readonly string[];
+}
+export interface RieManagementStockAlignmentRow {
+  alignmentPercent: number;
+}
+
 /** Product-grain stale-purchase evidence; Product × Customer stays inside SQL. */
 export interface RieStalePurchasesQuery extends EntityQueryContext {
   /** Routes holding active vehicle inventory for the current session. */

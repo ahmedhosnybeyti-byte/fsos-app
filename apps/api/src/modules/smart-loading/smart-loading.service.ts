@@ -393,7 +393,7 @@ export class SmartLoadingService {
 
     // Management keeps Route × Product inside RIE/PostgreSQL and receives
     // only the established Product-grain result. Sales Rep remains unchanged.
-    const [activeVehicleRouteRows, inventoryRows, managementStaleRows] = await Promise.all([
+    const [activeVehicleRouteRows, inventoryRows, managementStaleRows, managementStockAlignment] = await Promise.all([
       timed("active-vehicle-routes", () => bounded("active-vehicle-routes", withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }], groupBy: [{ field: "RouteID" }], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
       useManagementStaleGrain
         ? Promise.resolve([])
@@ -401,6 +401,9 @@ export class SmartLoadingService {
       useManagementStaleGrain
         ? timed("management-stale-rollup", () => this.rieFacade.queryRouteProductStaleness({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, staleDaysThreshold }))
         : Promise.resolve([]),
+      useManagementStaleGrain
+        ? timed("management-stock-alignment", () => this.rieFacade.queryManagementStockAlignment({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, salesFrom: isoDay(windowStartMs), salesTo: isoDay(nowMs), customerCodes: [...nextRouteCustomers.keys()] }))
+        : Promise.resolve(null),
     ]);
     const activeVehicleRouteIds = new Set<string>();
     const vehicleStockByProduct = new Map<string, number>();
@@ -577,6 +580,7 @@ export class SmartLoadingService {
     return {
       state: "ready",
       products,
+      managementStockAlignmentPercent: managementStockAlignment?.alignmentPercent ?? null,
       staleCount,
       managementStaleRouteProducts,
       staleProductPlans,

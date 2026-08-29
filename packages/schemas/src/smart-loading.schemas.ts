@@ -138,6 +138,7 @@ export type SmartLoadingLostOpportunityReason = z.infer<typeof smartLoadingLostO
 export const smartLoadingReadySessionSchema = z.object({
   state: z.literal("ready"),
   products: z.array(smartLoadingProductSchema),
+  managementStockAlignmentPercent: z.number().min(0).max(100).nullable(),
   staleCount: z.number().int().nonnegative(),
   managementStaleRouteProducts: z.array(smartLoadingManagementStaleRouteProductSchema).nullable(),
   staleProductPlans: z.array(smartLoadingStaleProductPlanSchema),
