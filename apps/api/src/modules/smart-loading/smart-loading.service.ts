@@ -317,6 +317,13 @@ export class SmartLoadingService {
     };
     const targetDate = parseTargetDate(requestedTargetDate);
     const targetDateIso = isoDay(targetDate.getTime());
+    // Temporary, tightly scoped Railway diagnostic for the reported RT-10
+    // snapshot-date issue. This is deliberately separate from the existing
+    // session queries so it cannot affect their inputs, results, or logic.
+    const vanInventoryDiagnosticRouteId = "RT-10";
+    const vanInventoryDiagnosticRouteIsResolved = !scopedRouteIds
+      || scopedRouteIds.some((routeId) => normalizedRouteId(routeId) === normalizedRouteId(vanInventoryDiagnosticRouteId));
+    const shouldRunVanInventoryDiagnostic = targetDateIso === "2026-08-30" && vanInventoryDiagnosticRouteIsResolved;
     const staleAsOfDate = targetDate;
     const now = new Date();
     const threeMonthsAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - MONTHS_LOOKBACK, now.getUTCDate()));
@@ -359,6 +366,37 @@ export class SmartLoadingService {
       timed("active-vehicle-routes", () => bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }], groupBy: [{ field: "RouteID" }], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
       timed("latest-inventory", () => bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "ProductCode", as: "productCode" }], latestPer: { partitionBy: { field: "RouteID" }, orderBy: { field: "ReportDate" } }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
     ]);
+    if (shouldRunVanInventoryDiagnostic) {
+      const diagnosticReportDates = ["2026-08-29", "2026-08-30", "2026-08-31", "08/29/2026", "08/30/2026", "08/31/2026", "29-08-2026", "30-08-2026", "31-08-2026"];
+      const [rawReportDateRows, latestPerRows] = await Promise.all([
+        bounded({
+          ...ctx,
+          entityName: "Van Inventory",
+          projection: [{ field: "RouteID", as: "routeId" }, { field: "ReportDate", as: "reportDate" }],
+          groupBy: [{ field: "RouteID" }, { field: "ReportDate" }],
+          aggregates: [{ op: "count", as: "rowCount" }],
+          scope: { route: { values: [vanInventoryDiagnosticRouteId] }, fields: [{ field: "ReportDate", values: diagnosticReportDates }] },
+        }),
+        bounded({
+          ...ctx,
+          entityName: "Van Inventory",
+          projection: [{ field: "RouteID", as: "routeId" }, { field: "ReportDate", as: "reportDate" }],
+          latestPer: { partitionBy: { field: "RouteID" }, orderBy: { field: "ReportDate" } },
+          groupBy: [{ field: "RouteID" }, { field: "ReportDate" }],
+          aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }],
+          scope: { route: { values: [vanInventoryDiagnosticRouteId] }, date: { field: "ReportDate", to: targetDateIso } },
+        }),
+      ]);
+      this.logger.log(JSON.stringify({
+        tag: "[VAN_INV_DIAG]",
+        targetDateIso,
+        resolvedRouteIds: scopedRouteIds ?? "hierarchy-scoped",
+        diagnosticRouteId: vanInventoryDiagnosticRouteId,
+        rawReportDates: rawReportDateRows,
+        maxTextSelectedReportDate: activeVehicleRouteRows.filter((row) => normalizedRouteId(row.routeId) === normalizedRouteId(vanInventoryDiagnosticRouteId)),
+        latestPerSelectedReportDateAndQuantity: latestPerRows,
+      }));
+    }
     const activeVehicleRouteIds = new Set<string>();
     const vehicleStockByProduct = new Map<string, number>();
     for (const row of activeVehicleRouteRows) {
