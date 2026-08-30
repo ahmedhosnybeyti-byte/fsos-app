@@ -773,14 +773,12 @@ export function SmartLoadingScreen({
                       return next;
                     })
                   }
-                  className="flex w-full items-center justify-between px-3 py-2 text-sm font-semibold"
+                  className="relative flex w-full items-center justify-between px-3 py-2 pl-24 text-sm font-semibold"
                 >
-                  <span className="flex items-center gap-2">
-                    <span>
-                      {category} <span className="text-muted-foreground">({items.length})</span>
-                    </span>
-                    {managementView && <ManagementCategoryAlignment category={category} alignments={session.managementCategoryStockAlignments} />}
+                  <span>
+                    {category} <span className="text-muted-foreground">({items.length})</span>
                   </span>
+                  {managementView && <ManagementCategoryAlignment category={category} alignments={session.managementCategoryStockAlignments} />}
                   <ChevronDown className={cn("h-4 w-4 transition-transform", !open && "-rotate-90")} />
                 </button>
                 {open &&
@@ -1189,14 +1187,15 @@ function ManagementCategoryAlignment({ category, alignments }: { category: strin
   if (!alignment) return null;
   const percent = Math.round(alignment.alignmentPercent);
   const status = percent < 50
-    ? { label: t("smartLoading.alignmentLow"), tone: "bg-rose-500/25 text-rose-800 ring-rose-500/50 dark:bg-rose-400/30 dark:text-rose-100 dark:ring-rose-300/70" }
+    ? "bg-rose-500/30 text-rose-900 ring-rose-500/70 dark:bg-rose-400/35 dark:text-rose-50 dark:ring-rose-300"
     : percent < 75
-      ? { label: t("smartLoading.alignmentMedium"), tone: "bg-amber-500/25 text-amber-800 ring-amber-500/50 dark:bg-amber-400/30 dark:text-amber-100 dark:ring-amber-300/70" }
-      : { label: t("smartLoading.alignmentGood"), tone: "bg-emerald-500/25 text-emerald-800 ring-emerald-500/50 dark:bg-emerald-400/30 dark:text-emerald-100 dark:ring-emerald-300/70" };
+      ? "bg-amber-500/30 text-amber-900 ring-amber-500/70 dark:bg-amber-400/35 dark:text-amber-50 dark:ring-amber-300"
+      : "bg-emerald-500/30 text-emerald-900 ring-emerald-500/70 dark:bg-emerald-400/35 dark:text-emerald-50 dark:ring-emerald-300";
 
   return (
-    <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1", status.tone)}>
-      {formatQuantity(percent, locale)}% | {status.label}
+    <span className={cn("absolute left-10 inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-bold ring-1", status)} aria-label={`${formatQuantity(percent, locale)}%`}>
+      <span aria-hidden="true" className="h-2 w-2 rounded-full bg-current shadow-[0_0_8px_currentColor]" />
+      {formatQuantity(percent, locale)}%
     </span>
   );
 }

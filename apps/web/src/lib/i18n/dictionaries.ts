@@ -1329,9 +1329,6 @@ export type TranslationKey =
   | "smartLoading.priorityProductsPanelTitle"
   | "smartLoading.close"
   | "smartLoading.uncategorized"
-  | "smartLoading.alignmentLow"
-  | "smartLoading.alignmentMedium"
-  | "smartLoading.alignmentGood"
   | "smartLoading.restore"
   | "smartLoading.manualOverrideNote"
   | "smartLoading.quantityUnit"
@@ -2772,9 +2769,6 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.priorityProductsPanelTitle": "أصناف أولوية",
     "smartLoading.close": "إغلاق",
     "smartLoading.uncategorized": "غير مصنف",
-    "smartLoading.alignmentLow": "منخفض",
-    "smartLoading.alignmentMedium": "متوسط",
-    "smartLoading.alignmentGood": "جيد",
     "smartLoading.restore": "استعادة",
     "smartLoading.manualOverrideNote": "تم تعديل الكمية يدويًا (الأصل: {value})",
     "smartLoading.quantityUnit": "صنف",
@@ -4229,9 +4223,6 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.priorityProductsPanelTitle": "Priority Products",
     "smartLoading.close": "Close",
     "smartLoading.uncategorized": "Uncategorized",
-    "smartLoading.alignmentLow": "Low",
-    "smartLoading.alignmentMedium": "Medium",
-    "smartLoading.alignmentGood": "Good",
     "smartLoading.restore": "Restore",
     "smartLoading.manualOverrideNote": "Quantity manually adjusted (original: {value})",
     "smartLoading.quantityUnit": "product",
