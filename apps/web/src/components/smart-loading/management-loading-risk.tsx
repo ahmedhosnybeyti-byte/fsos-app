@@ -23,7 +23,14 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson, onViewAll }:
     queryFn: () => smartLoadingApi.getManagementLoadingRisk(targetDate),
     staleTime: 60_000,
   });
-  const people = query.data?.people ?? [];
+  // The API already returns a small management-only result. Ordering it by
+  // affected products, then routes, surfaces the largest operational risk
+  // without changing the risk calculation or requesting extra data.
+  const people = [...(query.data?.people ?? [])].sort((left, right) =>
+    right.affectedProductCount - left.affectedProductCount
+    || right.affectedRouteCount - left.affectedRouteCount
+    || left.employeeName.localeCompare(right.employeeName),
+  );
   const affectedPersonCount = query.data?.affectedPersonCount ?? 0;
 
   if (query.isLoading) {
@@ -107,17 +114,6 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson, onViewAll }:
             </button>
           ))}
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="mt-2 w-full justify-start"
-          onClick={(event) => {
-            event.stopPropagation();
-            onViewAll();
-          }}
-        >
-          {t("smartLoading.viewAll")}
-        </Button>
       </div>
     </section>
   );

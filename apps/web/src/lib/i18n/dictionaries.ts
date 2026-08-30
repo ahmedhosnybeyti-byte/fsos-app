@@ -1285,7 +1285,6 @@ export type TranslationKey =
   | "smartLoading.loadingRisk"
   | "smartLoading.peopleNeedAttention"
   | "smartLoading.viewRisks"
-  | "smartLoading.viewAll"
   | "smartLoading.loadingRiskLoadError"
   | "smartLoading.noLoadingRisk"
   | "smartLoading.allRisks"
@@ -2733,7 +2732,6 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.loadingRisk": "مخاطر التحميل",
     "smartLoading.peopleNeedAttention": "أشخاص يحتاجون للمتابعة",
     "smartLoading.viewRisks": "عرض المخاطر",
-    "smartLoading.viewAll": "عرض الكل",
     "smartLoading.loadingRiskLoadError": "تعذر تحميل مخاطر التحميل.",
     "smartLoading.noLoadingRisk": "لا يوجد أشخاص لديهم خطر تحميل اليوم.",
     "smartLoading.allRisks": "كل المخاطر",
@@ -4195,7 +4193,6 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.loadingRisk": "Loading Risk",
     "smartLoading.peopleNeedAttention": "People Need Attention",
     "smartLoading.viewRisks": "View Risks",
-    "smartLoading.viewAll": "View All",
     "smartLoading.loadingRiskLoadError": "Loading risks could not be loaded.",
     "smartLoading.noLoadingRisk": "No one has a loading risk today.",
     "smartLoading.allRisks": "All Risks",
