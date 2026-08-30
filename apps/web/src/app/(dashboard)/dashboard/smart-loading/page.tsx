@@ -34,6 +34,8 @@ export default function SmartLoadingPage() {
       staleDaysThreshold={staleDaysThreshold}
       onStaleDaysThresholdChange={setStaleDaysThreshold}
       salesRepId={salesRepId}
+      managerId={managerId}
+      supervisorId={supervisorId}
       onSalesRepChange={setSalesRepId}
       onManagementScopeChange={({ managerId: nextManagerId, supervisorId: nextSupervisorId, salesRepId: nextSalesRepId }) => {
         setManagerId(nextManagerId);
