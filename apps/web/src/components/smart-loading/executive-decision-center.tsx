@@ -4,6 +4,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import type { SmartLoadingSession } from "@/lib/types";
 
 type DecisionKind = "stale" | "alignment" | "priority" | "opportunities" | "loading";
+export type ExecutiveDecisionScope = {
+  managerName?: string;
+  supervisorName?: string;
+  salesRepName?: string;
+};
 
 type ExecutiveDecision = {
   kind: DecisionKind;
@@ -12,15 +17,19 @@ type ExecutiveDecision = {
   action: string;
 };
 
-function scopeLabel(roleCode: string | undefined, locale: "ar" | "en"): string {
+function scopeLabel(session: Extract<SmartLoadingSession, { state: "ready" }>, scope: ExecutiveDecisionScope, locale: "ar" | "en"): string {
+  const staleRoutes = new Set(session.managementStaleRouteProducts?.map((item) => item.routeId).filter(Boolean) ?? []);
+  const routes = staleRoutes.size || new Set(session.routeCustomers.map((customer) => customer.routeId).filter((routeId): routeId is string => Boolean(routeId))).size;
   if (locale === "ar") {
-    if (roleCode === "SUPERVISOR") return "فريق مندوبيك";
-    if (roleCode === "MANAGER") return "المشرفين والمسارات ضمن نطاقك";
-    return "الإدارة والمناطق ضمن نطاقك";
+    if (scope.salesRepName) return `المندوب ${scope.salesRepName}`;
+    if (scope.supervisorName) return `المشرف ${scope.supervisorName}`;
+    if (scope.managerName) return `المدير ${scope.managerName}`;
+    return routes > 0 ? `${routes} مسار${routes === 1 ? "" : "ات"} متأثر` : "المسارات المتأثرة";
   }
-  if (roleCode === "SUPERVISOR") return "your sales-rep team";
-  if (roleCode === "MANAGER") return "the supervisors and routes in your scope";
-  return "the management scope and regions";
+  if (scope.salesRepName) return `sales rep ${scope.salesRepName}`;
+  if (scope.supervisorName) return `supervisor ${scope.supervisorName}`;
+  if (scope.managerName) return `manager ${scope.managerName}`;
+  return routes === 1 ? "the affected route" : `${routes || "the affected"} routes`;
 }
 
 /**
@@ -28,53 +37,53 @@ function scopeLabel(roleCode: string | undefined, locale: "ar" | "en"): string {
  * preserves the existing engines' own signals and presents their established
  * intervention order: protect stock, protect sales, then recover demand.
  */
-export function getExecutiveDecisions({ session, roleCode, locale }: { session: Extract<SmartLoadingSession, { state: "ready" }>; roleCode: string | undefined; locale: "ar" | "en" }): ExecutiveDecision[] {
-  const scope = scopeLabel(roleCode, locale);
+export function getExecutiveDecisions({ session, scope: scopeSelection, locale }: { session: Extract<SmartLoadingSession, { state: "ready" }>; scope: ExecutiveDecisionScope; locale: "ar" | "en" }): ExecutiveDecision[] {
+  const scope = scopeLabel(session, scopeSelection, locale);
   const ar = locale === "ar";
   const decisions: ExecutiveDecision[] = [];
 
   if (session.staleCount > 0) decisions.push({
     kind: "stale",
-    happened: ar ? `يوجد خطر ركود في ${scope}.` : `There is a slow-moving stock risk in ${scope}.`,
-    whyItMatters: ar ? "أي تحميل إضافي قد يزيد المخزون غير المتحرك." : "Additional loading can increase non-moving inventory.",
-    action: ar ? "راجع الأصناف الراكدة" : "Review slow movers",
+    happened: ar ? `يوجد خطر ركود لدى ${scope}.` : `There is a slow-moving stock risk for ${scope}.`,
+    whyItMatters: ar ? "قد يرتفع المخزون غير المتحرك وتتراجع كفاءة المسارات." : "Non-moving inventory can increase and reduce route efficiency.",
+    action: ar ? "تابع المسارات المتأثرة" : "Follow affected routes",
   });
 
   // Uses the same <75% threshold already used by the management alignment
   // presentation; it does not introduce a new classification or calculation.
   if (session.managementStockAlignmentPercent !== null && session.managementStockAlignmentPercent < 75) decisions.push({
     kind: "alignment",
-    happened: ar ? `توافق المخزون يحتاج مراجعة في ${scope}.` : `Stock alignment needs review in ${scope}.`,
-    whyItMatters: ar ? "قد لا يغطي المخزون المبيعات المتوقعة للأصناف المطلوبة." : "Available stock may not cover expected demand for required products.",
-    action: ar ? "راجع توصيات التحميل" : "Review loading recommendations",
+    happened: ar ? `توجد فجوة في جودة التحميل لدى ${scope}.` : `There is a loading-quality gap for ${scope}.`,
+    whyItMatters: ar ? "قد لا يغطي المخزون المبيعات المتوقعة في المسارات." : "Stock may not cover expected sales across the routes.",
+    action: ar ? "تحقق من سبب الفجوة" : "Check the gap cause",
   });
 
   if (session.priorityProducts.length > 0) decisions.push({
     kind: "priority",
-    happened: ar ? `توجد أصناف ذات أولوية في ${scope}.` : `There are priority products in ${scope}.`,
-    whyItMatters: ar ? "هذه الأصناف مرتبطة بطلب مؤكد أو طلب يحتاج حماية." : "These products are tied to confirmed or protected demand.",
-    action: ar ? "راجع الأصناف ذات الأولوية" : "Review priority products",
+    happened: ar ? `توجد أصناف حساسة للمبيعات لدى ${scope}.` : `There are sales-sensitive products for ${scope}.`,
+    whyItMatters: ar ? "أي قصور في تغطيتها قد يرفع خطر فقد المبيعات." : "Insufficient coverage can increase the risk of lost sales.",
+    action: ar ? "راقب خطر فقد المبيعات" : "Monitor lost-sales risk",
   });
 
   if (session.lostOpportunities.length > 0) decisions.push({
     kind: "opportunities",
-    happened: ar ? `توجد فرص طلب غير مخدومة في ${scope}.` : `There are unserved demand opportunities in ${scope}.`,
-    whyItMatters: ar ? "قد تضيع مبيعات يمكن إدراجها في خطة التحميل القادمة." : "Sales that could be included in the next loading plan may be missed.",
-    action: ar ? "راجع الفرص الضائعة" : "Review lost opportunities",
+    happened: ar ? `توجد فرص طلب غير مخدومة لدى ${scope}.` : `There are unserved demand opportunities for ${scope}.`,
+    whyItMatters: ar ? "قد تضيع مبيعات ممكنة في المسارات المتأثرة." : "Potential sales may be missed on the affected routes.",
+    action: ar ? "تابع فرص الطلب غير المخدومة" : "Follow unserved demand",
   });
 
   if (decisions.length === 0) decisions.push({
     kind: "loading",
-    happened: ar ? "لا توجد إشارة تدخل أعلى أولوية في النطاق الحالي." : "There is no higher-priority intervention signal in the current scope.",
-    whyItMatters: ar ? "تبقى مراجعة خطة التحميل النهائية ضرورية قبل التنفيذ." : "The final loading plan still needs review before execution.",
-    action: ar ? "راجع خطة التحميل" : "Review loading plan",
+    happened: ar ? `لا توجد إشارة تدخل أعلى أولوية لدى ${scope}.` : `There is no higher-priority intervention signal for ${scope}.`,
+    whyItMatters: ar ? "تبقى جودة التحميل بحاجة إلى مراجعة إدارية." : "Loading quality still requires management review.",
+    action: ar ? "راجع جودة التحميل" : "Review loading quality",
   });
 
   return decisions.slice(0, 3);
 }
 
-export function ExecutiveDecisionCenter({ session, roleCode, locale, onDecision }: { session: Extract<SmartLoadingSession, { state: "ready" }>; roleCode: string | undefined; locale: "ar" | "en"; onDecision: (kind: DecisionKind) => void }) {
-  const decisions = getExecutiveDecisions({ session, roleCode, locale });
+export function ExecutiveDecisionCenter({ session, scope, locale, onDecision }: { session: Extract<SmartLoadingSession, { state: "ready" }>; scope: ExecutiveDecisionScope; locale: "ar" | "en"; onDecision: (kind: DecisionKind) => void }) {
+  const decisions = getExecutiveDecisions({ session, scope, locale });
   const ar = locale === "ar";
   const Arrow = ar ? ChevronLeft : ArrowLeft;
   return (

@@ -29,7 +29,7 @@ import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingRecalculateInput, ty
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
 import { categoryAddedProductCount, formatLostOpportunityQuantity, formatLostOpportunityQuantityInput, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
 import { calculateSuggestedLoading } from "./suggested-loading";
-import { ExecutiveDecisionCenter } from "./executive-decision-center";
+import { ExecutiveDecisionCenter, type ExecutiveDecisionScope } from "./executive-decision-center";
 
 type Inputs = { confirmedOrders: number; safetyStock: number; vehicleStock?: number; manual?: number };
 type LostOpportunityAddition = {
@@ -42,6 +42,7 @@ type LostOpportunityAddition = {
 };
 type Row = { product: SmartLoadingProduct; original: number; baseSuggested: number; suggested: number; input: Inputs; manuallyAdded: boolean; lostOpportunity?: LostOpportunityAddition; stockAvailable: boolean; effectiveVehicleStock: number | null; preliminary: boolean };
 type ManagementRow = SmartLoadingManagementVehicleProduct;
+type ManagementScopeSelection = { managerId?: string; supervisorId?: string; salesRepId?: string; managerName?: string; supervisorName?: string; salesRepName?: string };
 
 function parsePositiveNumber(value: string): number {
   return Math.max(0, Number(value) || 0);
@@ -85,11 +86,12 @@ export function SmartLoadingScreen({
   onStaleDaysThresholdChange: (value: number) => void;
   salesRepId?: string;
   onSalesRepChange: (value: string | undefined) => void;
-  onManagementScopeChange: (scope: { managerId?: string; supervisorId?: string; salesRepId?: string }) => void;
+  onManagementScopeChange: (scope: ManagementScopeSelection) => void;
 }) {
   const { locale, t } = useTranslation();
   const { user } = useAuth();
   const managementView = isManagementRole(user?.role.code);
+  const [managementScope, setManagementScope] = useState<ExecutiveDecisionScope>({});
   const label = (key: string, fallback: string) => {
     const translated = t(key as never);
     return translated === key ? fallback : translated;
@@ -678,7 +680,7 @@ export function SmartLoadingScreen({
 
       {managementView && <ExecutiveDecisionCenter
         session={session}
-        roleCode={user?.role.code}
+        scope={managementScope}
         locale={locale}
         onDecision={(kind) => {
           if (kind === "stale") { setPanel("stale"); return; }
@@ -717,7 +719,10 @@ export function SmartLoadingScreen({
         onRemoveConfirmedOrder={(productCode) => { setConfirmedOrdersByProduct((current) => { const next = { ...current }; delete next[productCode]; return next; }); setHasUnappliedChanges(true); }}
         roleCode={user?.role.code}
         onSalesRepChange={onSalesRepChange}
-        onManagementScopeChange={onManagementScopeChange}
+        onManagementScopeChange={(scope) => {
+          setManagementScope({ managerName: scope.managerName, supervisorName: scope.supervisorName, salesRepName: scope.salesRepName });
+          onManagementScopeChange(scope);
+        }}
       />
       {recalculationError && <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{recalculationError}</div>}
       {refreshError && (
@@ -1533,7 +1538,7 @@ type SmartLoadingPhaseTwoProps = {
   onRemoveConfirmedOrder: (value: string) => void;
   roleCode?: string;
   onSalesRepChange: (value: string | undefined) => void;
-  onManagementScopeChange: (scope: { managerId?: string; supervisorId?: string; salesRepId?: string }) => void;
+  onManagementScopeChange: (scope: ManagementScopeSelection) => void;
 };
 
 function SmartLoadingPhaseTwo(props: SmartLoadingPhaseTwoProps) {
@@ -1634,15 +1639,16 @@ function isManagementRole(roleCode: string | undefined) {
   return roleCode === "COMPANY_ADMIN" || roleCode === "MANAGER" || roleCode === "SUPERVISOR";
 }
 
-function ManagementHierarchyFilters({ locale, managementStockAlignmentPercent, managementStaleCount, onManagementStaleClick, onManagementScopeChange }: { locale: "ar" | "en"; managementStockAlignmentPercent: number | null; managementStaleCount: number; onManagementStaleClick: () => void; onManagementScopeChange: (scope: { managerId?: string; supervisorId?: string; salesRepId?: string }) => void }) {
+function ManagementHierarchyFilters({ locale, managementStockAlignmentPercent, managementStaleCount, onManagementStaleClick, onManagementScopeChange }: { locale: "ar" | "en"; managementStockAlignmentPercent: number | null; managementStaleCount: number; onManagementStaleClick: () => void; onManagementScopeChange: (scope: ManagementScopeSelection) => void }) {
   const [managerId, setManagerId] = useState("");
   const [supervisorId, setSupervisorId] = useState("");
   const [salesRepId, setSalesRepId] = useState("");
   const { t } = useTranslation();
   const hierarchy = useQuery({ queryKey: ["smart-loading", "management-hierarchy", managerId, supervisorId], queryFn: () => smartLoadingApi.getHierarchyOptions(managerId || undefined, supervisorId || undefined), placeholderData: (previous) => previous });
   const tr = locale === "ar";
+  const optionLabel = (options: { value: string; label: string }[] | undefined, value: string) => options?.find((option) => option.value === value)?.label;
   const Select = ({ label, value, options, placeholder, onChange }: { label: string; value: string; options: { value: string; label: string }[]; placeholder: string; onChange: (value: string) => void }) => <label className="grid gap-1 text-xs text-muted-foreground"><span>{label}</span><select className="h-8 rounded-md border bg-background px-2 text-sm text-foreground" value={value} onChange={(event) => onChange(event.target.value)}><option value="">{placeholder}</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
-  return <Card dir={tr ? "rtl" : "ltr"} className="relative z-10 order-2 flex h-full min-h-0 flex-col lg:col-start-1 lg:row-start-1 lg:row-span-2"><CardHeader className="shrink-0 px-4 pb-2 pt-4"><CardTitle className="text-base">{tr ? "الطلبات المؤكدة المجمعة" : "Aggregated confirmed orders"}</CardTitle><CardDescription>{tr ? "حدد التسلسل الإداري للوصول إلى المندوب." : "Select the management hierarchy to reach a sales rep."}</CardDescription></CardHeader><CardContent className="space-y-4 p-4 pt-1"><div className="grid gap-2 sm:grid-cols-3"><Select label={tr ? "المدير" : "Manager"} value={managerId} options={hierarchy.data?.managers ?? []} placeholder={tr ? "كل المدراء" : "All managers"} onChange={(value) => { setManagerId(value); setSupervisorId(""); setSalesRepId(""); onManagementScopeChange({ managerId: value || undefined }); }} /><Select label={tr ? "المشرف" : "Supervisor"} value={supervisorId} options={hierarchy.data?.supervisors ?? []} placeholder={tr ? "كل المشرفين" : "All supervisors"} onChange={(value) => { setSupervisorId(value); setSalesRepId(""); onManagementScopeChange({ managerId: managerId || undefined, supervisorId: value || undefined }); }} /><Select label={tr ? "مندوب المبيعات" : "Sales Rep"} value={salesRepId} options={hierarchy.data?.salesReps ?? []} placeholder={tr ? "اختر مندوبًا" : "Select a sales rep"} onChange={(value) => { setSalesRepId(value); onManagementScopeChange({ managerId: managerId || undefined, supervisorId: supervisorId || undefined, salesRepId: value || undefined }); }} /></div>{managementStockAlignmentPercent !== null && <div dir="ltr" className="grid grid-cols-3 gap-2"><ManagementStockAlignmentMetric label={tr ? "توافق مخزون الإدارة" : "Management Stock Alignment"} value={managementStockAlignmentPercent} locale={locale} /><button type="button" onClick={onManagementStaleClick} className="h-24 rounded-lg border border-border/70 bg-background/60 px-3 py-2 text-left shadow-none transition-colors hover:bg-secondary/60"><p className="text-[10px] text-muted-foreground">{t("smartLoading.managementStaleProducts")}</p><p className="mt-1 text-3xl font-semibold text-foreground">{formatQuantity(managementStaleCount, locale)}</p></button><Card aria-label="Reserved management KPI" className="h-24 border-dashed border-border/60 bg-background/30 shadow-none" /></div>}</CardContent></Card>;
+  return <Card dir={tr ? "rtl" : "ltr"} className="relative z-10 order-2 flex h-full min-h-0 flex-col lg:col-start-1 lg:row-start-1 lg:row-span-2"><CardHeader className="shrink-0 px-4 pb-2 pt-4"><CardTitle className="text-base">{tr ? "الطلبات المؤكدة المجمعة" : "Aggregated confirmed orders"}</CardTitle><CardDescription>{tr ? "حدد التسلسل الإداري للوصول إلى المندوب." : "Select the management hierarchy to reach a sales rep."}</CardDescription></CardHeader><CardContent className="space-y-4 p-4 pt-1"><div className="grid gap-2 sm:grid-cols-3"><Select label={tr ? "المدير" : "Manager"} value={managerId} options={hierarchy.data?.managers ?? []} placeholder={tr ? "كل المدراء" : "All managers"} onChange={(value) => { setManagerId(value); setSupervisorId(""); setSalesRepId(""); onManagementScopeChange({ managerId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, value) }); }} /><Select label={tr ? "المشرف" : "Supervisor"} value={supervisorId} options={hierarchy.data?.supervisors ?? []} placeholder={tr ? "كل المشرفين" : "All supervisors"} onChange={(value) => { setSupervisorId(value); setSalesRepId(""); onManagementScopeChange({ managerId: managerId || undefined, supervisorId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, managerId), supervisorName: optionLabel(hierarchy.data?.supervisors, value) }); }} /><Select label={tr ? "مندوب المبيعات" : "Sales Rep"} value={salesRepId} options={hierarchy.data?.salesReps ?? []} placeholder={tr ? "اختر مندوبًا" : "Select a sales rep"} onChange={(value) => { setSalesRepId(value); onManagementScopeChange({ managerId: managerId || undefined, supervisorId: supervisorId || undefined, salesRepId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, managerId), supervisorName: optionLabel(hierarchy.data?.supervisors, supervisorId), salesRepName: optionLabel(hierarchy.data?.salesReps, value) }); }} /></div>{managementStockAlignmentPercent !== null && <div dir="ltr" className="grid grid-cols-3 gap-2"><ManagementStockAlignmentMetric label={tr ? "توافق مخزون الإدارة" : "Management Stock Alignment"} value={managementStockAlignmentPercent} locale={locale} /><button type="button" onClick={onManagementStaleClick} className="h-24 rounded-lg border border-border/70 bg-background/60 px-3 py-2 text-left shadow-none transition-colors hover:bg-secondary/60"><p className="text-[10px] text-muted-foreground">{t("smartLoading.managementStaleProducts")}</p><p className="mt-1 text-3xl font-semibold text-foreground">{formatQuantity(managementStaleCount, locale)}</p></button><Card aria-label="Reserved management KPI" className="h-24 border-dashed border-border/60 bg-background/30 shadow-none" /></div>}</CardContent></Card>;
 }
 
 function SessionMetric({ label, value }: { label: string; value: string }) { return <div><p className="truncate text-[11px] text-muted-foreground">{label}</p><p className="font-semibold">{value}</p></div>; }
