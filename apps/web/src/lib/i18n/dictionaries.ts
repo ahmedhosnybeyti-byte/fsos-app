@@ -1289,8 +1289,6 @@ export type TranslationKey =
   | "smartLoading.loadingRiskLoadError"
   | "smartLoading.noLoadingRisk"
   | "smartLoading.allRisks"
-  | "smartLoading.recommendationsFor"
-  | "smartLoading.clearFilter"
   | "smartLoading.suggestedLoading"
   | "smartLoading.showReason"
   | "smartLoading.vehicleStock"
@@ -2739,8 +2737,6 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.loadingRiskLoadError": "تعذر تحميل مخاطر التحميل.",
     "smartLoading.noLoadingRisk": "لا يوجد أشخاص لديهم خطر تحميل اليوم.",
     "smartLoading.allRisks": "كل المخاطر",
-    "smartLoading.recommendationsFor": "توصيات",
-    "smartLoading.clearFilter": "إزالة الفلتر",
     "smartLoading.suggestedLoading": "الكمية المقترحة",
     "smartLoading.showReason": "عرض سبب الكمية",
     "smartLoading.vehicleStock": "مخزون السيارة",
@@ -4203,8 +4199,6 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.loadingRiskLoadError": "Loading risks could not be loaded.",
     "smartLoading.noLoadingRisk": "No one has a loading risk today.",
     "smartLoading.allRisks": "All Risks",
-    "smartLoading.recommendationsFor": "Recommendations for",
-    "smartLoading.clearFilter": "Clear Filter",
     "smartLoading.suggestedLoading": "Suggested Loading",
     "smartLoading.showReason": "Show quantity reason",
     "smartLoading.vehicleStock": "Vehicle Stock",
