@@ -100,6 +100,7 @@ export function SmartLoadingScreen({
   const { locale, t } = useTranslation();
   const { user } = useAuth();
   const managementView = isManagementRole(user?.role.code);
+  const hasManagementHierarchyFilter = Boolean(managerId || supervisorId || salesRepId);
   const managementHierarchy = useQuery({
     queryKey: ["smart-loading", "management-hierarchy", managerId, supervisorId],
     queryFn: () => smartLoadingApi.getHierarchyOptions(managerId, supervisorId),
@@ -692,7 +693,7 @@ export function SmartLoadingScreen({
         </div>
       </header>
 
-      {managementView && (
+      {managementView && !hasManagementHierarchyFilter && (
         <ManagementLoadingRisk
           targetDate={targetDate}
           onSelectPerson={(person) => {
