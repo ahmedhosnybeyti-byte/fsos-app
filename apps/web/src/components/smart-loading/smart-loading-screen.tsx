@@ -25,7 +25,13 @@ import { useTranslation } from "@/components/translation-provider";
 import { useAuth } from "@/hooks/use-auth";
 import type { SmartLoadingLostOpportunity, SmartLoadingManagementCategoryStockAlignment, SmartLoadingManagementStaleRouteProduct, SmartLoadingManagementVehicleProduct, SmartLoadingPriorityProduct, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
 import { smartLoadingApi } from "@/lib/api/smart-loading";
-import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult, type SmartLoadingRouteCustomer } from "@field-sales-os/schemas";
+import {
+  DEFAULT_SMART_LOADING_STALE_DAYS,
+  type SmartLoadingManagementLoadingRiskPerson,
+  type SmartLoadingRecalculateInput,
+  type SmartLoadingRecalculateResult,
+  type SmartLoadingRouteCustomer,
+} from "@field-sales-os/schemas";
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
 import { categoryAddedProductCount, formatLostOpportunityQuantity, formatLostOpportunityQuantityInput, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
 import { calculateSuggestedLoading } from "./suggested-loading";
@@ -103,6 +109,7 @@ export function SmartLoadingScreen({
   const [openRows, setOpenRows] = useState<Set<string>>(new Set());
   const [openRecommendationGroups, setOpenRecommendationGroups] = useState<Set<string>>(new Set());
   const [recommendationSearch, setRecommendationSearch] = useState("");
+  const [selectedRiskPerson, setSelectedRiskPerson] = useState<SmartLoadingManagementLoadingRiskPerson | null>(null);
   const [panel, setPanel] = useState<"priority" | "stale" | null>(null);
   const [openPriorityGroups, setOpenPriorityGroups] = useState<Set<string>>(new Set());
   const [checkedItems, setCheckedItems] = useState<Set<string>>(new Set());
@@ -677,7 +684,30 @@ export function SmartLoadingScreen({
         </div>
       </header>
 
-      {managementView && <ManagementLoadingRisk targetDate={targetDate} locale={locale} />}
+      {managementView && (
+        <ManagementLoadingRisk
+          targetDate={targetDate}
+          onSelectPerson={(person) => {
+            const scope = user?.role.code === "COMPANY_ADMIN"
+              ? { managerId: person.employeeId, managerName: person.employeeName }
+              : user?.role.code === "MANAGER"
+                ? { supervisorId: person.employeeId, supervisorName: person.employeeName }
+                : { salesRepId: person.employeeId, salesRepName: person.employeeName };
+            setSelectedRiskPerson(person);
+            onManagementScopeChange(scope);
+            requestAnimationFrame(() => {
+              document.getElementById("smart-loading-recommendations")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            });
+          }}
+          onViewAll={() => {
+            setSelectedRiskPerson(null);
+            onManagementScopeChange({});
+            requestAnimationFrame(() => {
+              document.getElementById("smart-loading-recommendations")?.scrollIntoView({ behavior: "smooth", block: "start" });
+            });
+          }}
+        />
+      )}
 
       <SmartLoadingPhaseTwo
         session={session}
@@ -709,6 +739,7 @@ export function SmartLoadingScreen({
         roleCode={user?.role.code}
         onSalesRepChange={onSalesRepChange}
         onManagementScopeChange={(scope) => {
+          setSelectedRiskPerson(null);
           onManagementScopeChange(scope);
         }}
       />
@@ -760,7 +791,28 @@ export function SmartLoadingScreen({
       <Card id="smart-loading-recommendations" className="glass-card">
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <CardTitle>{t("smartLoading.recommendationsTitle")}</CardTitle>
+            <div>
+              <CardTitle>
+                {managementView
+                  ? selectedRiskPerson
+                    ? `${t("smartLoading.recommendationsFor")} ${selectedRiskPerson.employeeName}`
+                    : t("smartLoading.allRisks")
+                  : t("smartLoading.recommendationsTitle")}
+              </CardTitle>
+              {managementView && selectedRiskPerson && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="mt-1 h-auto px-0 text-muted-foreground"
+                  onClick={() => {
+                    setSelectedRiskPerson(null);
+                    onManagementScopeChange({});
+                  }}
+                >
+                  {t("smartLoading.clearFilter")}
+                </Button>
+              )}
+            </div>
             <Input
               className="h-9 w-full sm:w-64"
               placeholder={t("smartLoading.searchProducts")}

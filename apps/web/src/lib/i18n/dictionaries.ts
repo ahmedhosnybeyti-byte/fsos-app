@@ -1282,6 +1282,15 @@ export type TranslationKey =
   | "smartLoading.attentionDescription"
   | "smartLoading.recommendationsTitle"
   | "smartLoading.recommendationsDescription"
+  | "smartLoading.loadingRisk"
+  | "smartLoading.peopleNeedAttention"
+  | "smartLoading.viewRisks"
+  | "smartLoading.viewAll"
+  | "smartLoading.loadingRiskLoadError"
+  | "smartLoading.noLoadingRisk"
+  | "smartLoading.allRisks"
+  | "smartLoading.recommendationsFor"
+  | "smartLoading.clearFilter"
   | "smartLoading.suggestedLoading"
   | "smartLoading.showReason"
   | "smartLoading.vehicleStock"
@@ -2723,6 +2732,15 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.attentionDescription": "حقائق تشغيلية تستحق المراجعة.",
     "smartLoading.recommendationsTitle": "توصيات التحميل",
     "smartLoading.recommendationsDescription": "تظهر فقط الكميات الإضافية المقترحة.",
+    "smartLoading.loadingRisk": "مخاطر التحميل",
+    "smartLoading.peopleNeedAttention": "أشخاص يحتاجون للمتابعة",
+    "smartLoading.viewRisks": "عرض المخاطر",
+    "smartLoading.viewAll": "عرض الكل",
+    "smartLoading.loadingRiskLoadError": "تعذر تحميل مخاطر التحميل.",
+    "smartLoading.noLoadingRisk": "لا يوجد أشخاص لديهم خطر تحميل اليوم.",
+    "smartLoading.allRisks": "كل المخاطر",
+    "smartLoading.recommendationsFor": "توصيات",
+    "smartLoading.clearFilter": "إزالة الفلتر",
     "smartLoading.suggestedLoading": "الكمية المقترحة",
     "smartLoading.showReason": "عرض سبب الكمية",
     "smartLoading.vehicleStock": "مخزون السيارة",
@@ -4178,6 +4196,15 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.attentionDescription": "Operational facts worth reviewing.",
     "smartLoading.recommendationsTitle": "Loading Recommendations",
     "smartLoading.recommendationsDescription": "Only additional suggested quantities are shown.",
+    "smartLoading.loadingRisk": "Loading Risk",
+    "smartLoading.peopleNeedAttention": "People Need Attention",
+    "smartLoading.viewRisks": "View Risks",
+    "smartLoading.viewAll": "View All",
+    "smartLoading.loadingRiskLoadError": "Loading risks could not be loaded.",
+    "smartLoading.noLoadingRisk": "No one has a loading risk today.",
+    "smartLoading.allRisks": "All Risks",
+    "smartLoading.recommendationsFor": "Recommendations for",
+    "smartLoading.clearFilter": "Clear Filter",
     "smartLoading.suggestedLoading": "Suggested Loading",
     "smartLoading.showReason": "Show quantity reason",
     "smartLoading.vehicleStock": "Vehicle Stock",
