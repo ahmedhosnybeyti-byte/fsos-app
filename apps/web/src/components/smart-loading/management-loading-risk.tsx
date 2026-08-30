@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CircleCheck } from "lucide-react";
 import type { SmartLoadingManagementLoadingRiskPerson } from "@field-sales-os/schemas";
@@ -18,6 +19,7 @@ type ManagementLoadingRiskProps = {
 
 export function ManagementLoadingRisk({ targetDate, onSelectPerson, onViewAll }: ManagementLoadingRiskProps) {
   const { locale, t } = useTranslation();
+  const [isPopoverOpen, setPopoverOpen] = useState(false);
   const query = useQuery({
     queryKey: ["smart-loading", "management-risks", "loading", targetDate],
     queryFn: () => smartLoadingApi.getManagementLoadingRisk(targetDate),
@@ -64,7 +66,12 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson, onViewAll }:
       className="group relative w-full max-w-sm cursor-pointer"
       role="button"
       tabIndex={0}
-      onClick={onViewAll}
+      onMouseEnter={() => setPopoverOpen(true)}
+      onMouseLeave={() => setPopoverOpen(false)}
+      onClick={() => {
+        setPopoverOpen(false);
+        onViewAll();
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
@@ -89,6 +96,7 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson, onViewAll }:
             className="w-fit"
             onClick={(event) => {
               event.stopPropagation();
+              setPopoverOpen(false);
               onViewAll();
             }}
           >
@@ -97,24 +105,27 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson, onViewAll }:
         </CardContent>
       </Card>
 
-      <div className="invisible absolute start-0 top-full z-30 mt-2 w-72 translate-y-1 rounded-lg border bg-popover p-3 opacity-0 shadow-lg transition-all group-hover:visible group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:visible group-focus-within:translate-y-0 group-focus-within:opacity-100">
-        <p className="mb-2 text-sm font-semibold">{t("smartLoading.loadingRisk")}</p>
-        <div className="space-y-1">
-          {people.slice(0, 4).map((person) => (
-            <button
-              key={person.employeeId}
-              type="button"
-              className="block w-full truncate rounded px-2 py-1.5 text-start text-sm hover:bg-muted focus-visible:bg-muted"
-              onClick={(event) => {
-                event.stopPropagation();
-                onSelectPerson(person);
-              }}
-            >
-              {person.employeeName}
-            </button>
-          ))}
+      {isPopoverOpen && (
+        <div className="absolute start-0 top-full z-30 mt-2 w-72 rounded-lg border bg-popover p-3 shadow-lg">
+          <p className="mb-2 text-sm font-semibold">{t("smartLoading.loadingRisk")}</p>
+          <div className="space-y-1">
+            {people.slice(0, 4).map((person) => (
+              <button
+                key={person.employeeId}
+                type="button"
+                className="block w-full truncate rounded px-2 py-1.5 text-start text-sm hover:bg-muted focus-visible:bg-muted"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setPopoverOpen(false);
+                  onSelectPerson(person);
+                }}
+              >
+                {person.employeeName}
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
     </section>
   );
 }
