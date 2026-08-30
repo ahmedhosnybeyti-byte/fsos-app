@@ -57,7 +57,7 @@ export function ManagementStaleInventory({ cases, onSelectPerson }: ManagementSt
         />
       </div>
 
-      <Card className="glass-card invisible absolute start-0 top-full z-30 mt-2 w-72 opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+      <Card className="glass-card invisible absolute start-0 top-[calc(100%-0.25rem)] z-30 w-72 opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
         <CardContent className="p-3">
           <p className="mb-2 text-sm font-semibold">{t("smartLoading.staleInventory")}</p>
           <div className="space-y-1">

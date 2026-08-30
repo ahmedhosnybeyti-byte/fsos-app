@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -98,7 +98,12 @@ export function StaleInventoryTable({ plans, targetDate, onSelectProduct, showBu
               })}
             >
               <CardTitle>{group.category}</CardTitle>
-              <span className="text-sm text-muted-foreground">{formatQuantity(group.plans.length, locale)}</span>
+              <span className="flex items-center gap-2 text-sm text-muted-foreground">
+                {formatQuantity(group.plans.length, locale)}
+                <ChevronDown
+                  className={`h-4 w-4 transition-transform ${collapsedCategories.has(group.category) ? "-rotate-90" : ""}`}
+                />
+              </span>
             </button>
           </CardHeader>
           {!collapsedCategories.has(group.category) && (

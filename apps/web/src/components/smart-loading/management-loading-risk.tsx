@@ -77,7 +77,7 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson }: Management
       </div>
 
       {isPopoverOpen && (
-        <Card className="glass-card absolute start-0 top-full z-30 mt-2 w-72">
+        <Card className="glass-card absolute start-0 top-[calc(100%-0.25rem)] z-30 w-72">
           <CardContent className="p-3">
             <p className="mb-2 text-sm font-semibold">{t("smartLoading.loadingRisk")}</p>
             <div className="space-y-1">
