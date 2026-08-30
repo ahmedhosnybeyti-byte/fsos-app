@@ -78,26 +78,29 @@ export function ExecutiveDecisionCenter({ session, roleCode, locale, onDecision 
   const ar = locale === "ar";
   const Arrow = ar ? ChevronLeft : ArrowLeft;
   return (
-    <section aria-labelledby="executive-decision-center-title" className="glass-card rounded-xl border p-4">
-      <div className="mb-3">
-        <h2 id="executive-decision-center-title" className="text-lg font-semibold">{ar ? "مركز القرار التنفيذي" : "Executive Decision Center"}</h2>
-        <p className="text-sm text-muted-foreground">{ar ? "ما أول ثلاثة قرارات يجب أن تتخذها اليوم؟" : "What are the first three decisions to make today?"}</p>
-      </div>
-      <div className="grid gap-3 lg:grid-cols-3">
-        {decisions.map((decision, index) => (
-          <Card key={decision.kind} className="min-w-0 shadow-none">
-            <CardHeader className="pb-2">
-              <CardDescription>{ar ? `قرار ${index + 1}` : `Decision ${index + 1}`}</CardDescription>
-              <CardTitle className="text-base leading-6">{decision.happened}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-sm text-muted-foreground">{decision.whyItMatters}</p>
-              <Button variant="outline" className="w-full justify-between" onClick={() => onDecision(decision.kind)}>
-                {decision.action}<Arrow className="h-4 w-4" />
-              </Button>
-            </CardContent>
-          </Card>
-        ))}
+    <section aria-labelledby="executive-decision-center-title" className="glass-hero rise-in p-5 max-md:p-3">
+      <div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" />
+      <div className="relative">
+        <div className="mb-4 max-md:mb-3">
+          <h2 id="executive-decision-center-title" className="text-lg font-semibold tracking-tight max-md:text-base">{ar ? "مركز القرار التنفيذي" : "Executive Decision Center"}</h2>
+          <p className="mt-1 text-sm text-muted-foreground max-md:text-xs">{ar ? "ما أول ثلاثة قرارات يجب أن تتخذها اليوم؟" : "What are the first three decisions to make today?"}</p>
+        </div>
+        <div className="grid gap-3 max-md:gap-2.5 lg:grid-cols-3">
+          {decisions.map((decision, index) => (
+            <Card key={decision.kind} className="glass-card card-lift min-w-0 overflow-hidden">
+              <CardHeader className="relative space-y-1 p-4 pb-2 max-md:p-3 max-md:pb-2">
+                <CardDescription className="text-xs font-medium text-ai">{ar ? `قرار ${index + 1}` : `Decision ${index + 1}`}</CardDescription>
+                <CardTitle className="text-base leading-6 tracking-tight max-md:text-sm max-md:leading-5">{decision.happened}</CardTitle>
+              </CardHeader>
+              <CardContent className="relative space-y-3 p-4 pt-0 max-md:space-y-2.5 max-md:p-3 max-md:pt-0">
+                <p className="text-sm leading-relaxed text-muted-foreground max-md:text-xs">{decision.whyItMatters}</p>
+                <Button variant="outline" className="h-10 w-full justify-between bg-card/80 backdrop-blur-sm transition-colors hover:bg-ai/10" onClick={() => onDecision(decision.kind)}>
+                  {decision.action}<Arrow className="h-4 w-4" />
+                </Button>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
     </section>
   );
