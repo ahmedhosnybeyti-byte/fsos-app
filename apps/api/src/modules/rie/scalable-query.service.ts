@@ -333,7 +333,7 @@ export class RieScalableQueryService {
     const invRoute = normalizedField({ field: "RouteID", source: "inventory" }), invProduct = normalizedField({ field: "ProductCode", source: "inventory" }), invQuantity = numericField(textField({ field: "Quantity", source: "inventory" }));
     const itemProduct = normalizedField({ field: "ProductCode", source: "item" }), itemQuantity = numericField(textField({ field: "Quantity", source: "item" })), itemInvoice = normalizedField({ field: "InvoiceNo", source: "item" }), invoiceNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
     const saleRoute = Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "RouteID", source: "item" })}, '')), ''), ${textField({ field: "RouteID", source: "invoice" })}, '')))`;
-    const routeId = normalizedField({ field: "RouteID", source: "route" }), routeRep = normalizedField({ field: "SalesRepID", source: "route" }), repId = normalizedField({ field: "EmployeeID", source: "rep" }), supervisorId = normalizedField({ field: "EmployeeID", source: "supervisor" }), managerId = normalizedField({ field: "EmployeeID", source: "manager" });
+    const routeId = normalizedField({ field: "RouteID", source: "route" }), routeRep = normalizedField({ field: "SalesRepID", source: "route" }), routeSupervisor = normalizedField({ field: "SupervisorID", source: "route" }), routeManager = normalizedField({ field: "ManagerID", source: "route" }), repId = normalizedField({ field: "EmployeeID", source: "rep" }), supervisorId = normalizedField({ field: "EmployeeID", source: "supervisor" }), managerId = normalizedField({ field: "EmployeeID", source: "manager" });
     const person = input.personLevel === "manager" ? { id: managerId, name: textField({ field: "EmployeeName", source: "manager" }) } : input.personLevel === "supervisor" ? { id: supervisorId, name: textField({ field: "EmployeeName", source: "supervisor" }) } : { id: repId, name: textField({ field: "EmployeeName", source: "rep" }) };
     const productCode = normalizedField({ field: "ProductCode", source: "product" }), productName = textField({ field: "ProductName", source: "product" });
     const rows = await this.prisma.$queryRaw<RieManagementLoadingRiskRow[]>(Prisma.sql`
@@ -341,12 +341,35 @@ export class RieScalableQueryService {
       latest_inventory AS MATERIALIZED (SELECT ${invRoute} route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) report_date FROM inventory_active inventory GROUP BY ${invRoute}),
       stock AS MATERIALIZED (SELECT ${invRoute} route_id, ${invProduct} product_code, SUM(${invQuantity})::double precision current_stock FROM inventory_active inventory INNER JOIN latest_inventory latest ON latest.route_id=${invRoute} AND NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')=latest.report_date WHERE ${invProduct}<>'' GROUP BY ${invRoute}, ${invProduct}),
       demand AS MATERIALIZED (SELECT ${saleRoute} route_id, ${itemProduct} product_code, (SUM(${itemQuantity})/12.0)::double precision expected_demand FROM item_active item INNER JOIN invoice_active invoice ON ${itemInvoice}=${invoiceNo} WHERE ${itemProduct}<>'' AND ${saleRoute}<>'' GROUP BY ${saleRoute}, ${itemProduct}),
-      people AS MATERIALIZED (SELECT ${routeId} route_id, ${person.id} employee_id, COALESCE(NULLIF(BTRIM(COALESCE(${person.name}, '')), ''), ${person.id}) employee_name FROM route_active route INNER JOIN rep_active rep ON ${routeRep}=${repId} INNER JOIN supervisor_active supervisor ON ${normalizedField({ field: "DirectManagerID", source: "rep" })}=${supervisorId} INNER JOIN manager_active manager ON ${normalizedField({ field: "DirectManagerID", source: "supervisor" })}=${managerId} WHERE ${person.id}<>''),
+      people AS MATERIALIZED (
+        SELECT DISTINCT ${routeId} route_id, ${person.id} employee_id,
+          COALESCE(NULLIF(BTRIM(COALESCE(${person.name}, '')), ''), ${person.id}) employee_name
+        FROM route_active route
+        INNER JOIN rep_active rep ON ${routeRep}=${repId}
+        LEFT JOIN supervisor_active supervisor ON COALESCE(NULLIF(${routeSupervisor}, ''), ${normalizedField({ field: "DirectManagerID", source: "rep" })})=${supervisorId}
+        LEFT JOIN manager_active manager ON COALESCE(NULLIF(${routeManager}, ''), ${normalizedField({ field: "DirectManagerID", source: "supervisor" })})=${managerId}
+        WHERE ${person.id}<>''
+      ),
+      scope_debug AS MATERIALIZED (
+        SELECT COUNT(DISTINCT employee_id)::integer direct_reports_count FROM people
+      ),
+      route_scope_debug AS MATERIALIZED (
+        SELECT COUNT(DISTINCT ${routeId})::integer route_count FROM route_active route
+      ),
       risk AS MATERIALIZED (SELECT people.employee_id, people.employee_name, people.route_id, demand.product_code, demand.expected_demand, COALESCE(stock.current_stock,0)::double precision current_stock FROM people INNER JOIN demand ON demand.route_id=people.route_id LEFT JOIN stock ON stock.route_id=demand.route_id AND stock.product_code=demand.product_code WHERE demand.expected_demand>COALESCE(stock.current_stock,0)),
+      risk_debug AS MATERIALIZED (
+        SELECT COUNT(*)::integer loading_risk_rows_before_aggregation FROM risk
+      ),
       product_names AS MATERIALIZED (SELECT DISTINCT ON (${productCode}) ${productCode} product_code, NULLIF(BTRIM(COALESCE(${productName}, '')), '') product_name FROM product_active product WHERE ${productCode}<>'' ORDER BY ${productCode}, product."entity_key" DESC),
       route_result AS MATERIALIZED (SELECT risk.employee_id, risk.employee_name, risk.route_id, COUNT(*)::integer affected_product_count, JSONB_AGG(JSONB_BUILD_OBJECT('productCode',risk.product_code,'productName',COALESCE(names.product_name,risk.product_code),'expectedDemand',risk.expected_demand,'currentVehicleStock',risk.current_stock,'quantityGap',risk.expected_demand-risk.current_stock) ORDER BY risk.expected_demand-risk.current_stock DESC,risk.product_code) products FROM risk LEFT JOIN product_names names ON names.product_code=risk.product_code GROUP BY risk.employee_id,risk.employee_name,risk.route_id),
-      person_result AS MATERIALIZED (SELECT employee_id,employee_name,COUNT(*)::integer affected_route_count,SUM(affected_product_count)::integer affected_product_count,JSONB_AGG(JSONB_BUILD_OBJECT('routeId',route_id,'products',products) ORDER BY route_id) routes FROM route_result GROUP BY employee_id,employee_name)
-      SELECT COALESCE(JSONB_AGG(JSONB_BUILD_OBJECT('employeeId',employee_id,'employeeName',employee_name,'affectedRouteCount',affected_route_count,'affectedProductCount',affected_product_count,'routes',routes) ORDER BY employee_name,employee_id),'[]'::jsonb) people FROM person_result
+      person_result AS MATERIALIZED (SELECT employee_id,employee_name,COUNT(*)::integer affected_route_count,SUM(affected_product_count)::integer affected_product_count,JSONB_AGG(JSONB_BUILD_OBJECT('routeId',route_id,'products',products) ORDER BY route_id) routes FROM route_result GROUP BY employee_id,employee_name),
+      person_json AS MATERIALIZED (
+        SELECT COALESCE(JSONB_AGG(JSONB_BUILD_OBJECT('employeeId',employee_id,'employeeName',employee_name,'affectedRouteCount',affected_route_count,'affectedProductCount',affected_product_count,'routes',routes) ORDER BY employee_name,employee_id),'[]'::jsonb) people
+        FROM person_result
+      )
+      SELECT person_json.people,
+        JSONB_BUILD_OBJECT('directReportsCount',scope_debug.direct_reports_count,'routeCount',route_scope_debug.route_count,'loadingRiskRowsBeforeAggregation',risk_debug.loading_risk_rows_before_aggregation) debug
+      FROM person_json CROSS JOIN scope_debug CROSS JOIN route_scope_debug CROSS JOIN risk_debug
     `);
     return rows[0] ?? { people: [] };
   }

@@ -229,6 +229,14 @@ export class SmartLoadingService {
     if (salesFrom > salesTo) throw new BadRequestException("salesFrom must not be after salesTo.");
     const personLevel = user.roleCode === "COMPANY_ADMIN" ? "manager" : user.roleCode === "MANAGER" ? "supervisor" : "sales_rep";
     const result = await this.rieFacade.queryManagementLoadingRisk({ ...this.rieContext(user), targetDate, salesFrom, salesTo, personLevel });
+    this.logger.log(JSON.stringify({
+      event: "smart_loading_management_loading_risk_scope",
+      currentUser: user.email,
+      role: user.roleCode,
+      directReportsCount: result.debug?.directReportsCount ?? 0,
+      routeCount: result.debug?.routeCount ?? 0,
+      loadingRiskRowsBeforeAggregation: result.debug?.loadingRiskRowsBeforeAggregation ?? 0,
+    }));
     return { targetDate, salesFrom, salesTo, affectedPersonCount: result.people.length, people: result.people };
   }
 

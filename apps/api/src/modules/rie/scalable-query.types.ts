@@ -137,6 +137,8 @@ export interface RieManagementLoadingRiskQuery extends EntityQueryContext {
 }
 export interface RieManagementLoadingRiskRow {
   people: { employeeId: string; employeeName: string; affectedRouteCount: number; affectedProductCount: number; routes: { routeId: string; products: { productCode: string; productName: string; expectedDemand: number; currentVehicleStock: number; quantityGap: number }[] }[] }[];
+  /** Internal, temporary scope diagnostics. This is logged by the service and is never exposed by the API contract. */
+  debug?: { directReportsCount: number; routeCount: number; loadingRiskRowsBeforeAggregation: number };
 }
 
 /** Product-grain stale-purchase evidence; Product × Customer stays inside SQL. */
