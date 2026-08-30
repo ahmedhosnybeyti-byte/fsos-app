@@ -128,6 +128,17 @@ export interface RieManagementVehicleProductRow {
   alignmentPercent: number;
 }
 
+/** One compact Person → Route → Product document; all fact aggregation is SQL-only. */
+export interface RieManagementLoadingRiskQuery extends EntityQueryContext {
+  targetDate: string;
+  salesFrom: string;
+  salesTo: string;
+  personLevel: "manager" | "supervisor" | "sales_rep";
+}
+export interface RieManagementLoadingRiskRow {
+  people: { employeeId: string; employeeName: string; routes: { routeId: string; products: { productCode: string; productName: string; expectedDemand: number; currentVehicleStock: number; quantityGap: number }[] }[] }[];
+}
+
 /** Product-grain stale-purchase evidence; Product × Customer stays inside SQL. */
 export interface RieStalePurchasesQuery extends EntityQueryContext {
   /** Routes holding active vehicle inventory for the current session. */

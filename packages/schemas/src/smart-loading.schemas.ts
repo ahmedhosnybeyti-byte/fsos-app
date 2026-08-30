@@ -25,6 +25,27 @@ export type SmartLoadingPriority = z.infer<typeof smartLoadingPrioritySchema>;
 export const DEFAULT_SMART_LOADING_STALE_DAYS = 4;
 export const smartLoadingStaleDaysThresholdSchema = z.coerce.number().int().min(1).default(DEFAULT_SMART_LOADING_STALE_DAYS);
 
+/**
+ * Management Loading Risk: current Vehicle Stock is the business-approved
+ * actual loaded quantity for the latest Van Inventory report.
+ */
+export const smartLoadingManagementLoadingRiskQuerySchema = z.object({
+  targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  salesFrom: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  salesTo: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+export type SmartLoadingManagementLoadingRiskQuery = z.infer<typeof smartLoadingManagementLoadingRiskQuerySchema>;
+export const smartLoadingManagementLoadingRiskProductSchema = z.object({
+  productCode: z.string(), productName: z.string(), expectedDemand: z.number(), currentVehicleStock: z.number(), quantityGap: z.number().positive(),
+});
+export type SmartLoadingManagementLoadingRiskProduct = z.infer<typeof smartLoadingManagementLoadingRiskProductSchema>;
+export const smartLoadingManagementLoadingRiskRouteSchema = z.object({ routeId: z.string(), products: z.array(smartLoadingManagementLoadingRiskProductSchema) });
+export type SmartLoadingManagementLoadingRiskRoute = z.infer<typeof smartLoadingManagementLoadingRiskRouteSchema>;
+export const smartLoadingManagementLoadingRiskPersonSchema = z.object({ employeeId: z.string(), employeeName: z.string(), routes: z.array(smartLoadingManagementLoadingRiskRouteSchema) });
+export type SmartLoadingManagementLoadingRiskPerson = z.infer<typeof smartLoadingManagementLoadingRiskPersonSchema>;
+export const smartLoadingManagementLoadingRiskResponseSchema = z.object({ targetDate: z.string(), salesFrom: z.string(), salesTo: z.string(), affectedPersonCount: z.number().int().nonnegative(), people: z.array(smartLoadingManagementLoadingRiskPersonSchema) });
+export type SmartLoadingManagementLoadingRiskResponse = z.infer<typeof smartLoadingManagementLoadingRiskResponseSchema>;
+
 export const smartLoadingProductSchema = z.object({
   productCode: z.string(),
   productName: z.string(),

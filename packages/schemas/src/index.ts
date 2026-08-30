@@ -39,6 +39,11 @@ export {
   smartLoadingPrioritySchema,
   DEFAULT_SMART_LOADING_STALE_DAYS,
   smartLoadingStaleDaysThresholdSchema,
+  smartLoadingManagementLoadingRiskQuerySchema,
+  smartLoadingManagementLoadingRiskProductSchema,
+  smartLoadingManagementLoadingRiskRouteSchema,
+  smartLoadingManagementLoadingRiskPersonSchema,
+  smartLoadingManagementLoadingRiskResponseSchema,
   smartLoadingProductSchema,
   smartLoadingManagementVehicleProductSchema,
   smartLoadingStaleProductCustomerSchema,
@@ -60,6 +65,11 @@ export {
 } from "./smart-loading.schemas";
 export type {
   SmartLoadingPriority,
+  SmartLoadingManagementLoadingRiskQuery,
+  SmartLoadingManagementLoadingRiskProduct,
+  SmartLoadingManagementLoadingRiskRoute,
+  SmartLoadingManagementLoadingRiskPerson,
+  SmartLoadingManagementLoadingRiskResponse,
   SmartLoadingProduct,
   SmartLoadingManagementVehicleProduct,
   SmartLoadingStaleProductCustomer,

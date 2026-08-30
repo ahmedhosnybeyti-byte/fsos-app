@@ -3,7 +3,7 @@ import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import type { EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieLatestPerScope, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
+import type { RieDateScope, RieLatestPerScope, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
@@ -312,6 +312,39 @@ export class RieScalableQueryService {
       GROUP BY product_code
       ORDER BY product_code
     `);
+  }
+
+  /** Current Vehicle Stock is the approved actual-loaded quantity for Loading Risk. */
+  async queryManagementLoadingRisk(input: RieManagementLoadingRiskQuery): Promise<RieManagementLoadingRiskRow> {
+    if (!input.companyId?.trim()) throw new Error("RIE management loading risk requires companyId.");
+    const targetDate = normalizeDate(input.targetDate), salesFrom = normalizeDate(input.salesFrom), salesTo = normalizeDate(input.salesTo);
+    const allowed = input.requestingUser ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser) : null;
+    const routes = allowed ? [...allowed].map((value) => value.trim().toLowerCase()).filter(Boolean) : null;
+    const routeScope = (field: RieQueryField) => routes === null ? Prisma.empty : routes.length ? Prisma.sql` AND ${normalizedField(field)} IN (${Prisma.join(routes)})` : Prisma.sql` AND FALSE`;
+    const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [Prisma.sql`${dateText(textField({ field: "ReportDate", source: "inventory_source" }))} <= ${targetDate}${routeScope({ field: "RouteID", source: "inventory_source" })}`], [], []);
+    const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} >= ${salesFrom} AND ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${salesTo}${routeScope({ field: "RouteID", source: "invoice_source" })}`], [], []);
+    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], []);
+    const routesCte = activeEntityRowsCte(input.companyId, "Routes", "route", [routeScope({ field: "RouteID", source: "route_source" })], [], []);
+    const repCte = activeEntityRowsCte(input.companyId, "Employees", "rep", [], [], []), supervisorCte = activeEntityRowsCte(input.companyId, "Employees", "supervisor", [], [], []), managerCte = activeEntityRowsCte(input.companyId, "Employees", "manager", [], [], []), productCte = activeEntityRowsCte(input.companyId, "Products", "product", [], [], []);
+    const invRoute = normalizedField({ field: "RouteID", source: "inventory" }), invProduct = normalizedField({ field: "ProductCode", source: "inventory" }), invQuantity = numericField(textField({ field: "Quantity", source: "inventory" }));
+    const itemProduct = normalizedField({ field: "ProductCode", source: "item" }), itemQuantity = numericField(textField({ field: "Quantity", source: "item" })), itemInvoice = normalizedField({ field: "InvoiceNo", source: "item" }), invoiceNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
+    const saleRoute = Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "RouteID", source: "item" })}, '')), ''), ${textField({ field: "RouteID", source: "invoice" })}, '')))`;
+    const routeId = normalizedField({ field: "RouteID", source: "route" }), routeRep = normalizedField({ field: "SalesRepID", source: "route" }), repId = normalizedField({ field: "EmployeeID", source: "rep" }), supervisorId = normalizedField({ field: "EmployeeID", source: "supervisor" }), managerId = normalizedField({ field: "EmployeeID", source: "manager" });
+    const person = input.personLevel === "manager" ? { id: managerId, name: textField({ field: "EmployeeName", source: "manager" }) } : input.personLevel === "supervisor" ? { id: supervisorId, name: textField({ field: "EmployeeName", source: "supervisor" }) } : { id: repId, name: textField({ field: "EmployeeName", source: "rep" }) };
+    const productCode = normalizedField({ field: "ProductCode", source: "product" }), productName = textField({ field: "ProductName", source: "product" });
+    const rows = await this.prisma.$queryRaw<RieManagementLoadingRiskRow[]>(Prisma.sql`
+      WITH ${inventoryCte}, ${invoiceCte}, ${itemsCte}, ${routesCte}, ${repCte}, ${supervisorCte}, ${managerCte}, ${productCte},
+      latest_inventory AS MATERIALIZED (SELECT ${invRoute} route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) report_date FROM inventory_active inventory GROUP BY ${invRoute}),
+      stock AS MATERIALIZED (SELECT ${invRoute} route_id, ${invProduct} product_code, SUM(${invQuantity})::double precision current_stock FROM inventory_active inventory INNER JOIN latest_inventory latest ON latest.route_id=${invRoute} AND NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')=latest.report_date WHERE ${invProduct}<>'' GROUP BY ${invRoute}, ${invProduct}),
+      demand AS MATERIALIZED (SELECT ${saleRoute} route_id, ${itemProduct} product_code, (SUM(${itemQuantity})/12.0)::double precision expected_demand FROM item_active item INNER JOIN invoice_active invoice ON ${itemInvoice}=${invoiceNo} WHERE ${itemProduct}<>'' AND ${saleRoute}<>'' GROUP BY ${saleRoute}, ${itemProduct}),
+      people AS MATERIALIZED (SELECT ${routeId} route_id, ${person.id} employee_id, COALESCE(NULLIF(BTRIM(COALESCE(${person.name}, '')), ''), ${person.id}) employee_name FROM route_active route INNER JOIN rep_active rep ON ${routeRep}=${repId} INNER JOIN supervisor_active supervisor ON ${normalizedField({ field: "DirectManagerID", source: "rep" })}=${supervisorId} INNER JOIN manager_active manager ON ${normalizedField({ field: "DirectManagerID", source: "supervisor" })}=${managerId} WHERE ${person.id}<>''),
+      risk AS MATERIALIZED (SELECT people.employee_id, people.employee_name, people.route_id, demand.product_code, demand.expected_demand, COALESCE(stock.current_stock,0)::double precision current_stock FROM people INNER JOIN demand ON demand.route_id=people.route_id LEFT JOIN stock ON stock.route_id=demand.route_id AND stock.product_code=demand.product_code WHERE demand.expected_demand>COALESCE(stock.current_stock,0)),
+      product_names AS MATERIALIZED (SELECT DISTINCT ON (${productCode}) ${productCode} product_code, NULLIF(BTRIM(COALESCE(${productName}, '')), '') product_name FROM product_active product WHERE ${productCode}<>'' ORDER BY ${productCode}, product."entity_key" DESC),
+      route_result AS MATERIALIZED (SELECT risk.employee_id, risk.employee_name, risk.route_id, JSONB_AGG(JSONB_BUILD_OBJECT('productCode',risk.product_code,'productName',COALESCE(names.product_name,risk.product_code),'expectedDemand',risk.expected_demand,'currentVehicleStock',risk.current_stock,'quantityGap',risk.expected_demand-risk.current_stock) ORDER BY risk.expected_demand-risk.current_stock DESC,risk.product_code) products FROM risk LEFT JOIN product_names names ON names.product_code=risk.product_code GROUP BY risk.employee_id,risk.employee_name,risk.route_id),
+      person_result AS MATERIALIZED (SELECT employee_id,employee_name,JSONB_AGG(JSONB_BUILD_OBJECT('routeId',route_id,'products',products) ORDER BY route_id) routes FROM route_result GROUP BY employee_id,employee_name)
+      SELECT COALESCE(JSONB_AGG(JSONB_BUILD_OBJECT('employeeId',employee_id,'employeeName',employee_name,'routes',routes) ORDER BY employee_name,employee_id),'[]'::jsonb) people FROM person_result
+    `);
+    return rows[0] ?? { people: [] };
   }
 
   /**

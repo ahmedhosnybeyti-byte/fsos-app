@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from "@nestjs/common";
-import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingHierarchyOptions, type SmartLoadingManagementVehicleProduct, type SmartLoadingPriorityProduct, type SmartLoadingProduct, type SmartLoadingSession, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
+import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingHierarchyOptions, type SmartLoadingManagementLoadingRiskQuery, type SmartLoadingManagementLoadingRiskResponse, type SmartLoadingManagementVehicleProduct, type SmartLoadingPriorityProduct, type SmartLoadingProduct, type SmartLoadingSession, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
 import { CanonicalHierarchyResolverService } from "../rie/canonical-hierarchy-resolver.service";
@@ -218,6 +218,18 @@ export class SmartLoadingService {
 
   private rieContext(user: AuthenticatedUser) {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
+  }
+
+  /** Management-only: Expected Demand > current Vehicle Stock (actual loaded quantity). */
+  async getManagementLoadingRisk(user: AuthenticatedUser, query: SmartLoadingManagementLoadingRiskQuery): Promise<SmartLoadingManagementLoadingRiskResponse> {
+    if (!user.companyId || !["COMPANY_ADMIN", "MANAGER", "SUPERVISOR"].includes(user.roleCode)) throw new ForbiddenException();
+    const targetDate = isoDay(parseTargetDate(query.targetDate).getTime());
+    const salesTo = query.salesTo ?? isoDay(companyCalendarDate().getTime());
+    const salesFrom = query.salesFrom ?? isoDay(Date.UTC(new Date(`${salesTo}T00:00:00.000Z`).getUTCFullYear(), new Date(`${salesTo}T00:00:00.000Z`).getUTCMonth() - MONTHS_LOOKBACK, new Date(`${salesTo}T00:00:00.000Z`).getUTCDate()));
+    if (salesFrom > salesTo) throw new BadRequestException("salesFrom must not be after salesTo.");
+    const personLevel = user.roleCode === "COMPANY_ADMIN" ? "manager" : user.roleCode === "MANAGER" ? "supervisor" : "sales_rep";
+    const result = await this.rieFacade.queryManagementLoadingRisk({ ...this.rieContext(user), targetDate, salesFrom, salesTo, personLevel });
+    return { targetDate, salesFrom, salesTo, affectedPersonCount: result.people.length, people: result.people };
   }
 
   /**
