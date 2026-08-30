@@ -1338,6 +1338,8 @@ export type TranslationKey =
   | "smartLoading.managementStaleProducts"
   | "smartLoading.staleInventory"
   | "smartLoading.noStaleInventory"
+  | "smartLoading.disposalPlan"
+  | "smartLoading.backToStaleInventory"
   | "smartLoading.restore"
   | "smartLoading.manualOverrideNote"
   | "smartLoading.quantityUnit"
@@ -2787,6 +2789,8 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.managementStaleProducts": "الأصناف الراكدة",
     "smartLoading.staleInventory": "المخزون الراكد",
     "smartLoading.noStaleInventory": "لا يوجد أشخاص لديهم مخزون راكد اليوم.",
+    "smartLoading.disposalPlan": "خطة التصريف",
+    "smartLoading.backToStaleInventory": "العودة إلى المخزون الراكد",
     "smartLoading.restore": "استعادة",
     "smartLoading.manualOverrideNote": "تم تعديل الكمية يدويًا (الأصل: {value})",
     "smartLoading.quantityUnit": "صنف",
@@ -4250,6 +4254,8 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.managementStaleProducts": "Stale Products",
     "smartLoading.staleInventory": "Stale Inventory",
     "smartLoading.noStaleInventory": "No one has stale inventory today.",
+    "smartLoading.disposalPlan": "Disposal Plan",
+    "smartLoading.backToStaleInventory": "Back to Stale Inventory",
     "smartLoading.restore": "Restore",
     "smartLoading.manualOverrideNote": "Quantity manually adjusted (original: {value})",
     "smartLoading.quantityUnit": "product",
