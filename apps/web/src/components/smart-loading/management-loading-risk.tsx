@@ -6,6 +6,7 @@ import { AlertTriangle, CircleCheck } from "lucide-react";
 import type { SmartLoadingManagementLoadingRiskPerson } from "@field-sales-os/schemas";
 import { smartLoadingApi } from "@/lib/api/smart-loading";
 import { Card, CardContent } from "@/components/ui/card";
+import { KpiCard } from "@/components/dashboard/kpi-card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTranslation } from "@/components/translation-provider";
 import { formatQuantity } from "@/lib/utils";
@@ -39,7 +40,7 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson }: Management
 
   if (query.isError) {
     return (
-      <Card className="max-w-sm border-destructive/30 bg-destructive/10">
+      <Card className="glass-card max-w-sm border-destructive/30 bg-destructive/10">
         <CardContent className="p-4 text-sm text-destructive">
           {t("smartLoading.loadingRiskLoadError")}
         </CardContent>
@@ -49,7 +50,7 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson }: Management
 
   if (people.length === 0) {
     return (
-      <Card className="max-w-sm border-emerald-500/20 bg-emerald-500/5">
+      <Card className="glass-card max-w-sm border-emerald-500/20 bg-emerald-500/5">
         <CardContent className="flex min-h-36 items-center gap-2 p-4 text-sm text-emerald-700 dark:text-emerald-300">
           <CircleCheck className="h-5 w-5 shrink-0" />
           {t("smartLoading.noLoadingRisk")}
@@ -65,40 +66,38 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson }: Management
       onMouseEnter={() => setPopoverOpen(true)}
       onMouseLeave={() => setPopoverOpen(false)}
     >
-      <Card className="glass-card card-lift rise-in h-40 border-amber-500/20 transition-colors group-hover:border-amber-500/45">
-        <CardContent className="flex h-full flex-col justify-between p-4">
-          <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
-            <AlertTriangle className="h-5 w-5" />
-            <h2 id="management-loading-risk-title" className="text-sm font-semibold tracking-tight">
-              {t("smartLoading.loadingRisk")}
-            </h2>
-          </div>
-          <p className="text-lg font-semibold text-foreground">
-            {formatQuantity(affectedPersonCount, locale)} {t("smartLoading.peopleNeedAttention")}
-          </p>
-        </CardContent>
-      </Card>
+      <div id="management-loading-risk-title">
+        <KpiCard
+          icon={AlertTriangle}
+          label={t("smartLoading.loadingRisk")}
+          value={formatQuantity(affectedPersonCount, locale)}
+          caption={t("smartLoading.peopleNeedAttention")}
+          glow="warning"
+        />
+      </div>
 
       {isPopoverOpen && (
-        <div className="absolute start-0 top-full z-30 mt-2 w-72 rounded-lg border bg-popover p-3 shadow-lg">
-          <p className="mb-2 text-sm font-semibold">{t("smartLoading.loadingRisk")}</p>
-          <div className="space-y-1">
-            {people.slice(0, 4).map((person) => (
-              <button
-                key={person.employeeId}
-                type="button"
-                className="block w-full truncate rounded px-2 py-1.5 text-start text-sm hover:bg-muted focus-visible:bg-muted"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setPopoverOpen(false);
-                  onSelectPerson(person);
-                }}
-              >
-                {person.employeeName}
-              </button>
-            ))}
-          </div>
-        </div>
+        <Card className="glass-card absolute start-0 top-full z-30 mt-2 w-72">
+          <CardContent className="p-3">
+            <p className="mb-2 text-sm font-semibold">{t("smartLoading.loadingRisk")}</p>
+            <div className="space-y-1">
+              {people.slice(0, 4).map((person) => (
+                <button
+                  key={person.employeeId}
+                  type="button"
+                  className="block w-full truncate rounded px-2 py-1.5 text-start text-sm hover:bg-muted focus-visible:bg-muted"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setPopoverOpen(false);
+                    onSelectPerson(person);
+                  }}
+                >
+                  {person.employeeName}
+                </button>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
       )}
     </section>
   );
