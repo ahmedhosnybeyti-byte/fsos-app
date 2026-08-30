@@ -1185,10 +1185,15 @@ function ManagementCategoryAlignment({ category, alignments }: { category: strin
   const { locale, t } = useTranslation();
   const alignment = alignments?.find((item) => (item.category ?? t("smartLoading.uncategorized")) === category);
   if (!alignment) return null;
-  const percent = Math.round(alignment.alignmentPercent);
-  const status = percent < 50
+  // Classify the raw numeric percentage before rounding it for display so
+  // formatting can never change the management threshold outcome.
+  const numericPercent = Number(alignment.alignmentPercent);
+  if (!Number.isFinite(numericPercent)) return null;
+  const boundedPercent = Math.min(100, Math.max(0, numericPercent));
+  const percent = Math.round(boundedPercent);
+  const status = boundedPercent < 50
     ? "bg-rose-500/30 text-rose-900 ring-rose-500/70 dark:bg-rose-400/35 dark:text-rose-50 dark:ring-rose-300"
-    : percent < 75
+    : boundedPercent < 75
       ? "bg-amber-500/30 text-amber-900 ring-amber-500/70 dark:bg-amber-400/35 dark:text-amber-50 dark:ring-amber-300"
       : "bg-emerald-500/30 text-emerald-900 ring-emerald-500/70 dark:bg-emerald-400/35 dark:text-emerald-50 dark:ring-emerald-300";
 
