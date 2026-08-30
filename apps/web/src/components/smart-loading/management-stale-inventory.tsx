@@ -46,7 +46,7 @@ export function ManagementStaleInventory({ cases, onSelectPerson }: ManagementSt
       aria-labelledby="management-stale-inventory-title"
       className="group relative w-full max-w-sm"
     >
-      <Card className="glass-card rise-in h-40 border-amber-500/20 transition-colors group-hover:border-amber-500/45 group-focus-visible:border-amber-500/45">
+      <Card className="glass-card card-lift rise-in h-40 border-amber-500/20 transition-colors group-hover:border-amber-500/45">
         <CardContent className="flex h-full flex-col justify-between p-4">
           <div className="flex items-center gap-2 text-amber-700 dark:text-amber-300">
             <AlertTriangle className="h-5 w-5" />

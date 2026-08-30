@@ -84,7 +84,7 @@ export function StaleInventoryTable({ plans, targetDate, onSelectProduct, showBu
         </div>
       )}
       {plansByCategory.map((group) => (
-        <Card key={group.category}>
+        <Card key={group.category} className="glass-card overflow-hidden">
           <CardHeader>
             <button
               type="button"
@@ -103,7 +103,7 @@ export function StaleInventoryTable({ plans, targetDate, onSelectProduct, showBu
           </CardHeader>
           {!collapsedCategories.has(group.category) && (
             <CardContent className="space-y-4">
-              <section className="rounded-md border bg-secondary/30 p-3">
+              <section className="glow-ai rounded-lg p-3">
                 <h2 className="font-semibold">{t("smartLoading.practicalDecision")}</h2>
                 <ol className="mt-2 space-y-1 text-sm text-muted-foreground">
                   {group.decisionPlans.map((plan) => (
@@ -113,8 +113,8 @@ export function StaleInventoryTable({ plans, targetDate, onSelectProduct, showBu
                   ))}
                 </ol>
               </section>
-              <div className="overflow-x-auto rounded-md border">
-                <div className="grid min-w-[640px] grid-cols-[minmax(0,1fr)_10rem_8rem_10rem] gap-3 border-b bg-secondary/50 px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <div className="overflow-x-auto rounded-lg border border-border bg-background/30">
+                <div className="grid min-w-[640px] grid-cols-[minmax(0,1fr)_10rem_8rem_10rem] gap-3 border-b border-border/60 bg-secondary/30 px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   <span>{t("smartLoading.productLabel")}</span>
                   <span>{t("smartLoading.vehicleStock")}</span>
                   <span>{t("smartLoading.daysStale")}</span>
@@ -146,7 +146,7 @@ export function StaleDisposalPlan({ plan, targetDate, onBack }: { plan: SmartLoa
   const { locale, t } = useTranslation();
 
   return (
-    <Card>
+    <Card className="glass-card overflow-hidden">
       <CardHeader className="flex flex-row items-center justify-between gap-3">
         <div>
           <CardTitle>{plan.productName}</CardTitle>
