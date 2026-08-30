@@ -324,7 +324,11 @@ export class RieScalableQueryService {
     const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [Prisma.sql`${dateText(textField({ field: "ReportDate", source: "inventory_source" }))} <= ${targetDate}${routeScope({ field: "RouteID", source: "inventory_source" })}`], [], []);
     const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} >= ${salesFrom} AND ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${salesTo}${routeScope({ field: "RouteID", source: "invoice_source" })}`], [], []);
     const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], []);
-    const routesCte = activeEntityRowsCte(input.companyId, "Routes", "route", [routeScope({ field: "RouteID", source: "route_source" })], [], []);
+    // Company Admin has no restricted route set. Do not pass an empty SQL
+    // fragment as a predicate, otherwise the active Route CTE compiles to a
+    // dangling `AND` and PostgreSQL rejects the query.
+    const routePredicates = routes === null ? [] : [routeScope({ field: "RouteID", source: "route_source" })];
+    const routesCte = activeEntityRowsCte(input.companyId, "Routes", "route", routePredicates, [], []);
     const repCte = activeEntityRowsCte(input.companyId, "Employees", "rep", [], [], []), supervisorCte = activeEntityRowsCte(input.companyId, "Employees", "supervisor", [], [], []), managerCte = activeEntityRowsCte(input.companyId, "Employees", "manager", [], [], []), productCte = activeEntityRowsCte(input.companyId, "Products", "product", [], [], []);
     const invRoute = normalizedField({ field: "RouteID", source: "inventory" }), invProduct = normalizedField({ field: "ProductCode", source: "inventory" }), invQuantity = numericField(textField({ field: "Quantity", source: "inventory" }));
     const itemProduct = normalizedField({ field: "ProductCode", source: "item" }), itemQuantity = numericField(textField({ field: "Quantity", source: "item" })), itemInvoice = normalizedField({ field: "InvoiceNo", source: "item" }), invoiceNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
