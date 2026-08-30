@@ -2,7 +2,6 @@
 
 import { AlertTriangle, CircleCheck } from "lucide-react";
 import type { SmartLoadingManagementStaleRouteProduct } from "@/lib/types";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useTranslation } from "@/components/translation-provider";
 import { formatQuantity } from "@/lib/utils";
@@ -10,10 +9,9 @@ import { formatQuantity } from "@/lib/utils";
 type ManagementStaleInventoryProps = {
   cases: readonly SmartLoadingManagementStaleRouteProduct[];
   onSelectPerson: (person: { employeeId: string; employeeName: string }) => void;
-  onViewAll: () => void;
 };
 
-export function ManagementStaleInventory({ cases, onSelectPerson, onViewAll }: ManagementStaleInventoryProps) {
+export function ManagementStaleInventory({ cases, onSelectPerson }: ManagementStaleInventoryProps) {
   const { locale, t } = useTranslation();
   const peopleById = new Map<string, { employeeId: string; employeeName: string; affectedRouteIds: Set<string> }>();
 
@@ -46,16 +44,7 @@ export function ManagementStaleInventory({ cases, onSelectPerson, onViewAll }: M
   return (
     <section
       aria-labelledby="management-stale-inventory-title"
-      className="group relative w-full max-w-sm cursor-pointer"
-      role="button"
-      tabIndex={0}
-      onClick={onViewAll}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onViewAll();
-        }
-      }}
+      className="group relative w-full max-w-sm"
     >
       <Card className="glass-card rise-in h-40 border-amber-500/20 transition-colors group-hover:border-amber-500/45 group-focus-visible:border-amber-500/45">
         <CardContent className="flex h-full flex-col justify-between p-4">
@@ -68,12 +57,6 @@ export function ManagementStaleInventory({ cases, onSelectPerson, onViewAll }: M
           <p className="text-lg font-semibold text-foreground">
             {formatQuantity(people.length, locale)} {t("smartLoading.peopleNeedAttention")}
           </p>
-          <Button variant="outline" size="sm" className="w-fit" onClick={(event) => {
-            event.stopPropagation();
-            onViewAll();
-          }}>
-            {t("smartLoading.viewRisks")}
-          </Button>
         </CardContent>
       </Card>
 

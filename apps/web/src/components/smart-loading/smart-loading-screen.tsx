@@ -50,7 +50,7 @@ type LostOpportunityAddition = {
 type Row = { product: SmartLoadingProduct; original: number; baseSuggested: number; suggested: number; input: Inputs; manuallyAdded: boolean; lostOpportunity?: LostOpportunityAddition; stockAvailable: boolean; effectiveVehicleStock: number | null; preliminary: boolean };
 type ManagementRow = SmartLoadingManagementVehicleProduct;
 type ManagementScopeSelection = { managerId?: string; supervisorId?: string; salesRepId?: string; managerName?: string; supervisorName?: string; salesRepName?: string };
-type ManagementContext = "all-risks" | "loading-risk" | "stale-inventory" | "disposal-plan";
+type ManagementContext = "loading-risk" | "stale-inventory";
 
 function parsePositiveNumber(value: string): number {
   return Math.max(0, Number(value) || 0);
@@ -121,7 +121,7 @@ export function SmartLoadingScreen({
   const [openRows, setOpenRows] = useState<Set<string>>(new Set());
   const [openRecommendationGroups, setOpenRecommendationGroups] = useState<Set<string>>(new Set());
   const [recommendationSearch, setRecommendationSearch] = useState("");
-  const [managementContext, setManagementContext] = useState<ManagementContext>("all-risks");
+  const [managementContext, setManagementContext] = useState<ManagementContext>("loading-risk");
   const [selectedStaleProductCode, setSelectedStaleProductCode] = useState<string | null>(null);
   const [panel, setPanel] = useState<"priority" | "stale" | null>(null);
   const [openPriorityGroups, setOpenPriorityGroups] = useState<Set<string>>(new Set());
@@ -283,7 +283,6 @@ export function SmartLoadingScreen({
   useEffect(() => {
     if (selectedStaleProductCode && !selectedStalePlan) {
       setSelectedStaleProductCode(null);
-      setManagementContext("stale-inventory");
     }
   }, [selectedStalePlan, selectedStaleProductCode]);
 
@@ -730,10 +729,6 @@ export function SmartLoadingScreen({
                   : { salesRepId: selectedOption.value, salesRepName: selectedOption.label };
               onManagementScopeChange(scope);
             }}
-            onViewAll={() => {
-              setSelectedStaleProductCode(null);
-              setManagementContext("loading-risk");
-            }}
           />
           <ManagementStaleInventory
             cases={session.managementStaleRouteProducts ?? []}
@@ -744,10 +739,6 @@ export function SmartLoadingScreen({
                   ? { supervisorId: person.employeeId, supervisorName: person.employeeName }
                   : { salesRepId: person.employeeId, salesRepName: person.employeeName };
               onManagementScopeChange(scope);
-            }}
-            onViewAll={() => {
-              setSelectedStaleProductCode(null);
-              setManagementContext("stale-inventory");
             }}
           />
         </div>
@@ -830,17 +821,48 @@ export function SmartLoadingScreen({
       {panel === "priority" && <PriorityProductsPopover groups={priorityGroups} openGroups={openPriorityGroups} onToggleGroup={(category) => setOpenPriorityGroups((current) => { const next = new Set(current); next.has(category) ? next.delete(category) : next.add(category); return next; })} onClose={() => setPanel(null)} />}
       {panel === "stale" && <ProductListPopover rows={staleRows} stale referenceDate={staleReferenceDate} onClose={() => setPanel(null)} />}
 
-      {(!managementView || managementContext === "all-risks" || managementContext === "loading-risk") && (
+      {managementView && (
+        <div role="tablist" aria-label={t("smartLoading.title")} className="inline-flex rounded-lg border bg-muted/40 p-1">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={managementContext === "loading-risk"}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+              managementContext === "loading-risk" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => {
+              setSelectedStaleProductCode(null);
+              setManagementContext("loading-risk");
+            }}
+          >
+            {t("smartLoading.loadingRisk")}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={managementContext === "stale-inventory"}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+              managementContext === "stale-inventory" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => {
+              setSelectedStaleProductCode(null);
+              setManagementContext("stale-inventory");
+            }}
+          >
+            {t("smartLoading.staleInventory")}
+          </button>
+        </div>
+      )}
+
+      {(!managementView || managementContext === "loading-risk") && (
       <Card id="smart-loading-recommendations" className="glass-card">
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <CardTitle>
-                {managementView
-                  ? managementContext === "loading-risk"
-                    ? t("smartLoading.loadingRisk")
-                    : t("smartLoading.allRisks")
-                  : t("smartLoading.recommendationsTitle")}
+                {managementView ? t("smartLoading.loadingRisk") : t("smartLoading.recommendationsTitle")}
               </CardTitle>
             </div>
             <Input
@@ -962,7 +984,7 @@ export function SmartLoadingScreen({
       </Card>
       )}
 
-      {managementView && managementContext === "stale-inventory" && (
+      {managementView && managementContext === "stale-inventory" && !selectedStalePlan && (
         <section id="smart-loading-recommendations" className="space-y-3">
           <h2 className="text-xl font-semibold">{t("smartLoading.staleInventory")}</h2>
           <StaleInventoryTable
@@ -970,13 +992,12 @@ export function SmartLoadingScreen({
             targetDate={session.targetDate}
             onSelectProduct={(plan) => {
               setSelectedStaleProductCode(plan.productCode);
-              setManagementContext("disposal-plan");
             }}
           />
         </section>
       )}
 
-      {managementView && managementContext === "disposal-plan" && selectedStalePlan && (
+      {managementView && managementContext === "stale-inventory" && selectedStalePlan && (
         <section id="smart-loading-recommendations" className="space-y-3">
           <h2 className="text-xl font-semibold">{t("smartLoading.disposalPlan")}</h2>
           <StaleDisposalPlan
@@ -984,7 +1005,6 @@ export function SmartLoadingScreen({
             targetDate={session.targetDate}
             onBack={() => {
               setSelectedStaleProductCode(null);
-              setManagementContext("stale-inventory");
             }}
           />
         </section>

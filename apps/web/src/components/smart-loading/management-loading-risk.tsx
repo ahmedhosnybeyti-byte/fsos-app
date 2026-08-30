@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CircleCheck } from "lucide-react";
 import type { SmartLoadingManagementLoadingRiskPerson } from "@field-sales-os/schemas";
 import { smartLoadingApi } from "@/lib/api/smart-loading";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTranslation } from "@/components/translation-provider";
@@ -14,10 +13,9 @@ import { formatQuantity } from "@/lib/utils";
 type ManagementLoadingRiskProps = {
   targetDate: string;
   onSelectPerson: (person: SmartLoadingManagementLoadingRiskPerson) => void;
-  onViewAll: () => void;
 };
 
-export function ManagementLoadingRisk({ targetDate, onSelectPerson, onViewAll }: ManagementLoadingRiskProps) {
+export function ManagementLoadingRisk({ targetDate, onSelectPerson }: ManagementLoadingRiskProps) {
   const { locale, t } = useTranslation();
   const [isPopoverOpen, setPopoverOpen] = useState(false);
   const query = useQuery({
@@ -63,21 +61,9 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson, onViewAll }:
   return (
     <section
       aria-labelledby="management-loading-risk-title"
-      className="group relative w-full max-w-sm cursor-pointer"
-      role="button"
-      tabIndex={0}
+      className="group relative w-full max-w-sm"
       onMouseEnter={() => setPopoverOpen(true)}
       onMouseLeave={() => setPopoverOpen(false)}
-      onClick={() => {
-        setPopoverOpen(false);
-        onViewAll();
-      }}
-      onKeyDown={(event) => {
-        if (event.key === "Enter" || event.key === " ") {
-          event.preventDefault();
-          onViewAll();
-        }
-      }}
     >
       <Card className="glass-card rise-in h-40 border-amber-500/20 transition-colors group-hover:border-amber-500/45 group-focus-visible:border-amber-500/45">
         <CardContent className="flex h-full flex-col justify-between p-4">
@@ -90,18 +76,6 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson, onViewAll }:
           <p className="text-lg font-semibold text-foreground">
             {formatQuantity(affectedPersonCount, locale)} {t("smartLoading.peopleNeedAttention")}
           </p>
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-fit"
-            onClick={(event) => {
-              event.stopPropagation();
-              setPopoverOpen(false);
-              onViewAll();
-            }}
-          >
-            {t("smartLoading.viewRisks")}
-          </Button>
         </CardContent>
       </Card>
 
