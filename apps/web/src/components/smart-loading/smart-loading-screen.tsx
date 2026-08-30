@@ -711,7 +711,7 @@ export function SmartLoadingScreen({
       </header>
 
       {managementView && (
-        <div className="grid gap-4 lg:grid-cols-2">
+        <div className="-my-2 grid items-stretch gap-3 md:grid-cols-2">
           <ManagementLoadingRisk
             targetDate={targetDate}
             onSelectPerson={(person) => {

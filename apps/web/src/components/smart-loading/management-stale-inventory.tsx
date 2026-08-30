@@ -33,8 +33,8 @@ export function ManagementStaleInventory({ cases, onSelectPerson }: ManagementSt
 
   if (people.length === 0) {
     return (
-      <Card className="glass-card max-w-sm border-emerald-500/20 bg-emerald-500/5">
-        <CardContent className="flex min-h-36 items-center gap-2 p-4 text-sm text-emerald-700 dark:text-emerald-300">
+      <Card className="glass-card h-full min-h-36 w-full border-success/20 bg-success/5">
+        <CardContent className="flex min-h-36 items-center gap-2 p-4 text-sm text-success">
           <CircleCheck className="h-5 w-5 shrink-0" />
           {t("smartLoading.noStaleInventory")}
         </CardContent>
@@ -45,7 +45,7 @@ export function ManagementStaleInventory({ cases, onSelectPerson }: ManagementSt
   return (
     <section
       aria-labelledby="management-stale-inventory-title"
-      className="group relative w-full max-w-sm self-start"
+      className="group relative h-full w-full min-w-0 self-stretch [&>div:first-child]:h-full [&>div:first-child]:min-h-36 [&>div:first-child>div]:h-full [&>div:first-child>div]:min-h-36"
     >
       <div id="management-stale-inventory-title">
         <KpiCard

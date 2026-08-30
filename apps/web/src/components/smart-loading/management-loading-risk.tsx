@@ -35,13 +35,13 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson }: Management
   const affectedPersonCount = query.data?.affectedPersonCount ?? 0;
 
   if (query.isLoading) {
-    return <Skeleton className="h-40 w-full max-w-sm" />;
+    return <Skeleton className="h-full min-h-36 w-full" />;
   }
 
   if (query.isError) {
     return (
-      <Card className="glass-card max-w-sm border-destructive/30 bg-destructive/10">
-        <CardContent className="p-4 text-sm text-destructive">
+      <Card className="glass-card h-full min-h-36 w-full border-destructive/30 bg-destructive/10">
+        <CardContent className="flex min-h-36 items-center p-4 text-sm text-destructive">
           {t("smartLoading.loadingRiskLoadError")}
         </CardContent>
       </Card>
@@ -50,8 +50,8 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson }: Management
 
   if (people.length === 0) {
     return (
-      <Card className="glass-card max-w-sm border-emerald-500/20 bg-emerald-500/5">
-        <CardContent className="flex min-h-36 items-center gap-2 p-4 text-sm text-emerald-700 dark:text-emerald-300">
+      <Card className="glass-card h-full min-h-36 w-full border-success/20 bg-success/5">
+        <CardContent className="flex min-h-36 items-center gap-2 p-4 text-sm text-success">
           <CircleCheck className="h-5 w-5 shrink-0" />
           {t("smartLoading.noLoadingRisk")}
         </CardContent>
@@ -62,7 +62,7 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson }: Management
   return (
     <section
       aria-labelledby="management-loading-risk-title"
-      className="group relative w-full max-w-sm self-start"
+      className="group relative h-full w-full min-w-0 self-stretch [&>div:first-child]:h-full [&>div:first-child]:min-h-36 [&>div:first-child>div]:h-full [&>div:first-child>div]:min-h-36"
       onMouseEnter={() => setPopoverOpen(true)}
       onMouseLeave={() => setPopoverOpen(false)}
     >
