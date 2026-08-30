@@ -124,6 +124,7 @@ export interface RieManagementVehicleProductRow {
   productCode: string;
   currentVehicleStock: number;
   weeklyAverageSales: number;
+  alignmentPercent: number;
 }
 
 /** Product-grain stale-purchase evidence; Product × Customer stays inside SQL. */

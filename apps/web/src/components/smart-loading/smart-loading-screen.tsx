@@ -1168,7 +1168,7 @@ function ProductRow({
 function ManagementProductRow({ row }: { row: ManagementRow }) {
   const { locale, t } = useTranslation();
   const stockDifference = row.currentVehicleStock - row.weeklyAverageSales;
-  const stockCoveragePercent = row.weeklyAverageSales <= 0 ? 100 : Math.min(100, Math.max(0, (Math.min(row.currentVehicleStock, row.weeklyAverageSales) / row.weeklyAverageSales) * 100));
+  const stockCoveragePercent = row.alignmentPercent;
   const stockCoversExpected = stockDifference >= 0;
   const stockCoverageTone = stockCoveragePercent < 50
     ? "bg-rose-500/25 text-rose-800 ring-rose-500/50 dark:bg-rose-400/30 dark:text-rose-100 dark:ring-rose-300/70"

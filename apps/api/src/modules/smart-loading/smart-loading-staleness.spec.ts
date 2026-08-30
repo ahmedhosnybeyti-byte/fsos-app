@@ -89,8 +89,8 @@ test("management RIE stale rollup returns Product grain for more than 5,000 rout
 
 test("management vehicle monitor returns every inventory product at Product grain for a large route scope", async () => {
   const expected = [
-    { productCode: "sku-a", currentVehicleStock: 10, weeklyAverageSales: 2 },
-    { productCode: "sku-b", currentVehicleStock: 1, weeklyAverageSales: 0 },
+    { productCode: "sku-a", currentVehicleStock: 10, weeklyAverageSales: 2, alignmentPercent: 100 },
+    { productCode: "sku-b", currentVehicleStock: 1, weeklyAverageSales: 0, alignmentPercent: 100 },
   ];
   let statement: { strings: readonly string[] } | undefined;
   const query = new RieScalableQueryService(
@@ -109,6 +109,7 @@ test("management vehicle monitor returns every inventory product at Product grai
   assert.match(statement!.strings.join("?"), /FROM stock_by_route_product stock/);
   assert.match(statement!.strings.join("?"), /LEFT JOIN sales_by_route_product/);
   assert.match(statement!.strings.join("?"), /GROUP BY product_code/);
+  assert.match(statement!.strings.join("?"), /SUM\(LEAST\(current_stock, weekly_average_sales\)\)/);
 });
 
 test("management stock alignment keeps Route A's shortage despite Route B's surplus", async () => {

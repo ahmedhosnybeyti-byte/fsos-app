@@ -301,7 +301,11 @@ export class RieScalableQueryService {
         LEFT JOIN sales_by_route_product sales ON sales.route_id = stock.route_id AND sales.product_code = stock.product_code
       )
       SELECT product_code AS "productCode", SUM(current_stock)::double precision AS "currentVehicleStock",
-        SUM(weekly_average_sales)::double precision AS "weeklyAverageSales"
+        SUM(weekly_average_sales)::double precision AS "weeklyAverageSales",
+        CASE
+          WHEN COALESCE(SUM(weekly_average_sales), 0) = 0 THEN 100::double precision
+          ELSE LEAST(100::double precision, (SUM(LEAST(current_stock, weekly_average_sales)) / SUM(weekly_average_sales)) * 100)
+        END AS "alignmentPercent"
       FROM vehicle_product
       GROUP BY product_code
       ORDER BY product_code

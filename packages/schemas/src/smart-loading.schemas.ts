@@ -44,6 +44,7 @@ export const smartLoadingManagementVehicleProductSchema = z.object({
   category: z.string().nullable(),
   currentVehicleStock: z.number(),
   weeklyAverageSales: z.number(),
+  alignmentPercent: z.number().min(0).max(100),
 });
 export type SmartLoadingManagementVehicleProduct = z.infer<typeof smartLoadingManagementVehicleProductSchema>;
 

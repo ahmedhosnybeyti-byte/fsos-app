@@ -474,6 +474,7 @@ export class SmartLoadingService {
           category: meta?.category ?? null,
           currentVehicleStock: toFiniteNumber(row.currentVehicleStock) ?? 0,
           weeklyAverageSales: toFiniteNumber(row.weeklyAverageSales) ?? 0,
+          alignmentPercent: toFiniteNumber(row.alignmentPercent) ?? 0,
         };
       }).filter((product) => !!product.productCode)
       : null;
