@@ -72,6 +72,7 @@ export type {
   SmartLoadingRecalculatedProduct,
   SmartLoadingRecalculateResult,
   SmartLoadingPriorityProduct,
+  SmartLoadingManagementCategoryStockAlignment,
   SmartLoadingAttention,
   SmartLoadingReadySession,
   SmartLoadingLostOpportunity,

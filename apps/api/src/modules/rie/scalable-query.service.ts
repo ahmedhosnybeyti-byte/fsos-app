@@ -263,6 +263,7 @@ export class RieScalableQueryService {
       Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} >= ${salesFrom} AND ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${salesTo}${routeScope({ field: "RouteID", source: "invoice_source" })}${customerCodes.length ? Prisma.sql` AND ${normalizedField({ field: "CustomerCode", source: "invoice_source" })} IN (${Prisma.join(customerCodes)})` : Prisma.sql` AND FALSE`}`,
     ], [], []);
     const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], []);
+    const productsCte = activeEntityRowsCte(input.companyId, "Products", "product", [], [], []);
     const inventoryRoute = normalizedField({ field: "RouteID", source: "inventory" });
     const inventoryProduct = normalizedField({ field: "ProductCode", source: "inventory" });
     const inventoryQuantity = numericField(textField({ field: "Quantity", source: "inventory" }));
@@ -271,8 +272,9 @@ export class RieScalableQueryService {
     const invoiceNo = normalizedField({ field: "InvoiceNo", source: "item" });
     const invoiceJoinNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
     const effectiveSaleRoute = Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "RouteID", source: "item" })}, '')), ''), ${textField({ field: "RouteID", source: "invoice" })}, '')))`;
+    const productCategory = Prisma.sql`NULLIF(BTRIM(COALESCE(${textField({ field: "Category", source: "product" })}, '')), '')`;
     const rows = await this.prisma.$queryRaw<RieManagementStockAlignmentRow[]>(Prisma.sql`
-      WITH ${inventoryCte}, ${invoiceCte}, ${itemsCte},
+      WITH ${inventoryCte}, ${invoiceCte}, ${itemsCte}, ${productsCte},
       inventory_latest AS MATERIALIZED (
         SELECT ${inventoryRoute} AS route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) AS report_date
         FROM inventory_active inventory
@@ -299,14 +301,36 @@ export class RieScalableQueryService {
           COALESCE(expected.expected_sales, 0)::double precision AS expected_sales
         FROM stock_by_route_product stock
         FULL OUTER JOIN expected_by_route_product expected ON expected.route_id = stock.route_id AND expected.product_code = stock.product_code
+      ),
+      product_categories AS MATERIALIZED (
+        SELECT DISTINCT ON (${normalizedField({ field: "ProductCode", source: "product" })})
+          ${normalizedField({ field: "ProductCode", source: "product" })} AS product_code,
+          ${productCategory} AS category
+        FROM product_active product
+        WHERE ${normalizedField({ field: "ProductCode", source: "product" })} <> ''
+        ORDER BY ${normalizedField({ field: "ProductCode", source: "product" })}, product."entity_key" DESC
+      ),
+      category_alignment AS MATERIALIZED (
+        SELECT categories.category,
+          CASE
+            WHEN COALESCE(SUM(alignment.expected_sales), 0) = 0 THEN 100::double precision
+            ELSE LEAST(100::double precision, (SUM(LEAST(alignment.current_stock, alignment.expected_sales)) / SUM(alignment.expected_sales)) * 100)
+          END AS alignment_percent
+        FROM route_product_alignment alignment
+        LEFT JOIN product_categories categories ON categories.product_code = alignment.product_code
+        GROUP BY categories.category
       )
       SELECT CASE
         WHEN COALESCE(SUM(expected_sales), 0) = 0 THEN 100::double precision
         ELSE LEAST(100::double precision, (SUM(LEAST(current_stock, expected_sales)) / SUM(expected_sales)) * 100)
-      END AS "alignmentPercent"
+      END AS "alignmentPercent",
+      COALESCE((SELECT JSONB_AGG(JSONB_BUILD_OBJECT(
+        'category', category,
+        'alignmentPercent', alignment_percent
+      ) ORDER BY category NULLS LAST) FROM category_alignment), '[]'::jsonb) AS "categoryAlignments"
       FROM route_product_alignment
     `);
-    return rows[0] ?? { alignmentPercent: 100 };
+    return rows[0] ?? { alignmentPercent: 100, categoryAlignments: [] };
   }
 
   /**

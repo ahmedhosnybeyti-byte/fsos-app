@@ -101,6 +101,12 @@ export const smartLoadingPriorityProductSchema = z.object({
 });
 export type SmartLoadingPriorityProduct = z.infer<typeof smartLoadingPriorityProductSchema>;
 
+export const smartLoadingManagementCategoryStockAlignmentSchema = z.object({
+  category: z.string().nullable(),
+  alignmentPercent: z.number().min(0).max(100),
+});
+export type SmartLoadingManagementCategoryStockAlignment = z.infer<typeof smartLoadingManagementCategoryStockAlignmentSchema>;
+
 export const smartLoadingAttentionSchema = z.object({
   id: z.string(),
   message: z.string(),
@@ -139,6 +145,7 @@ export const smartLoadingReadySessionSchema = z.object({
   state: z.literal("ready"),
   products: z.array(smartLoadingProductSchema),
   managementStockAlignmentPercent: z.number().min(0).max(100).nullable(),
+  managementCategoryStockAlignments: z.array(smartLoadingManagementCategoryStockAlignmentSchema).nullable(),
   staleCount: z.number().int().nonnegative(),
   managementStaleRouteProducts: z.array(smartLoadingManagementStaleRouteProductSchema).nullable(),
   staleProductPlans: z.array(smartLoadingStaleProductPlanSchema),

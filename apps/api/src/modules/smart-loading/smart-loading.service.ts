@@ -581,6 +581,7 @@ export class SmartLoadingService {
       state: "ready",
       products,
       managementStockAlignmentPercent: managementStockAlignment?.alignmentPercent ?? null,
+      managementCategoryStockAlignments: managementStockAlignment?.categoryAlignments ?? null,
       staleCount,
       managementStaleRouteProducts,
       staleProductPlans,

@@ -106,6 +106,11 @@ export interface RieManagementStockAlignmentQuery extends EntityQueryContext {
 }
 export interface RieManagementStockAlignmentRow {
   alignmentPercent: number;
+  categoryAlignments: RieManagementCategoryStockAlignment[];
+}
+export interface RieManagementCategoryStockAlignment {
+  category: string | null;
+  alignmentPercent: number;
 }
 
 /** Product-grain stale-purchase evidence; Product × Customer stays inside SQL. */

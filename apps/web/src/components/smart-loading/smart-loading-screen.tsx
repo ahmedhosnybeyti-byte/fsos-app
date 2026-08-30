@@ -23,7 +23,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTranslation } from "@/components/translation-provider";
 import { useAuth } from "@/hooks/use-auth";
-import type { SmartLoadingLostOpportunity, SmartLoadingManagementStaleRouteProduct, SmartLoadingPriorityProduct, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
+import type { SmartLoadingLostOpportunity, SmartLoadingManagementCategoryStockAlignment, SmartLoadingManagementStaleRouteProduct, SmartLoadingPriorityProduct, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
 import { smartLoadingApi } from "@/lib/api/smart-loading";
 import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult, type SmartLoadingRouteCustomer } from "@field-sales-os/schemas";
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
@@ -775,8 +775,11 @@ export function SmartLoadingScreen({
                   }
                   className="flex w-full items-center justify-between px-3 py-2 text-sm font-semibold"
                 >
-                  <span>
-                    {category} <span className="text-muted-foreground">({items.length})</span>
+                  <span className="flex items-center gap-2">
+                    <span>
+                      {category} <span className="text-muted-foreground">({items.length})</span>
+                    </span>
+                    {managementView && <ManagementCategoryAlignment category={category} alignments={session.managementCategoryStockAlignments} />}
                   </span>
                   <ChevronDown className={cn("h-4 w-4 transition-transform", !open && "-rotate-90")} />
                 </button>
@@ -1032,7 +1035,7 @@ function ProductRow({
           <span className="font-medium">{formatQuantity(expectedSales, locale)}</span>
           <span className="font-medium">{stockDifference === null ? "—" : formatQuantity(stockDifference, locale)}</span>
           <div className="min-w-0">
-            {stockCoveragePercent === null ? "—" : <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold", stockCoversExpected ? "bg-emerald-500/15 text-emerald-700" : "bg-red-500/15 text-red-700")} aria-label={label("smartLoading.stockStatus", "مؤشر الحالة")}><span aria-hidden="true">{stockCoversExpected ? "↑" : "↓"}</span>{formatQuantity(Math.round(stockCoveragePercent), locale)}%</span>}
+            {stockCoveragePercent === null ? "—" : <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ring-1", stockCoversExpected ? "bg-emerald-500/25 text-emerald-800 ring-emerald-500/50 dark:bg-emerald-400/30 dark:text-emerald-100 dark:ring-emerald-300/70" : "bg-rose-500/25 text-rose-800 ring-rose-500/50 dark:bg-rose-400/30 dark:text-rose-100 dark:ring-rose-300/70")} aria-label={label("smartLoading.stockStatus", "مؤشر الحالة")}><span aria-hidden="true">{stockCoversExpected ? "↑" : "↓"}</span>{formatQuantity(Math.round(stockCoveragePercent), locale)}%</span>}
           </div>
           <Button
             aria-label={label("smartLoading.removeProduct", "Remove product")}
@@ -1177,6 +1180,24 @@ function ManagementStockAlignmentMetric({ label, value, locale }: { label: strin
       </svg>
       </CardContent>
     </Card>
+  );
+}
+
+function ManagementCategoryAlignment({ category, alignments }: { category: string; alignments: SmartLoadingManagementCategoryStockAlignment[] | null }) {
+  const { locale, t } = useTranslation();
+  const alignment = alignments?.find((item) => (item.category ?? t("smartLoading.uncategorized")) === category);
+  if (!alignment) return null;
+  const percent = Math.round(alignment.alignmentPercent);
+  const status = percent < 50
+    ? { label: t("smartLoading.alignmentLow"), tone: "bg-rose-500/25 text-rose-800 ring-rose-500/50 dark:bg-rose-400/30 dark:text-rose-100 dark:ring-rose-300/70" }
+    : percent < 75
+      ? { label: t("smartLoading.alignmentMedium"), tone: "bg-amber-500/25 text-amber-800 ring-amber-500/50 dark:bg-amber-400/30 dark:text-amber-100 dark:ring-amber-300/70" }
+      : { label: t("smartLoading.alignmentGood"), tone: "bg-emerald-500/25 text-emerald-800 ring-emerald-500/50 dark:bg-emerald-400/30 dark:text-emerald-100 dark:ring-emerald-300/70" };
+
+  return (
+    <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1", status.tone)}>
+      {formatQuantity(percent, locale)}% | {status.label}
+    </span>
   );
 }
 
