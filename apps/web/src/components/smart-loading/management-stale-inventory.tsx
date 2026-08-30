@@ -45,7 +45,7 @@ export function ManagementStaleInventory({ cases, onSelectPerson }: ManagementSt
   return (
     <section
       aria-labelledby="management-stale-inventory-title"
-      className="group relative w-full max-w-sm"
+      className="group relative w-full max-w-sm self-start"
     >
       <div id="management-stale-inventory-title">
         <KpiCard

@@ -62,7 +62,7 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson }: Management
   return (
     <section
       aria-labelledby="management-loading-risk-title"
-      className="group relative w-full max-w-sm"
+      className="group relative w-full max-w-sm self-start"
       onMouseEnter={() => setPopoverOpen(true)}
       onMouseLeave={() => setPopoverOpen(false)}
     >
