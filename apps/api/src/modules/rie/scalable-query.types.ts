@@ -136,7 +136,7 @@ export interface RieManagementLoadingRiskQuery extends EntityQueryContext {
   personLevel: "manager" | "supervisor" | "sales_rep";
 }
 export interface RieManagementLoadingRiskRow {
-  people: { employeeId: string; employeeName: string; routes: { routeId: string; products: { productCode: string; productName: string; expectedDemand: number; currentVehicleStock: number; quantityGap: number }[] }[] }[];
+  people: { employeeId: string; employeeName: string; affectedRouteCount: number; affectedProductCount: number; routes: { routeId: string; products: { productCode: string; productName: string; expectedDemand: number; currentVehicleStock: number; quantityGap: number }[] }[] }[];
 }
 
 /** Product-grain stale-purchase evidence; Product × Customer stays inside SQL. */

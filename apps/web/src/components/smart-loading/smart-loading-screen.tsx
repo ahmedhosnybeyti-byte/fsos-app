@@ -29,7 +29,7 @@ import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingRecalculateInput, ty
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
 import { categoryAddedProductCount, formatLostOpportunityQuantity, formatLostOpportunityQuantityInput, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
 import { calculateSuggestedLoading } from "./suggested-loading";
-import { ExecutiveDecisionCenter, type ExecutiveDecisionScope } from "./executive-decision-center";
+import { ManagementLoadingRisk } from "./management-loading-risk";
 
 type Inputs = { confirmedOrders: number; safetyStock: number; vehicleStock?: number; manual?: number };
 type LostOpportunityAddition = {
@@ -91,7 +91,6 @@ export function SmartLoadingScreen({
   const { locale, t } = useTranslation();
   const { user } = useAuth();
   const managementView = isManagementRole(user?.role.code);
-  const [managementScope, setManagementScope] = useState<ExecutiveDecisionScope>({});
   const label = (key: string, fallback: string) => {
     const translated = t(key as never);
     return translated === key ? fallback : translated;
@@ -678,17 +677,7 @@ export function SmartLoadingScreen({
         </div>
       </header>
 
-      {managementView && <ExecutiveDecisionCenter
-        session={session}
-        scope={managementScope}
-        locale={locale}
-        onDecision={(kind) => {
-          if (kind === "stale") { setPanel("stale"); return; }
-          if (kind === "priority") { setPanel("priority"); return; }
-          if (kind === "opportunities") { setLostOpportunitiesOpen(true); setLostOpportunityWarning(null); return; }
-          document.getElementById("smart-loading-recommendations")?.scrollIntoView({ behavior: "smooth", block: "start" });
-        }}
-      />}
+      {managementView && <ManagementLoadingRisk targetDate={targetDate} locale={locale} />}
 
       <SmartLoadingPhaseTwo
         session={session}
@@ -720,7 +709,6 @@ export function SmartLoadingScreen({
         roleCode={user?.role.code}
         onSalesRepChange={onSalesRepChange}
         onManagementScopeChange={(scope) => {
-          setManagementScope({ managerName: scope.managerName, supervisorName: scope.supervisorName, salesRepName: scope.salesRepName });
           onManagementScopeChange(scope);
         }}
       />
