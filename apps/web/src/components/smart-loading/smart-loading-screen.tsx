@@ -8,6 +8,7 @@ import {
   ChevronDown,
   ClipboardCheck,
   Download,
+  Gauge,
   Minus,
   PackagePlus,
   Plus,
@@ -21,6 +22,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { KpiCard } from "@/components/dashboard/kpi-card";
 import { useTranslation } from "@/components/translation-provider";
 import { useAuth } from "@/hooks/use-auth";
 import type { SmartLoadingLostOpportunity, SmartLoadingManagementCategoryStockAlignment, SmartLoadingManagementVehicleProduct, SmartLoadingPriorityProduct, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
@@ -822,37 +825,33 @@ export function SmartLoadingScreen({
       {panel === "stale" && <ProductListPopover rows={staleRows} stale referenceDate={staleReferenceDate} onClose={() => setPanel(null)} />}
 
       {managementView && (
-        <div role="tablist" aria-label={t("smartLoading.title")} className="glass-card rise-in inline-flex rounded-lg border border-border bg-background/30 p-1">
-          <button
+        <div role="tablist" aria-label={t("smartLoading.title")} className="glass-card rise-in inline-flex gap-1 p-1">
+          <Button
             type="button"
             role="tab"
             aria-selected={managementContext === "loading-risk"}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-              managementContext === "loading-risk" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-            )}
+            variant={managementContext === "loading-risk" ? "secondary" : "ghost"}
+            size="sm"
             onClick={() => {
               setSelectedStaleProductCode(null);
               setManagementContext("loading-risk");
             }}
           >
             {t("smartLoading.loadingRisk")}
-          </button>
-          <button
+          </Button>
+          <Button
             type="button"
             role="tab"
             aria-selected={managementContext === "stale-inventory"}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-              managementContext === "stale-inventory" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-            )}
+            variant={managementContext === "stale-inventory" ? "secondary" : "ghost"}
+            size="sm"
             onClick={() => {
               setSelectedStaleProductCode(null);
               setManagementContext("stale-inventory");
             }}
           >
             {t("smartLoading.staleInventory")}
-          </button>
+          </Button>
         </div>
       )}
 
@@ -985,29 +984,37 @@ export function SmartLoadingScreen({
       )}
 
       {managementView && managementContext === "stale-inventory" && !selectedStalePlan && (
-        <section id="smart-loading-recommendations" className="glass-card rise-in space-y-4 p-4 max-md:p-3">
-          <h2 className="text-xl font-semibold">{t("smartLoading.staleInventory")}</h2>
-          <StaleInventoryTable
-            plans={session.staleProductPlans}
-            targetDate={session.targetDate}
-            onSelectProduct={(plan) => {
-              setSelectedStaleProductCode(plan.productCode);
-            }}
-          />
-        </section>
+        <Card id="smart-loading-recommendations" className="glass-card rise-in">
+          <CardHeader>
+            <CardTitle>{t("smartLoading.staleInventory")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <StaleInventoryTable
+              plans={session.staleProductPlans}
+              targetDate={session.targetDate}
+              onSelectProduct={(plan) => {
+                setSelectedStaleProductCode(plan.productCode);
+              }}
+            />
+          </CardContent>
+        </Card>
       )}
 
       {managementView && managementContext === "stale-inventory" && selectedStalePlan && (
-        <section id="smart-loading-recommendations" className="glass-card rise-in space-y-4 p-4 max-md:p-3">
-          <h2 className="text-xl font-semibold">{t("smartLoading.disposalPlan")}</h2>
-          <StaleDisposalPlan
-            plan={selectedStalePlan}
-            targetDate={session.targetDate}
-            onBack={() => {
-              setSelectedStaleProductCode(null);
-            }}
-          />
-        </section>
+        <Card id="smart-loading-recommendations" className="glass-card rise-in">
+          <CardHeader>
+            <CardTitle>{t("smartLoading.disposalPlan")}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <StaleDisposalPlan
+              plan={selectedStalePlan}
+              targetDate={session.targetDate}
+              onBack={() => {
+                setSelectedStaleProductCode(null);
+              }}
+            />
+          </CardContent>
+        </Card>
       )}
     </div>
   );
@@ -1333,28 +1340,6 @@ function MetricButton({ label, value, description, onClick }: { label: string; v
       <p className="mt-1 text-lg font-semibold">{value}</p>
       {description && <p className="mt-1 text-[10px] leading-4 text-muted-foreground">{description}</p>}
     </button>
-  );
-}
-
-function ManagementStockAlignmentMetric({ label, value, locale }: { label: string; value: number; locale: "ar" | "en" }) {
-  const percent = Math.min(100, Math.max(0, value));
-  const needleRotation = -90 + percent * 1.8;
-  const tone = percent < 50 ? "text-rose-500" : percent < 75 ? "text-amber-500" : "text-emerald-500";
-  return (
-    <Card className="h-24 min-w-0 border-border/70 bg-background/60 shadow-none">
-      <CardContent className="flex h-full items-center justify-between px-3 py-2">
-      <div className="min-w-0">
-        <p className="truncate text-[10px] text-muted-foreground">{label}</p>
-        <p className={cn("mt-1 text-xl font-semibold", tone)}>{formatQuantity(Math.round(percent), locale)}%</p>
-      </div>
-      <svg viewBox="0 0 112 64" className="h-16 w-28 shrink-0" role="img" aria-label={`${label}: ${Math.round(percent)}%`}>
-        <path d="M 14 56 A 42 42 0 0 1 98 56" fill="none" stroke="currentColor" strokeWidth="9" className="text-muted-foreground/30" strokeLinecap="round" />
-        <path d="M 14 56 A 42 42 0 0 1 98 56" fill="none" stroke="currentColor" strokeWidth="9" className={tone} strokeLinecap="round" strokeDasharray={`${percent * 1.32} 132`} />
-        <line x1="56" y1="56" x2="56" y2="22" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className={tone} transform={`rotate(${needleRotation} 56 56)`} />
-        <circle cx="56" cy="56" r="4" fill="currentColor" className={tone} />
-      </svg>
-      </CardContent>
-    </Card>
   );
 }
 
@@ -1744,8 +1729,58 @@ function ManagementHierarchyFilters({ locale, managementStockAlignmentPercent, o
   const hierarchy = useQuery({ queryKey: ["smart-loading", "management-hierarchy", managerId, supervisorId], queryFn: () => smartLoadingApi.getHierarchyOptions(managerId || undefined, supervisorId || undefined), placeholderData: (previous) => previous });
   const tr = locale === "ar";
   const optionLabel = (options: { value: string; label: string }[] | undefined, value: string) => options?.find((option) => option.value === value)?.label;
-  const Select = ({ label, value, options, placeholder, onChange }: { label: string; value: string; options: { value: string; label: string }[]; placeholder: string; onChange: (value: string) => void }) => <label className="grid gap-1 text-xs text-muted-foreground"><span>{label}</span><select className="h-8 rounded-md border bg-background px-2 text-sm text-foreground" value={value} onChange={(event) => onChange(event.target.value)}><option value="">{placeholder}</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
-  return <Card dir={tr ? "rtl" : "ltr"} className="glass-card rise-in relative z-10 order-2 flex h-full min-h-0 flex-col lg:col-start-1 lg:row-start-1 lg:row-span-2"><CardHeader className="shrink-0 px-4 pb-2 pt-4"><CardTitle className="text-base">{tr ? "الطلبات المؤكدة المجمعة" : "Aggregated confirmed orders"}</CardTitle><CardDescription>{tr ? "حدد التسلسل الإداري للوصول إلى المندوب." : "Select the management hierarchy to reach a sales rep."}</CardDescription></CardHeader><CardContent className="space-y-4 p-4 pt-1"><div className="grid gap-2 sm:grid-cols-3"><Select label={tr ? "المدير" : "Manager"} value={managerId} options={hierarchy.data?.managers ?? []} placeholder={tr ? "كل المدراء" : "All managers"} onChange={(value) => { onManagementScopeChange({ managerId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, value) }); }} /><Select label={tr ? "المشرف" : "Supervisor"} value={supervisorId} options={hierarchy.data?.supervisors ?? []} placeholder={tr ? "كل المشرفين" : "All supervisors"} onChange={(value) => { onManagementScopeChange({ managerId: managerId || undefined, supervisorId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, managerId), supervisorName: optionLabel(hierarchy.data?.supervisors, value) }); }} /><Select label={tr ? "مندوب المبيعات" : "Sales Rep"} value={salesRepId} options={hierarchy.data?.salesReps ?? []} placeholder={tr ? "اختر مندوبًا" : "Select a sales rep"} onChange={(value) => { onManagementScopeChange({ managerId: managerId || undefined, supervisorId: supervisorId || undefined, managerName: optionLabel(hierarchy.data?.managers, managerId), supervisorName: optionLabel(hierarchy.data?.supervisors, value), salesRepId: value || undefined, salesRepName: optionLabel(hierarchy.data?.salesReps, value) }); }} /></div>{managementStockAlignmentPercent !== null && <div dir="ltr" className="grid grid-cols-3 gap-2"><ManagementStockAlignmentMetric label={tr ? "توافق مخزون الإدارة" : "Management Stock Alignment"} value={managementStockAlignmentPercent} locale={locale} /><Card aria-label="Reserved management KPI" className="glass-card h-24 border-dashed border-border/60 bg-background/30 shadow-none" /></div>}</CardContent></Card>;
+  const scopeOptions = (options: { value: string; label: string }[], placeholder: string, value: string, onChange: (value: string) => void) => (
+    <Select value={value || "all"} onValueChange={(nextValue) => onChange(nextValue === "all" ? "" : nextValue)}>
+      <SelectTrigger>
+        <SelectValue placeholder={placeholder} />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">{placeholder}</SelectItem>
+        {options.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  );
+
+  return (
+    <Card dir={tr ? "rtl" : "ltr"} className="glass-card rise-in relative z-10 order-2 flex h-full min-h-0 flex-col lg:col-start-1 lg:row-start-1 lg:row-span-2">
+      <CardHeader className="shrink-0">
+        <CardTitle className="text-base">{t("smartLoading.aggregatedConfirmedOrders")}</CardTitle>
+        <CardDescription>{tr ? "حدد التسلسل الإداري للوصول إلى المندوب." : "Select the management hierarchy to reach a sales rep."}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-2">
+            <Label className="text-xs">{t("fsos360.manager")}</Label>
+            {scopeOptions(hierarchy.data?.managers ?? [], tr ? "كل المدراء" : "All managers", managerId, (value) => {
+              onManagementScopeChange({ managerId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, value) });
+            })}
+          </div>
+          <div className="grid gap-2">
+            <Label className="text-xs">{t("fsos360.supervisor")}</Label>
+            {scopeOptions(hierarchy.data?.supervisors ?? [], tr ? "كل المشرفين" : "All supervisors", supervisorId, (value) => {
+              onManagementScopeChange({ managerId: managerId || undefined, supervisorId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, managerId), supervisorName: optionLabel(hierarchy.data?.supervisors, value) });
+            })}
+          </div>
+          <div className="grid gap-2">
+            <Label className="text-xs">{t("fsos360.salesRep")}</Label>
+            {scopeOptions(hierarchy.data?.salesReps ?? [], tr ? "اختر مندوبًا" : "Select a sales rep", salesRepId, (value) => {
+              onManagementScopeChange({ managerId: managerId || undefined, supervisorId: supervisorId || undefined, managerName: optionLabel(hierarchy.data?.managers, managerId), supervisorName: optionLabel(hierarchy.data?.supervisors, value), salesRepId: value || undefined, salesRepName: optionLabel(hierarchy.data?.salesReps, value) });
+            })}
+          </div>
+        </div>
+        {managementStockAlignmentPercent !== null && (
+          <div dir="ltr" className="max-w-xs">
+            <KpiCard
+              icon={Gauge}
+              label={tr ? "توافق مخزون الإدارة" : "Management Stock Alignment"}
+              value={`${formatQuantity(Math.round(Math.min(100, Math.max(0, managementStockAlignmentPercent))), locale)}%`}
+              glow="ai"
+            />
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function SessionMetric({ label, value }: { label: string; value: string }) { return <div><p className="truncate text-[11px] text-muted-foreground">{label}</p><p className="font-semibold">{value}</p></div>; }
