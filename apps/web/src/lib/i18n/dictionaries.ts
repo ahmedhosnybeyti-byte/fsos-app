@@ -1329,6 +1329,7 @@ export type TranslationKey =
   | "smartLoading.priorityProductsPanelTitle"
   | "smartLoading.close"
   | "smartLoading.uncategorized"
+  | "smartLoading.managementStaleProducts"
   | "smartLoading.restore"
   | "smartLoading.manualOverrideNote"
   | "smartLoading.quantityUnit"
@@ -2769,6 +2770,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.priorityProductsPanelTitle": "أصناف أولوية",
     "smartLoading.close": "إغلاق",
     "smartLoading.uncategorized": "غير مصنف",
+    "smartLoading.managementStaleProducts": "الأصناف الراكدة",
     "smartLoading.restore": "استعادة",
     "smartLoading.manualOverrideNote": "تم تعديل الكمية يدويًا (الأصل: {value})",
     "smartLoading.quantityUnit": "صنف",
@@ -4223,6 +4225,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.priorityProductsPanelTitle": "Priority Products",
     "smartLoading.close": "Close",
     "smartLoading.uncategorized": "Uncategorized",
+    "smartLoading.managementStaleProducts": "Stale Products",
     "smartLoading.restore": "Restore",
     "smartLoading.manualOverrideNote": "Quantity manually adjusted (original: {value})",
     "smartLoading.quantityUnit": "product",
