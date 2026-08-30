@@ -113,39 +113,26 @@ export function StaleInventoryTable({ plans, targetDate, onSelectProduct, showBu
                   ))}
                 </ol>
               </section>
-              <div className="overflow-x-auto rounded-lg border border-border/70 bg-background/20">
-                <Table className="min-w-[640px]">
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t("smartLoading.productLabel")}</TableHead>
-                      <TableHead>{t("smartLoading.vehicleStock")}</TableHead>
-                      <TableHead>{t("smartLoading.daysStale")}</TableHead>
-                      <TableHead>{t("smartLoading.lastSale")}</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {group.plans.map((plan) => (
-                      <TableRow
-                        key={plan.productCode}
-                        role="button"
-                        tabIndex={0}
-                        className="cursor-pointer"
-                        onClick={() => onSelectProduct(plan)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
-                            event.preventDefault();
-                            onSelectProduct(plan);
-                          }
-                        }}
-                      >
-                        <TableCell className="font-medium">{plan.productName}</TableCell>
-                        <TableCell>{formatQuantity(plan.currentVehicleStock, locale)}</TableCell>
-                        <TableCell>{formatQuantity(staleDaysSince(plan.lastSaleDate, targetDate), locale)} {t("smartLoading.staleDaysUnit")}</TableCell>
-                        <TableCell>{formatPurchaseDate(plan.lastSaleDate)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+              <div className="overflow-x-auto rounded-lg border border-border bg-background/30">
+                <div className="grid min-w-[640px] grid-cols-[minmax(0,1fr)_10rem_8rem_10rem] gap-3 border-b border-border/60 bg-secondary/30 px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  <span>{t("smartLoading.productLabel")}</span>
+                  <span>{t("smartLoading.vehicleStock")}</span>
+                  <span>{t("smartLoading.daysStale")}</span>
+                  <span>{t("smartLoading.lastSale")}</span>
+                </div>
+                {group.plans.map((plan) => (
+                  <button
+                    key={plan.productCode}
+                    type="button"
+                    className="grid min-w-[640px] w-full grid-cols-[minmax(0,1fr)_10rem_8rem_10rem] gap-3 px-4 py-3 text-start text-sm transition-colors hover:bg-secondary/50"
+                    onClick={() => onSelectProduct(plan)}
+                  >
+                    <span className="font-medium">{plan.productName}</span>
+                    <span>{formatQuantity(plan.currentVehicleStock, locale)}</span>
+                    <span>{formatQuantity(staleDaysSince(plan.lastSaleDate, targetDate), locale)} {t("smartLoading.staleDaysUnit")}</span>
+                    <span>{formatPurchaseDate(plan.lastSaleDate)}</span>
+                  </button>
+                ))}
               </div>
             </CardContent>
           )}
