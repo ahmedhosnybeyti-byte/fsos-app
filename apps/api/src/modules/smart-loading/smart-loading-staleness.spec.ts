@@ -102,12 +102,12 @@ test("management vehicle monitor returns every inventory product at Product grai
     targetDate: "2026-08-10",
     salesFrom: "2026-05-10",
     salesTo: "2026-08-10",
+    customerCodes: ["customer-a", "customer-b"],
     routeIds: Array.from({ length: 5_001 }, (_, index) => `route-${index}`),
   });
 
   assert.deepEqual(rows, expected);
-  assert.match(statement!.strings.join("?"), /FROM stock_by_route_product stock/);
-  assert.match(statement!.strings.join("?"), /LEFT JOIN sales_by_route_product/);
+  assert.match(statement!.strings.join("?"), /FULL OUTER JOIN sales_by_route_product/);
   assert.match(statement!.strings.join("?"), /GROUP BY product_code/);
   assert.match(statement!.strings.join("?"), /SUM\(LEAST\(current_stock, weekly_average_sales\)\)/);
 });

@@ -405,7 +405,7 @@ export class SmartLoadingService {
         ? timed("management-stock-alignment", () => this.rieFacade.queryManagementStockAlignment({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, salesFrom: isoDay(windowStartMs), salesTo: isoDay(nowMs), customerCodes: [...nextRouteCustomers.keys()] }))
         : Promise.resolve(null),
       useManagementStaleGrain
-        ? timed("management-vehicle-products", () => this.rieFacade.queryManagementVehicleProducts({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, salesFrom: isoDay(windowStartMs), salesTo: isoDay(nowMs) }))
+        ? timed("management-vehicle-products", () => this.rieFacade.queryManagementVehicleProducts({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, salesFrom: isoDay(windowStartMs), salesTo: isoDay(nowMs), customerCodes: [...nextRouteCustomers.keys()] }))
         : Promise.resolve([]),
     ]);
     const activeVehicleRouteIds = new Set<string>();

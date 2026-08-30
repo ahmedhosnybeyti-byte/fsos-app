@@ -251,6 +251,7 @@ export class RieScalableQueryService {
     const effectiveRoutes = allowedRouteIds
       ? [...allowedRouteIds].filter((routeId) => requestedRoutes === null || requestedRoutes.has(routeId))
       : requestedRoutes === null ? null : [...requestedRoutes];
+    const customerCodes = [...new Set(input.customerCodes.map((code) => code.trim().toLowerCase()).filter(Boolean))];
     const routeScope = (field: RieQueryField): Prisma.Sql => effectiveRoutes === null
       ? Prisma.empty
       : effectiveRoutes.length
@@ -260,7 +261,7 @@ export class RieScalableQueryService {
       Prisma.sql`${dateText(textField({ field: "ReportDate", source: "inventory_source" }))} <= ${targetDate}${routeScope({ field: "RouteID", source: "inventory_source" })}`,
     ], [], []);
     const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [
-      Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} >= ${salesFrom} AND ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${salesTo}${routeScope({ field: "RouteID", source: "invoice_source" })}`,
+      Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} >= ${salesFrom} AND ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${salesTo}${routeScope({ field: "RouteID", source: "invoice_source" })}${customerCodes.length ? Prisma.sql` AND ${normalizedField({ field: "CustomerCode", source: "invoice_source" })} IN (${Prisma.join(customerCodes)})` : Prisma.sql` AND FALSE`}`,
     ], [], []);
     const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], []);
     const inventoryRoute = normalizedField({ field: "RouteID", source: "inventory" });
@@ -290,15 +291,16 @@ export class RieScalableQueryService {
         SELECT ${effectiveSaleRoute} AS route_id, ${itemProduct} AS product_code, SUM(${itemQuantity})::double precision / 12.0 AS weekly_average_sales
         FROM item_active item
         INNER JOIN invoice_active invoice ON ${invoiceNo} = ${invoiceJoinNo}
-        INNER JOIN (SELECT DISTINCT route_id FROM stock_by_route_product) stocked_routes ON stocked_routes.route_id = ${effectiveSaleRoute}
         WHERE ${itemProduct} <> '' AND ${effectiveSaleRoute} <> ''
         GROUP BY ${effectiveSaleRoute}, ${itemProduct}
       ),
       vehicle_product AS MATERIALIZED (
-        SELECT stock.route_id, stock.product_code, stock.current_stock,
+        SELECT COALESCE(stock.route_id, sales.route_id) AS route_id,
+          COALESCE(stock.product_code, sales.product_code) AS product_code,
+          COALESCE(stock.current_stock, 0)::double precision AS current_stock,
           COALESCE(sales.weekly_average_sales, 0)::double precision AS weekly_average_sales
         FROM stock_by_route_product stock
-        LEFT JOIN sales_by_route_product sales ON sales.route_id = stock.route_id AND sales.product_code = stock.product_code
+        FULL OUTER JOIN sales_by_route_product sales ON sales.route_id = stock.route_id AND sales.product_code = stock.product_code
       )
       SELECT product_code AS "productCode", SUM(current_stock)::double precision AS "currentVehicleStock",
         SUM(weekly_average_sales)::double precision AS "weeklyAverageSales",

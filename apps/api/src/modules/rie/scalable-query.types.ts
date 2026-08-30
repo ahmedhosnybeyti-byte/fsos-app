@@ -119,6 +119,7 @@ export interface RieManagementVehicleProductsQuery extends EntityQueryContext {
   targetDate: string;
   salesFrom: string;
   salesTo: string;
+  customerCodes: readonly string[];
 }
 export interface RieManagementVehicleProductRow {
   productCode: string;
