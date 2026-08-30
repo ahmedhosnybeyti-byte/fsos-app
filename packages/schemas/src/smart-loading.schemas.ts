@@ -88,9 +88,11 @@ export const smartLoadingStaleProductPlanSchema = z.object({
 });
 export type SmartLoadingStaleProductPlan = z.infer<typeof smartLoadingStaleProductPlanSchema>;
 
-/** Management-only popup detail: each stale Route × Product state remains distinct. */
+/** Management-only stale detail: each Route × Product state remains distinct. */
 export const smartLoadingManagementStaleRouteProductSchema = z.object({
   routeId: z.string(),
+  responsibleEmployeeId: z.string(),
+  responsibleEmployeeName: z.string(),
   productCode: z.string(),
   productName: z.string(),
   category: z.string().nullable(),

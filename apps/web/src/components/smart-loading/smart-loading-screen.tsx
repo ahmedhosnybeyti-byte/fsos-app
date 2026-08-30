@@ -23,7 +23,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTranslation } from "@/components/translation-provider";
 import { useAuth } from "@/hooks/use-auth";
-import type { SmartLoadingLostOpportunity, SmartLoadingManagementCategoryStockAlignment, SmartLoadingManagementStaleRouteProduct, SmartLoadingManagementVehicleProduct, SmartLoadingPriorityProduct, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
+import type { SmartLoadingLostOpportunity, SmartLoadingManagementCategoryStockAlignment, SmartLoadingManagementVehicleProduct, SmartLoadingPriorityProduct, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
 import { smartLoadingApi } from "@/lib/api/smart-loading";
 import {
   DEFAULT_SMART_LOADING_STALE_DAYS,
@@ -35,6 +35,7 @@ import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
 import { categoryAddedProductCount, formatLostOpportunityQuantity, formatLostOpportunityQuantityInput, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
 import { calculateSuggestedLoading } from "./suggested-loading";
 import { ManagementLoadingRisk } from "./management-loading-risk";
+import { ManagementStaleInventory } from "./management-stale-inventory";
 
 type Inputs = { confirmedOrders: number; safetyStock: number; vehicleStock?: number; manual?: number };
 type LostOpportunityAddition = {
@@ -693,33 +694,47 @@ export function SmartLoadingScreen({
       </header>
 
       {managementView && (
-        <ManagementLoadingRisk
-          targetDate={targetDate}
-          onSelectPerson={(person) => {
-            const options = user?.role.code === "COMPANY_ADMIN"
-              ? managementHierarchy.data?.managers
-              : user?.role.code === "MANAGER"
-                ? managementHierarchy.data?.supervisors
-                : managementHierarchy.data?.salesReps;
-            const selectedOption = options?.find((option) => option.label === person.employeeName);
-            if (!selectedOption) return;
-            const scope = user?.role.code === "COMPANY_ADMIN"
-              ? { managerId: selectedOption.value, managerName: selectedOption.label }
-              : user?.role.code === "MANAGER"
-                ? { supervisorId: selectedOption.value, supervisorName: selectedOption.label }
-                : { salesRepId: selectedOption.value, salesRepName: selectedOption.label };
-            onManagementScopeChange(scope);
-            requestAnimationFrame(() => {
-              document.getElementById("smart-loading-recommendations")?.scrollIntoView({ behavior: "smooth", block: "start" });
-            });
-          }}
-          onViewAll={() => {
-            onManagementScopeChange({});
-            requestAnimationFrame(() => {
-              document.getElementById("smart-loading-recommendations")?.scrollIntoView({ behavior: "smooth", block: "start" });
-            });
-          }}
-        />
+        <div className="grid gap-3 lg:grid-cols-2">
+          <ManagementLoadingRisk
+            targetDate={targetDate}
+            onSelectPerson={(person) => {
+              const options = user?.role.code === "COMPANY_ADMIN"
+                ? managementHierarchy.data?.managers
+                : user?.role.code === "MANAGER"
+                  ? managementHierarchy.data?.supervisors
+                  : managementHierarchy.data?.salesReps;
+              const selectedOption = options?.find((option) => option.label === person.employeeName);
+              if (!selectedOption) return;
+              const scope = user?.role.code === "COMPANY_ADMIN"
+                ? { managerId: selectedOption.value, managerName: selectedOption.label }
+                : user?.role.code === "MANAGER"
+                  ? { supervisorId: selectedOption.value, supervisorName: selectedOption.label }
+                  : { salesRepId: selectedOption.value, salesRepName: selectedOption.label };
+              onManagementScopeChange(scope);
+              requestAnimationFrame(() => {
+                document.getElementById("smart-loading-recommendations")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              });
+            }}
+            onViewAll={() => {
+              onManagementScopeChange({});
+              requestAnimationFrame(() => {
+                document.getElementById("smart-loading-recommendations")?.scrollIntoView({ behavior: "smooth", block: "start" });
+              });
+            }}
+          />
+          <ManagementStaleInventory
+            cases={session.managementStaleRouteProducts ?? []}
+            onSelectPerson={(person) => {
+              const scope = user?.role.code === "COMPANY_ADMIN"
+                ? { managerId: person.employeeId, managerName: person.employeeName }
+                : user?.role.code === "MANAGER"
+                  ? { supervisorId: person.employeeId, supervisorName: person.employeeName }
+                  : { salesRepId: person.employeeId, salesRepName: person.employeeName };
+              onManagementScopeChange(scope);
+            }}
+            onViewAll={() => onManagementScopeChange({})}
+          />
+        </div>
       )}
 
       <SmartLoadingPhaseTwo
@@ -797,9 +812,7 @@ export function SmartLoadingScreen({
       )}
 
       {panel === "priority" && <PriorityProductsPopover groups={priorityGroups} openGroups={openPriorityGroups} onToggleGroup={(category) => setOpenPriorityGroups((current) => { const next = new Set(current); next.has(category) ? next.delete(category) : next.add(category); return next; })} onClose={() => setPanel(null)} />}
-      {panel === "stale" && (session.managementStaleRouteProducts !== null
-        ? <ManagementStaleRouteProductPopover cases={session.managementStaleRouteProducts} referenceDate={staleReferenceDate} onClose={() => setPanel(null)} />
-        : <ProductListPopover rows={staleRows} stale referenceDate={staleReferenceDate} onClose={() => setPanel(null)} />)}
+      {panel === "stale" && <ProductListPopover rows={staleRows} stale referenceDate={staleReferenceDate} onClose={() => setPanel(null)} />}
 
       <Card id="smart-loading-recommendations" className="glass-card">
         <CardHeader className="pb-3">
@@ -1631,7 +1644,7 @@ function SmartLoadingPhaseTwo(props: SmartLoadingPhaseTwoProps) {
   }
 
   if (isManagementRole(props.roleCode)) {
-    return <ManagementHierarchyFilters locale={props.locale} managementStockAlignmentPercent={props.session.managementStockAlignmentPercent} managementStaleCount={props.session.staleCount} onManagementStaleClick={props.onStaleClick} onManagementScopeChange={props.onManagementScopeChange} managementScope={props.managementScope} />;
+    return <ManagementHierarchyFilters locale={props.locale} managementStockAlignmentPercent={props.session.managementStockAlignmentPercent} onManagementScopeChange={props.onManagementScopeChange} managementScope={props.managementScope} />;
   }
 
   return <>
@@ -1640,41 +1653,18 @@ function SmartLoadingPhaseTwo(props: SmartLoadingPhaseTwoProps) {
         <Card className="flex h-full min-h-0 flex-col"><CardHeader className="shrink-0 pb-2"><div className="flex items-center justify-between gap-2"><div><CardTitle className="text-base">{props.label("smartLoading.routeSetup", "Route setup")}</CardTitle><CardDescription>{props.label("smartLoading.targetDate", "Prepare loading for")}: {props.targetDate}</CardDescription></div><Button size="sm" variant="outline" onClick={openEditor}>{props.label("smartLoading.editRoute", "Edit route")}</Button></div></CardHeader><CardContent className="grid gap-2 text-sm sm:grid-cols-2"><div><Label htmlFor="smart-loading-from-date" className="text-xs text-muted-foreground">{props.label("smartLoading.fromDate", "From date")}</Label><Input id="smart-loading-from-date" className="mt-1 h-8" type="date" value={props.fromDate} max={props.toDate} onChange={(event) => props.onFromDateChange(event.target.value)} /></div><div><Label htmlFor="smart-loading-to-date" className="text-xs text-muted-foreground">{props.label("smartLoading.toDate", "To date")}</Label><Input id="smart-loading-to-date" className="mt-1 h-8" type="date" value={props.toDate} min={props.fromDate} onChange={(event) => props.onToDateChange(event.target.value)} /></div><div><Label htmlFor="smart-loading-visits" className="text-xs text-muted-foreground">{props.label("smartLoading.visitsPerWeek", "Route visits pattern")}</Label><select id="smart-loading-visits" className="mt-1 h-8 w-full rounded-md border bg-background px-2" value={props.visitsPerWeek} onChange={(event) => changeVisits(event.target.value)}><option value="1">{props.label("smartLoading.onceWeekly", "Once weekly")}</option><option value="2">{props.label("smartLoading.twiceWeekly", "Twice weekly")}</option><option value="6">{props.label("smartLoading.sixWeekly", "6 times weekly")}</option></select></div><div><Label htmlFor="smart-loading-stale-days" className="text-xs text-muted-foreground">{props.label("smartLoading.staleDays", "Stale after days")}</Label><Input id="smart-loading-stale-days" className="mt-0.5 h-11 sm:h-8" type="number" min={1} value={props.staleDaysThreshold} onChange={(event) => props.onStaleDaysThresholdChange(Math.max(1, Number(event.target.value) || 1))} /></div>{days === 0 && <p role="alert" className="sm:col-span-2 text-xs text-destructive">{props.label("smartLoading.invalidDateRange", "The start date must be on or before the end date.")}</p>}</CardContent></Card>
         <Card className="glass-hero flex h-full min-h-0 flex-col"><CardHeader className="pb-1 pt-3"><CardTitle className="text-sm">{props.label("smartLoading.summaryTitle", "Loading summary")}</CardTitle></CardHeader><CardContent className="grid grid-cols-2 gap-2 pb-3 text-xs"><Metric label={props.label("smartLoading.productsToLoad", "Products to load")} value={formatQuantity(props.loadingSummary.productsToLoad, props.locale)} /><Metric label={props.label("smartLoading.totalQuantity", "Total quantity")} value={formatQuantity(props.loadingSummary.totalQuantity, props.locale)} strong /><MetricButton label={props.label("smartLoading.operationalPriorityProducts", "Priority products")} value={formatQuantity(props.loadingSummary.priorityProducts, props.locale)} onClick={props.onPriorityClick} /><MetricButton label={props.label("smartLoading.staleProducts", "Stale products")} value={formatQuantity(props.loadingSummary.staleProducts, props.locale)} onClick={props.onStaleClick} /></CardContent></Card>
       </div>
-      {isManagementRole(props.roleCode) && <ManagementHierarchyFilters locale={props.locale} managementStockAlignmentPercent={props.session.managementStockAlignmentPercent} managementStaleCount={props.session.staleCount} onManagementStaleClick={props.onStaleClick} onManagementScopeChange={props.onManagementScopeChange} managementScope={props.managementScope} />}
+      {isManagementRole(props.roleCode) && <ManagementHierarchyFilters locale={props.locale} managementStockAlignmentPercent={props.session.managementStockAlignmentPercent} onManagementScopeChange={props.onManagementScopeChange} managementScope={props.managementScope} />}
       <Card dir={props.locale === "ar" ? "rtl" : "ltr"} className="order-2 flex h-full min-h-0 flex-col lg:col-start-1 lg:row-start-1 lg:row-span-2"><CardHeader className="shrink-0 px-4 pb-1 pt-4"><CardTitle className="text-base">{props.label("smartLoading.aggregatedConfirmedOrders", "Aggregated confirmed orders")}</CardTitle><CardDescription>{props.label("smartLoading.orderTotals", "Products")}: {orders.length} · {props.label("smartLoading.totalQuantity", "Total quantity")}: {formatQuantity(orders.reduce((sum, [, quantity]) => sum + quantity, 0), props.locale)}</CardDescription></CardHeader><CardContent className="flex min-h-0 flex-1 flex-col space-y-1 p-4 pt-1"><div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_5rem_auto]"><div className="relative"><Input aria-label={props.label("smartLoading.searchProducts", "Search products")} className="h-8" placeholder={props.label("smartLoading.searchProducts", "Search products")} value={productQuery} onChange={(event) => setProductQuery(event.target.value)} onKeyDown={handleProductSearchKeyDown} role="combobox" aria-expanded={productSuggestions.length > 0} aria-controls="confirmed-product-suggestions" />{productSearchLoading && <span className="absolute left-3 top-2 text-xs text-muted-foreground">{props.label("smartLoading.loading", "Loading…")}</span>}{productQuery.trim() && !productSearchLoading && <div id="confirmed-product-suggestions" role="listbox" className="absolute z-20 mt-1 max-h-44 w-full overflow-y-auto rounded-md border bg-popover p-1 shadow-lg">{productSuggestions.length === 0 ? <p className="p-2 text-sm text-muted-foreground">{props.label("smartLoading.noResults", "No results")}</p> : productSuggestions.map((product, index) => <button key={product.productCode} type="button" role="option" aria-selected={activeProductIndex === index} className={cn("flex w-full items-center justify-between rounded px-2 py-1.5 text-right text-sm hover:bg-secondary", activeProductIndex === index && "bg-secondary")} onMouseDown={(event) => event.preventDefault()} onClick={() => selectConfirmedProduct(product)}><span>{product.productName}</span><span className="text-xs text-muted-foreground">{product.productCode}</span></button>)}</div>}</div><Input className="h-8" type="text" inputMode="numeric" pattern="[0-9]*" value={props.confirmedQuantity} onChange={(event) => props.onConfirmedQuantityChange(Math.max(1, Number(event.target.value) || 1))} /><Button className="h-8" type="button" onClick={props.onAddConfirmedOrder} disabled={!props.confirmedProductCode}>{props.confirmedOrders[props.confirmedProductCode] ? props.label("settings.save", "Save") : props.label("smartLoading.add", "Add")}</Button></div><div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">{orders.length === 0 ? <div className="flex min-h-16 items-center justify-center rounded border border-dashed text-sm text-muted-foreground">{props.label("smartLoading.noConfirmedOrders", "No confirmed orders added.")}</div> : orders.map(([code, quantity]) => <div key={code} className="flex items-center justify-between gap-2 rounded border p-2 text-sm"><span className="truncate">{productByCode.get(code)?.productName ?? code}</span><Input className="h-8 w-20" type="number" min={1} value={quantity} onChange={(event) => { const next = Number(event.target.value); if (Number.isFinite(next) && next > 0) props.onUpdateConfirmedOrder(code, next); }} /><Button variant="ghost" size="sm" onClick={() => props.onRemoveConfirmedOrder(code)}>{props.label("smartLoading.remove", "Remove")}</Button></div>)}</div></CardContent></Card>
     </section>
     {editorOpen && <RouteEditorDialog session={props.session} label={props.label} query={customerQuery} searchResults={customerResults} exceptionalCustomers={draftExceptionalCustomers} selected={draftCustomerCodes} onQueryChange={setCustomerQuery} onToggleRoute={toggleRouteCustomer} onAddExceptional={addExceptional} onRemoveExceptional={removeExceptional} onClose={() => setEditorOpen(false)} onApply={applyCustomers} />}
   </>;
 }
 
-function ManagementStaleRouteProductPopover({ cases, referenceDate, onClose }: { cases: SmartLoadingManagementStaleRouteProduct[]; referenceDate: Date; onClose: () => void }) {
-  const { locale, t } = useTranslation();
-  const [openCategories, setOpenCategories] = useState<Set<string>>(new Set());
-  const groups = useMemo(() => cases.reduce<Record<string, SmartLoadingManagementStaleRouteProduct[]>>((current, item) => {
-    const category = item.category ?? t("smartLoading.uncategorized");
-    (current[category] ??= []).push(item);
-    return current;
-  }, {}), [cases, t]);
-  return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/20 pt-24" onClick={onClose}>
-      <Card className="w-[min(92vw,520px)] shadow-xl" onClick={(event) => event.stopPropagation()}>
-        <CardHeader className="flex-row items-center justify-between p-4"><CardTitle>{t("smartLoading.staleProductsPanelTitle")}</CardTitle><Button size="sm" variant="ghost" onClick={onClose}>{t("smartLoading.close")}</Button></CardHeader>
-        <CardContent className="max-h-[60vh] overflow-y-auto p-4 pt-0 space-y-2">
-          {Object.entries(groups).map(([category, items]) => {
-            const open = openCategories.has(category);
-            return <section key={category} className="rounded border"><button className="flex w-full items-center justify-between px-2 py-1.5 text-right text-xs font-semibold" onClick={() => setOpenCategories((current) => { const next = new Set(current); if (next.has(category)) next.delete(category); else next.add(category); return next; })} type="button"><span>{category} ({formatQuantity(items.length, locale)})</span><ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !open && "-rotate-90")} /></button>{open && <div className="max-h-56 overflow-y-auto border-t px-2">{items.map((item) => <div key={`${item.routeId}\u0000${item.productCode}`} className="grid grid-cols-[1fr_auto] gap-2 border-b py-1.5 text-xs last:border-0"><span className="min-w-0 truncate font-medium">{item.productName}<span className="block text-muted-foreground">{item.routeId}</span></span><span className="text-left text-muted-foreground">{t("smartLoading.vehicleStock")} {formatQuantity(item.currentVehicleStock, locale)} · {t("smartLoading.lastSale")} {formatGregorianDate(item.lastSaleDate) ?? "—"} · {daysSinceLastSale(item.lastSaleDate, referenceDate) ?? "—"} {t("smartLoading.staleDaysUnit")}</span></div>)}</div>}</section>;
-          })}
-        </CardContent>
-      </Card>
-    </div>
-  );
-}
-
 function isManagementRole(roleCode: string | undefined) {
   return roleCode === "COMPANY_ADMIN" || roleCode === "MANAGER" || roleCode === "SUPERVISOR";
 }
 
-function ManagementHierarchyFilters({ locale, managementStockAlignmentPercent, managementStaleCount, onManagementStaleClick, onManagementScopeChange, managementScope }: { locale: "ar" | "en"; managementStockAlignmentPercent: number | null; managementStaleCount: number; onManagementStaleClick: () => void; onManagementScopeChange: (scope: ManagementScopeSelection) => void; managementScope: ManagementScopeSelection }) {
+function ManagementHierarchyFilters({ locale, managementStockAlignmentPercent, onManagementScopeChange, managementScope }: { locale: "ar" | "en"; managementStockAlignmentPercent: number | null; onManagementScopeChange: (scope: ManagementScopeSelection) => void; managementScope: ManagementScopeSelection }) {
   const managerId = managementScope.managerId ?? "";
   const supervisorId = managementScope.supervisorId ?? "";
   const salesRepId = managementScope.salesRepId ?? "";
@@ -1683,7 +1673,7 @@ function ManagementHierarchyFilters({ locale, managementStockAlignmentPercent, m
   const tr = locale === "ar";
   const optionLabel = (options: { value: string; label: string }[] | undefined, value: string) => options?.find((option) => option.value === value)?.label;
   const Select = ({ label, value, options, placeholder, onChange }: { label: string; value: string; options: { value: string; label: string }[]; placeholder: string; onChange: (value: string) => void }) => <label className="grid gap-1 text-xs text-muted-foreground"><span>{label}</span><select className="h-8 rounded-md border bg-background px-2 text-sm text-foreground" value={value} onChange={(event) => onChange(event.target.value)}><option value="">{placeholder}</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
-  return <Card dir={tr ? "rtl" : "ltr"} className="relative z-10 order-2 flex h-full min-h-0 flex-col lg:col-start-1 lg:row-start-1 lg:row-span-2"><CardHeader className="shrink-0 px-4 pb-2 pt-4"><CardTitle className="text-base">{tr ? "الطلبات المؤكدة المجمعة" : "Aggregated confirmed orders"}</CardTitle><CardDescription>{tr ? "حدد التسلسل الإداري للوصول إلى المندوب." : "Select the management hierarchy to reach a sales rep."}</CardDescription></CardHeader><CardContent className="space-y-4 p-4 pt-1"><div className="grid gap-2 sm:grid-cols-3"><Select label={tr ? "المدير" : "Manager"} value={managerId} options={hierarchy.data?.managers ?? []} placeholder={tr ? "كل المدراء" : "All managers"} onChange={(value) => { onManagementScopeChange({ managerId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, value) }); }} /><Select label={tr ? "المشرف" : "Supervisor"} value={supervisorId} options={hierarchy.data?.supervisors ?? []} placeholder={tr ? "كل المشرفين" : "All supervisors"} onChange={(value) => { onManagementScopeChange({ managerId: managerId || undefined, supervisorId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, managerId), supervisorName: optionLabel(hierarchy.data?.supervisors, value) }); }} /><Select label={tr ? "مندوب المبيعات" : "Sales Rep"} value={salesRepId} options={hierarchy.data?.salesReps ?? []} placeholder={tr ? "اختر مندوبًا" : "Select a sales rep"} onChange={(value) => { onManagementScopeChange({ managerId: managerId || undefined, supervisorId: supervisorId || undefined, salesRepId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, managerId), supervisorName: optionLabel(hierarchy.data?.supervisors, supervisorId), salesRepName: optionLabel(hierarchy.data?.salesReps, value) }); }} /></div>{managementStockAlignmentPercent !== null && <div dir="ltr" className="grid grid-cols-3 gap-2"><ManagementStockAlignmentMetric label={tr ? "توافق مخزون الإدارة" : "Management Stock Alignment"} value={managementStockAlignmentPercent} locale={locale} /><button type="button" onClick={onManagementStaleClick} className="h-24 rounded-lg border border-border/70 bg-background/60 px-3 py-2 text-left shadow-none transition-colors hover:bg-secondary/60"><p className="text-[10px] text-muted-foreground">{t("smartLoading.managementStaleProducts")}</p><p className="mt-1 text-3xl font-semibold text-foreground">{formatQuantity(managementStaleCount, locale)}</p></button><Card aria-label="Reserved management KPI" className="h-24 border-dashed border-border/60 bg-background/30 shadow-none" /></div>}</CardContent></Card>;
+  return <Card dir={tr ? "rtl" : "ltr"} className="relative z-10 order-2 flex h-full min-h-0 flex-col lg:col-start-1 lg:row-start-1 lg:row-span-2"><CardHeader className="shrink-0 px-4 pb-2 pt-4"><CardTitle className="text-base">{tr ? "الطلبات المؤكدة المجمعة" : "Aggregated confirmed orders"}</CardTitle><CardDescription>{tr ? "حدد التسلسل الإداري للوصول إلى المندوب." : "Select the management hierarchy to reach a sales rep."}</CardDescription></CardHeader><CardContent className="space-y-4 p-4 pt-1"><div className="grid gap-2 sm:grid-cols-3"><Select label={tr ? "المدير" : "Manager"} value={managerId} options={hierarchy.data?.managers ?? []} placeholder={tr ? "كل المدراء" : "All managers"} onChange={(value) => { onManagementScopeChange({ managerId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, value) }); }} /><Select label={tr ? "المشرف" : "Supervisor"} value={supervisorId} options={hierarchy.data?.supervisors ?? []} placeholder={tr ? "كل المشرفين" : "All supervisors"} onChange={(value) => { onManagementScopeChange({ managerId: managerId || undefined, supervisorId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, managerId), supervisorName: optionLabel(hierarchy.data?.supervisors, value) }); }} /><Select label={tr ? "مندوب المبيعات" : "Sales Rep"} value={salesRepId} options={hierarchy.data?.salesReps ?? []} placeholder={tr ? "اختر مندوبًا" : "Select a sales rep"} onChange={(value) => { onManagementScopeChange({ managerId: managerId || undefined, supervisorId: supervisorId || undefined, managerName: optionLabel(hierarchy.data?.managers, managerId), supervisorName: optionLabel(hierarchy.data?.supervisors, value), salesRepId: value || undefined, salesRepName: optionLabel(hierarchy.data?.salesReps, value) }); }} /></div>{managementStockAlignmentPercent !== null && <div dir="ltr" className="grid grid-cols-3 gap-2"><ManagementStockAlignmentMetric label={tr ? "توافق مخزون الإدارة" : "Management Stock Alignment"} value={managementStockAlignmentPercent} locale={locale} /><Card aria-label="Reserved management KPI" className="h-24 border-dashed border-border/60 bg-background/30 shadow-none" /></div>}</CardContent></Card>;
 }
 
 function SessionMetric({ label, value }: { label: string; value: string }) { return <div><p className="truncate text-[11px] text-muted-foreground">{label}</p><p className="font-semibold">{value}</p></div>; }

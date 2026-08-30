@@ -1336,6 +1336,8 @@ export type TranslationKey =
   | "smartLoading.close"
   | "smartLoading.uncategorized"
   | "smartLoading.managementStaleProducts"
+  | "smartLoading.staleInventory"
+  | "smartLoading.noStaleInventory"
   | "smartLoading.restore"
   | "smartLoading.manualOverrideNote"
   | "smartLoading.quantityUnit"
@@ -2783,6 +2785,8 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.close": "إغلاق",
     "smartLoading.uncategorized": "غير مصنف",
     "smartLoading.managementStaleProducts": "الأصناف الراكدة",
+    "smartLoading.staleInventory": "المخزون الراكد",
+    "smartLoading.noStaleInventory": "لا يوجد أشخاص لديهم مخزون راكد اليوم.",
     "smartLoading.restore": "استعادة",
     "smartLoading.manualOverrideNote": "تم تعديل الكمية يدويًا (الأصل: {value})",
     "smartLoading.quantityUnit": "صنف",
@@ -4244,6 +4248,8 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.close": "Close",
     "smartLoading.uncategorized": "Uncategorized",
     "smartLoading.managementStaleProducts": "Stale Products",
+    "smartLoading.staleInventory": "Stale Inventory",
+    "smartLoading.noStaleInventory": "No one has stale inventory today.",
     "smartLoading.restore": "Restore",
     "smartLoading.manualOverrideNote": "Quantity manually adjusted (original: {value})",
     "smartLoading.quantityUnit": "product",

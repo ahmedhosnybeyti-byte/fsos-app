@@ -499,19 +499,60 @@ export class SmartLoadingService {
       }).filter((product) => !!product.productCode)
       : null;
     const managementStaleRouteProducts = useManagementStaleGrain
-      ? managementStaleRouteProductCases(managementStaleRows)
-        .filter((routeProduct) => routeProduct.productCode && routeProduct.lastSaleDate !== null)
-        .map((routeProduct) => {
+      ? await timed("management-stale-route-people", async () => {
+        const staleRouteProducts = managementStaleRouteProductCases(managementStaleRows)
+          .filter((routeProduct) => routeProduct.productCode && routeProduct.lastSaleDate !== null);
+        const staleRouteIds = [...new Set(staleRouteProducts.map((routeProduct) => normalizedRouteId(routeProduct.routeId)).filter(Boolean))];
+        const responsiblePersonAlias = user.roleCode === "COMPANY_ADMIN" ? "manager" : user.roleCode === "MANAGER" ? "supervisor" : "rep";
+        const responsiblePeople = staleRouteIds.length
+          ? await bounded("management-stale-route-people", {
+            ...ctx,
+            entityName: "Routes",
+            projection: [
+              { field: "RouteID", as: "routeId" },
+              { field: "EmployeeID", source: responsiblePersonAlias, as: "responsibleEmployeeId" },
+              { field: "EmployeeName", source: responsiblePersonAlias, as: "responsibleEmployeeName" },
+            ],
+            joins: [
+              { entityName: "Employees", alias: "rep", type: "inner", on: { left: { field: "SalesRepID" }, rightField: "EmployeeID" } },
+              { entityName: "Employees", alias: "supervisor", type: "left", on: { left: { field: "SupervisorID" }, rightField: "EmployeeID" } },
+              { entityName: "Employees", alias: "manager", type: "left", on: { left: { field: "ManagerID" }, rightField: "EmployeeID" } },
+            ],
+            groupBy: [
+              { field: "RouteID" },
+              { field: "EmployeeID", source: responsiblePersonAlias },
+              { field: "EmployeeName", source: responsiblePersonAlias },
+            ],
+            scope: { route: { values: staleRouteIds } },
+          })
+          : [];
+        const personByRouteId = new Map(responsiblePeople.map((person) => [
+          normalizedRouteId(person.routeId),
+          {
+            employeeId: String(person.responsibleEmployeeId ?? "").trim(),
+            employeeName: String(person.responsibleEmployeeName ?? person.responsibleEmployeeId ?? "").trim(),
+          },
+        ]));
+
+        // This only exposes the same route-to-direct-report relationship used
+        // by Loading Risk. Stale classification and Route × Product rollup stay
+        // entirely in the established Stale Inventory engine.
+        return staleRouteProducts.flatMap((routeProduct) => {
+          const person = personByRouteId.get(normalizedRouteId(routeProduct.routeId));
+          if (!person?.employeeId || !person.employeeName) return [];
           const meta = productMeta.get(routeProduct.productCode);
-          return {
+          return [{
             routeId: routeProduct.routeId,
+            responsibleEmployeeId: person.employeeId,
+            responsibleEmployeeName: person.employeeName,
             productCode: meta?.code ?? routeProduct.productCode,
             productName: meta?.name ?? routeProduct.productCode,
             category: meta?.category ?? null,
             currentVehicleStock: routeProduct.currentVehicleStock,
             lastSaleDate: routeProduct.lastSaleDate!,
-          };
-        })
+          }];
+        });
+      })
       : null;
     const customerPurchasesByProduct = new Map<string, Map<string, { totalQuantity: number; purchaseFrequency: number; lastPurchaseMs: number }>>();
     const customerNamesByCode = new Map<string, string>();
