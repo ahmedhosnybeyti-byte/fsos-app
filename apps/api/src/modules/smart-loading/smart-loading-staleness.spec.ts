@@ -87,6 +87,30 @@ test("management RIE stale rollup returns Product grain for more than 5,000 rout
   assert.equal(rows[0]?.staleRouteProducts.length, 5_001);
 });
 
+test("management vehicle monitor returns every inventory product at Product grain for a large route scope", async () => {
+  const expected = [
+    { productCode: "sku-a", currentVehicleStock: 10, weeklyAverageSales: 2 },
+    { productCode: "sku-b", currentVehicleStock: 1, weeklyAverageSales: 0 },
+  ];
+  let statement: { strings: readonly string[] } | undefined;
+  const query = new RieScalableQueryService(
+    { $queryRaw: async (sql: { strings: readonly string[] }) => { statement = sql; return expected; } } as never,
+    { resolveAllowedRouteIds: async () => null } as never,
+  );
+  const rows = await query.queryManagementVehicleProducts({
+    companyId: "company-1",
+    targetDate: "2026-08-10",
+    salesFrom: "2026-05-10",
+    salesTo: "2026-08-10",
+    routeIds: Array.from({ length: 5_001 }, (_, index) => `route-${index}`),
+  });
+
+  assert.deepEqual(rows, expected);
+  assert.match(statement!.strings.join("?"), /FROM stock_by_route_product stock/);
+  assert.match(statement!.strings.join("?"), /LEFT JOIN sales_by_route_product/);
+  assert.match(statement!.strings.join("?"), /GROUP BY product_code/);
+});
+
 test("management stock alignment keeps Route A's shortage despite Route B's surplus", async () => {
   const expected = { alignmentPercent: 85, categoryAlignments: [] };
   let statement: { strings: readonly string[] } | undefined;

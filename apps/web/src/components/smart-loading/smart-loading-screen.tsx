@@ -23,7 +23,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useTranslation } from "@/components/translation-provider";
 import { useAuth } from "@/hooks/use-auth";
-import type { SmartLoadingLostOpportunity, SmartLoadingManagementCategoryStockAlignment, SmartLoadingManagementStaleRouteProduct, SmartLoadingPriorityProduct, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
+import type { SmartLoadingLostOpportunity, SmartLoadingManagementCategoryStockAlignment, SmartLoadingManagementStaleRouteProduct, SmartLoadingManagementVehicleProduct, SmartLoadingPriorityProduct, SmartLoadingProduct, SmartLoadingSession } from "@/lib/types";
 import { smartLoadingApi } from "@/lib/api/smart-loading";
 import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult, type SmartLoadingRouteCustomer } from "@field-sales-os/schemas";
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
@@ -40,6 +40,7 @@ type LostOpportunityAddition = {
   customers: { id: string; name: string; baselineNetQuantity: number }[];
 };
 type Row = { product: SmartLoadingProduct; original: number; baseSuggested: number; suggested: number; input: Inputs; manuallyAdded: boolean; lostOpportunity?: LostOpportunityAddition; stockAvailable: boolean; effectiveVehicleStock: number | null; preliminary: boolean };
+type ManagementRow = SmartLoadingManagementVehicleProduct;
 
 function parsePositiveNumber(value: string): number {
   return Math.max(0, Number(value) || 0);
@@ -136,6 +137,7 @@ export function SmartLoadingScreen({
 
   useEffect(() => {
     if (session?.state !== "ready") return;
+    if (managementView) return;
     const routeCustomerCodes = session.routeCustomers.map((customer) => customer.customerCode.trim()).filter(Boolean);
     const routeKey = `${session.targetDate}:${salesRepId ?? "self"}:${routeCustomerCodes.join(",")}`;
 
@@ -240,6 +242,15 @@ export function SmartLoadingScreen({
     );
   }, [recommendationSearch, rows]);
 
+  const managementRecommendationRows = useMemo<ManagementRow[]>(() => {
+    if (session?.state !== "ready") return [];
+    const query = recommendationSearch.trim().toLocaleLowerCase();
+    const products = session.managementVehicleProducts ?? [];
+    return query
+      ? products.filter((product) => `${product.productName} ${product.productCode} ${product.category ?? ""}`.toLocaleLowerCase().includes(query))
+      : products;
+  }, [recommendationSearch, session]);
+
   const groupedByCategory = useMemo(() => {
     return recommendationRows.reduce<Record<string, Row[]>>((acc, row) => {
       const key = row.product.category ?? t("smartLoading.uncategorized");
@@ -247,6 +258,12 @@ export function SmartLoadingScreen({
       return acc;
     }, {});
   }, [recommendationRows, t]);
+
+  const managementGroupedByCategory = useMemo(() => managementRecommendationRows.reduce<Record<string, ManagementRow[]>>((acc, row) => {
+    const key = row.category ?? t("smartLoading.uncategorized");
+    (acc[key] ??= []).push(row);
+    return acc;
+  }, {}), [managementRecommendationRows, t]);
 
   const appliedProductCodes = useMemo(() => new Set(recalculation?.products.map((product) => product.productCode) ?? []), [recalculation]);
   const priorityProducts = session?.state === "ready" ? (recalculation ? session.priorityProducts.filter((product) => appliedProductCodes.has(product.productCode)) : session.priorityProducts) : [];
@@ -616,6 +633,7 @@ export function SmartLoadingScreen({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          {!managementView && <>
           <Button asChild variant="outline">
             <Link href={`/dashboard/stale-products?targetDate=${targetDate}&staleDaysThreshold=${staleDaysThreshold}${salesRepId ? `&salesRepId=${encodeURIComponent(salesRepId)}` : ""}`}>
               <PackagePlus className="h-4 w-4" />
@@ -653,6 +671,7 @@ export function SmartLoadingScreen({
               {t("smartLoading.startRoute")}
             </Link>
           </Button>
+          </>}
         </div>
       </header>
 
@@ -749,7 +768,7 @@ export function SmartLoadingScreen({
           <CardDescription>{t("smartLoading.recommendationsDescription")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
-          {managementView && recommendationRows.length > 0 && (
+          {managementView && managementRecommendationRows.length > 0 && (
             <div className="grid grid-cols-[minmax(9rem,1fr)_repeat(3,minmax(4.5rem,auto))_5rem_auto] items-end gap-3 px-3 pb-1 text-[10px] font-medium text-muted-foreground">
               <span>{label("smartLoading.product", "الصنف")}</span>
               <span>{label("smartLoading.vehicleStock", "رصيد السيارة")}</span>
@@ -759,8 +778,8 @@ export function SmartLoadingScreen({
               <span aria-hidden="true" />
             </div>
           )}
-          {recommendationRows.length === 0 && <p className="text-sm text-muted-foreground">{t("smartLoading.empty")}</p>}
-          {Object.entries(groupedByCategory).map(([category, items]) => {
+          {(managementView ? managementRecommendationRows : recommendationRows).length === 0 && <p className="text-sm text-muted-foreground">{t("smartLoading.empty")}</p>}
+          {Object.entries(managementView ? managementGroupedByCategory : groupedByCategory).map(([category, items]) => {
             const open = openRecommendationGroups.has(category);
             return (
               <section key={category} className="rounded-lg border">
@@ -781,31 +800,30 @@ export function SmartLoadingScreen({
                   {managementView && <ManagementCategoryAlignment category={category} alignments={session.managementCategoryStockAlignments} />}
                   <ChevronDown className={cn("h-4 w-4 transition-transform", !open && "-rotate-90")} />
                 </button>
-                {open &&
-                  items.map((row) => (
-                    <ProductRow
-                      key={row.product.productCode}
-                      row={row}
-                      managementView={managementView}
-                      open={openRows.has(row.product.productCode)}
-                      toggle={() =>
-                        setOpenRows((current) => {
+                {open && (managementView
+                  ? (items as ManagementRow[]).map((row) => <ManagementProductRow key={row.productCode} row={row} />)
+                  : (items as Row[]).map((row) => (
+                      <ProductRow
+                        key={row.product.productCode}
+                        row={row}
+                        managementView={false}
+                        open={openRows.has(row.product.productCode)}
+                        toggle={() => setOpenRows((current) => {
                           const next = new Set(current);
                           if (next.has(row.product.productCode)) next.delete(row.product.productCode);
                           else next.add(row.product.productCode);
                           return next;
-                        })
-                      }
-                      setInput={setInput}
-                      resetManualOverride={resetManualOverride}
-                      removeProduct={removeProduct}
-                    />
-                  ))}
+                        })}
+                        setInput={setInput}
+                        resetManualOverride={resetManualOverride}
+                        removeProduct={removeProduct}
+                      />
+                    ))) }
               </section>
             );
           })}
 
-          <div className="flex flex-wrap items-center justify-between gap-2">
+          {!managementView && <div className="flex flex-wrap items-center justify-between gap-2">
             <Button onClick={() => setAddProductOpen(true)}>
               <Plus className="h-4 w-4" />
               {label("smartLoading.addProduct", "Add product")}
@@ -814,9 +832,9 @@ export function SmartLoadingScreen({
               <RotateCcw className="h-4 w-4" />
               {label("smartLoading.restoreOriginalList", "Restore original list")}
             </Button>
-          </div>
+          </div>}
 
-          <div className="mt-3 border-t pt-3">
+          {!managementView && <div className="mt-3 border-t pt-3">
             <h3 className="mb-1 flex items-center gap-2 font-semibold">
               <ClipboardCheck className="h-4 w-4" />
               {t("smartLoading.checklistTitle")}
@@ -850,7 +868,7 @@ export function SmartLoadingScreen({
                 </label>
               ))}
             </div>
-          </div>
+          </div>}
         </CardContent>
       </Card>
     </div>
@@ -1145,6 +1163,19 @@ function ProductRow({
       )}
     </article>
   );
+}
+
+function ManagementProductRow({ row }: { row: ManagementRow }) {
+  const { locale, t } = useTranslation();
+  const stockDifference = row.currentVehicleStock - row.weeklyAverageSales;
+  const stockCoveragePercent = row.weeklyAverageSales <= 0 ? 100 : Math.min(100, Math.max(0, (Math.min(row.currentVehicleStock, row.weeklyAverageSales) / row.weeklyAverageSales) * 100));
+  const stockCoversExpected = stockDifference >= 0;
+  const stockCoverageTone = stockCoveragePercent < 50
+    ? "bg-rose-500/25 text-rose-800 ring-rose-500/50 dark:bg-rose-400/30 dark:text-rose-100 dark:ring-rose-300/70"
+    : stockCoveragePercent < 75
+      ? "bg-amber-500/25 text-amber-800 ring-amber-500/50 dark:bg-amber-400/30 dark:text-amber-100 dark:ring-amber-300/70"
+      : "bg-emerald-500/25 text-emerald-800 ring-emerald-500/50 dark:bg-emerald-400/30 dark:text-emerald-100 dark:ring-emerald-300/70";
+  return <article className="border-t px-3 py-2"><div className="grid grid-cols-[minmax(9rem,1fr)_repeat(3,minmax(4.5rem,auto))_5rem_auto] items-center gap-3 text-xs"><div className="min-w-0 text-right"><p className="truncate text-sm font-medium">{row.productName}</p><p className="truncate text-[11px] text-muted-foreground">{row.category ?? t("smartLoading.uncategorized")}</p></div><span className="font-medium">{formatQuantity(row.currentVehicleStock, locale)}</span><span className="font-medium">{formatQuantity(row.weeklyAverageSales, locale)}</span><span className="font-medium">{formatQuantity(stockDifference, locale)}</span><div><span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ring-1", stockCoverageTone)}><span aria-hidden="true">{stockCoversExpected ? "↑" : "↓"}</span>{formatQuantity(Math.round(stockCoveragePercent), locale)}%</span></div><span aria-hidden="true" /></div></article>;
 }
 
 function Metric({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
@@ -1542,6 +1573,10 @@ function SmartLoadingPhaseTwo(props: SmartLoadingPhaseTwoProps) {
     if (event.key === "ArrowUp") { event.preventDefault(); setActiveProductIndex((index) => Math.max(index - 1, 0)); }
     if (event.key === "Escape") { setProductSuggestions([]); setActiveProductIndex(-1); }
     if (event.key === "Enter" && activeProductIndex >= 0 && productSuggestions[activeProductIndex]) { event.preventDefault(); selectConfirmedProduct(productSuggestions[activeProductIndex]); }
+  }
+
+  if (isManagementRole(props.roleCode)) {
+    return <ManagementHierarchyFilters locale={props.locale} managementStockAlignmentPercent={props.session.managementStockAlignmentPercent} managementStaleCount={props.session.staleCount} onManagementStaleClick={props.onStaleClick} onManagementScopeChange={props.onManagementScopeChange} />;
   }
 
   return <>

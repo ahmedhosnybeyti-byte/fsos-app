@@ -3,7 +3,7 @@ import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import type { EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieLatestPerScope, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
+import type { RieDateScope, RieLatestPerScope, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
@@ -227,6 +227,85 @@ export class RieScalableQueryService {
       ORDER BY product_code
     `);
     return rows;
+  }
+
+  /**
+   * Builds the management vehicle-monitor table from current Van Inventory.
+   * Route × Product is computed in PostgreSQL; only a small Product rollup
+   * crosses the RIE boundary. Inventory is intentionally the driving set.
+   */
+  async queryManagementVehicleProducts(input: RieManagementVehicleProductsQuery): Promise<RieManagementVehicleProductRow[]> {
+    if (!input.companyId?.trim()) throw new Error("RIE management vehicle products requires companyId.");
+    const targetDate = normalizeDate(input.targetDate);
+    const salesFrom = normalizeDate(input.salesFrom);
+    const salesTo = normalizeDate(input.salesTo);
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const allowedRouteIds = allowedRoutes
+      ? new Set([...allowedRoutes].map((routeId) => routeId.trim().toLowerCase()).filter(Boolean))
+      : null;
+    const requestedRoutes = input.routeIds === undefined || input.routeIds === null
+      ? null
+      : new Set(input.routeIds.map((routeId) => routeId.trim().toLowerCase()).filter(Boolean));
+    const effectiveRoutes = allowedRouteIds
+      ? [...allowedRouteIds].filter((routeId) => requestedRoutes === null || requestedRoutes.has(routeId))
+      : requestedRoutes === null ? null : [...requestedRoutes];
+    const routeScope = (field: RieQueryField): Prisma.Sql => effectiveRoutes === null
+      ? Prisma.empty
+      : effectiveRoutes.length
+        ? Prisma.sql` AND ${normalizedField(field)} IN (${Prisma.join(effectiveRoutes)})`
+        : Prisma.sql` AND FALSE`;
+    const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [
+      Prisma.sql`${dateText(textField({ field: "ReportDate", source: "inventory_source" }))} <= ${targetDate}${routeScope({ field: "RouteID", source: "inventory_source" })}`,
+    ], [], []);
+    const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [
+      Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} >= ${salesFrom} AND ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${salesTo}${routeScope({ field: "RouteID", source: "invoice_source" })}`,
+    ], [], []);
+    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], []);
+    const inventoryRoute = normalizedField({ field: "RouteID", source: "inventory" });
+    const inventoryProduct = normalizedField({ field: "ProductCode", source: "inventory" });
+    const inventoryQuantity = numericField(textField({ field: "Quantity", source: "inventory" }));
+    const itemProduct = normalizedField({ field: "ProductCode", source: "item" });
+    const itemQuantity = numericField(textField({ field: "Quantity", source: "item" }));
+    const invoiceNo = normalizedField({ field: "InvoiceNo", source: "item" });
+    const invoiceJoinNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
+    const effectiveSaleRoute = Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "RouteID", source: "item" })}, '')), ''), ${textField({ field: "RouteID", source: "invoice" })}, '')))`;
+    return this.prisma.$queryRaw<RieManagementVehicleProductRow[]>(Prisma.sql`
+      WITH ${inventoryCte}, ${invoiceCte}, ${itemsCte},
+      inventory_latest AS MATERIALIZED (
+        SELECT ${inventoryRoute} AS route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) AS report_date
+        FROM inventory_active inventory
+        GROUP BY ${inventoryRoute}
+      ),
+      stock_by_route_product AS MATERIALIZED (
+        SELECT ${inventoryRoute} AS route_id, ${inventoryProduct} AS product_code, SUM(${inventoryQuantity})::double precision AS current_stock
+        FROM inventory_active inventory
+        INNER JOIN inventory_latest latest ON latest.route_id = ${inventoryRoute}
+          AND NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '') = latest.report_date
+        WHERE ${inventoryProduct} <> ''
+        GROUP BY ${inventoryRoute}, ${inventoryProduct}
+      ),
+      sales_by_route_product AS MATERIALIZED (
+        SELECT ${effectiveSaleRoute} AS route_id, ${itemProduct} AS product_code, SUM(${itemQuantity})::double precision / 12.0 AS weekly_average_sales
+        FROM item_active item
+        INNER JOIN invoice_active invoice ON ${invoiceNo} = ${invoiceJoinNo}
+        INNER JOIN (SELECT DISTINCT route_id FROM stock_by_route_product) stocked_routes ON stocked_routes.route_id = ${effectiveSaleRoute}
+        WHERE ${itemProduct} <> '' AND ${effectiveSaleRoute} <> ''
+        GROUP BY ${effectiveSaleRoute}, ${itemProduct}
+      ),
+      vehicle_product AS MATERIALIZED (
+        SELECT stock.route_id, stock.product_code, stock.current_stock,
+          COALESCE(sales.weekly_average_sales, 0)::double precision AS weekly_average_sales
+        FROM stock_by_route_product stock
+        LEFT JOIN sales_by_route_product sales ON sales.route_id = stock.route_id AND sales.product_code = stock.product_code
+      )
+      SELECT product_code AS "productCode", SUM(current_stock)::double precision AS "currentVehicleStock",
+        SUM(weekly_average_sales)::double precision AS "weeklyAverageSales"
+      FROM vehicle_product
+      GROUP BY product_code
+      ORDER BY product_code
+    `);
   }
 
   /**

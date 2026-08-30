@@ -113,6 +113,19 @@ export interface RieManagementCategoryStockAlignment {
   alignmentPercent: number;
 }
 
+/** Product-grain management monitor rows; Route × Product stays in PostgreSQL. */
+export interface RieManagementVehicleProductsQuery extends EntityQueryContext {
+  routeIds?: readonly string[] | null;
+  targetDate: string;
+  salesFrom: string;
+  salesTo: string;
+}
+export interface RieManagementVehicleProductRow {
+  productCode: string;
+  currentVehicleStock: number;
+  weeklyAverageSales: number;
+}
+
 /** Product-grain stale-purchase evidence; Product × Customer stays inside SQL. */
 export interface RieStalePurchasesQuery extends EntityQueryContext {
   /** Routes holding active vehicle inventory for the current session. */

@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from "@nestjs/common";
-import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingHierarchyOptions, type SmartLoadingPriorityProduct, type SmartLoadingProduct, type SmartLoadingSession, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
+import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingHierarchyOptions, type SmartLoadingManagementVehicleProduct, type SmartLoadingPriorityProduct, type SmartLoadingProduct, type SmartLoadingSession, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
 import { CanonicalHierarchyResolverService } from "../rie/canonical-hierarchy-resolver.service";
@@ -393,7 +393,7 @@ export class SmartLoadingService {
 
     // Management keeps Route × Product inside RIE/PostgreSQL and receives
     // only the established Product-grain result. Sales Rep remains unchanged.
-    const [activeVehicleRouteRows, inventoryRows, managementStaleRows, managementStockAlignment] = await Promise.all([
+    const [activeVehicleRouteRows, inventoryRows, managementStaleRows, managementStockAlignment, managementVehicleRows] = await Promise.all([
       timed("active-vehicle-routes", () => bounded("active-vehicle-routes", withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }], groupBy: [{ field: "RouteID" }], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
       useManagementStaleGrain
         ? Promise.resolve([])
@@ -404,6 +404,9 @@ export class SmartLoadingService {
       useManagementStaleGrain
         ? timed("management-stock-alignment", () => this.rieFacade.queryManagementStockAlignment({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, salesFrom: isoDay(windowStartMs), salesTo: isoDay(nowMs), customerCodes: [...nextRouteCustomers.keys()] }))
         : Promise.resolve(null),
+      useManagementStaleGrain
+        ? timed("management-vehicle-products", () => this.rieFacade.queryManagementVehicleProducts({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, salesFrom: isoDay(windowStartMs), salesTo: isoDay(nowMs) }))
+        : Promise.resolve([]),
     ]);
     const activeVehicleRouteIds = new Set<string>();
     const vehicleStockByProduct = new Map<string, number>();
@@ -461,6 +464,19 @@ export class SmartLoadingService {
     const sessionProductCodes = [...new Set([...vehicleStockByProduct.keys(), ...windowQtyByProduct.keys()])];
     const productRows = sessionProductCodes.length ? await timed("products-lookup", () => bounded("products-lookup", { companyId: ctx.companyId, entityName: "Products", projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }, { field: "Category", as: "category" }], scope: { product: { values: sessionProductCodes } } })) : [];
     const productMeta = new Map(productRows.map((row) => { const code = normalizedProductCode(row.productCode); return [code, { code: String(row.productCode ?? code).trim() || code, name: String(row.productName ?? row.productCode ?? code).trim() || code, category: row.category ? String(row.category).trim() || null : null }] as const; }).filter(([code]) => !!code));
+    const managementVehicleProducts: SmartLoadingManagementVehicleProduct[] | null = useManagementStaleGrain
+      ? managementVehicleRows.map((row) => {
+        const productCode = normalizedProductCode(row.productCode);
+        const meta = productMeta.get(productCode);
+        return {
+          productCode: meta?.code ?? productCode,
+          productName: meta?.name ?? productCode,
+          category: meta?.category ?? null,
+          currentVehicleStock: toFiniteNumber(row.currentVehicleStock) ?? 0,
+          weeklyAverageSales: toFiniteNumber(row.weeklyAverageSales) ?? 0,
+        };
+      }).filter((product) => !!product.productCode)
+      : null;
     const managementStaleRouteProducts = useManagementStaleGrain
       ? managementStaleRouteProductCases(managementStaleRows)
         .filter((routeProduct) => routeProduct.productCode && routeProduct.lastSaleDate !== null)
@@ -580,6 +596,7 @@ export class SmartLoadingService {
     return {
       state: "ready",
       products,
+      managementVehicleProducts,
       managementStockAlignmentPercent: managementStockAlignment?.alignmentPercent ?? null,
       managementCategoryStockAlignments: managementStockAlignment?.categoryAlignments ?? null,
       staleCount,

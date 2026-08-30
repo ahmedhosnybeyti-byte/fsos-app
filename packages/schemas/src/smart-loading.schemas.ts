@@ -37,6 +37,16 @@ export const smartLoadingProductSchema = z.object({
 });
 export type SmartLoadingProduct = z.infer<typeof smartLoadingProductSchema>;
 
+/** Management-only vehicle-market monitor row. Never a loading recommendation. */
+export const smartLoadingManagementVehicleProductSchema = z.object({
+  productCode: z.string(),
+  productName: z.string(),
+  category: z.string().nullable(),
+  currentVehicleStock: z.number(),
+  weeklyAverageSales: z.number(),
+});
+export type SmartLoadingManagementVehicleProduct = z.infer<typeof smartLoadingManagementVehicleProductSchema>;
+
 export const smartLoadingStaleProductCustomerSchema = z.object({
   customerCode: z.string(),
   customerName: z.string(),
@@ -144,6 +154,7 @@ export type SmartLoadingLostOpportunityReason = z.infer<typeof smartLoadingLostO
 export const smartLoadingReadySessionSchema = z.object({
   state: z.literal("ready"),
   products: z.array(smartLoadingProductSchema),
+  managementVehicleProducts: z.array(smartLoadingManagementVehicleProductSchema).nullable(),
   managementStockAlignmentPercent: z.number().min(0).max(100).nullable(),
   managementCategoryStockAlignments: z.array(smartLoadingManagementCategoryStockAlignmentSchema).nullable(),
   staleCount: z.number().int().nonnegative(),
