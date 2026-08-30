@@ -1020,6 +1020,13 @@ function ProductRow({
   const stockDifference = row.effectiveVehicleStock === null ? null : row.effectiveVehicleStock - expectedSales;
   const stockCoversExpected = stockDifference !== null && stockDifference >= 0;
   const stockCoveragePercent = row.effectiveVehicleStock === null ? null : expectedSales <= 0 ? 100 : Math.min(100, Math.max(0, (Math.min(row.effectiveVehicleStock, expectedSales) / expectedSales) * 100));
+  const stockCoverageTone = stockCoveragePercent === null
+    ? null
+    : stockCoveragePercent < 50
+      ? "bg-rose-500/25 text-rose-800 ring-rose-500/50 dark:bg-rose-400/30 dark:text-rose-100 dark:ring-rose-300/70"
+      : stockCoveragePercent < 75
+        ? "bg-amber-500/25 text-amber-800 ring-amber-500/50 dark:bg-amber-400/30 dark:text-amber-100 dark:ring-amber-300/70"
+        : "bg-emerald-500/25 text-emerald-800 ring-emerald-500/50 dark:bg-emerald-400/30 dark:text-emerald-100 dark:ring-emerald-300/70";
 
   return (
     <article className="border-t px-3 py-2">
@@ -1033,7 +1040,7 @@ function ProductRow({
           <span className="font-medium">{formatQuantity(expectedSales, locale)}</span>
           <span className="font-medium">{stockDifference === null ? "—" : formatQuantity(stockDifference, locale)}</span>
           <div className="min-w-0">
-            {stockCoveragePercent === null ? "—" : <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ring-1", stockCoversExpected ? "bg-emerald-500/25 text-emerald-800 ring-emerald-500/50 dark:bg-emerald-400/30 dark:text-emerald-100 dark:ring-emerald-300/70" : "bg-rose-500/25 text-rose-800 ring-rose-500/50 dark:bg-rose-400/30 dark:text-rose-100 dark:ring-rose-300/70")} aria-label={label("smartLoading.stockStatus", "مؤشر الحالة")}><span aria-hidden="true">{stockCoversExpected ? "↑" : "↓"}</span>{formatQuantity(Math.round(stockCoveragePercent), locale)}%</span>}
+            {stockCoveragePercent === null ? "—" : <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold ring-1", stockCoverageTone)} aria-label={label("smartLoading.stockStatus", "مؤشر الحالة")}><span aria-hidden="true">{stockCoversExpected ? "↑" : "↓"}</span>{formatQuantity(Math.round(stockCoveragePercent), locale)}%</span>}
           </div>
           <Button
             aria-label={label("smartLoading.removeProduct", "Remove product")}
