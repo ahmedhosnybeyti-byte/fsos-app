@@ -100,6 +100,12 @@ export function SmartLoadingScreen({
   const { locale, t } = useTranslation();
   const { user } = useAuth();
   const managementView = isManagementRole(user?.role.code);
+  const managementHierarchy = useQuery({
+    queryKey: ["smart-loading", "management-hierarchy", managerId, supervisorId],
+    queryFn: () => smartLoadingApi.getHierarchyOptions(managerId, supervisorId),
+    enabled: managementView,
+    placeholderData: (previous) => previous,
+  });
   const label = (key: string, fallback: string) => {
     const translated = t(key as never);
     return translated === key ? fallback : translated;
@@ -690,11 +696,18 @@ export function SmartLoadingScreen({
         <ManagementLoadingRisk
           targetDate={targetDate}
           onSelectPerson={(person) => {
-            const scope = user?.role.code === "COMPANY_ADMIN"
-              ? { managerId: person.employeeId, managerName: person.employeeName }
+            const options = user?.role.code === "COMPANY_ADMIN"
+              ? managementHierarchy.data?.managers
               : user?.role.code === "MANAGER"
-                ? { supervisorId: person.employeeId, supervisorName: person.employeeName }
-                : { salesRepId: person.employeeId, salesRepName: person.employeeName };
+                ? managementHierarchy.data?.supervisors
+                : managementHierarchy.data?.salesReps;
+            const selectedOption = options?.find((option) => option.label === person.employeeName);
+            if (!selectedOption) return;
+            const scope = user?.role.code === "COMPANY_ADMIN"
+              ? { managerId: selectedOption.value, managerName: selectedOption.label }
+              : user?.role.code === "MANAGER"
+                ? { supervisorId: selectedOption.value, supervisorName: selectedOption.label }
+                : { salesRepId: selectedOption.value, salesRepName: selectedOption.label };
             onManagementScopeChange(scope);
             requestAnimationFrame(() => {
               document.getElementById("smart-loading-recommendations")?.scrollIntoView({ behavior: "smooth", block: "start" });
