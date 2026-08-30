@@ -327,7 +327,15 @@ export class RieScalableQueryService {
     // Company Admin has no restricted route set. Do not pass an empty SQL
     // fragment as a predicate, otherwise the active Route CTE compiles to a
     // dangling `AND` and PostgreSQL rejects the query.
-    const routePredicates = routes === null ? [] : [routeScope({ field: "RouteID", source: "route_source" })];
+    // activeEntityRowsCte joins its predicates with `AND`, whereas routeScope
+    // is intentionally an inline suffix for the inventory/invoice predicates
+    // above (and therefore already starts with `AND`). Build the Routes CTE
+    // predicate independently so a scoped user never generates `AND AND`.
+    const routePredicates = routes === null
+      ? []
+      : routes.length
+        ? [Prisma.sql`${normalizedField({ field: "RouteID", source: "route_source" })} IN (${Prisma.join(routes)})`]
+        : [Prisma.sql`FALSE`];
     const routesCte = activeEntityRowsCte(input.companyId, "Routes", "route", routePredicates, [], []);
     const repCte = activeEntityRowsCte(input.companyId, "Employees", "rep", [], [], []), supervisorCte = activeEntityRowsCte(input.companyId, "Employees", "supervisor", [], [], []), managerCte = activeEntityRowsCte(input.companyId, "Employees", "manager", [], [], []), productCte = activeEntityRowsCte(input.companyId, "Products", "product", [], [], []);
     const invRoute = normalizedField({ field: "RouteID", source: "inventory" }), invProduct = normalizedField({ field: "ProductCode", source: "inventory" }), invQuantity = numericField(textField({ field: "Quantity", source: "inventory" }));
