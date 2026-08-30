@@ -29,6 +29,7 @@ import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingRecalculateInput, ty
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
 import { categoryAddedProductCount, formatLostOpportunityQuantity, formatLostOpportunityQuantityInput, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
 import { calculateSuggestedLoading } from "./suggested-loading";
+import { ExecutiveDecisionCenter } from "./executive-decision-center";
 
 type Inputs = { confirmedOrders: number; safetyStock: number; vehicleStock?: number; manual?: number };
 type LostOpportunityAddition = {
@@ -675,6 +676,18 @@ export function SmartLoadingScreen({
         </div>
       </header>
 
+      {managementView && <ExecutiveDecisionCenter
+        session={session}
+        roleCode={user?.role.code}
+        locale={locale}
+        onDecision={(kind) => {
+          if (kind === "stale") { setPanel("stale"); return; }
+          if (kind === "priority") { setPanel("priority"); return; }
+          if (kind === "opportunities") { setLostOpportunitiesOpen(true); setLostOpportunityWarning(null); return; }
+          document.getElementById("smart-loading-recommendations")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }}
+      />}
+
       <SmartLoadingPhaseTwo
         session={session}
         label={label}
@@ -727,6 +740,7 @@ export function SmartLoadingScreen({
           onQuantityChange={setLostOpportunityQuantity}
           visitsPerWeek={appliedInputs?.visitsPerWeek ?? 1}
           onRestoreQuantity={restoreLostOpportunityQuantity}
+          readOnly={managementView}
         />
       )}
 
@@ -750,7 +764,7 @@ export function SmartLoadingScreen({
         ? <ManagementStaleRouteProductPopover cases={session.managementStaleRouteProducts} referenceDate={staleReferenceDate} onClose={() => setPanel(null)} />
         : <ProductListPopover rows={staleRows} stale referenceDate={staleReferenceDate} onClose={() => setPanel(null)} />)}
 
-      <Card className="glass-card">
+      <Card id="smart-loading-recommendations" className="glass-card">
         <CardHeader className="pb-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <CardTitle>{t("smartLoading.recommendationsTitle")}</CardTitle>
@@ -888,6 +902,7 @@ function LostOpportunitiesDialog({
   onAddProducts,
   onQuantityChange,
   onRestoreQuantity,
+  readOnly = false,
 }: {
   opportunities: SmartLoadingLostOpportunity[];
   quantityDrafts: OpportunityQuantityDrafts;
@@ -901,6 +916,7 @@ function LostOpportunitiesDialog({
   onAddProducts: (products: readonly LostOpportunityProductGroup[]) => void;
   onQuantityChange: (opportunityId: string, value: string) => void;
   onRestoreQuantity: (opportunityId: string) => void;
+  readOnly?: boolean;
 }) {
   const { locale, t } = useTranslation();
   const [search, setSearch] = useState("");
@@ -973,7 +989,7 @@ function LostOpportunitiesDialog({
                   {addedCount > 0 && addedCount < category.productCount && <p className="text-xs text-amber-700">{t("smartLoading.categoryPartiallyAdded", { added: formatQuantity(addedCount, locale), total: formatQuantity(category.productCount, locale) })}</p>}
                   {addedCount === category.productCount && <p className="text-xs text-emerald-700">{t("smartLoading.added")}</p>}
                 </button>
-                <Button variant="outline" disabled={unaddedProducts.length === 0 || unaddedProducts.every((product) => product.totalQuantity <= 0)} onClick={() => onAddProducts(unaddedProducts)}>{t("smartLoading.addCategory")}</Button>
+                {!readOnly && <Button variant="outline" disabled={unaddedProducts.length === 0 || unaddedProducts.every((product) => product.totalQuantity <= 0)} onClick={() => onAddProducts(unaddedProducts)}>{t("smartLoading.addCategory")}</Button>}
               </div>
               {effectiveOpenCategories.has(category.category) && <div className="mt-3 space-y-3">
                 {category.products.map((product) => {
@@ -986,13 +1002,12 @@ function LostOpportunitiesDialog({
                         <p className="font-medium">{product.productName}</p>
                         <p className="text-xs text-muted-foreground">{product.productCode} {"\u00b7"} {t("smartLoading.productSuggestedQuantity", { value: formatLostOpportunityQuantity(product.totalQuantity, locale) })}</p>
                       </button>
-                      <Button disabled={added || product.totalQuantity <= 0} onClick={() => onAddProducts([product])}>{added ? t("smartLoading.added") : t("smartLoading.addToLoading")}</Button>
+                      {!readOnly && <Button disabled={added || product.totalQuantity <= 0} onClick={() => onAddProducts([product])}>{added ? t("smartLoading.added") : t("smartLoading.addToLoading")}</Button>}
                     </div>
                     {effectiveOpenProducts.has(productId) && <div className="mt-2 space-y-2 border-t pt-2">
                       {product.customers.map((customer) => <div key={customer.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-2 text-sm">
                         <span className="min-w-0 truncate">{customer.customerName}</span>
-                        <Input className="h-8 w-24 text-center" type="number" min="0" step="0.01" value={formatLostOpportunityQuantityInput(customer.currentQuantity)} onChange={(event) => onQuantityChange(customer.id, event.target.value)} aria-label={t("smartLoading.customerSuggestedQuantity", { customer: customer.customerName })} />
-                        <Button className="h-11 sm:h-8" variant="ghost" size="sm" onClick={() => onRestoreQuantity(customer.id)}>{t("smartLoading.restore")}</Button>
+                        {readOnly ? <span className="text-left">{formatLostOpportunityQuantity(customer.currentQuantity, locale)}</span> : <><Input className="h-8 w-24 text-center" type="number" min="0" step="0.01" value={formatLostOpportunityQuantityInput(customer.currentQuantity)} onChange={(event) => onQuantityChange(customer.id, event.target.value)} aria-label={t("smartLoading.customerSuggestedQuantity", { customer: customer.customerName })} /><Button className="h-11 sm:h-8" variant="ghost" size="sm" onClick={() => onRestoreQuantity(customer.id)}>{t("smartLoading.restore")}</Button></>}
                       </div>)}
                     </div>}
                     <p className="mt-2 text-xs text-muted-foreground">{stockProduct ? t("smartLoading.vehicleStockQuantity", { value: stockProduct.currentVehicleStock === null ? "—" : formatQuantity(stockProduct.currentVehicleStock, locale) }) : t("smartLoading.vehicleStockUnavailable")}</p>
