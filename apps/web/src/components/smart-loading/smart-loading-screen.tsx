@@ -880,6 +880,24 @@ export function SmartLoadingScreen({
         </CardHeader>
         <CardContent className="space-y-2">
           {managementView && managementRecommendationRows.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setOpenRecommendationGroups(new Set(Object.keys(managementGroupedByCategory)))}
+              >
+                {t("smartLoading.openAllSections")}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setOpenRecommendationGroups(new Set())}
+              >
+                {t("smartLoading.closeAllSections")}
+              </Button>
+            </div>
+          )}
+          {managementView && managementRecommendationRows.length > 0 && (
             <div className="grid grid-cols-[minmax(9rem,1fr)_repeat(3,minmax(4.5rem,auto))_5rem_auto] items-end gap-3 px-3 pb-1 text-[10px] font-medium text-muted-foreground">
               <span>{label("smartLoading.product", "الصنف")}</span>
               <span>{label("smartLoading.vehicleStock", "رصيد السيارة")}</span>
@@ -990,6 +1008,7 @@ export function SmartLoadingScreen({
           <StaleInventoryTable
             plans={session.staleProductPlans}
             targetDate={session.targetDate}
+            showBulkControls
             onSelectProduct={(plan) => {
               setSelectedStaleProductCode(plan.productCode);
             }}
