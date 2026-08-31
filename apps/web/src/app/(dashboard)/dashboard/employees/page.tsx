@@ -194,8 +194,6 @@ export default function EmployeesPage() {
 
   return (
     <div className="relative space-y-6">
-      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
-      <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
 
       <div className="rise-in flex items-center justify-between">
         <div className="flex items-center gap-4">

@@ -138,7 +138,7 @@ export function GoogleDiscoveryMap({ customers, prospects, selectedProspectId, o
         const position = { lat: prospect.lat, lng: prospect.lon };
         const marker = new google.maps.Marker({ map, position, title: prospect.name, icon: "https://maps.google.com/mapfiles/ms/icons/red-dot.png" });
         const openProspect = () => {
-          const content = document.createElement("div"); content.dir = locale === "ar" ? "rtl" : "ltr"; content.style.cssText = `max-width:220px;padding:8px;border-radius:6px;background:${document.documentElement.classList.contains("dark") ? "#111827" : "#ffffff"};color:${document.documentElement.classList.contains("dark") ? "#f9fafb" : "#111827"};`;
+          const content = document.createElement("div"); content.dir = locale === "ar" ? "rtl" : "ltr"; content.style.cssText = "max-width:220px;padding:8px;border-radius:6px;border:1px solid hsl(var(--border));background:hsl(var(--popover));color:hsl(var(--popover-foreground));";
           const title = document.createElement("strong"); title.textContent = prospect.name;
           const details = document.createElement("div"); details.textContent = [prospect.businessType, prospect.address, prospect.channel].filter(Boolean).join(" — ");
           content.append(title, details);

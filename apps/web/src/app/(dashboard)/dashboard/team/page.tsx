@@ -146,8 +146,6 @@ export default function TeamPage() {
 
   return (
     <div className="relative space-y-6">
-      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
-      <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
 
       {tempPassword && (
         <div className="glass-card rise-in space-y-2 border-primary/50 p-6">

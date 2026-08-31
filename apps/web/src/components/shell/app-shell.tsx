@@ -61,7 +61,9 @@ export function AppShell({
     // per the CSS spec, so the sidebar renders on the correct side with
     // zero JSX reordering here. Spacing/border utilities use Tailwind's
     // logical-property variants (border-e/-s, ps-/pe-) so they flip too.
-    <div className="flex min-h-[100dvh] bg-app-gradient">
+    <div className="relative flex min-h-[100dvh] bg-app-gradient">
+      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
+      <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
       <aside className="glass-panel hidden w-64 shrink-0 flex-col border-e border-border md:flex">
         <div className="flex items-center gap-2 border-b border-border px-6 py-4">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/70 text-primary-foreground shadow-sm">

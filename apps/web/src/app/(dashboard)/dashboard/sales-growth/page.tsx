@@ -181,8 +181,6 @@ export default function SalesGrowthPage() {
 
   return (
     <div className="relative space-y-6">
-      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
-      <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
 
       <div className="rise-in">
         <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">

@@ -133,8 +133,6 @@ function AssistantChat() {
   // no chat/API/history behavior touched.
   return (
     <div className="relative flex h-[calc(100vh-8rem)] flex-col">
-      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
-      <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
 
       <div className="mb-4 flex items-center gap-3">
         <span className="crystal-badge h-14 w-14 shrink-0 bg-ai/15 text-ai drop-shadow-[0_0_24px_hsl(var(--ai)/0.5)]">

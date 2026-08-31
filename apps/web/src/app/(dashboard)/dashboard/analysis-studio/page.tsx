@@ -42,8 +42,6 @@ export default function AnalysisStudioPage() {
 
   return (
     <div className="relative space-y-6">
-      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
-      <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
 
       <div className="rise-in flex flex-wrap items-start justify-between gap-4">
         <div className="flex items-center gap-4">
@@ -103,8 +101,6 @@ export default function AnalysisStudioPage() {
 function LocalizedAnalysisStudio({ events, eventsUnavailable, onClear, feedEndRef }: { events: Awaited<ReturnType<typeof analysisStudioApi.listEvents>>; eventsUnavailable: boolean; onClear: () => void; feedEndRef: React.RefObject<HTMLDivElement | null> }) {
   const { t, locale } = useTranslation();
   return <div className="relative space-y-6">
-    <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
-    <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
     <div className="rise-in flex flex-wrap items-start justify-between gap-4"><div className="flex items-center gap-4"><span className="crystal-badge hidden h-14 w-14 shrink-0 bg-ai/15 text-ai drop-shadow-[0_0_24px_hsl(var(--ai)/0.5)] sm:flex"><Sparkles className="h-6 w-6" /></span><div><h1 className="text-2xl font-semibold tracking-tight">{t("analysisStudio.title")}</h1><p className="max-w-xl text-muted-foreground">{t("analysisStudio.subtitle")}</p></div></div>{events.length > 0 && <Button variant="ghost" size="sm" onClick={onClear}><Trash2 className="h-4 w-4" /> {t("analysisStudio.clear")}</Button>}</div>
     <div className="rise-in rise-d1"><LaunchGptCard /></div>
     {eventsUnavailable && <p className="text-sm text-muted-foreground">{t("analysisStudio.unavailable")}</p>}
