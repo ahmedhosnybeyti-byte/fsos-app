@@ -45,9 +45,9 @@ export function ManagementStaleInventory({ cases, onSelectPerson }: ManagementSt
   return (
     <section
       aria-labelledby="management-stale-inventory-title"
-      className="group relative h-full w-full min-w-0 self-stretch [&>div:first-child]:h-full [&>div:first-child]:min-h-36 [&>div:first-child>div]:h-full [&>div:first-child>div]:min-h-36"
+      className="group w-full min-w-0"
     >
-      <div id="management-stale-inventory-title">
+      <div id="management-stale-inventory-title" className="relative min-h-36">
         <KpiCard
           icon={AlertTriangle}
           label={t("smartLoading.staleInventory")}
@@ -55,9 +55,7 @@ export function ManagementStaleInventory({ cases, onSelectPerson }: ManagementSt
           caption={t("smartLoading.peopleNeedAttention")}
           glow="warning"
         />
-      </div>
-
-      <Card className="glass-card invisible absolute start-0 top-[calc(100%-0.25rem)] z-30 w-72 opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
+        <Card className="glass-card invisible absolute start-0 top-full z-30 -mt-1 w-72 opacity-0 transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100">
         <CardContent className="p-3">
           <p className="mb-2 text-sm font-semibold">{t("smartLoading.staleInventory")}</p>
           <div className="space-y-1">
@@ -76,7 +74,8 @@ export function ManagementStaleInventory({ cases, onSelectPerson }: ManagementSt
             ))}
           </div>
         </CardContent>
-      </Card>
+        </Card>
+      </div>
     </section>
   );
 }

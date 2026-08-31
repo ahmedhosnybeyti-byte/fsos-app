@@ -650,6 +650,8 @@ export function SmartLoadingScreen({
 
   return (
     <div dir={locale === "ar" ? "rtl" : "ltr"} className="relative space-y-6 pb-10 max-md:space-y-3" onClick={() => panel && setPanel(null)}>
+      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
+      <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
       <header className="rise-in flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-semibold">

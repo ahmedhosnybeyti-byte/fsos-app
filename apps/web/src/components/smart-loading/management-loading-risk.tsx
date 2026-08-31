@@ -62,11 +62,11 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson }: Management
   return (
     <section
       aria-labelledby="management-loading-risk-title"
-      className="group relative h-full w-full min-w-0 self-stretch [&>div:first-child]:h-full [&>div:first-child]:min-h-36 [&>div:first-child>div]:h-full [&>div:first-child>div]:min-h-36"
+      className="group w-full min-w-0"
       onMouseEnter={() => setPopoverOpen(true)}
       onMouseLeave={() => setPopoverOpen(false)}
     >
-      <div id="management-loading-risk-title">
+      <div id="management-loading-risk-title" className="relative min-h-36">
         <KpiCard
           icon={AlertTriangle}
           label={t("smartLoading.loadingRisk")}
@@ -74,10 +74,8 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson }: Management
           caption={t("smartLoading.peopleNeedAttention")}
           glow="warning"
         />
-      </div>
-
-      {isPopoverOpen && (
-        <Card className="glass-card absolute start-0 top-[calc(100%-0.25rem)] z-30 w-72">
+        {isPopoverOpen && (
+          <Card className="glass-card absolute start-0 top-full z-30 -mt-1 w-72">
           <CardContent className="p-3">
             <p className="mb-2 text-sm font-semibold">{t("smartLoading.loadingRisk")}</p>
             <div className="space-y-1">
@@ -97,8 +95,9 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson }: Management
               ))}
             </div>
           </CardContent>
-        </Card>
-      )}
+          </Card>
+        )}
+      </div>
     </section>
   );
 }
