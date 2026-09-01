@@ -35,6 +35,7 @@ import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
 import { categoryAddedProductCount, formatLostOpportunityQuantity, formatLostOpportunityQuantityInput, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
 import { calculateSuggestedLoading } from "./suggested-loading";
 import { ManagementLoadingRisk } from "./management-loading-risk";
+import { ManagementLostOpportunitiesCard, ManagementLostOpportunitiesTable } from "./management-lost-opportunities";
 import { ManagementStaleInventory } from "./management-stale-inventory";
 import { StaleDisposalPlan, StaleInventoryTable } from "./stale-inventory-workflow";
 
@@ -50,7 +51,7 @@ type LostOpportunityAddition = {
 type Row = { product: SmartLoadingProduct; original: number; baseSuggested: number; suggested: number; input: Inputs; manuallyAdded: boolean; lostOpportunity?: LostOpportunityAddition; stockAvailable: boolean; effectiveVehicleStock: number | null; preliminary: boolean };
 type ManagementRow = SmartLoadingManagementVehicleProduct;
 type ManagementScopeSelection = { managerId?: string; supervisorId?: string; salesRepId?: string; managerName?: string; supervisorName?: string; salesRepName?: string };
-type ManagementContext = "loading-risk" | "stale-inventory";
+type ManagementContext = "loading-risk" | "stale-inventory" | "lost-opportunities";
 
 function parsePositiveNumber(value: string): number {
   return Math.max(0, Number(value) || 0);
@@ -716,7 +717,7 @@ export function SmartLoadingScreen({
       </header>
 
       {managementView && (
-        <div className="-my-2 grid items-stretch gap-3 md:grid-cols-2">
+        <div className="-my-2 grid items-stretch gap-3 md:grid-cols-3">
           <ManagementLoadingRisk
             targetDate={targetDate}
             onSelectPerson={(person) => {
@@ -746,6 +747,7 @@ export function SmartLoadingScreen({
               onManagementScopeChange(scope);
             }}
           />
+          <ManagementLostOpportunitiesCard targetDate={targetDate} />
         </div>
       )}
 
@@ -857,6 +859,21 @@ export function SmartLoadingScreen({
             }}
           >
             {t("smartLoading.staleInventory")}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={managementContext === "lost-opportunities"}
+            className={cn(
+              "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+              managementContext === "lost-opportunities" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => {
+              setSelectedStaleProductCode(null);
+              setManagementContext("lost-opportunities");
+            }}
+          >
+            {t("smartLoading.lostOpportunities")}
           </button>
         </div>
       )}
@@ -1031,6 +1048,13 @@ export function SmartLoadingScreen({
               setSelectedStaleProductCode(null);
             }}
           />
+        </section>
+      )}
+
+      {managementView && managementContext === "lost-opportunities" && (
+        <section id="smart-loading-recommendations" className="glass-card rise-in space-y-5 border-primary/20 bg-background/30 p-5 max-md:space-y-4 max-md:p-3">
+          <h2 className="text-xl font-semibold tracking-tight">{t("smartLoading.lostOpportunities")}</h2>
+          <ManagementLostOpportunitiesTable targetDate={targetDate} />
         </section>
       )}
     </div>
