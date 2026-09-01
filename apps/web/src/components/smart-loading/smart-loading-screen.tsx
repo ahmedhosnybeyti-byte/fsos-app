@@ -1008,8 +1008,8 @@ export function SmartLoadingScreen({
       )}
 
       {managementView && managementContext === "stale-inventory" && !selectedStalePlan && (
-        <section id="smart-loading-recommendations" className="glass-card rise-in space-y-4 p-4 max-md:p-3">
-          <h2 className="text-xl font-semibold">{t("smartLoading.staleInventory")}</h2>
+        <section id="smart-loading-recommendations" className="glass-card rise-in space-y-5 border-primary/20 bg-background/30 p-5 max-md:space-y-4 max-md:p-3">
+          <h2 className="text-xl font-semibold tracking-tight">{t("smartLoading.staleInventory")}</h2>
           <StaleInventoryTable
             plans={session.staleProductPlans}
             targetDate={session.targetDate}

@@ -68,7 +68,7 @@ export function StaleInventoryTable({ plans, targetDate, onSelectProduct, showBu
   }, [locale, plans, t, targetDate]);
 
   if (plans.length === 0) {
-    return <p className="rounded-md border p-4 text-sm text-muted-foreground">{t("smartLoading.noStaleProducts")}</p>;
+    return <p className="rounded-xl border border-dashed border-border/60 bg-background/30 p-4 text-sm text-muted-foreground">{t("smartLoading.noStaleProducts")}</p>;
   }
 
   return (
@@ -84,11 +84,11 @@ export function StaleInventoryTable({ plans, targetDate, onSelectProduct, showBu
         </div>
       )}
       {plansByCategory.map((group) => (
-        <Card key={group.category} className="glass-card overflow-hidden">
-          <CardHeader>
+        <Card key={group.category} className="glass-card overflow-hidden border-border/60 bg-background/25">
+          <CardHeader className="border-b border-border/60 bg-primary/[0.04] px-4 py-3">
             <button
               type="button"
-              className="flex w-full items-center justify-between text-start"
+              className="flex w-full items-center justify-between rounded-md text-start outline-none focus-visible:ring-2 focus-visible:ring-primary/50"
               aria-expanded={!collapsedCategories.has(group.category)}
               onClick={() => setCollapsedCategories((current) => {
                 const next = new Set(current);
@@ -97,7 +97,7 @@ export function StaleInventoryTable({ plans, targetDate, onSelectProduct, showBu
                 return next;
               })}
             >
-              <CardTitle>{group.category}</CardTitle>
+              <CardTitle className="text-base">{group.category}</CardTitle>
               <span className="flex items-center gap-2 text-sm text-muted-foreground">
                 {formatQuantity(group.plans.length, locale)}
                 <ChevronDown
@@ -107,10 +107,10 @@ export function StaleInventoryTable({ plans, targetDate, onSelectProduct, showBu
             </button>
           </CardHeader>
           {!collapsedCategories.has(group.category) && (
-            <CardContent className="space-y-4">
-              <section className="glow-ai rounded-lg p-3">
-                <h2 className="font-semibold">{t("smartLoading.practicalDecision")}</h2>
-                <ol className="mt-2 space-y-1 text-sm text-muted-foreground">
+            <CardContent className="space-y-4 p-4">
+              <section className="rounded-xl border border-primary/20 bg-primary/[0.04] p-4 shadow-[inset_0_1px_0_rgb(255,255,255,0.04)]">
+                <h2 className="font-semibold text-foreground">{t("smartLoading.practicalDecision")}</h2>
+                <ol className="mt-2 space-y-1.5 text-sm text-muted-foreground">
                   {group.decisionPlans.map((plan) => (
                     <li key={plan.productCode}>
                       {plan.productName} · {t("smartLoading.vehicleStock")}: {formatQuantity(plan.currentVehicleStock, locale)} · {t("smartLoading.daysStale")}: {formatQuantity(staleDaysSince(plan.lastSaleDate, targetDate), locale)} · {t("smartLoading.customerEvidence", { count: formatQuantity(plan.customers.length, locale) })}
@@ -118,8 +118,8 @@ export function StaleInventoryTable({ plans, targetDate, onSelectProduct, showBu
                   ))}
                 </ol>
               </section>
-              <div className="overflow-x-auto rounded-lg border border-border bg-background/30">
-                <div className="grid min-w-[640px] grid-cols-[minmax(0,1fr)_10rem_8rem_10rem] gap-3 border-b border-border/60 bg-secondary/30 px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <div className="overflow-x-auto rounded-xl border border-border/60 bg-background/30 shadow-[inset_0_1px_0_rgb(255,255,255,0.03)]">
+                <div className="grid min-w-[640px] grid-cols-[minmax(0,1fr)_10rem_8rem_10rem] gap-3 border-b border-border/60 bg-secondary/35 px-4 py-3 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   <span>{t("smartLoading.productLabel")}</span>
                   <span>{t("smartLoading.vehicleStock")}</span>
                   <span>{t("smartLoading.daysStale")}</span>
@@ -129,7 +129,7 @@ export function StaleInventoryTable({ plans, targetDate, onSelectProduct, showBu
                   <button
                     key={plan.productCode}
                     type="button"
-                    className="grid min-w-[640px] w-full grid-cols-[minmax(0,1fr)_10rem_8rem_10rem] gap-3 px-4 py-3 text-start text-sm transition-colors hover:bg-secondary/50"
+                    className="grid min-w-[640px] w-full grid-cols-[minmax(0,1fr)_10rem_8rem_10rem] gap-3 border-b border-border/50 px-4 py-3 text-start text-sm transition-colors last:border-b-0 hover:bg-primary/[0.04] focus-visible:bg-primary/[0.06] focus-visible:outline-none"
                     onClick={() => onSelectProduct(plan)}
                   >
                     <span className="font-medium">{plan.productName}</span>
