@@ -151,6 +151,8 @@ export interface RieManagementLostOpportunitiesQuery extends EntityQueryContext 
   /** The existing Smart Loading aliases for the target date's VisitDay. */
   visitDays: readonly string[];
   personLevel: "manager" | "supervisor" | "sales_rep";
+  /** Already authorization-checked hierarchy selection, resolved to Routes before facts. */
+  routeIds?: readonly string[] | null;
   pagination?: RieQueryPagination;
 }
 export interface RieManagementLostOpportunityRow {
@@ -171,6 +173,7 @@ export interface RieManagementLostOpportunitiesResult {
   affectedPersonCount: number;
   affectedRouteCount: number;
   lostOpportunityCount: number;
+  topPeople: { responsibleEmployeeId: string; responsibleEmployeeName: string; lostOpportunityCount: number; suggestedQuantity: number }[];
   page: { limit: number; offset: number; hasMore: boolean };
   rows: RieManagementLostOpportunityRow[];
 }

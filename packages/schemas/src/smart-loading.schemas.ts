@@ -48,6 +48,9 @@ export type SmartLoadingManagementLoadingRiskResponse = z.infer<typeof smartLoad
 
 export const smartLoadingManagementLostOpportunitiesQuerySchema = z.object({
   targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  managerId: z.string().trim().min(1).optional(),
+  supervisorId: z.string().trim().min(1).optional(),
+  salesRepId: z.string().trim().min(1).optional(),
   limit: z.coerce.number().int().min(1).max(500).default(100),
   offset: z.coerce.number().int().min(0).default(0),
 });
@@ -67,11 +70,19 @@ export const smartLoadingManagementLostOpportunityRowSchema = z.object({
   currentVanStock: z.number(),
 });
 export type SmartLoadingManagementLostOpportunityRow = z.infer<typeof smartLoadingManagementLostOpportunityRowSchema>;
+export const smartLoadingManagementLostOpportunityPersonSchema = z.object({
+  responsibleEmployeeId: z.string(),
+  responsibleEmployeeName: z.string(),
+  lostOpportunityCount: z.number().int().positive(),
+  suggestedQuantity: z.number().positive(),
+});
+export type SmartLoadingManagementLostOpportunityPerson = z.infer<typeof smartLoadingManagementLostOpportunityPersonSchema>;
 export const smartLoadingManagementLostOpportunitiesResponseSchema = z.object({
   targetDate: z.string(),
   affectedPersonCount: z.number().int().nonnegative(),
   affectedRouteCount: z.number().int().nonnegative(),
   lostOpportunityCount: z.number().int().nonnegative(),
+  topPeople: z.array(smartLoadingManagementLostOpportunityPersonSchema).max(4),
   page: z.object({ limit: z.number().int().positive(), offset: z.number().int().nonnegative(), hasMore: z.boolean() }),
   rows: z.array(smartLoadingManagementLostOpportunityRowSchema),
 });

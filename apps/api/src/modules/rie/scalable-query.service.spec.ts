@@ -84,6 +84,7 @@ test("management lost opportunities keeps stock-zero rows, excludes positive sto
         affectedRouteCount: 1,
         lostOpportunityCount: 1,
         hasMore: false,
+        topPeople: [{ responsibleEmployeeId: "M-1", responsibleEmployeeName: "Manager", lostOpportunityCount: 1, suggestedQuantity: 4 }],
         rows: [{
           responsibleEmployeeId: "M-1", responsibleEmployeeName: "Manager", routeId: "R-1",
           customerCode: "C-1", customerName: "Customer", productCode: "P-1", productName: "Product",
@@ -110,6 +111,7 @@ test("management lost opportunities keeps stock-zero rows, excludes positive sto
     affectedPersonCount: 1,
     affectedRouteCount: 1,
     lostOpportunityCount: 1,
+    topPeople: [{ responsibleEmployeeId: "M-1", responsibleEmployeeName: "Manager", lostOpportunityCount: 1, suggestedQuantity: 4 }],
     page: { limit: 25, offset: 0, hasMore: false },
     rows: [{
       responsibleEmployeeId: "M-1", responsibleEmployeeName: "Manager", routeId: "R-1",
@@ -121,6 +123,9 @@ test("management lost opportunities keeps stock-zero rows, excludes positive sto
   assert.match(sql, /baseline_net_quantity > 0/);
   assert.match(sql, /recent_net_quantity = 0/);
   assert.match(sql, /COALESCE\(stock\.current_stock, 0\) <= 0/);
+  assert.match(sql, /ROUND\(net\.baseline_net_quantity \/ 3\.0\) > 0/);
+  assert.match(sql, /SUM\("suggestedQuantity"\).*"suggestedQuantity"/);
+  assert.match(sql, /ORDER BY "suggestedQuantity" DESC, "responsibleEmployeeName"/);
   assert.match(sql, /LIMIT .* OFFSET/);
   assert.ok(captured?.values?.includes("R-1"));
   assert.ok(captured?.values?.includes("Tuesday"));

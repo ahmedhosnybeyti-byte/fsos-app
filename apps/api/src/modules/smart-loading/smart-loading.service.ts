@@ -249,8 +249,11 @@ export class SmartLoadingService {
     const baselineTo = isoDay(target.getTime() - 30 * MS_PER_DAY);
     const recentFrom = isoDay(target.getTime() - 29 * MS_PER_DAY);
     const personLevel = user.roleCode === "COMPANY_ADMIN" ? "manager" : user.roleCode === "MANAGER" ? "supervisor" : "sales_rep";
+    const ctx = this.rieContext(user);
+    const selectedRepRouteIds = query.salesRepId ? await this.resolveSelectedSalesRepRoutes(ctx, query.salesRepId) : null;
+    const scopedRouteIds = await this.resolveManagementScopeRouteIds(ctx, query.managerId, query.supervisorId, selectedRepRouteIds);
     const result = await this.rieFacade.queryManagementLostOpportunities({
-      ...this.rieContext(user),
+      ...ctx,
       targetDate,
       baselineFrom,
       baselineTo,
@@ -258,6 +261,7 @@ export class SmartLoadingService {
       recentTo: targetDate,
       visitDays: VISIT_DAY_ALIASES[weekdayForDate(target)],
       personLevel,
+      routeIds: scopedRouteIds,
       pagination: { limit: query.limit, offset: query.offset },
     });
     return { targetDate, ...result };

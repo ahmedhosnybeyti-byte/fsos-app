@@ -398,12 +398,18 @@ export class RieScalableQueryService {
     const page = normalizePagination(input.pagination, false);
     const allowed = input.requestingUser ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser) : null;
     const routes = allowed ? [...allowed].map((value) => value.trim().toLowerCase()).filter(Boolean) : null;
+    const requestedRoutes = input.routeIds === undefined || input.routeIds === null
+      ? null
+      : new Set(input.routeIds.map((value) => value.trim().toLowerCase()).filter(Boolean));
+    const effectiveRoutes = routes === null
+      ? requestedRoutes === null ? null : [...requestedRoutes]
+      : requestedRoutes === null ? routes : routes.filter((routeId) => requestedRoutes.has(routeId));
     const visitDays = [...new Set(input.visitDays.map((value) => value.trim().toLowerCase()).filter(Boolean))];
-    const routeScope = (field: RieQueryField) => routes === null ? Prisma.empty : routes.length ? Prisma.sql` AND ${normalizedField(field)} IN (${Prisma.join(routes)})` : Prisma.sql` AND FALSE`;
-    const routePredicates = routes === null
+    const routeScope = (field: RieQueryField) => effectiveRoutes === null ? Prisma.empty : effectiveRoutes.length ? Prisma.sql` AND ${normalizedField(field)} IN (${Prisma.join(effectiveRoutes)})` : Prisma.sql` AND FALSE`;
+    const routePredicates = effectiveRoutes === null
       ? []
-      : routes.length
-        ? [Prisma.sql`${normalizedField({ field: "RouteID", source: "route_source" })} IN (${Prisma.join(routes)})`]
+      : effectiveRoutes.length
+        ? [Prisma.sql`${normalizedField({ field: "RouteID", source: "route_source" })} IN (${Prisma.join(effectiveRoutes)})`]
         : [Prisma.sql`FALSE`];
     const customerPredicates = visitDays.length
       ? [Prisma.sql`${normalizedField({ field: "VisitDay", source: "customer_source" })} IN (${Prisma.join(visitDays)})${routeScope({ field: "RouteID", source: "customer_source" })}`]
@@ -457,6 +463,7 @@ export class RieScalableQueryService {
       lostOpportunityCount: number;
       hasMore: boolean;
       rows: RieManagementLostOpportunityRow[];
+      topPeople: RieManagementLostOpportunitiesResult["topPeople"];
     }>>(Prisma.sql`
       WITH ${customerCte}, ${invoiceCte}, ${itemCte}, ${returnsCte}, ${returnItemsCte}, ${inventoryCte}, ${routesCte}, ${repCte}, ${supervisorCte}, ${managerCte}, ${productCte},
       scheduled_customers AS MATERIALIZED (
@@ -528,15 +535,24 @@ export class RieScalableQueryService {
         LEFT JOIN stock ON stock.route_id=scheduled_customers.route_id AND stock.product_code=net.product_code
         LEFT JOIN product_names ON product_names.product_code=net.product_code
         WHERE net.baseline_net_quantity > 0 AND net.recent_net_quantity = 0 AND COALESCE(stock.current_stock, 0) <= 0
+          AND ROUND(net.baseline_net_quantity / 3.0) > 0
       ),
       summary AS MATERIALIZED (
         SELECT COUNT(*)::integer "lostOpportunityCount", COUNT(DISTINCT "routeId")::integer "affectedRouteCount", COUNT(DISTINCT "responsibleEmployeeId")::integer "affectedPersonCount"
         FROM opportunities
       ),
-      page_window AS MATERIALIZED (
-        SELECT *, ROW_NUMBER() OVER (ORDER BY "responsibleEmployeeName", "responsibleEmployeeId", "routeId", "customerName", "customerCode", "productName", "productCode") row_number
+      top_people AS MATERIALIZED (
+        SELECT "responsibleEmployeeId", "responsibleEmployeeName", COUNT(*)::integer "lostOpportunityCount",
+          SUM("suggestedQuantity")::double precision "suggestedQuantity"
         FROM opportunities
-        ORDER BY "responsibleEmployeeName", "responsibleEmployeeId", "routeId", "customerName", "customerCode", "productName", "productCode"
+        GROUP BY "responsibleEmployeeId", "responsibleEmployeeName"
+        ORDER BY "suggestedQuantity" DESC, "lostOpportunityCount" DESC, "responsibleEmployeeName", "responsibleEmployeeId"
+        LIMIT 4
+      ),
+      page_window AS MATERIALIZED (
+        SELECT *, ROW_NUMBER() OVER (ORDER BY "suggestedQuantity" DESC, "responsibleEmployeeName", "responsibleEmployeeId", "routeId", "customerName", "customerCode", "productName", "productCode") row_number
+        FROM opportunities
+        ORDER BY "suggestedQuantity" DESC, "responsibleEmployeeName", "responsibleEmployeeId", "routeId", "customerName", "customerCode", "productName", "productCode"
         LIMIT ${page.limit + 1} OFFSET ${page.offset}
       ),
       page_result AS MATERIALIZED (
@@ -548,15 +564,23 @@ export class RieScalableQueryService {
         ) ORDER BY row_number) FILTER (WHERE row_number <= ${page.limit}), '[]'::jsonb) rows,
         COALESCE(BOOL_OR(row_number > ${page.limit}), FALSE) "hasMore"
         FROM page_window
+      ),
+      top_people_result AS MATERIALIZED (
+        SELECT COALESCE(JSONB_AGG(JSONB_BUILD_OBJECT(
+          'responsibleEmployeeId', "responsibleEmployeeId", 'responsibleEmployeeName', "responsibleEmployeeName",
+          'lostOpportunityCount', "lostOpportunityCount", 'suggestedQuantity', "suggestedQuantity"
+        ) ORDER BY "suggestedQuantity" DESC, "lostOpportunityCount" DESC, "responsibleEmployeeName", "responsibleEmployeeId"), '[]'::jsonb) "topPeople"
+        FROM top_people
       )
-      SELECT summary."affectedPersonCount", summary."affectedRouteCount", summary."lostOpportunityCount", page_result."hasMore", page_result.rows
-      FROM summary CROSS JOIN page_result
+      SELECT summary."affectedPersonCount", summary."affectedRouteCount", summary."lostOpportunityCount", page_result."hasMore", page_result.rows, top_people_result."topPeople"
+      FROM summary CROSS JOIN page_result CROSS JOIN top_people_result
     `);
     const result = rawRows[0];
     return {
       affectedPersonCount: Number(result?.affectedPersonCount ?? 0),
       affectedRouteCount: Number(result?.affectedRouteCount ?? 0),
       lostOpportunityCount: Number(result?.lostOpportunityCount ?? 0),
+      topPeople: Array.isArray(result?.topPeople) ? result.topPeople : [],
       page: { ...page, hasMore: Boolean(result?.hasMore) },
       rows: Array.isArray(result?.rows) ? result.rows : [],
     };

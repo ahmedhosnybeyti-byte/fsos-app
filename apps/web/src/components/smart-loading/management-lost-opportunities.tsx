@@ -13,17 +13,20 @@ import { formatQuantity } from "@/lib/utils";
 
 const PAGE_SIZE = 100;
 
-function useManagementLostOpportunities(targetDate: string, offset = 0) {
+type ManagementScope = { managerId?: string; supervisorId?: string; salesRepId?: string };
+
+function useManagementLostOpportunities(targetDate: string, scope: ManagementScope, offset = 0) {
   return useQuery({
-    queryKey: ["smart-loading", "management-risks", "lost-opportunities", targetDate, PAGE_SIZE, offset],
-    queryFn: () => smartLoadingApi.getManagementLostOpportunities(targetDate, PAGE_SIZE, offset),
+    queryKey: ["smart-loading", "management-risks", "lost-opportunities", targetDate, scope.managerId, scope.supervisorId, scope.salesRepId, PAGE_SIZE, offset],
+    queryFn: () => smartLoadingApi.getManagementLostOpportunities(targetDate, scope, PAGE_SIZE, offset),
     staleTime: 60_000,
   });
 }
 
-export function ManagementLostOpportunitiesCard({ targetDate }: { targetDate: string }) {
+export function ManagementLostOpportunitiesCard({ targetDate, scope }: { targetDate: string; scope: ManagementScope }) {
   const { locale, t } = useTranslation();
-  const query = useManagementLostOpportunities(targetDate);
+  const [isPopoverOpen, setPopoverOpen] = useState(false);
+  const query = useManagementLostOpportunities(targetDate, scope);
   const label = (key: string, fallback: string) => {
     const translated = t(key as never);
     return translated === key ? fallback : translated;
@@ -35,13 +38,13 @@ export function ManagementLostOpportunitiesCard({ targetDate }: { targetDate: st
   const data = query.data;
   if (!data || data.lostOpportunityCount === 0) return <Card className="glass-card h-full min-h-36 w-full border-success/20 bg-success/5"><CardContent className="flex min-h-36 items-center gap-2 p-4 text-sm text-success"><CircleCheck className="h-5 w-5 shrink-0" />{label("smartLoading.noLostOpportunities", "No lost opportunities.")}</CardContent></Card>;
 
-  return <section aria-labelledby="management-lost-opportunities-title" className="w-full min-w-0"><div id="management-lost-opportunities-title" className="relative min-h-36"><KpiCard icon={PackageX} label={label("smartLoading.lostOpportunities", "Lost opportunities")} value={formatQuantity(data.lostOpportunityCount, locale)} caption={`${formatQuantity(data.affectedPersonCount, locale)} ${label("smartLoading.people", "people")} · ${formatQuantity(data.affectedRouteCount, locale)} ${label("smartLoading.routes", "routes")}`} glow="warning" /></div></section>;
+  return <section aria-labelledby="management-lost-opportunities-title" className="group w-full min-w-0" onMouseEnter={() => setPopoverOpen(true)} onMouseLeave={() => setPopoverOpen(false)}><div id="management-lost-opportunities-title" className="relative min-h-36"><KpiCard icon={PackageX} label={label("smartLoading.lostOpportunities", "Lost opportunities")} value={formatQuantity(data.affectedPersonCount, locale)} caption={`${formatQuantity(data.affectedPersonCount, locale)} ${label("smartLoading.people", "people")} · ${formatQuantity(data.affectedRouteCount, locale)} ${label("smartLoading.routes", "routes")} · ${formatQuantity(data.lostOpportunityCount, locale)} ${label("smartLoading.lostOpportunities", "lost opportunities")}`} glow="warning" />{isPopoverOpen && data.topPeople.length > 0 && <Card className="glass-card absolute start-0 top-full z-30 -mt-1 w-80"><CardContent className="p-3"><p className="mb-2 text-sm font-semibold">{label("smartLoading.topLostOpportunityPeople", "Top affected people")}</p><div className="space-y-1">{data.topPeople.map((person) => <div key={person.responsibleEmployeeId} className="flex items-center justify-between gap-3 rounded px-2 py-1.5 text-sm"><span className="truncate">{person.responsibleEmployeeName}</span><span className="shrink-0 tabular-nums text-muted-foreground">{formatQuantity(person.suggestedQuantity, locale)}</span></div>)}</div></CardContent></Card>}</div></section>;
 }
 
-export function ManagementLostOpportunitiesTable({ targetDate }: { targetDate: string }) {
+export function ManagementLostOpportunitiesTable({ targetDate, scope }: { targetDate: string; scope: ManagementScope }) {
   const { locale, t } = useTranslation();
   const [offset, setOffset] = useState(0);
-  const query = useManagementLostOpportunities(targetDate, offset);
+  const query = useManagementLostOpportunities(targetDate, scope, offset);
   const label = (key: string, fallback: string) => {
     const translated = t(key as never);
     return translated === key ? fallback : translated;

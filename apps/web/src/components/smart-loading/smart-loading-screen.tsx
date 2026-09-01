@@ -747,7 +747,7 @@ export function SmartLoadingScreen({
               onManagementScopeChange(scope);
             }}
           />
-          <ManagementLostOpportunitiesCard targetDate={targetDate} />
+          <ManagementLostOpportunitiesCard targetDate={targetDate} scope={{ managerId, supervisorId, salesRepId }} />
         </div>
       )}
 
@@ -1054,7 +1054,7 @@ export function SmartLoadingScreen({
       {managementView && managementContext === "lost-opportunities" && (
         <section id="smart-loading-recommendations" className="glass-card rise-in space-y-5 border-primary/20 bg-background/30 p-5 max-md:space-y-4 max-md:p-3">
           <h2 className="text-xl font-semibold tracking-tight">{t("smartLoading.lostOpportunities")}</h2>
-          <ManagementLostOpportunitiesTable targetDate={targetDate} />
+          <ManagementLostOpportunitiesTable targetDate={targetDate} scope={{ managerId, supervisorId, salesRepId }} />
         </section>
       )}
     </div>
