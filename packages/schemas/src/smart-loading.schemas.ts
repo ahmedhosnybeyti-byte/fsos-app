@@ -46,6 +46,37 @@ export type SmartLoadingManagementLoadingRiskPerson = z.infer<typeof smartLoadin
 export const smartLoadingManagementLoadingRiskResponseSchema = z.object({ targetDate: z.string(), salesFrom: z.string(), salesTo: z.string(), affectedPersonCount: z.number().int().nonnegative(), people: z.array(smartLoadingManagementLoadingRiskPersonSchema) });
 export type SmartLoadingManagementLoadingRiskResponse = z.infer<typeof smartLoadingManagementLoadingRiskResponseSchema>;
 
+export const smartLoadingManagementLostOpportunitiesQuerySchema = z.object({
+  targetDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  limit: z.coerce.number().int().min(1).max(500).default(100),
+  offset: z.coerce.number().int().min(0).default(0),
+});
+export type SmartLoadingManagementLostOpportunitiesQuery = z.infer<typeof smartLoadingManagementLostOpportunitiesQuerySchema>;
+export const smartLoadingManagementLostOpportunityRowSchema = z.object({
+  responsibleEmployeeId: z.string(),
+  responsibleEmployeeName: z.string(),
+  routeId: z.string(),
+  customerCode: z.string(),
+  customerName: z.string(),
+  productCode: z.string(),
+  productName: z.string(),
+  category: z.string().nullable(),
+  baselineNetQuantity: z.number(),
+  recentNetQuantity: z.number(),
+  suggestedQuantity: z.number(),
+  currentVanStock: z.number(),
+});
+export type SmartLoadingManagementLostOpportunityRow = z.infer<typeof smartLoadingManagementLostOpportunityRowSchema>;
+export const smartLoadingManagementLostOpportunitiesResponseSchema = z.object({
+  targetDate: z.string(),
+  affectedPersonCount: z.number().int().nonnegative(),
+  affectedRouteCount: z.number().int().nonnegative(),
+  lostOpportunityCount: z.number().int().nonnegative(),
+  page: z.object({ limit: z.number().int().positive(), offset: z.number().int().nonnegative(), hasMore: z.boolean() }),
+  rows: z.array(smartLoadingManagementLostOpportunityRowSchema),
+});
+export type SmartLoadingManagementLostOpportunitiesResponse = z.infer<typeof smartLoadingManagementLostOpportunitiesResponseSchema>;
+
 export const smartLoadingProductSchema = z.object({
   productCode: z.string(),
   productName: z.string(),

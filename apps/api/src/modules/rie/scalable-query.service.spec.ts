@@ -73,3 +73,55 @@ test("scalable query keeps the latest snapshot per visible route before aggregat
   assert.match(sql, /MAX\(NULLIF/);
   assert.match(sql, /FROM base_latest base/);
 });
+
+test("management lost opportunities keeps stock-zero rows, excludes positive stock in SQL, and returns paged totals", async () => {
+  let captured: { strings?: readonly string[]; values?: readonly unknown[] } | undefined;
+  const service = new RieScalableQueryService({
+    $queryRaw: async (query: typeof captured) => {
+      captured = query;
+      return [{
+        affectedPersonCount: 1,
+        affectedRouteCount: 1,
+        lostOpportunityCount: 1,
+        hasMore: false,
+        rows: [{
+          responsibleEmployeeId: "M-1", responsibleEmployeeName: "Manager", routeId: "R-1",
+          customerCode: "C-1", customerName: "Customer", productCode: "P-1", productName: "Product",
+          category: "Food", baselineNetQuantity: 12, recentNetQuantity: 0, suggestedQuantity: 4, currentVanStock: 0,
+        }],
+      }];
+    },
+  } as never, { resolveAllowedRouteIds: async () => new Set(["R-1"]) } as never);
+
+  const result = await service.queryManagementLostOpportunities({
+    companyId: "company-1",
+    requestingUser: { roleCode: "MANAGER", email: "manager@example.com" },
+    targetDate: "2026-09-02",
+    baselineFrom: "2026-05-06",
+    baselineTo: "2026-08-03",
+    recentFrom: "2026-08-04",
+    recentTo: "2026-09-02",
+    visitDays: ["Tuesday"],
+    personLevel: "supervisor",
+    pagination: { limit: 25, offset: 0 },
+  });
+
+  assert.deepEqual(result, {
+    affectedPersonCount: 1,
+    affectedRouteCount: 1,
+    lostOpportunityCount: 1,
+    page: { limit: 25, offset: 0, hasMore: false },
+    rows: [{
+      responsibleEmployeeId: "M-1", responsibleEmployeeName: "Manager", routeId: "R-1",
+      customerCode: "C-1", customerName: "Customer", productCode: "P-1", productName: "Product",
+      category: "Food", baselineNetQuantity: 12, recentNetQuantity: 0, suggestedQuantity: 4, currentVanStock: 0,
+    }],
+  });
+  const sql = captured?.strings?.join(" ") ?? "";
+  assert.match(sql, /baseline_net_quantity > 0/);
+  assert.match(sql, /recent_net_quantity = 0/);
+  assert.match(sql, /COALESCE\(stock\.current_stock, 0\) <= 0/);
+  assert.match(sql, /LIMIT .* OFFSET/);
+  assert.ok(captured?.values?.includes("R-1"));
+  assert.ok(captured?.values?.includes("Tuesday"));
+});

@@ -3,7 +3,7 @@ import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import type { EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieLatestPerScope, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
+import type { RieDateScope, RieLatestPerScope, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
@@ -380,6 +380,186 @@ export class RieScalableQueryService {
       FROM person_json CROSS JOIN scope_debug CROSS JOIN route_scope_debug CROSS JOIN risk_debug
     `);
     return rows[0] ?? { people: [] };
+  }
+
+  /**
+   * Management result for Smart Loading Lost Opportunities. This keeps the
+   * established Sales Rep definition in PostgreSQL at Customer × Product ×
+   * Route grain, then adds the existing management person roll-up without
+   * reading or joining raw facts in Node.
+   */
+  async queryManagementLostOpportunities(input: RieManagementLostOpportunitiesQuery): Promise<RieManagementLostOpportunitiesResult> {
+    if (!input.companyId?.trim()) throw new Error("RIE management lost opportunities requires companyId.");
+    const targetDate = normalizeDate(input.targetDate);
+    const baselineFrom = normalizeDate(input.baselineFrom);
+    const baselineTo = normalizeDate(input.baselineTo);
+    const recentFrom = normalizeDate(input.recentFrom);
+    const recentTo = normalizeDate(input.recentTo);
+    const page = normalizePagination(input.pagination, false);
+    const allowed = input.requestingUser ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser) : null;
+    const routes = allowed ? [...allowed].map((value) => value.trim().toLowerCase()).filter(Boolean) : null;
+    const visitDays = [...new Set(input.visitDays.map((value) => value.trim().toLowerCase()).filter(Boolean))];
+    const routeScope = (field: RieQueryField) => routes === null ? Prisma.empty : routes.length ? Prisma.sql` AND ${normalizedField(field)} IN (${Prisma.join(routes)})` : Prisma.sql` AND FALSE`;
+    const routePredicates = routes === null
+      ? []
+      : routes.length
+        ? [Prisma.sql`${normalizedField({ field: "RouteID", source: "route_source" })} IN (${Prisma.join(routes)})`]
+        : [Prisma.sql`FALSE`];
+    const customerPredicates = visitDays.length
+      ? [Prisma.sql`${normalizedField({ field: "VisitDay", source: "customer_source" })} IN (${Prisma.join(visitDays)})${routeScope({ field: "RouteID", source: "customer_source" })}`]
+      : [Prisma.sql`FALSE`];
+    const customerCte = activeEntityRowsCte(input.companyId, "Customers", "customer", customerPredicates, [], []);
+    const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} >= ${baselineFrom} AND ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${recentTo}${routeScope({ field: "RouteID", source: "invoice_source" })}`], [], []);
+    const itemCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], []);
+    const returnsCte = activeEntityRowsCte(input.companyId, "Returns", "returned", [Prisma.sql`${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} >= ${baselineFrom} AND ${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} <= ${recentTo}${routeScope({ field: "RouteID", source: "returned_source" })}`], [], []);
+    const returnItemsCte = activeEntityRowsCte(input.companyId, "Return Items", "return_item", [], [], []);
+    const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [Prisma.sql`${dateText(textField({ field: "ReportDate", source: "inventory_source" }))} <= ${targetDate}${routeScope({ field: "RouteID", source: "inventory_source" })}`], [], []);
+    const routesCte = activeEntityRowsCte(input.companyId, "Routes", "route", routePredicates, [], []);
+    const repCte = activeEntityRowsCte(input.companyId, "Employees", "rep", [], [], []);
+    const supervisorCte = activeEntityRowsCte(input.companyId, "Employees", "supervisor", [], [], []);
+    const managerCte = activeEntityRowsCte(input.companyId, "Employees", "manager", [], [], []);
+    const productCte = activeEntityRowsCte(input.companyId, "Products", "product", [], [], []);
+    const customerCode = normalizedField({ field: "CustomerCode", source: "customer" });
+    const customerRoute = normalizedField({ field: "RouteID", source: "customer" });
+    const invoiceCustomer = normalizedField({ field: "CustomerCode", source: "invoice" });
+    const invoiceNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
+    const invoiceDate = dateText(textField({ field: "InvoiceDate", source: "invoice" }));
+    const invoiceStatus = normalizedField({ field: "InvoiceStatus", source: "invoice" });
+    const itemInvoiceNo = normalizedField({ field: "InvoiceNo", source: "item" });
+    const itemProduct = normalizedField({ field: "ProductCode", source: "item" });
+    const itemQuantity = numericField(textField({ field: "Quantity", source: "item" }));
+    const returnCustomer = normalizedField({ field: "CustomerCode", source: "returned" });
+    const returnNo = normalizedField({ field: "ReturnNo", source: "returned" });
+    const returnDate = dateText(textField({ field: "ReturnDate", source: "returned" }));
+    const returnStatus = normalizedField({ field: "Status", source: "returned" });
+    const returnItemNo = normalizedField({ field: "ReturnNo", source: "return_item" });
+    const returnItemProduct = normalizedField({ field: "ProductCode", source: "return_item" });
+    const returnItemQuantity = numericField(textField({ field: "Quantity", source: "return_item" }));
+    const inventoryRoute = normalizedField({ field: "RouteID", source: "inventory" });
+    const inventoryProduct = normalizedField({ field: "ProductCode", source: "inventory" });
+    const inventoryQuantity = numericField(textField({ field: "Quantity", source: "inventory" }));
+    const routeId = normalizedField({ field: "RouteID", source: "route" });
+    const routeRep = normalizedField({ field: "SalesRepID", source: "route" });
+    const routeSupervisor = normalizedField({ field: "SupervisorID", source: "route" });
+    const routeManager = normalizedField({ field: "ManagerID", source: "route" });
+    const repId = normalizedField({ field: "EmployeeID", source: "rep" });
+    const supervisorId = normalizedField({ field: "EmployeeID", source: "supervisor" });
+    const managerId = normalizedField({ field: "EmployeeID", source: "manager" });
+    const person = input.personLevel === "manager"
+      ? { id: managerId, name: textField({ field: "EmployeeName", source: "manager" }) }
+      : input.personLevel === "supervisor"
+        ? { id: supervisorId, name: textField({ field: "EmployeeName", source: "supervisor" }) }
+        : { id: repId, name: textField({ field: "EmployeeName", source: "rep" }) };
+    const productCode = normalizedField({ field: "ProductCode", source: "product" });
+    const rawRows = await this.prisma.$queryRaw<Array<{
+      affectedPersonCount: number;
+      affectedRouteCount: number;
+      lostOpportunityCount: number;
+      hasMore: boolean;
+      rows: RieManagementLostOpportunityRow[];
+    }>>(Prisma.sql`
+      WITH ${customerCte}, ${invoiceCte}, ${itemCte}, ${returnsCte}, ${returnItemsCte}, ${inventoryCte}, ${routesCte}, ${repCte}, ${supervisorCte}, ${managerCte}, ${productCte},
+      scheduled_customers AS MATERIALIZED (
+        SELECT DISTINCT ON (${customerCode}) ${customerCode} customer_code, ${customerRoute} route_id,
+          COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "CustomerName", source: "customer" })}, '')), ''), ${customerCode}) customer_name
+        FROM customer_active customer
+        WHERE ${customerCode}<>'' AND ${customerRoute}<>''
+        ORDER BY ${customerCode}, customer."entity_key" DESC
+      ),
+      sales AS MATERIALIZED (
+        SELECT ${invoiceCustomer} customer_code, ${itemProduct} product_code,
+          SUM(CASE WHEN ${invoiceDate} BETWEEN ${baselineFrom} AND ${baselineTo} THEN ${itemQuantity} ELSE 0 END)::double precision baseline_sales,
+          SUM(CASE WHEN ${invoiceDate} BETWEEN ${recentFrom} AND ${recentTo} THEN ${itemQuantity} ELSE 0 END)::double precision recent_sales
+        FROM item_active item
+        INNER JOIN invoice_active invoice ON ${itemInvoiceNo}=${invoiceNo}
+        WHERE ${invoiceCustomer}<>'' AND ${itemProduct}<>'' AND ${invoiceStatus} IN ('confirmed', 'posted')
+        GROUP BY ${invoiceCustomer}, ${itemProduct}
+      ),
+      returned AS MATERIALIZED (
+        SELECT ${returnCustomer} customer_code, ${returnItemProduct} product_code,
+          SUM(CASE WHEN ${returnDate} BETWEEN ${baselineFrom} AND ${baselineTo} THEN ${returnItemQuantity} ELSE 0 END)::double precision baseline_returns,
+          SUM(CASE WHEN ${returnDate} BETWEEN ${recentFrom} AND ${recentTo} THEN ${returnItemQuantity} ELSE 0 END)::double precision recent_returns
+        FROM return_item_active return_item
+        INNER JOIN returned_active returned ON ${returnItemNo}=${returnNo}
+        WHERE ${returnCustomer}<>'' AND ${returnItemProduct}<>'' AND ${returnStatus} IN ('confirmed', 'approved')
+        GROUP BY ${returnCustomer}, ${returnItemProduct}
+      ),
+      net AS MATERIALIZED (
+        SELECT COALESCE(sales.customer_code, returned.customer_code) customer_code,
+          COALESCE(sales.product_code, returned.product_code) product_code,
+          (COALESCE(sales.baseline_sales, 0) - COALESCE(returned.baseline_returns, 0))::double precision baseline_net_quantity,
+          (COALESCE(sales.recent_sales, 0) - COALESCE(returned.recent_returns, 0))::double precision recent_net_quantity
+        FROM sales FULL OUTER JOIN returned ON sales.customer_code=returned.customer_code AND sales.product_code=returned.product_code
+      ),
+      latest_inventory AS MATERIALIZED (
+        SELECT ${inventoryRoute} route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) report_date
+        FROM inventory_active inventory GROUP BY ${inventoryRoute}
+      ),
+      stock AS MATERIALIZED (
+        SELECT ${inventoryRoute} route_id, ${inventoryProduct} product_code, SUM(${inventoryQuantity})::double precision current_stock
+        FROM inventory_active inventory
+        INNER JOIN latest_inventory latest ON latest.route_id=${inventoryRoute} AND NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')=latest.report_date
+        WHERE ${inventoryProduct}<>'' GROUP BY ${inventoryRoute}, ${inventoryProduct}
+      ),
+      people AS MATERIALIZED (
+        SELECT DISTINCT ${routeId} route_id, ${person.id} employee_id,
+          COALESCE(NULLIF(BTRIM(COALESCE(${person.name}, '')), ''), ${person.id}) employee_name
+        FROM route_active route
+        INNER JOIN rep_active rep ON ${routeRep}=${repId}
+        LEFT JOIN supervisor_active supervisor ON COALESCE(NULLIF(${routeSupervisor}, ''), ${normalizedField({ field: "DirectManagerID", source: "rep" })})=${supervisorId}
+        LEFT JOIN manager_active manager ON COALESCE(NULLIF(${routeManager}, ''), ${normalizedField({ field: "DirectManagerID", source: "supervisor" })})=${managerId}
+        WHERE ${person.id}<>''
+      ),
+      product_names AS MATERIALIZED (
+        SELECT DISTINCT ON (${productCode}) ${productCode} product_code,
+          COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "ProductName", source: "product" })}, '')), ''), ${productCode}) product_name,
+          NULLIF(BTRIM(COALESCE(${textField({ field: "Category", source: "product" })}, '')), '') category
+        FROM product_active product WHERE ${productCode}<>'' ORDER BY ${productCode}, product."entity_key" DESC
+      ),
+      opportunities AS MATERIALIZED (
+        SELECT people.employee_id "responsibleEmployeeId", people.employee_name "responsibleEmployeeName", scheduled_customers.route_id "routeId",
+          scheduled_customers.customer_code "customerCode", scheduled_customers.customer_name "customerName", net.product_code "productCode",
+          COALESCE(product_names.product_name, net.product_code) "productName", product_names.category "category",
+          net.baseline_net_quantity "baselineNetQuantity", net.recent_net_quantity "recentNetQuantity",
+          ROUND(net.baseline_net_quantity / 3.0)::double precision "suggestedQuantity", COALESCE(stock.current_stock, 0)::double precision "currentVanStock"
+        FROM net
+        INNER JOIN scheduled_customers ON scheduled_customers.customer_code=net.customer_code
+        INNER JOIN people ON people.route_id=scheduled_customers.route_id
+        LEFT JOIN stock ON stock.route_id=scheduled_customers.route_id AND stock.product_code=net.product_code
+        LEFT JOIN product_names ON product_names.product_code=net.product_code
+        WHERE net.baseline_net_quantity > 0 AND net.recent_net_quantity = 0 AND COALESCE(stock.current_stock, 0) <= 0
+      ),
+      summary AS MATERIALIZED (
+        SELECT COUNT(*)::integer "lostOpportunityCount", COUNT(DISTINCT "routeId")::integer "affectedRouteCount", COUNT(DISTINCT "responsibleEmployeeId")::integer "affectedPersonCount"
+        FROM opportunities
+      ),
+      page_window AS MATERIALIZED (
+        SELECT *, ROW_NUMBER() OVER (ORDER BY "responsibleEmployeeName", "responsibleEmployeeId", "routeId", "customerName", "customerCode", "productName", "productCode") row_number
+        FROM opportunities
+        ORDER BY "responsibleEmployeeName", "responsibleEmployeeId", "routeId", "customerName", "customerCode", "productName", "productCode"
+        LIMIT ${page.limit + 1} OFFSET ${page.offset}
+      ),
+      page_result AS MATERIALIZED (
+        SELECT COALESCE(JSONB_AGG(JSONB_BUILD_OBJECT(
+          'responsibleEmployeeId', "responsibleEmployeeId", 'responsibleEmployeeName', "responsibleEmployeeName", 'routeId', "routeId",
+          'customerCode', "customerCode", 'customerName', "customerName", 'productCode', "productCode", 'productName', "productName",
+          'category', "category", 'baselineNetQuantity', "baselineNetQuantity", 'recentNetQuantity', "recentNetQuantity",
+          'suggestedQuantity', "suggestedQuantity", 'currentVanStock', "currentVanStock"
+        ) ORDER BY row_number) FILTER (WHERE row_number <= ${page.limit}), '[]'::jsonb) rows,
+        COALESCE(BOOL_OR(row_number > ${page.limit}), FALSE) "hasMore"
+        FROM page_window
+      )
+      SELECT summary."affectedPersonCount", summary."affectedRouteCount", summary."lostOpportunityCount", page_result."hasMore", page_result.rows
+      FROM summary CROSS JOIN page_result
+    `);
+    const result = rawRows[0];
+    return {
+      affectedPersonCount: Number(result?.affectedPersonCount ?? 0),
+      affectedRouteCount: Number(result?.affectedRouteCount ?? 0),
+      lostOpportunityCount: Number(result?.lostOpportunityCount ?? 0),
+      page: { ...page, hasMore: Boolean(result?.hasMore) },
+      rows: Array.isArray(result?.rows) ? result.rows : [],
+    };
   }
 
   /**

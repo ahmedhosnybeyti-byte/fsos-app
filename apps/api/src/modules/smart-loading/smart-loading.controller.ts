@@ -1,6 +1,6 @@
 import { Body, Controller, ForbiddenException, Get, Post, Query } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
-import { smartLoadingManagementLoadingRiskQuerySchema, smartLoadingRecalculateInputSchema, smartLoadingStaleDaysThresholdSchema, type SmartLoadingManagementLoadingRiskQuery, type SmartLoadingRecalculateInput } from "@field-sales-os/schemas";
+import { smartLoadingManagementLoadingRiskQuerySchema, smartLoadingManagementLostOpportunitiesQuerySchema, smartLoadingRecalculateInputSchema, smartLoadingStaleDaysThresholdSchema, type SmartLoadingManagementLoadingRiskQuery, type SmartLoadingManagementLostOpportunitiesQuery, type SmartLoadingRecalculateInput } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
@@ -17,6 +17,8 @@ export class SmartLoadingController {
   hierarchyOptions(@CurrentUser() user: AuthenticatedUser, @Query("managerId") managerId?: string, @Query("supervisorId") supervisorId?: string) { if (!user.companyId) throw new ForbiddenException(); return this.smartLoadingService.getHierarchyOptions(user, managerId, supervisorId); }
   @Get("management-risks/loading") @Auth("COMPANY_ADMIN", "MANAGER", "SUPERVISOR")
   loadingRisk(@CurrentUser() user: AuthenticatedUser, @Query(new ZodValidationPipe(smartLoadingManagementLoadingRiskQuerySchema)) query: SmartLoadingManagementLoadingRiskQuery) { if (!user.companyId) throw new ForbiddenException(); return this.smartLoadingService.getManagementLoadingRisk(user, query); }
+  @Get("management-risks/lost-opportunities") @Auth("COMPANY_ADMIN", "MANAGER", "SUPERVISOR")
+  lostOpportunities(@CurrentUser() user: AuthenticatedUser, @Query(new ZodValidationPipe(smartLoadingManagementLostOpportunitiesQuerySchema)) query: SmartLoadingManagementLostOpportunitiesQuery) { if (!user.companyId) throw new ForbiddenException(); return this.smartLoadingService.getManagementLostOpportunities(user, query); }
   @Get("customers/search") @Auth()
   searchCustomers(@CurrentUser() user: AuthenticatedUser, @Query("q") q?: string, @Query("excludeCustomerCodes") excluded?: string) { if (!user.companyId) throw new ForbiddenException(); return this.smartLoadingService.searchCustomers(user, q, excluded?.split(",")); }
   @Post("recalculate") @Auth()

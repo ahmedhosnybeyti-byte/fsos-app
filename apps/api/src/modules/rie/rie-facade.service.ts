@@ -16,7 +16,7 @@ import { FilesService } from "../files/files.service";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { ENTITY_DATASET_TYPE_MAP } from "./excel-entity-provider.mapping";
 import { RieScalableQueryService } from "./scalable-query.service";
-import type { RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery } from "./scalable-query.types";
+import type { RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery } from "./scalable-query.types";
 
 /**
  * The smallest sales grain used by analytics: an invoice line, or the same
@@ -194,6 +194,10 @@ export class RieFacade {
 
   queryManagementLoadingRisk(query: RieManagementLoadingRiskQuery): Promise<RieManagementLoadingRiskRow> {
     return this.scalableQuery.queryManagementLoadingRisk(query);
+  }
+
+  queryManagementLostOpportunities(query: RieManagementLostOpportunitiesQuery): Promise<RieManagementLostOpportunitiesResult> {
+    return this.scalableQuery.queryManagementLostOpportunities(query);
   }
 
   queryStalePurchases(query: RieStalePurchasesQuery): Promise<RieStalePurchaseRow[]> {

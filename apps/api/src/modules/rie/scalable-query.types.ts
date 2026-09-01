@@ -141,6 +141,40 @@ export interface RieManagementLoadingRiskRow {
   debug?: { directReportsCount: number; routeCount: number; loadingRiskRowsBeforeAggregation: number };
 }
 
+/** Management view of the existing Smart Loading lost-opportunity definition. */
+export interface RieManagementLostOpportunitiesQuery extends EntityQueryContext {
+  targetDate: string;
+  baselineFrom: string;
+  baselineTo: string;
+  recentFrom: string;
+  recentTo: string;
+  /** The existing Smart Loading aliases for the target date's VisitDay. */
+  visitDays: readonly string[];
+  personLevel: "manager" | "supervisor" | "sales_rep";
+  pagination?: RieQueryPagination;
+}
+export interface RieManagementLostOpportunityRow {
+  responsibleEmployeeId: string;
+  responsibleEmployeeName: string;
+  routeId: string;
+  customerCode: string;
+  customerName: string;
+  productCode: string;
+  productName: string;
+  category: string | null;
+  baselineNetQuantity: number;
+  recentNetQuantity: number;
+  suggestedQuantity: number;
+  currentVanStock: number;
+}
+export interface RieManagementLostOpportunitiesResult {
+  affectedPersonCount: number;
+  affectedRouteCount: number;
+  lostOpportunityCount: number;
+  page: { limit: number; offset: number; hasMore: boolean };
+  rows: RieManagementLostOpportunityRow[];
+}
+
 /** Product-grain stale-purchase evidence; Product × Customer stays inside SQL. */
 export interface RieStalePurchasesQuery extends EntityQueryContext {
   /** Routes holding active vehicle inventory for the current session. */

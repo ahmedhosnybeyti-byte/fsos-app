@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from "@nestjs/common";
-import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingHierarchyOptions, type SmartLoadingManagementLoadingRiskQuery, type SmartLoadingManagementLoadingRiskResponse, type SmartLoadingManagementVehicleProduct, type SmartLoadingPriorityProduct, type SmartLoadingProduct, type SmartLoadingSession, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
+import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingHierarchyOptions, type SmartLoadingManagementLoadingRiskQuery, type SmartLoadingManagementLoadingRiskResponse, type SmartLoadingManagementLostOpportunitiesQuery, type SmartLoadingManagementLostOpportunitiesResponse, type SmartLoadingManagementVehicleProduct, type SmartLoadingPriorityProduct, type SmartLoadingProduct, type SmartLoadingSession, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
 import { CanonicalHierarchyResolverService } from "../rie/canonical-hierarchy-resolver.service";
@@ -238,6 +238,29 @@ export class SmartLoadingService {
       loadingRiskRowsBeforeAggregation: result.debug?.loadingRiskRowsBeforeAggregation ?? 0,
     }));
     return { targetDate, salesFrom, salesTo, affectedPersonCount: result.people.length, people: result.people };
+  }
+
+  /** Management-only view of the existing Smart Loading lost-opportunity rule. */
+  async getManagementLostOpportunities(user: AuthenticatedUser, query: SmartLoadingManagementLostOpportunitiesQuery): Promise<SmartLoadingManagementLostOpportunitiesResponse> {
+    if (!user.companyId || !["COMPANY_ADMIN", "MANAGER", "SUPERVISOR"].includes(user.roleCode)) throw new ForbiddenException();
+    const target = parseTargetDate(query.targetDate);
+    const targetDate = isoDay(target.getTime());
+    const baselineFrom = isoDay(target.getTime() - 119 * MS_PER_DAY);
+    const baselineTo = isoDay(target.getTime() - 30 * MS_PER_DAY);
+    const recentFrom = isoDay(target.getTime() - 29 * MS_PER_DAY);
+    const personLevel = user.roleCode === "COMPANY_ADMIN" ? "manager" : user.roleCode === "MANAGER" ? "supervisor" : "sales_rep";
+    const result = await this.rieFacade.queryManagementLostOpportunities({
+      ...this.rieContext(user),
+      targetDate,
+      baselineFrom,
+      baselineTo,
+      recentFrom,
+      recentTo: targetDate,
+      visitDays: VISIT_DAY_ALIASES[weekdayForDate(target)],
+      personLevel,
+      pagination: { limit: query.limit, offset: query.offset },
+    });
+    return { targetDate, ...result };
   }
 
   /**
