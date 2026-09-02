@@ -119,6 +119,11 @@ export function normalizedProductCode(value: unknown): string {
   return String(value ?? "").trim().toLowerCase();
 }
 
+/** A Sales Rep needs loading only when the route's current stock cannot cover the suggested quantity. */
+export function needsLostOpportunityLoading(suggestedQuantity: number, currentVehicleStock: number): boolean {
+  return suggestedQuantity > currentVehicleStock;
+}
+
 export function isSaleOnOrBeforeTargetDate(saleMs: number, targetDateIso: string): boolean {
   return isoDay(saleMs) <= targetDateIso;
 }
@@ -593,7 +598,8 @@ export class SmartLoadingService {
     const lostOpportunityStockByRouteProduct = new Map(lostOpportunityStockRows.map((row) => [`${normalizedRouteId(row.routeId)}\u0000${normalizedProductCode(row.productCode)}`, toFiniteNumber(row.quantity) ?? 0] as const));
     const lostOpportunities = lostOpportunityResult.opportunities.filter((opportunity) => {
       const routeId = normalizedRouteId(routeCustomersByCode.get(opportunity.customerCode)?.routeId);
-      return !!routeId && (lostOpportunityStockByRouteProduct.get(`${routeId}\u0000${normalizedProductCode(opportunity.productCode)}`) ?? 0) <= 0;
+      const currentVehicleStock = lostOpportunityStockByRouteProduct.get(`${routeId}\u0000${normalizedProductCode(opportunity.productCode)}`) ?? 0;
+      return !!routeId && needsLostOpportunityLoading(opportunity.suggestedQuantity, currentVehicleStock);
     });
     const lostOpportunityReason = nextRouteCustomers.size === 0 ? hasUnsupportedVisitDayFormat ? "unsupported-visit-day-format" : "no-tomorrow-route-customers" : lostOpportunityResult.status === "no-customers" ? "no-tomorrow-route-customers" : lostOpportunityResult.status;
 
