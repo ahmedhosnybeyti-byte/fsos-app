@@ -124,8 +124,9 @@ test("management lost opportunities keeps both covered and uncovered rows and re
   assert.match(sql, /recent_net_quantity = 0/);
   assert.doesNotMatch(sql, /COALESCE\(stock\.current_stock, 0\) <= 0/);
   assert.match(sql, /ROUND\(net\.baseline_net_quantity \/ 3\.0\) > 0/);
-  assert.match(sql, /SUM\("suggestedQuantity"\).*"suggestedQuantity"/);
-  assert.match(sql, /ORDER BY "suggestedQuantity" DESC, "responsibleEmployeeName"/);
+  assert.match(sql, /route_product_opportunities AS MATERIALIZED/);
+  assert.match(sql, /opportunity\."opportunityQuantity" > COALESCE\(stock\.current_stock, 0\)/);
+  assert.match(sql, /ORDER BY gap DESC, "opportunityQuantity" DESC/);
   assert.match(sql, /LIMIT .* OFFSET/);
   assert.ok(captured?.values?.includes("R-1"));
   assert.ok(captured?.values?.includes("Tuesday"));

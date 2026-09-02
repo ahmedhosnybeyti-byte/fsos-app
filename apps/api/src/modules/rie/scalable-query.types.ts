@@ -159,21 +159,18 @@ export interface RieManagementLostOpportunityRow {
   responsibleEmployeeId: string;
   responsibleEmployeeName: string;
   routeId: string;
-  customerCode: string;
-  customerName: string;
   productCode: string;
   productName: string;
   category: string | null;
-  baselineNetQuantity: number;
-  recentNetQuantity: number;
-  suggestedQuantity: number;
+  opportunityQuantity: number;
   currentVanStock: number;
+  gap: number;
 }
 export interface RieManagementLostOpportunitiesResult {
   affectedPersonCount: number;
   affectedRouteCount: number;
   lostOpportunityCount: number;
-  topPeople: { responsibleEmployeeId: string; responsibleEmployeeName: string; lostOpportunityCount: number; suggestedQuantity: number }[];
+  topPeople: { responsibleEmployeeId: string; responsibleEmployeeName: string; lostOpportunityCount: number; gap: number }[];
   page: { limit: number; offset: number; hasMore: boolean };
   rows: RieManagementLostOpportunityRow[];
 }

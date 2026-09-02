@@ -59,22 +59,19 @@ export const smartLoadingManagementLostOpportunityRowSchema = z.object({
   responsibleEmployeeId: z.string(),
   responsibleEmployeeName: z.string(),
   routeId: z.string(),
-  customerCode: z.string(),
-  customerName: z.string(),
   productCode: z.string(),
   productName: z.string(),
   category: z.string().nullable(),
-  baselineNetQuantity: z.number(),
-  recentNetQuantity: z.number(),
-  suggestedQuantity: z.number(),
+  opportunityQuantity: z.number().positive(),
   currentVanStock: z.number(),
+  gap: z.number().positive(),
 });
 export type SmartLoadingManagementLostOpportunityRow = z.infer<typeof smartLoadingManagementLostOpportunityRowSchema>;
 export const smartLoadingManagementLostOpportunityPersonSchema = z.object({
   responsibleEmployeeId: z.string(),
   responsibleEmployeeName: z.string(),
   lostOpportunityCount: z.number().int().positive(),
-  suggestedQuantity: z.number().positive(),
+  gap: z.number().positive(),
 });
 export type SmartLoadingManagementLostOpportunityPerson = z.infer<typeof smartLoadingManagementLostOpportunityPersonSchema>;
 export const smartLoadingManagementLostOpportunitiesResponseSchema = z.object({

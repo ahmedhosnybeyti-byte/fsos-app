@@ -428,6 +428,7 @@ export class RieScalableQueryService {
     const customerCode = normalizedField({ field: "CustomerCode", source: "customer" });
     const customerRoute = normalizedField({ field: "RouteID", source: "customer" });
     const invoiceCustomer = normalizedField({ field: "CustomerCode", source: "invoice" });
+    const invoiceRoute = normalizedField({ field: "RouteID", source: "invoice" });
     const invoiceNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
     const invoiceDate = dateText(textField({ field: "InvoiceDate", source: "invoice" }));
     const invoiceStatus = normalizedField({ field: "InvoiceStatus", source: "invoice" });
@@ -435,6 +436,7 @@ export class RieScalableQueryService {
     const itemProduct = normalizedField({ field: "ProductCode", source: "item" });
     const itemQuantity = numericField(textField({ field: "Quantity", source: "item" }));
     const returnCustomer = normalizedField({ field: "CustomerCode", source: "returned" });
+    const returnRoute = normalizedField({ field: "RouteID", source: "returned" });
     const returnNo = normalizedField({ field: "ReturnNo", source: "returned" });
     const returnDate = dateText(textField({ field: "ReturnDate", source: "returned" }));
     const returnStatus = normalizedField({ field: "Status", source: "returned" });
@@ -474,29 +476,29 @@ export class RieScalableQueryService {
         ORDER BY ${customerCode}, customer."entity_key" DESC
       ),
       sales AS MATERIALIZED (
-        SELECT ${invoiceCustomer} customer_code, ${itemProduct} product_code,
+        SELECT ${invoiceRoute} route_id, ${invoiceCustomer} customer_code, ${itemProduct} product_code,
           SUM(CASE WHEN ${invoiceDate} BETWEEN ${baselineFrom} AND ${baselineTo} THEN ${itemQuantity} ELSE 0 END)::double precision baseline_sales,
           SUM(CASE WHEN ${invoiceDate} BETWEEN ${recentFrom} AND ${recentTo} THEN ${itemQuantity} ELSE 0 END)::double precision recent_sales
         FROM item_active item
         INNER JOIN invoice_active invoice ON ${itemInvoiceNo}=${invoiceNo}
-        WHERE ${invoiceCustomer}<>'' AND ${itemProduct}<>'' AND ${invoiceStatus} IN ('confirmed', 'posted')
-        GROUP BY ${invoiceCustomer}, ${itemProduct}
+        WHERE ${invoiceRoute}<>'' AND ${invoiceCustomer}<>'' AND ${itemProduct}<>'' AND ${invoiceStatus} IN ('confirmed', 'posted')
+        GROUP BY ${invoiceRoute}, ${invoiceCustomer}, ${itemProduct}
       ),
       returned AS MATERIALIZED (
-        SELECT ${returnCustomer} customer_code, ${returnItemProduct} product_code,
+        SELECT ${returnRoute} route_id, ${returnCustomer} customer_code, ${returnItemProduct} product_code,
           SUM(CASE WHEN ${returnDate} BETWEEN ${baselineFrom} AND ${baselineTo} THEN ${returnItemQuantity} ELSE 0 END)::double precision baseline_returns,
           SUM(CASE WHEN ${returnDate} BETWEEN ${recentFrom} AND ${recentTo} THEN ${returnItemQuantity} ELSE 0 END)::double precision recent_returns
         FROM return_item_active return_item
         INNER JOIN returned_active returned ON ${returnItemNo}=${returnNo}
-        WHERE ${returnCustomer}<>'' AND ${returnItemProduct}<>'' AND ${returnStatus} IN ('confirmed', 'approved')
-        GROUP BY ${returnCustomer}, ${returnItemProduct}
+        WHERE ${returnRoute}<>'' AND ${returnCustomer}<>'' AND ${returnItemProduct}<>'' AND ${returnStatus} IN ('confirmed', 'approved')
+        GROUP BY ${returnRoute}, ${returnCustomer}, ${returnItemProduct}
       ),
       net AS MATERIALIZED (
-        SELECT COALESCE(sales.customer_code, returned.customer_code) customer_code,
+        SELECT COALESCE(sales.route_id, returned.route_id) route_id, COALESCE(sales.customer_code, returned.customer_code) customer_code,
           COALESCE(sales.product_code, returned.product_code) product_code,
           (COALESCE(sales.baseline_sales, 0) - COALESCE(returned.baseline_returns, 0))::double precision baseline_net_quantity,
           (COALESCE(sales.recent_sales, 0) - COALESCE(returned.recent_returns, 0))::double precision recent_net_quantity
-        FROM sales FULL OUTER JOIN returned ON sales.customer_code=returned.customer_code AND sales.product_code=returned.product_code
+        FROM sales FULL OUTER JOIN returned ON sales.route_id=returned.route_id AND sales.customer_code=returned.customer_code AND sales.product_code=returned.product_code
       ),
       latest_inventory AS MATERIALIZED (
         SELECT ${inventoryRoute} route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) report_date
@@ -528,39 +530,51 @@ export class RieScalableQueryService {
           scheduled_customers.customer_code "customerCode", scheduled_customers.customer_name "customerName", net.product_code "productCode",
           COALESCE(product_names.product_name, net.product_code) "productName", product_names.category "category",
           net.baseline_net_quantity "baselineNetQuantity", net.recent_net_quantity "recentNetQuantity",
-          ROUND(net.baseline_net_quantity / 3.0)::double precision "suggestedQuantity", COALESCE(stock.current_stock, 0)::double precision "currentVanStock"
+          ROUND(net.baseline_net_quantity / 3.0)::double precision "suggestedQuantity"
         FROM net
-        INNER JOIN scheduled_customers ON scheduled_customers.customer_code=net.customer_code
+        INNER JOIN scheduled_customers ON scheduled_customers.route_id=net.route_id AND scheduled_customers.customer_code=net.customer_code
         INNER JOIN people ON people.route_id=scheduled_customers.route_id
-        LEFT JOIN stock ON stock.route_id=scheduled_customers.route_id AND stock.product_code=net.product_code
         LEFT JOIN product_names ON product_names.product_code=net.product_code
         WHERE net.baseline_net_quantity > 0 AND net.recent_net_quantity = 0
           AND ROUND(net.baseline_net_quantity / 3.0) > 0
       ),
+      route_product_opportunities AS MATERIALIZED (
+        SELECT "responsibleEmployeeId", "responsibleEmployeeName", "routeId", "productCode", MAX("productName") "productName", MAX("category") "category",
+          SUM("suggestedQuantity")::double precision "opportunityQuantity"
+        FROM opportunities
+        GROUP BY "responsibleEmployeeId", "responsibleEmployeeName", "routeId", "productCode"
+      ),
+      risks AS MATERIALIZED (
+        SELECT opportunity."responsibleEmployeeId", opportunity."responsibleEmployeeName", opportunity."routeId", opportunity."productCode", opportunity."productName", opportunity."category",
+          opportunity."opportunityQuantity", COALESCE(stock.current_stock, 0)::double precision "currentVanStock",
+          (opportunity."opportunityQuantity" - COALESCE(stock.current_stock, 0))::double precision gap
+        FROM route_product_opportunities opportunity
+        LEFT JOIN stock ON stock.route_id=opportunity."routeId" AND stock.product_code=opportunity."productCode"
+        WHERE opportunity."opportunityQuantity" > COALESCE(stock.current_stock, 0)
+      ),
       summary AS MATERIALIZED (
         SELECT COUNT(*)::integer "lostOpportunityCount", COUNT(DISTINCT "routeId")::integer "affectedRouteCount", COUNT(DISTINCT "responsibleEmployeeId")::integer "affectedPersonCount"
-        FROM opportunities
+        FROM risks
       ),
       top_people AS MATERIALIZED (
         SELECT "responsibleEmployeeId", "responsibleEmployeeName", COUNT(*)::integer "lostOpportunityCount",
-          SUM("suggestedQuantity")::double precision "suggestedQuantity"
-        FROM opportunities
+          SUM(gap)::double precision gap
+        FROM risks
         GROUP BY "responsibleEmployeeId", "responsibleEmployeeName"
-        ORDER BY "suggestedQuantity" DESC, "lostOpportunityCount" DESC, "responsibleEmployeeName", "responsibleEmployeeId"
+        ORDER BY gap DESC, "lostOpportunityCount" DESC, "responsibleEmployeeName", "responsibleEmployeeId"
         LIMIT 4
       ),
       page_window AS MATERIALIZED (
-        SELECT *, ROW_NUMBER() OVER (ORDER BY "suggestedQuantity" DESC, "responsibleEmployeeName", "responsibleEmployeeId", "routeId", "customerName", "customerCode", "productName", "productCode") row_number
-        FROM opportunities
-        ORDER BY "suggestedQuantity" DESC, "responsibleEmployeeName", "responsibleEmployeeId", "routeId", "customerName", "customerCode", "productName", "productCode"
+        SELECT *, ROW_NUMBER() OVER (ORDER BY gap DESC, "opportunityQuantity" DESC, "responsibleEmployeeName", "responsibleEmployeeId", "routeId", "productName", "productCode") row_number
+        FROM risks
+        ORDER BY gap DESC, "opportunityQuantity" DESC, "responsibleEmployeeName", "responsibleEmployeeId", "routeId", "productName", "productCode"
         LIMIT ${page.limit + 1} OFFSET ${page.offset}
       ),
       page_result AS MATERIALIZED (
         SELECT COALESCE(JSONB_AGG(JSONB_BUILD_OBJECT(
           'responsibleEmployeeId', "responsibleEmployeeId", 'responsibleEmployeeName', "responsibleEmployeeName", 'routeId', "routeId",
-          'customerCode', "customerCode", 'customerName', "customerName", 'productCode', "productCode", 'productName', "productName",
-          'category', "category", 'baselineNetQuantity', "baselineNetQuantity", 'recentNetQuantity', "recentNetQuantity",
-          'suggestedQuantity', "suggestedQuantity", 'currentVanStock', "currentVanStock"
+          'productCode', "productCode", 'productName', "productName", 'category', "category",
+          'opportunityQuantity', "opportunityQuantity", 'currentVanStock', "currentVanStock", 'gap', gap
         ) ORDER BY row_number) FILTER (WHERE row_number <= ${page.limit}), '[]'::jsonb) rows,
         COALESCE(BOOL_OR(row_number > ${page.limit}), FALSE) "hasMore"
         FROM page_window
@@ -568,8 +582,8 @@ export class RieScalableQueryService {
       top_people_result AS MATERIALIZED (
         SELECT COALESCE(JSONB_AGG(JSONB_BUILD_OBJECT(
           'responsibleEmployeeId', "responsibleEmployeeId", 'responsibleEmployeeName', "responsibleEmployeeName",
-          'lostOpportunityCount', "lostOpportunityCount", 'suggestedQuantity', "suggestedQuantity"
-        ) ORDER BY "suggestedQuantity" DESC, "lostOpportunityCount" DESC, "responsibleEmployeeName", "responsibleEmployeeId"), '[]'::jsonb) "topPeople"
+          'lostOpportunityCount', "lostOpportunityCount", 'gap', gap
+        ) ORDER BY gap DESC, "lostOpportunityCount" DESC, "responsibleEmployeeName", "responsibleEmployeeId"), '[]'::jsonb) "topPeople"
         FROM top_people
       )
       SELECT summary."affectedPersonCount", summary."affectedRouteCount", summary."lostOpportunityCount", page_result."hasMore", page_result.rows, top_people_result."topPeople"

@@ -280,8 +280,8 @@ export class SmartLoadingService {
     const selectedSupervisorId = clean(supervisorId);
     const joins = [
       { entityName: "Employees", alias: "rep", type: "inner" as const, on: { left: { field: "SalesRepID" }, rightField: "EmployeeID" } },
-      { entityName: "Employees", alias: "supervisor", type: "inner" as const, on: { left: { field: "DirectManagerID", source: "rep" }, rightField: "EmployeeID" } },
-      { entityName: "Employees", alias: "manager", type: "inner" as const, on: { left: { field: "DirectManagerID", source: "supervisor" }, rightField: "EmployeeID" } },
+      { entityName: "Employees", alias: "supervisor", type: "inner" as const, on: { left: { field: "SupervisorID" }, rightField: "EmployeeID" } },
+      { entityName: "Employees", alias: "manager", type: "inner" as const, on: { left: { field: "ManagerID" }, rightField: "EmployeeID" } },
     ];
     const base = { ...ctx, entityName: "Routes", hierarchyRoute: { field: "RouteID" }, joins, pagination: { limit: 500 } } as const;
     const options = async (alias: "manager" | "supervisor" | "rep", scopes: readonly { field: string; source: string; values: readonly string[] }[] = []) => {
@@ -352,8 +352,8 @@ export class SmartLoadingService {
       hierarchyRoute: { field: "RouteID" },
       joins: [
         { entityName: "Employees", alias: "rep", type: "inner", on: { left: { field: "SalesRepID" }, rightField: "EmployeeID" } },
-        { entityName: "Employees", alias: "supervisor", type: "inner", on: { left: { field: "DirectManagerID", source: "rep" }, rightField: "EmployeeID" } },
-        { entityName: "Employees", alias: "manager", type: "inner", on: { left: { field: "DirectManagerID", source: "supervisor" }, rightField: "EmployeeID" } },
+        { entityName: "Employees", alias: "supervisor", type: "inner", on: { left: { field: "SupervisorID" }, rightField: "EmployeeID" } },
+        { entityName: "Employees", alias: "manager", type: "inner", on: { left: { field: "ManagerID" }, rightField: "EmployeeID" } },
       ],
       projection: [{ field: "RouteID", as: "routeId" }],
       groupBy: [{ field: "RouteID" }],
