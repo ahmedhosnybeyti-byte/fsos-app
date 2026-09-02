@@ -74,7 +74,7 @@ test("scalable query keeps the latest snapshot per visible route before aggregat
   assert.match(sql, /FROM base_latest base/);
 });
 
-test("management lost opportunities keeps stock-zero rows, excludes positive stock in SQL, and returns paged totals", async () => {
+test("management lost opportunities keeps both covered and uncovered rows and returns paged totals", async () => {
   let captured: { strings?: readonly string[]; values?: readonly unknown[] } | undefined;
   const service = new RieScalableQueryService({
     $queryRaw: async (query: typeof captured) => {
@@ -122,7 +122,7 @@ test("management lost opportunities keeps stock-zero rows, excludes positive sto
   const sql = captured?.strings?.join(" ") ?? "";
   assert.match(sql, /baseline_net_quantity > 0/);
   assert.match(sql, /recent_net_quantity = 0/);
-  assert.match(sql, /COALESCE\(stock\.current_stock, 0\) <= 0/);
+  assert.doesNotMatch(sql, /COALESCE\(stock\.current_stock, 0\) <= 0/);
   assert.match(sql, /ROUND\(net\.baseline_net_quantity \/ 3\.0\) > 0/);
   assert.match(sql, /SUM\("suggestedQuantity"\).*"suggestedQuantity"/);
   assert.match(sql, /ORDER BY "suggestedQuantity" DESC, "responsibleEmployeeName"/);

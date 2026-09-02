@@ -534,7 +534,7 @@ export class RieScalableQueryService {
         INNER JOIN people ON people.route_id=scheduled_customers.route_id
         LEFT JOIN stock ON stock.route_id=scheduled_customers.route_id AND stock.product_code=net.product_code
         LEFT JOIN product_names ON product_names.product_code=net.product_code
-        WHERE net.baseline_net_quantity > 0 AND net.recent_net_quantity = 0 AND COALESCE(stock.current_stock, 0) <= 0
+        WHERE net.baseline_net_quantity > 0 AND net.recent_net_quantity = 0
           AND ROUND(net.baseline_net_quantity / 3.0) > 0
       ),
       summary AS MATERIALIZED (

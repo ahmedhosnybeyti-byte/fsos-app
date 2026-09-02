@@ -747,7 +747,18 @@ export function SmartLoadingScreen({
               onManagementScopeChange(scope);
             }}
           />
-          <ManagementLostOpportunitiesCard targetDate={targetDate} scope={{ managerId, supervisorId, salesRepId }} />
+          <ManagementLostOpportunitiesCard
+            targetDate={targetDate}
+            scope={{ managerId, supervisorId, salesRepId }}
+            onSelectPerson={(person) => {
+              const scope = user?.role.code === "COMPANY_ADMIN"
+                ? { managerId: person.employeeId, managerName: person.employeeName }
+                : user?.role.code === "MANAGER"
+                  ? { supervisorId: person.employeeId, supervisorName: person.employeeName }
+                  : { salesRepId: person.employeeId, salesRepName: person.employeeName };
+              onManagementScopeChange(scope);
+            }}
+          />
         </div>
       )}
 
