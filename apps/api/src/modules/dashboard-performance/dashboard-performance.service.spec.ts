@@ -1,29 +1,29 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import { DashboardPerformanceService } from "./dashboard-performance.service";
+import type { RieScalableQuery } from "../rie/scalable-query.types";
 
-const available = (records: Record<string, unknown>[]) => ({ available: true, records, fields: [], warnings: [] });
-const unavailable = () => ({ available: false, records: [], fields: [], warnings: [] });
+const resultPage = (records: Record<string, unknown>[]) => ({ records, page: { limit: 500, offset: 0, hasMore: false } });
 
 test("keeps the full target month calendar for Sales and Collection pacing", async () => {
-  const now = new Date();
+  const now = new Date("2026-08-07T12:00:00Z");
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth();
   const calendar = Array.from({ length: 28 }, (_, day) => ({ calendarDate: new Date(Date.UTC(year, month, day + 1)), workingDay: true }));
   const date = new Date(Date.UTC(year, month, 1)).toISOString();
   const rie = {
-    getEntityRecords: async (name: string) => {
-      if (name === "Invoices") return available([{ InvoiceNo: "I-1", InvoiceDate: date, CustomerCode: "C-1", RouteID: "R-1" }]);
-      if (name === "Invoice Items") return available([{ InvoiceNo: "I-1", LineTotal: 280 }]);
-      if (name === "Collections") return available([{ CollectionDate: date, Amount: 140, RouteID: "R-1" }]);
-      if (name === "Targets") return available([{ Year: year, Month: month + 1, SalesTarget: 2_800, CollectionTarget: 1_400, RouteID: "R-1" }]);
-      return unavailable();
+    // The dashboard now consumes SQL aggregate pages, not full entities.
+    queryCanonicalRecords: async ({ entityName }: RieScalableQuery) => {
+      if (entityName === "Invoice Items") return resultPage([{ date, sales: 280, invoices: 1, customers: 1, skus: 1 }]);
+      if (entityName === "Collections") return resultPage([{ date, collections: 140 }]);
+      if (entityName === "Targets") return resultPage([{ SalesTarget: 2_800, CollectionTarget: 1_400 }]);
+      return resultPage([]);
     },
   };
   const prisma = { salesCalendar: { findMany: async () => calendar } };
   const service = new DashboardPerformanceService(rie as any, prisma as any);
 
-  const result = await service.get({ companyId: "company", userId: "user", email: "rep@example.com", roleCode: "SALES_REP" } as any, "previous-month");
+  const result = await service.get({ companyId: "company", userId: "user", email: "rep@example.com", roleCode: "SALES_REP" } as any, "previous-month", undefined, "2026-08-01", "2026-08-07");
   const sales = result.targets.find((target) => target.key === "SalesTarget")!;
   const collections = result.targets.find((target) => target.key === "CollectionTarget")!;
 

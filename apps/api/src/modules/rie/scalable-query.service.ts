@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
+import { IMPORT_TEMPLATES } from "../import-validation/import-templates.data";
 import type { EntityRecord, EntityQueryResult } from "./entity-provider.interface";
 import type { RieDateScope, RieLatestPerScope, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
 
@@ -835,13 +836,45 @@ function activeEntityRowsCte(companyId: string, entityName: string, alias: strin
   const cte = `${alias}_active`;
   const rowAlias = `${alias}_source`;
   const versionAlias = `${alias}_version`;
-  return Prisma.sql`${Prisma.raw(cte)} AS MATERIALIZED (
-    SELECT ${Prisma.raw(rowAlias)}.*
+  const primaryKey = IMPORT_TEMPLATES.find((template) => template.entity === entityName)?.primaryKey;
+  if (!primaryKey?.length) throw new Error(`RIE scalable query requires a canonical primary key for "${entityName}".`);
+  for (const field of primaryKey) assertIdentifier(field, "primary key");
+  const keyIsBlank = Prisma.join(primaryKey.map((field) => Prisma.sql`BTRIM(COALESCE(${textField({ source: rowAlias, field })}, '')) = ''`), " OR ");
+  const sameKey = Prisma.join(primaryKey.map((field) => Prisma.sql`${normalizedField({ source: "newer", field })} = ${normalizedField({ source: rowAlias, field })}`), " AND ");
+
+  // Match the entity provider's newest-upload-wins merge by the template's
+  // business key, not entity_key (invoice-line storage keys may have an
+  // occurrence suffix). Keep unmatched history and existing within-file
+  // multiplicity/blank-key semantics. Rank only small version metadata.
+  // The newer-record lookup deliberately has NO screen/hierarchy/date scope:
+  // filtering it could resurrect an old Pending record after it became Closed.
+  // NOT MATERIALIZED allows PostgreSQL to use scoped row indexes without
+  // materializing a company's entire merged entity before the fact joins.
+  return Prisma.sql`${Prisma.raw(`${alias}_versions`)} AS MATERIALIZED (
+    SELECT ${Prisma.raw(versionAlias)}.id,
+      ROW_NUMBER() OVER (ORDER BY source_file."created_at" DESC, source_file.id DESC) AS precedence
     FROM "rie_dataset_versions" ${Prisma.raw(versionAlias)}
-    INNER JOIN "rie_entity_rows" ${Prisma.raw(rowAlias)} ON ${Prisma.raw(rowAlias)}."dataset_version_id" = ${Prisma.raw(versionAlias)}.id
-    ${sourceJoins.length ? Prisma.join(sourceJoins, " ") : Prisma.empty}
+    INNER JOIN "files" source_file ON source_file.id = ${Prisma.raw(versionAlias)}."source_file_id"
     WHERE ${Prisma.raw(versionAlias)}."company_id" = ${companyId} AND ${Prisma.raw(versionAlias)}."entity_name" = ${entityName} AND ${Prisma.raw(versionAlias)}."is_active" = TRUE
-      AND ${Prisma.raw(rowAlias)}."company_id" = ${companyId} AND ${Prisma.raw(rowAlias)}."entity_name" = ${entityName}
+      AND source_file."company_id" = ${companyId} AND source_file."is_active" = TRUE
+      AND source_file.status = 'READY' AND source_file."dataset_type_confirmed" = TRUE
+  ), ${Prisma.raw(`${alias}_merged`)} AS NOT MATERIALIZED (
+    SELECT ${Prisma.raw(rowAlias)}.*
+    FROM ${Prisma.raw(`${alias}_versions`)} candidate_version
+    INNER JOIN "rie_entity_rows" ${Prisma.raw(rowAlias)} ON ${Prisma.raw(rowAlias)}."dataset_version_id" = candidate_version.id
+    WHERE ${Prisma.raw(rowAlias)}."company_id" = ${companyId} AND ${Prisma.raw(rowAlias)}."entity_name" = ${entityName}
+      AND (${keyIsBlank} OR NOT EXISTS (
+        SELECT 1 FROM ${Prisma.raw(`${alias}_versions`)} newer_version
+        INNER JOIN "rie_entity_rows" newer ON newer."dataset_version_id" = newer_version.id
+        WHERE newer_version.precedence < candidate_version.precedence
+          AND newer."company_id" = ${companyId} AND newer."entity_name" = ${entityName}
+          AND ${sameKey}
+      ))
+  ), ${Prisma.raw(cte)} AS MATERIALIZED (
+    SELECT ${Prisma.raw(rowAlias)}.*
+    FROM ${Prisma.raw(`${alias}_merged`)} ${Prisma.raw(rowAlias)}
+    ${sourceJoins.length ? Prisma.join(sourceJoins, " ") : Prisma.empty}
+    WHERE TRUE
       ${predicates.length ? Prisma.sql`AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty}
       ${semiJoins.length ? Prisma.sql`AND ${Prisma.join(semiJoins, " AND ")}` : Prisma.empty}
   )`;

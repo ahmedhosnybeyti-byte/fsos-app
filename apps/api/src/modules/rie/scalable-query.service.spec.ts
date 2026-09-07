@@ -47,9 +47,9 @@ test("hashed scoped semi-join compiles stale-style Invoice Items membership once
   let captured: { strings?: readonly string[] } | undefined;
   const service = new RieScalableQueryService({ $queryRaw: async (query: typeof captured) => { captured = query; return []; } } as never, { resolveAllowedRouteIds: async () => null } as never);
   await service.query({
-    companyId: "company-1", entityName: "Invoice Items", projection: [{ field: "ProductCode" }],
+    companyId: "company-1", entityName: "Invoice Items", projection: [{ field: "ProductCode" }, { field: "CustomerCode", source: "invoice" }],
     joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }],
-    groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }],
+    groupBy: [{ field: "ProductCode" }, { field: "CustomerCode", source: "invoice" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }],
     scope: { date: { field: "InvoiceDate", source: "invoice", to: "2026-08-31" }, product: { values: ["P-1"] } },
     preferHashedScopedSemiJoin: true, pagination: { limit: 1 },
   });
@@ -128,6 +128,6 @@ test("management lost opportunities keeps both covered and uncovered rows and re
   assert.match(sql, /opportunity\."opportunityQuantity" > COALESCE\(stock\.current_stock, 0\)/);
   assert.match(sql, /ORDER BY gap DESC, "opportunityQuantity" DESC/);
   assert.match(sql, /LIMIT .* OFFSET/);
-  assert.ok(captured?.values?.includes("R-1"));
-  assert.ok(captured?.values?.includes("Tuesday"));
+  assert.ok(captured?.values?.includes("r-1"));
+  assert.ok(captured?.values?.includes("tuesday"));
 });
