@@ -78,6 +78,21 @@ test("scalable query keeps the latest snapshot per visible route before aggregat
   assert.match(sql, /FROM base_latest base/);
 });
 
+test("single active version uses the direct scoped query without newest-wins windowing", async () => {
+  let captured: { strings?: readonly string[] } | undefined;
+  const service = new RieScalableQueryService({
+    $queryRaw: async (query: { strings?: readonly string[] }) => {
+      if ((query.strings?.join(" ") ?? "").includes('COUNT(*) AS "versionCount"')) return [{ entityName: "Visits", versionCount: 1 }];
+      captured = query;
+      return [];
+    },
+  } as never, { resolveAllowedRouteIds: async () => null } as never);
+  await service.query({ companyId: "company-1", entityName: "Visits", projection: [], aggregates: [{ op: "count", as: "count" }], scope: { route: { values: ["R-1"] } } });
+  const sql = captured?.strings?.join(" ") ?? "";
+  assert.match(sql, /base_active AS MATERIALIZED/);
+  assert.doesNotMatch(sql, /base_merged|base_versions|ROW_NUMBER\(\) OVER|MIN\(candidate_version\.precedence\) OVER/);
+});
+
 test("management lost opportunities keeps both covered and uncovered rows and returns paged totals", async () => {
   let captured: { strings?: readonly string[]; values?: readonly unknown[] } | undefined;
   const service = new RieScalableQueryService({

@@ -80,6 +80,10 @@ test("scalable RIE incremental merge in PostgreSQL", {
     ], company, active, ready);
   }
 
+  await upload("only-visits", "Visits", "2026-08-01", [
+    { key: "VIS-1", data: { VisitID: "VIS-1", VisitDate: "2026-08-01", RouteID: "R-1", VisitStatus: "Productive" } },
+  ]);
+
   let lastQuery: Prisma.Sql | undefined;
   const service = new RieScalableQueryService({
     $queryRaw: async (sql: Prisma.Sql) => {
@@ -92,6 +96,15 @@ test("scalable RIE incremental merge in PostgreSQL", {
   await t.test("newer matching record wins regardless of insertion order, key casing or whitespace", async () => {
     const result = await service.query({ ...invoices, scope: { fields: [{ field: "InvoiceNo", values: ["INV-1"] }] } });
     assert.deepEqual(result.records, [{ InvoiceNo: " inv-1 ", InvoiceStatus: "Closed" }]);
+  });
+  await t.test("a single active version uses the direct path with identical records", async () => {
+    const result = await service.query({ companyId: "company-1", entityName: "Visits", projection: [{ field: "VisitID" }, { field: "VisitStatus" }], pagination: { limit: 10 } });
+    assert.deepEqual(result.records, [{ VisitID: "VIS-1", VisitStatus: "Productive" }]);
+    assert.doesNotMatch(lastQuery!.text, /base_merged|base_versions AS|ROW_NUMBER\(\) OVER|MIN\(candidate_version\.precedence\) OVER/);
+    const explained = await db.query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${lastQuery!.text}`, lastQuery!.values);
+    const plan = (explained.rows[0]!["QUERY PLAN"] as Array<Record<string, unknown>>)[0]!;
+    const allNodes = (node: Record<string, unknown>): Record<string, unknown>[] => [node, ...((node.Plans ?? []) as Record<string, unknown>[]).flatMap(allNodes)];
+    assert.ok(allNodes(plan.Plan as Record<string, unknown>).every((node) => node["Node Type"] !== "WindowAgg"));
   });
   await t.test("unmatched historical record remains after a partial upload", async () => {
     const result = await service.query({ ...invoices, scope: { fields: [{ field: "InvoiceNo", values: ["HIST"] }] } });
@@ -181,6 +194,39 @@ test("scalable RIE incremental merge in PostgreSQL", {
       assert.ok(nodes.every((node) => node["Parent Relationship"] !== "SubPlan"));
       assert.ok(nodes.every((node) => !(node["Node Type"] === "Nested Loop" && (node.Plans as Record<string, unknown>[] | undefined)?.some((child) => child["Node Type"] === "Seq Scan" && Number(child["Actual Loops"] ?? 0) > 1))));
       t.diagnostic(`${entity} 20k history rows (5k newer overlaps): executionMs=${plan["Execution Time"]}`);
+    }
+  });
+
+  await t.test("representative single-version Visits, Collections and Invoices avoid newest-wins windowing", async () => {
+    const entities = [
+      { entity: "Visits", key: "VisitID", date: "VisitDate", prefix: "SVIS" },
+      { entity: "Collections", key: "CollectionNo", date: "CollectionDate", prefix: "SCOL" },
+      { entity: "Invoices", key: "InvoiceNo", date: "InvoiceDate", prefix: "SINV" },
+    ] as const;
+    for (const { entity, key, date, prefix } of entities) {
+      const slug = `single-${entity.toLowerCase()}`;
+      await db.query("INSERT INTO files VALUES ($1, $2, $3, true, 'READY', true)", [slug, "company-single", "2026-08-01"]);
+      await db.query("INSERT INTO rie_dataset_versions VALUES ($1, $2, $3, $1, true)", [slug, "company-single", entity]);
+      await db.query(`
+        INSERT INTO rie_entity_rows (id, company_id, entity_name, dataset_version_id, entity_key, data)
+        SELECT '${slug}-' || series, 'company-single', '${entity}', '${slug}', '${prefix}-' || series, jsonb_build_object('${key}', '${prefix}-' || series, '${date}', '2026-08-01', 'RouteID', 'R-' || (series % 5), 'Amount', 1, 'TotalAmount', 1)
+        FROM generate_series(1, 20000) series
+      `);
+    }
+
+    for (const { entity } of entities) {
+      const result = await service.query({
+        companyId: "company-single", entityName: entity, projection: [], aggregates: [{ op: "count", as: "count" }],
+        scope: { route: { values: ["R-1"] } }, pagination: { limit: 1 },
+      });
+      assert.deepEqual(result.records, [{ count: 4000 }]);
+      assert.doesNotMatch(lastQuery!.text, /base_merged|base_versions AS|ROW_NUMBER\(\) OVER|MIN\(candidate_version\.precedence\) OVER/);
+      const explained = await db.query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${lastQuery!.text}`, lastQuery!.values);
+      const plan = (explained.rows[0]!["QUERY PLAN"] as Array<Record<string, unknown>>)[0]!;
+      const allNodes = (node: Record<string, unknown>): Record<string, unknown>[] => [node, ...((node.Plans ?? []) as Record<string, unknown>[]).flatMap(allNodes)];
+      const nodes = allNodes(plan.Plan as Record<string, unknown>);
+      assert.ok(nodes.every((node) => node["Node Type"] !== "WindowAgg" && node["Parent Relationship"] !== "SubPlan"));
+      t.diagnostic(`${entity} 20k single-version rows: executionMs=${plan["Execution Time"]}`);
     }
   });
 });

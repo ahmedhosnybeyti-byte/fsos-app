@@ -114,7 +114,8 @@ export class RieScalableQueryService {
     const baseDrivenByScopedJoins = canCollapseScopedJoins || driveBaseFromScopedJoins;
     const baseSemiJoins = baseDrivenByScopedJoins ? [] : scopedSemiJoinsFor("base", joins, scopedJoinAliases, input.preferHashedScopedSemiJoin);
     const baseSourceJoins = baseDrivenByScopedJoins ? joins.map(scopedJoin) : [];
-    const ctes = orderedActiveRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias, ctePredicates.get(alias) ?? [], alias === "base" ? baseSemiJoins : scopedSemiJoinsFor(alias, joins, scopedJoinAliases), alias === "base" ? baseSourceJoins : []));
+    const activeVersionCounts = await this.activeVersionCounts(input.companyId, [...new Set(activeRows.map(({ entityName }) => entityName))]);
+    const ctes = orderedActiveRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias, ctePredicates.get(alias) ?? [], alias === "base" ? baseSemiJoins : scopedSemiJoinsFor(alias, joins, scopedJoinAliases), alias === "base" ? baseSourceJoins : [], activeVersionCounts.get(entityName) === 1));
     if (input.latestPer) ctes.push(latestPerCte(input.latestPer));
     const baseReference = input.latestPer ? Prisma.sql`base_latest base` : activeEntityRowsReference("base");
     const joinSql = (canCollapseScopedJoins ? [] : joins).map((join) => {
@@ -139,6 +140,20 @@ export class RieScalableQueryService {
     `);
     const hasMore = rows.length > page.limit;
     return { records: hasMore ? rows.slice(0, page.limit) : rows, page: { ...page, hasMore } };
+  }
+
+  private async activeVersionCounts(companyId: string, entityNames: readonly string[]): Promise<Map<string, number>> {
+    const rows = await this.prisma.$queryRaw<Array<{ entityName: string; versionCount: bigint | number }>>(Prisma.sql`
+      SELECT version."entity_name" AS "entityName", COUNT(*) AS "versionCount"
+      FROM "rie_dataset_versions" version
+      INNER JOIN "files" source_file ON source_file.id = version."source_file_id"
+      WHERE version."company_id" = ${companyId} AND version."entity_name" IN (${Prisma.join(entityNames)})
+        AND version."is_active" = TRUE AND source_file."company_id" = ${companyId}
+        AND source_file."is_active" = TRUE AND source_file.status = 'READY'
+        AND source_file."dataset_type_confirmed" = TRUE
+      GROUP BY version."entity_name"
+    `);
+    return new Map(rows.map(({ entityName, versionCount }) => [entityName, Number(versionCount)]));
   }
 
   /**
@@ -832,10 +847,27 @@ export class RieScalableQueryService {
   }
 }
 
-function activeEntityRowsCte(companyId: string, entityName: string, alias: string, predicates: readonly Prisma.Sql[], semiJoins: readonly Prisma.Sql[], sourceJoins: readonly Prisma.Sql[]): Prisma.Sql {
+function activeEntityRowsCte(companyId: string, entityName: string, alias: string, predicates: readonly Prisma.Sql[], semiJoins: readonly Prisma.Sql[], sourceJoins: readonly Prisma.Sql[], singleActiveVersion = false): Prisma.Sql {
   const cte = `${alias}_active`;
   const rowAlias = `${alias}_source`;
   const versionAlias = `${alias}_version`;
+  if (singleActiveVersion) {
+    // With one eligible version there can be no cross-upload collision, so
+    // avoid the newest-wins window and preserve the direct scoped SQL shape.
+    return Prisma.sql`${Prisma.raw(cte)} AS MATERIALIZED (
+      SELECT ${Prisma.raw(rowAlias)}.*
+      FROM "rie_dataset_versions" ${Prisma.raw(versionAlias)}
+      INNER JOIN "files" source_file ON source_file.id = ${Prisma.raw(versionAlias)}."source_file_id"
+      INNER JOIN "rie_entity_rows" ${Prisma.raw(rowAlias)} ON ${Prisma.raw(rowAlias)}."dataset_version_id" = ${Prisma.raw(versionAlias)}.id
+      ${sourceJoins.length ? Prisma.join(sourceJoins, " ") : Prisma.empty}
+      WHERE ${Prisma.raw(versionAlias)}."company_id" = ${companyId} AND ${Prisma.raw(versionAlias)}."entity_name" = ${entityName} AND ${Prisma.raw(versionAlias)}."is_active" = TRUE
+        AND source_file."company_id" = ${companyId} AND source_file."is_active" = TRUE
+        AND source_file.status = 'READY' AND source_file."dataset_type_confirmed" = TRUE
+        AND ${Prisma.raw(rowAlias)}."company_id" = ${companyId} AND ${Prisma.raw(rowAlias)}."entity_name" = ${entityName}
+        ${predicates.length ? Prisma.sql`AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty}
+        ${semiJoins.length ? Prisma.sql`AND ${Prisma.join(semiJoins, " AND ")}` : Prisma.empty}
+    )`;
+  }
   const primaryKey = IMPORT_TEMPLATES.find((template) => template.entity === entityName)?.primaryKey;
   if (!primaryKey?.length) throw new Error(`RIE scalable query requires a canonical primary key for "${entityName}".`);
   for (const field of primaryKey) assertIdentifier(field, "primary key");
