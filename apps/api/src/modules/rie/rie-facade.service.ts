@@ -16,6 +16,9 @@ import { FilesService } from "../files/files.service";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { ENTITY_DATASET_TYPE_MAP } from "./excel-entity-provider.mapping";
 import { RieScalableQueryService } from "./scalable-query.service";
+import { RieFsos360QueryService } from "./fsos-360-query.service";
+import type { Fsos360Query } from "@field-sales-os/schemas";
+import type { Fsos360ResolvedContext } from "../decision-analytics-studio/fsos-360-context.service";
 import type { RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery } from "./scalable-query.types";
 
 /**
@@ -72,6 +75,7 @@ export class RieFacade {
     private readonly filesService: FilesService,
     private readonly hierarchyResolver: CanonicalHierarchyResolverService,
     private readonly scalableQuery: RieScalableQueryService,
+    private readonly fsos360Query?: RieFsos360QueryService,
   ) {}
 
   // ------------------------------------------------------------------
@@ -190,6 +194,21 @@ export class RieFacade {
 
   queryManagementVehicleProducts(query: RieManagementVehicleProductsQuery): Promise<RieManagementVehicleProductRow[]> {
     return this.scalableQuery.queryManagementVehicleProducts(query);
+  }
+
+  queryFsos360Facts(ctx: EntityQueryContext, context: Fsos360ResolvedContext, input: Fsos360Query) {
+    if (!this.fsos360Query) throw new Error('FSOS 360 query service is not configured.');
+    return this.fsos360Query.aggregate(ctx, context, input);
+  }
+
+  queryFsos360CustomerContext(...args: Parameters<RieFsos360QueryService['customerContext']>) {
+    if (!this.fsos360Query) throw new Error('FSOS 360 query service is not configured.');
+    return this.fsos360Query.customerContext(...args);
+  }
+
+  queryFsos360CustomerOptions(...args: Parameters<RieFsos360QueryService['customerOptions']>) {
+    if (!this.fsos360Query) throw new Error('FSOS 360 query service is not configured.');
+    return this.fsos360Query.customerOptions(...args);
   }
 
   queryManagementLoadingRisk(query: RieManagementLoadingRiskQuery): Promise<RieManagementLoadingRiskRow> {

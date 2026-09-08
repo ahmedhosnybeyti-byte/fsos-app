@@ -1,3 +1,4 @@
+// Frozen parity oracle: f808491, test-only. Never used by production services.
 import { BadRequestException, Injectable } from "@nestjs/common";
 import type { Fsos360Availability, Fsos360FilterOptionsQuery, Fsos360Kpi, Fsos360Query, SgiSituation } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
@@ -5,17 +6,31 @@ import { assignmentMatchesAt, Fsos360ContextService, type Fsos360ResolvedContext
 import { UserActivityService } from "../user-activity/user-activity.service";
 import { SgiService } from "../sgi/sgi.service";
 
-import type { Fsos360FactAggregate } from "../rie/fsos-360-query.service";
+interface SalesRow { invoiceNo: string; customerCode: string; productCode: string; routeId: string; time: number | null; amount: number }
+interface OperationRow { customerCode: string; routeId: string; time: number | null; amount: number }
 interface Window { from: number; to: number }
 type VisualizationRequest = NonNullable<Fsos360Query["visualization"]>;
 type VisualizationAvailability = "available" | "unavailable" | "not-applicable";
 
+const MAX_CATEGORY_ITEMS = 40;
+const MAX_TREEMAP_ITEMS = 20;
+const MAX_GEO_POINTS = 750;
 
 function numberOf(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim()) {
     const parsed = Number(value.replace(/,/g, ""));
     return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function timeOf(value: unknown): number | null {
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Date.parse(value);
+    return Number.isNaN(parsed) ? null : parsed;
   }
   return null;
 }
@@ -56,14 +71,16 @@ export class Fsos360WorkspaceService {
     await this.userActivity?.record({ type: "BIZ_360_VIEW", category: "BUSINESS", actorUserId: user.userId, subjectUserId: user.userId, actorRole: user.roleCode, companyId: user.companyId, source: "fsos-360.query", metadata: { scopeType: input.analysisFocus ?? "COMPANY" } });
     const context = await this.contextService.resolve(user, input.filters, input.analysisFocus);
     const windows = { current: this.window(input.currentPeriod), comparison: this.window(input.comparisonPeriod) };
-    const facts = await this.contextService.aggregateFacts(user, context, input);
-    const analysisAvailability = this.analysisAvailability(context, facts);
+    const salesRows = this.salesRows(context);
+    const analysisAvailability = this.analysisAvailability(context, windows, salesRows);
+    const currentRows = analysisAvailability.availability === "available" ? salesRows.filter((row) => this.inWindow(row.time, windows.current) && this.matches(row, context)) : [];
+    const previousRows = analysisAvailability.availability === "available" ? salesRows.filter((row) => this.inWindow(row.time, windows.comparison) && this.matches(row, context)) : [];
     const sgi = await this.sgiService?.getLatest(user);
-    const sgiSituations = sgi ? await this.scopedSgiSituations(user, context, sgi.situations) : null;
-    const kpis = this.kpis(context, facts, analysisAvailability, sgiSituations);
-    const target = this.target(context, analysisAvailability.availability === "available" ? facts.periods[0]!.sales : 0, input.currentPeriod);
-    const timeline = this.timeline(analysisAvailability.availability === "available" ? facts.timeline : [], input.currentPeriod, input.comparisonPeriod);
-    const visualization = this.visualization(context, facts, windows, input.visualization, analysisAvailability);
+    const sgiSituations = sgi ? this.scopedSgiSituations(context, sgi.situations) : null;
+    const kpis = this.kpis(context, currentRows, previousRows, windows, analysisAvailability, sgiSituations);
+    const target = this.target(context, currentRows, input.currentPeriod);
+    const timeline = this.timeline(currentRows, previousRows, input.currentPeriod, input.comparisonPeriod);
+    const visualization = this.visualization(context, currentRows, previousRows, windows, input.visualization, analysisAvailability);
     const salesRepHistory = context.capabilities.routeAssignments!;
 
     return {
@@ -73,7 +90,7 @@ export class Fsos360WorkspaceService {
       activeAnalysisLevel: context.activeAnalysisLevel,
       smallFilterOptions: context.smallFilterOptions,
       smartSlicerCapabilities: {
-        customer: { availability: context.datasets.Customers.available ? "available" : "unavailable", reason: context.datasets.Customers.available ? null : "customers-dataset-unavailable", total: context.customerCount },
+        customer: { availability: context.datasets.Customers.available ? "available" : "unavailable", reason: context.datasets.Customers.available ? null : "customers-dataset-unavailable", total: context.customers.size },
         product: { availability: context.datasets.Products.available ? "available" : "unavailable", reason: context.datasets.Products.available ? null : "products-dataset-unavailable", total: context.products.size },
         brand: { availability: context.datasets.Products.available ? "available" : "unavailable", reason: context.datasets.Products.available ? null : "products-dataset-unavailable", total: new Set(Array.from(context.products.values(), (p) => p.brand).filter(Boolean)).size },
         category: { availability: context.datasets.Products.available ? "available" : "unavailable", reason: context.datasets.Products.available ? null : "products-dataset-unavailable", total: new Set(Array.from(context.products.values(), (p) => p.category).filter(Boolean)).size },
@@ -100,14 +117,14 @@ export class Fsos360WorkspaceService {
 
   async filterOptions(user: AuthenticatedUser, input: Fsos360FilterOptionsQuery) {
     const context = await this.contextService.resolve(user, input.context.filters, input.context.analysisFocus);
-    if (input.field === 'customer') {
-      const result = await this.contextService.customerOptions(user, context, input);
-      return { field: input.field, resolvedFilters: context.filters, removedSelections: context.removedSelections, availability: 'available', reason: null, ...result, page: input.page, pageSize: input.pageSize, hasMore: input.page * input.pageSize < result.total };
-    }
     const needle = input.query.trim().toLocaleLowerCase();
     const salesRepUnavailable = input.field === "sales-rep" && !context.capabilities.routeAssignments!.available;
     let all: { value: string; label: string; meta?: Record<string, string> }[] = [];
-    if (!salesRepUnavailable && input.field === "product") {
+    if (!salesRepUnavailable && input.field === "customer") {
+      all = Array.from(context.customers.values())
+        .filter((customer) => this.customerMatches(customer.code, context))
+        .map((customer) => ({ value: customer.code, label: customer.name, meta: { city: customer.city, routeId: customer.routeId } }));
+    } else if (!salesRepUnavailable && input.field === "product") {
       all = Array.from(context.products.values()).map((product) => ({ value: product.code, label: product.name, meta: { brand: product.brand, category: product.category } }));
     } else if (!salesRepUnavailable && input.field === "brand") {
       all = Array.from(new Set(Array.from(context.products.values(), (product) => product.brand).filter(Boolean))).map((value) => ({ value, label: value }));
@@ -154,10 +171,24 @@ export class Fsos360WorkspaceService {
     };
   }
 
-  private analysisAvailability(context: Fsos360ResolvedContext, facts: Fsos360FactAggregate) {
+  private analysisAvailability(context: Fsos360ResolvedContext, windows: { current: Window; comparison: Window }, salesRows: SalesRow[]) {
     if (context.activeAnalysisLevel === "mixed") return { availability: "unavailable" as const, reason: "ambiguous-analysis-focus" };
-    const needsHistory = ["manager", "supervisor", "sales-rep"].includes(context.activeAnalysisLevel) || Boolean(context.filters.managerIds?.length || context.filters.supervisorIds?.length || context.filters.salesRepIds?.length);
-    if (needsHistory && (!context.capabilities.routeAssignments!.available || facts.missingHistory)) return { availability: "unavailable" as const, reason: "route-assignment-history-unavailable" };
+    const needsSalesRepHistory = ["manager", "supervisor", "sales-rep"].includes(context.activeAnalysisLevel) || Boolean(context.filters.managerIds?.length || context.filters.supervisorIds?.length || context.filters.salesRepIds?.length);
+    if (!needsSalesRepHistory) return { availability: "available" as const, reason: null };
+    if (!context.capabilities.routeAssignments!.available) return { availability: "unavailable" as const, reason: "route-assignment-history-unavailable" };
+    const operationRows = [
+      ...salesRows,
+      ...this.operationRows(context, "Collections", "CollectionDate", "Amount"),
+      ...this.operationRows(context, "Returns", "ReturnDate", "TotalAmount"),
+      ...this.operationRows(context, "Visits", "VisitDate", "0"),
+    ];
+    const relevant = operationRows.filter((row) => (this.inWindow(row.time, windows.current) || this.inWindow(row.time, windows.comparison)) && this.baseMatches(row, context));
+    const repIds: Set<string> | null = null;
+    for (const operation of relevant) {
+      if (operation.time === null || !operation.routeId || !context.routeAssignments.some((assignment) => assignmentMatchesAt(assignment, operation.routeId, operation.time!, repIds))) {
+        return { availability: "unavailable" as const, reason: "route-assignment-history-unavailable" };
+      }
+    }
     return { availability: "available" as const, reason: null };
   }
 
@@ -168,36 +199,133 @@ export class Fsos360WorkspaceService {
     return { from, to };
   }
 
-  private async scopedSgiSituations(user: AuthenticatedUser, context: Fsos360ResolvedContext, situations: SgiSituation[]): Promise<SgiSituation[]> {
-    const productFiltered = Boolean(context.filters.productCodes?.length || context.filters.brandValues?.length || context.filters.categoryValues?.length);
-    if (productFiltered) return [];
-    const candidates = situations.filter(item => item.entityType === 'customer');
-    if (!candidates.length) return [];
-    const matched = await this.contextService.customerOptions(user, context, { query: '', page: 1, pageSize: candidates.length }, candidates.map(item => item.entityKey.trim()));
-    const codes = new Set(matched.options.map(item => item.value));
-    return candidates.filter(item => codes.has(item.entityKey.trim()));
+  private inWindow(value: number | null, window: Window): boolean {
+    return value !== null && value >= window.from && value <= window.to;
   }
 
-  private kpis(context: Fsos360ResolvedContext, facts: Fsos360FactAggregate, analysis: { availability: Fsos360Availability; reason: string | null }, sgiSituations: SgiSituation[] | null): Fsos360Kpi[] {
-    const invoicesAvailable = context.datasets.Invoices.available && context.datasets["Invoice Items"].available;
-    const usable = analysis.availability === "available";
-    const [current, previous] = facts.periods;
-    const currentSales = invoicesAvailable && usable ? current!.sales : null;
-    const previousSales = invoicesAvailable && usable ? previous!.sales : null;
-    const currentOrders = invoicesAvailable && usable ? current!.orders : null;
-    const previousOrders = invoicesAvailable && usable ? previous!.orders : null;
+  private salesRows(context: Fsos360ResolvedContext): SalesRow[] {
+    const invoices = context.datasets.Invoices;
+    const items = context.datasets["Invoice Items"];
+    if (!invoices.available || !items.available) return [];
+    const invoicesByNo = new Map<string, { customerCode: string; routeId: string; time: number | null }>();
+    for (const invoice of invoices.records) {
+      const invoiceNo = String(invoice.InvoiceNo ?? "").trim();
+      if (invoiceNo) invoicesByNo.set(invoiceNo, { customerCode: String(invoice.CustomerCode ?? "").trim(), routeId: String(invoice.RouteID ?? "").trim(), time: timeOf(invoice.InvoiceDate) });
+    }
+    const rows: SalesRow[] = [];
+    for (const item of items.records) {
+      const invoiceNo = String(item.InvoiceNo ?? "").trim();
+      const invoice = invoicesByNo.get(invoiceNo);
+      if (invoice) rows.push({ invoiceNo, customerCode: invoice.customerCode, productCode: String(item.ProductCode ?? "").trim(), routeId: invoice.routeId, time: invoice.time, amount: numberOf(item.LineTotal) ?? 0 });
+    }
+    return rows;
+  }
+
+  private operationRows(context: Fsos360ResolvedContext, dataset: "Collections" | "Returns" | "Visits", dateField: string, amountField: string): OperationRow[] {
+    if (!context.datasets[dataset].available) return [];
+    return context.datasets[dataset].records.map((row) => ({
+      customerCode: String(row.CustomerCode ?? "").trim(),
+      routeId: String(row.RouteID ?? "").trim(),
+      time: timeOf(row[dateField]),
+      amount: amountField === "0" ? 0 : numberOf(row[amountField]) ?? 0,
+    }));
+  }
+
+  private historicalSalesRepMatches(routeId: string, time: number | null, context: Fsos360ResolvedContext): boolean {
+    const selected = context.filters.salesRepIds?.length ? new Set(context.filters.salesRepIds) : null;
+    const managers = context.filters.managerIds?.length ? new Set(context.filters.managerIds) : null;
+    const supervisors = context.filters.supervisorIds?.length ? new Set(context.filters.supervisorIds) : null;
+    if (!selected && !managers && !supervisors && context.activeAnalysisLevel !== "sales-rep") return true;
+    return time !== null && context.routeAssignments.some((assignment) => {
+      if (!assignmentMatchesAt(assignment, routeId, time, selected)) return false;
+      const supervisorId = context.employees.get(assignment.employeeId)?.managerId ?? null;
+      const managerId = supervisorId ? context.employees.get(supervisorId)?.managerId ?? null : null;
+      return (!supervisors || (supervisorId !== null && supervisors.has(supervisorId))) && (!managers || (managerId !== null && managers.has(managerId)));
+    });
+  }
+
+  private baseMatches(row: OperationRow, context: Fsos360ResolvedContext): boolean {
+    const filters = context.filters;
+    const customer = context.customers.get(row.customerCode);
+    const includes = (values: string[] | undefined, value: string) => !values?.length || values.includes(value);
+    if (!customer) return false;
+    return includes(filters.regionIds, context.branches.get(customer.branchId)?.regionId ?? "")
+      && includes(filters.cityValues, customer.city)
+      && includes(filters.branchIds, customer.branchId)
+      && includes(filters.routeIds, row.routeId || customer.routeId)
+      && includes(filters.customerCodes, customer.code);
+  }
+
+  private matches(row: SalesRow, context: Fsos360ResolvedContext): boolean {
+    if (!this.baseMatches(row, context) || !this.historicalSalesRepMatches(row.routeId, row.time, context)) return false;
+    const filters = context.filters;
+    const product = context.products.get(row.productCode);
+    const includes = (values: string[] | undefined, value: string) => !values?.length || values.includes(value);
+    if (!product) return !filters.brandValues?.length && !filters.categoryValues?.length && !filters.productCodes?.length;
+    return includes(filters.brandValues, product.brand) && includes(filters.categoryValues, product.category) && includes(filters.productCodes, product.code);
+  }
+
+  private operationMatches(row: OperationRow, context: Fsos360ResolvedContext): boolean {
+    return this.baseMatches(row, context) && this.historicalSalesRepMatches(row.routeId, row.time, context);
+  }
+
+  private customerMatches(code: string, context: Fsos360ResolvedContext): boolean {
+    const customer = context.customers.get(code);
+    if (!customer) return false;
+    const filters = context.filters;
+    const includes = (values: string[] | undefined, value: string) => !values?.length || values.includes(value);
+    return includes(filters.regionIds, context.branches.get(customer.branchId)?.regionId ?? "")
+      && includes(filters.cityValues, customer.city)
+      && includes(filters.branchIds, customer.branchId)
+      && includes(filters.routeIds, customer.routeId)
+      && includes(filters.customerCodes, customer.code);
+  }
+
+  private scopedSgiSituations(context: Fsos360ResolvedContext, situations: SgiSituation[]): SgiSituation[] {
     const productFiltered = Boolean(context.filters.productCodes?.length || context.filters.brandValues?.length || context.filters.categoryValues?.length);
-    const collectionCurrent = context.datasets.Collections.available && !productFiltered && usable ? current!.collections : null;
-    const collectionPrevious = context.datasets.Collections.available && !productFiltered && usable ? previous!.collections : null;
-    const returnsCurrent = context.datasets.Returns.available && !productFiltered && usable ? current!.returns : null;
-    const returnsPrevious = context.datasets.Returns.available && !productFiltered && usable ? previous!.returns : null;
-    const visitMetric = (p: Fsos360FactAggregate["periods"][number]) => context.datasets.Visits.available && !productFiltered && usable ? {
-      coverage: p.inScopeCustomers ? p.visited / p.inScopeCustomers * 100 : null,
-      strike: p.visits ? p.productive / p.visits * 100 : null,
-      productiveVisits: p.productive,
-    } : null;
-    const currentVisits = visitMetric(current!);
-    const previousVisits = visitMetric(previous!);
+    return situations.filter((item) => item.entityType === "customer" && !productFiltered && this.customerMatches(item.entityKey.trim(), context));
+  }
+
+  private kpis(context: Fsos360ResolvedContext, currentRows: SalesRow[], previousRows: SalesRow[], windows: { current: Window; comparison: Window }, analysis: { availability: Fsos360Availability; reason: string | null }, sgiSituations: SgiSituation[] | null): Fsos360Kpi[] {
+    const invoicesAvailable = context.datasets.Invoices.available && context.datasets["Invoice Items"].available;
+    const sales = (rows: SalesRow[]) => rows.reduce((sum, row) => sum + row.amount, 0);
+    const currentSales = invoicesAvailable && analysis.availability === "available" ? sales(currentRows) : null;
+    const previousSales = invoicesAvailable && analysis.availability === "available" ? sales(previousRows) : null;
+    const currentOrders = invoicesAvailable && analysis.availability === "available" ? new Set(currentRows.map((row) => row.invoiceNo)).size : null;
+    const previousOrders = invoicesAvailable && analysis.availability === "available" ? new Set(previousRows.map((row) => row.invoiceNo)).size : null;
+    const productFiltered = Boolean(context.filters.productCodes?.length || context.filters.brandValues?.length || context.filters.categoryValues?.length);
+    const total = (dataset: "Collections" | "Returns", dateField: string, amountField: string, window: Window) => {
+      if (!context.datasets[dataset].available || productFiltered || analysis.availability !== "available") return null;
+      return this.operationRows(context, dataset, dateField, amountField)
+        .filter((row) => this.inWindow(row.time, window) && this.operationMatches(row, context))
+        .reduce((sum, row) => sum + row.amount, 0);
+    };
+    const collectionCurrent = total("Collections", "CollectionDate", "Amount", windows.current);
+    const collectionPrevious = total("Collections", "CollectionDate", "Amount", windows.comparison);
+    const returnsCurrent = total("Returns", "ReturnDate", "TotalAmount", windows.current);
+    const returnsPrevious = total("Returns", "ReturnDate", "TotalAmount", windows.comparison);
+    const visitMetric = (window: Window) => {
+      if (!context.datasets.Visits.available || productFiltered || analysis.availability !== "available") return null;
+      let totalVisits = 0;
+      let productiveVisits = 0;
+      const visited = new Set<string>();
+      for (const visit of context.datasets.Visits.records) {
+        const row: OperationRow = { customerCode: String(visit.CustomerCode ?? "").trim(), routeId: String(visit.RouteID ?? "").trim(), time: timeOf(visit.VisitDate), amount: 0 };
+        if (!this.inWindow(row.time, window) || !this.operationMatches(row, context)) continue;
+        totalVisits++;
+        visited.add(row.customerCode);
+        if (String(visit.VisitStatus ?? "").trim() === "Productive") productiveVisits++;
+      }
+      const inScopeCustomers = Array.from(context.customers.values()).filter((customer) => {
+        if (!this.customerMatches(customer.code, context)) return false;
+        if (context.activeAnalysisLevel !== "sales-rep" && !context.filters.salesRepIds?.length) return true;
+        const selected = context.filters.salesRepIds?.length ? new Set(context.filters.salesRepIds) : null;
+        return context.routeAssignments.some((assignment) => assignmentMatchesAt(assignment, customer.routeId, window.from, selected));
+      }).length;
+      return { coverage: inScopeCustomers ? (visited.size / inScopeCustomers) * 100 : null, strike: totalVisits ? (productiveVisits / totalVisits) * 100 : null, productiveVisits };
+    };
+    const currentVisits = visitMetric(windows.current);
+    const previousVisits = visitMetric(windows.comparison);
     const collectionsAvailability = productFiltered ? "not-applicable" : (context.datasets.Collections.available ? analysis.availability : "unavailable");
     const returnsAvailability = productFiltered ? "not-applicable" : (context.datasets.Returns.available ? analysis.availability : "unavailable");
     const visitsAvailability = productFiltered ? "not-applicable" : (context.datasets.Visits.available ? analysis.availability : "unavailable");
@@ -216,12 +344,20 @@ export class Fsos360WorkspaceService {
     ];
   }
 
-  private timeline(rows: Fsos360FactAggregate["timeline"], currentPeriod: { from: string; to: string }, comparisonPeriod: { from: string; to: string }) {
-    const bucket = (periodIndex: number, period: { from: string; to: string }) => {
+  private timeline(currentRows: SalesRow[], previousRows: SalesRow[], currentPeriod: { from: string; to: string }, comparisonPeriod: { from: string; to: string }) {
+    const bucket = (rows: SalesRow[], period: { from: string; to: string }) => {
       const from = this.window(period);
       const days = Math.ceil((from.to - from.from) / 86_400_000) + 1;
       const granularity = days <= 62 ? "day" : days <= 180 ? "week" : "month";
-      const map = new Map(rows.filter(row => row.period === periodIndex).map(row => [String(row.position), row.value]));
+      const map = new Map<string, number>();
+      for (const row of rows) {
+        if (row.time === null) continue;
+        const date = new Date(row.time);
+        const key = granularity === "month"
+          ? String((date.getUTCFullYear() - new Date(period.from).getUTCFullYear()) * 12 + date.getUTCMonth() - new Date(period.from).getUTCMonth())
+          : granularity === "week" ? String(Math.floor((row.time - from.from) / (7 * 86_400_000))) : String(Math.floor((row.time - from.from) / 86_400_000));
+        map.set(key, (map.get(key) ?? 0) + row.amount);
+      }
       const startDate = new Date(period.from);
       const endDate = new Date(period.to);
       const count = granularity === "month"
@@ -229,13 +365,13 @@ export class Fsos360WorkspaceService {
         : granularity === "week" ? Math.ceil(days / 7) : days;
       return { granularity, values: Array.from({ length: count }, (_, position) => ({ position, value: map.get(String(position)) ?? null })) };
     };
-    const current = bucket(0, currentPeriod);
-    const comparison = bucket(1, comparisonPeriod);
+    const current = bucket(currentRows, currentPeriod);
+    const comparison = bucket(previousRows, comparisonPeriod);
     const length = Math.max(current.values.length, comparison.values.length);
     return { granularity: current.granularity, buckets: Array.from({ length }, (_, position) => ({ position, current: current.values[position]?.value ?? null, comparison: comparison.values[position]?.value ?? null })) };
   }
 
-  private target(context: Fsos360ResolvedContext, achievementValue: number, period: { from: string; to: string }) {
+  private target(context: Fsos360ResolvedContext, currentRows: SalesRow[], period: { from: string; to: string }) {
     const supported = ["company", "region", "branch", "sales-rep"].includes(context.activeAnalysisLevel);
     if (!supported) return { availability: "not-applicable", reason: "analysis-level-does-not-own-target" };
     const start = new Date(`${period.from}T00:00:00Z`);
@@ -276,12 +412,14 @@ export class Fsos360WorkspaceService {
     if (ambiguousAssignment) return { availability: "unavailable", reason: "route-assignment-history-unavailable" };
     const expected = Array.from(context.routes.keys()).reduce((count, routeId) => count + months.filter((month) => scopedRouteForMonth(routeId, month)).length, 0);
     if (!expected || covered.size < expected) return { availability: "partial", reason: "incomplete-target-coverage", targetRouteCount: covered.size, scopedRouteCount: expected };
+    const achievementValue = currentRows.reduce((sum, row) => sum + row.amount, 0);
     return { availability: "available", reason: null, targetValue, achievementValue, achievementPercentage: targetValue ? (achievementValue / targetValue) * 100 : null, remainingValue: Math.max(targetValue - achievementValue, 0), targetRouteCount: covered.size, scopedRouteCount: expected };
   }
 
   private visualization(
     context: Fsos360ResolvedContext,
-    facts: Fsos360FactAggregate,
+    currentRows: SalesRow[],
+    previousRows: SalesRow[],
     windows: { current: Window; comparison: Window },
     request: VisualizationRequest | undefined,
     analysis: { availability: Fsos360Availability; reason: string | null },
@@ -302,7 +440,7 @@ export class Fsos360WorkspaceService {
     if (!selectedCapability || selectedCapability.availability !== "available") return unavailable();
 
     if (selectedType === "timeline" || selectedType === "line") {
-      const timeline = this.timeline(facts.visualizationTimeline, {
+      const timeline = this.timeline(currentRows, previousRows, {
         from: new Date(windows.current.from).toISOString().slice(0, 10),
         to: new Date(windows.current.to).toISOString().slice(0, 10),
       }, {
@@ -321,36 +459,81 @@ export class Fsos360WorkspaceService {
             comparison: bucket.comparison,
           })),
         },
-        meta: { totalRows: facts.periods[0]!.salesRows + facts.periods[1]!.salesRows, generatedAt },
+        meta: { totalRows: currentRows.length + previousRows.length, generatedAt },
       };
     }
 
     if (selectedType === "bar") {
-      const categories = facts.categories;
+      const categories = this.categoryItems(currentRows, previousRows, context);
       return {
         selectedType,
         availableTypes,
         data: { kind: "categories" as const, items: categories },
-        meta: { totalRows: facts.periods[0]!.salesRows + facts.periods[1]!.salesRows, generatedAt },
+        meta: { totalRows: currentRows.length + previousRows.length, generatedAt },
       };
     }
 
     if (selectedType === "treemap") {
-      const items = facts.treemap;
+      const items = this.treemapItems(currentRows, context, request?.groupBy ?? "product");
       return {
         selectedType,
         availableTypes,
         data: { kind: "treemap" as const, groupBy: request?.groupBy ?? "product", items },
-        meta: { totalRows: facts.periods[0]!.salesRows, generatedAt },
+        meta: { totalRows: currentRows.length, generatedAt },
       };
     }
 
-    const isCoverage = selectedType === "coverage-map" || selectedType === "route-map";
-    const metric = selectedType === "customer-density" ? "density" : isCoverage ? "coverage" : request?.metric ?? "sales";
+    if (selectedType === "customer-density") {
+      const productFiltered = Boolean(context.filters.productCodes?.length || context.filters.brandValues?.length || context.filters.categoryValues?.length);
+      const customerCodes = productFiltered ? new Set(currentRows.map((row) => row.customerCode)) : null;
+      const scopedCustomers = Array.from(context.customers.values()).filter((customer) => (!customerCodes || customerCodes.has(customer.code)) && this.customerInScope(customer.code, context, windows.current.from));
+      const geo = this.geoPoints(
+        scopedCustomers.map((customer) => ({ customerCode: customer.code, value: 1, routeId: customer.routeId })),
+        context,
+        "density",
+      );
+      return {
+        selectedType,
+        availableTypes,
+        data: { kind: "geo-points" as const, metric: "density" as const, points: geo.points },
+        meta: { totalRows: scopedCustomers.length, mappedRows: geo.mappedRows, unmappedRows: geo.unmappedRows, generatedAt },
+      };
+    }
+
+    if (selectedType === "coverage-map" || selectedType === "route-map") {
+      const visits = this.operationRows(context, "Visits", "VisitDate", "0")
+        .filter((row) => this.inWindow(row.time, windows.current) && this.operationMatches(row, context));
+      const geo = this.geoPoints(
+        visits.map((row) => ({ customerCode: row.customerCode, value: 1, routeId: row.routeId })),
+        context,
+        "coverage",
+      );
+      return {
+        selectedType,
+        availableTypes,
+        data: { kind: "geo-points" as const, metric: "coverage" as const, points: geo.points },
+        meta: {
+          totalRows: visits.length,
+          mappedRows: geo.mappedRows,
+          unmappedRows: geo.unmappedRows,
+          routeGeometryAvailable: false,
+          generatedAt,
+        },
+      };
+    }
+
+    const metric = request?.metric ?? "sales";
+    const sourceRows = metric === "sales"
+      ? currentRows.map((row) => ({ customerCode: row.customerCode, value: row.amount, routeId: row.routeId }))
+      : this.operationRows(context, metric === "collections" ? "Collections" : "Returns", metric === "collections" ? "CollectionDate" : "ReturnDate", metric === "collections" ? "Amount" : "TotalAmount")
+        .filter((row) => this.inWindow(row.time, windows.current) && this.operationMatches(row, context))
+        .map((row) => ({ customerCode: row.customerCode, value: row.amount, routeId: row.routeId }));
+    const geo = this.geoPoints(sourceRows, context, metric);
     return {
-      selectedType, availableTypes,
-      data: { kind: "geo-points" as const, metric, points: facts.geo.points },
-      meta: { totalRows: facts.geo.totalRows, mappedRows: facts.geo.mappedRows, unmappedRows: facts.geo.unmappedRows, ...(isCoverage ? { routeGeometryAvailable: false } : {}), generatedAt },
+      selectedType,
+      availableTypes,
+      data: { kind: "geo-points" as const, metric, points: geo.points },
+      meta: { totalRows: sourceRows.length, mappedRows: geo.mappedRows, unmappedRows: geo.unmappedRows, generatedAt },
     };
   }
 
@@ -393,6 +576,95 @@ export class Fsos360WorkspaceService {
       { type: "route-map", availability: visitsAvailability, reason: visitsAvailability === "available" ? null : analysis.availability === "available" ? visitsReason : analysisReason },
       { type: "customer-density", availability: customersAvailable ? "available" : "unavailable", reason: customersAvailable ? null : "customers-dataset-unavailable" },
     ];
+  }
+
+
+  private categoryItems(currentRows: SalesRow[], previousRows: SalesRow[], context: Fsos360ResolvedContext) {
+    const aggregate = (rows: SalesRow[]) => {
+      const totals = new Map<string, { label: string; value: number }>();
+      for (const row of rows) {
+        const product = context.products.get(row.productCode);
+        const key = product?.category || "unclassified";
+        const entry = totals.get(key) ?? { label: product?.category || "Unclassified", value: 0 };
+        entry.value += row.amount;
+        totals.set(key, entry);
+      }
+      return totals;
+    };
+    const current = aggregate(currentRows);
+    const previous = aggregate(previousRows);
+    return Array.from(new Set([...current.keys(), ...previous.keys()]))
+      .map((key) => ({
+        key,
+        label: current.get(key)?.label ?? previous.get(key)?.label ?? key,
+        current: current.get(key)?.value ?? 0,
+        previous: previous.get(key)?.value ?? 0,
+        change: (current.get(key)?.value ?? 0) - (previous.get(key)?.value ?? 0),
+      }))
+      .sort((a, b) => Math.abs(b.current) - Math.abs(a.current))
+      .slice(0, MAX_CATEGORY_ITEMS);
+  }
+
+  private treemapItems(rows: SalesRow[], context: Fsos360ResolvedContext, groupBy: "product" | "brand") {
+    const totals = new Map<string, { label: string; value: number }>();
+    for (const row of rows) {
+      const product = context.products.get(row.productCode);
+      const key = groupBy === "brand" ? product?.brand || "unclassified" : row.productCode || "unclassified";
+      const label = groupBy === "brand" ? product?.brand || "Unclassified" : product?.name || row.productCode || "Unclassified";
+      const entry = totals.get(key) ?? { label, value: 0 };
+      entry.value += row.amount;
+      totals.set(key, entry);
+    }
+    const sorted = Array.from(totals.entries())
+      .map(([key, entry]) => ({ key, label: entry.label, value: entry.value, isOther: false }))
+      .sort((a, b) => b.value - a.value);
+    if (sorted.length <= MAX_TREEMAP_ITEMS) return sorted;
+    const top = sorted.slice(0, MAX_TREEMAP_ITEMS - 1);
+    const otherValue = sorted.slice(MAX_TREEMAP_ITEMS - 1).reduce((sum, item) => sum + item.value, 0);
+    return [...top, { key: "__other__", label: "__other__", value: otherValue, isOther: true }];
+  }
+
+  private customerInScope(customerCode: string, context: Fsos360ResolvedContext, at: number) {
+    const customer = context.customers.get(customerCode);
+    if (!customer || !this.customerMatches(customerCode, context)) return false;
+    const selected = context.filters.salesRepIds?.length ? new Set(context.filters.salesRepIds) : null;
+    if (!selected && context.activeAnalysisLevel !== "sales-rep") return true;
+    return context.routeAssignments.some((assignment) => assignmentMatchesAt(assignment, customer.routeId, at, selected));
+  }
+
+  private geoPoints(
+    rows: { customerCode: string; value: number; routeId: string }[],
+    context: Fsos360ResolvedContext,
+    metric: "sales" | "collections" | "returns" | "density" | "coverage",
+  ) {
+    const totals = new Map<string, { value: number; routeId: string }>();
+    for (const row of rows) {
+      const entry = totals.get(row.customerCode) ?? { value: 0, routeId: row.routeId };
+      entry.value += row.value;
+      if (!entry.routeId && row.routeId) entry.routeId = row.routeId;
+      totals.set(row.customerCode, entry);
+    }
+    let unmappedRows = 0;
+    const points = [];
+    for (const [customerCode, entry] of totals) {
+      const customer = context.customers.get(customerCode);
+      const valid = customer && customer.latitude !== null && customer.longitude !== null
+        && customer.latitude >= -90 && customer.latitude <= 90 && customer.longitude >= -180 && customer.longitude <= 180;
+      if (!valid) {
+        unmappedRows++;
+        continue;
+      }
+      points.push({
+        customerCode,
+        customerName: customer.name,
+        routeId: entry.routeId || customer.routeId || null,
+        latitude: customer.latitude,
+        longitude: customer.longitude,
+        value: entry.value,
+      });
+    }
+    const limited = points.sort((a, b) => b.value - a.value).slice(0, MAX_GEO_POINTS);
+    return { points: limited, mappedRows: limited.length, unmappedRows, metric };
   }
 
 

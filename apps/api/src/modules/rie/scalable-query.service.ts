@@ -931,7 +931,7 @@ export class RieScalableQueryService {
   }
 }
 
-function activeEntityRowsCte(companyId: string, entityName: string, alias: string, predicates: readonly Prisma.Sql[], semiJoins: readonly Prisma.Sql[], sourceJoins: readonly Prisma.Sql[], singleActiveVersion = false): Prisma.Sql {
+export function activeEntityRowsCte(companyId: string, entityName: string, alias: string, predicates: readonly Prisma.Sql[], semiJoins: readonly Prisma.Sql[], sourceJoins: readonly Prisma.Sql[], singleActiveVersion = false): Prisma.Sql {
   const cte = `${alias}_active`;
   const rowAlias = `${alias}_source`;
   const versionAlias = `${alias}_version`;

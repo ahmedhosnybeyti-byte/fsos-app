@@ -1,5 +1,5 @@
 import { Injectable } from "@nestjs/common";
-import type { Fsos360AnalysisFocus, Fsos360Filters } from "@field-sales-os/schemas";
+import type { Fsos360AnalysisFocus, Fsos360Filters, Fsos360Query } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
 import type { EntityQueryResult } from "../rie/entity-provider.interface";
@@ -62,6 +62,7 @@ export interface Fsos360ResolvedContext {
   removedSelections: Record<string, string[]>;
   activeAnalysisLevel: Fsos360AnalysisFocus | "mixed";
   customers: Map<string, Fsos360Customer>;
+  customerCount: number;
   products: Map<string, Fsos360Product>;
   routes: Map<string, Fsos360Route>;
   employees: Map<string, Fsos360Employee>;
@@ -111,10 +112,10 @@ function optionsFrom(entries: Iterable<[string, string]>): Fsos360Option[] {
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
-function regionCityOptions(regions: Map<string, string>, customers: Map<string, Fsos360Customer>, branches: Map<string, { name: string; regionId: string }>, regionSet: Set<string> | null): Fsos360RegionCityOption[] {
+function regionCityOptions(regions: Map<string, string>, customers: Iterable<{ city: string; branchId: string }>, branches: Map<string, { name: string; regionId: string }>, regionSet: Set<string> | null): Fsos360RegionCityOption[] {
   const options: Fsos360RegionCityOption[] = Array.from(regions, ([value, label]) => ({ value, label: label || value, level: "region" }));
   const seenCities = new Set<string>();
-  for (const customer of customers.values()) {
+  for (const customer of customers) {
     const parentRegionId = branches.get(customer.branchId)?.regionId;
     if (!customer.city || !parentRegionId || (regionSet && !regionSet.has(parentRegionId))) continue;
     const key = `${parentRegionId}\u0000${customer.city}`;
@@ -138,10 +139,22 @@ export class Fsos360ContextService {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
   }
 
+  aggregateFacts(user: AuthenticatedUser, context: Fsos360ResolvedContext, input: Fsos360Query) {
+    return this.rieFacade.queryFsos360Facts(this.rieContext(user), context, input);
+  }
+
+  customerOptions(user: AuthenticatedUser, context: Fsos360ResolvedContext, input: { query: string; page: number; pageSize: number }, candidates?: string[]) {
+    if (!context.datasets.Customers.available) return Promise.resolve({ options: [], total: 0 });
+    return this.rieFacade.queryFsos360CustomerOptions(this.rieContext(user), context.filters, context.branches, input, candidates);
+  }
+
   async resolve(user: AuthenticatedUser, input: Fsos360Filters, focus?: Fsos360AnalysisFocus): Promise<Fsos360ResolvedContext> {
     const ctx = this.rieContext(user);
     const entityNames: Fsos360EntityName[] = ["Companies", "Regions", "Branches", "Employees", "Routes", "Route Assignments", "Customers", "Products", "Invoices", "Invoice Items", "Collections", "Returns", "Visits", "Targets"];
-    const results = await Promise.all(entityNames.map((entity) => this.rieFacade.getEntityRecords(entity, ctx)));
+    const facts = new Set(['Customers', 'Invoices', 'Invoice Items', 'Collections', 'Returns', 'Visits']);
+    const results = await Promise.all(entityNames.map(async (entity): Promise<EntityQueryResult> => facts.has(entity)
+      ? { entityName: entity, available: await this.rieFacade.hasCanonicalEntitySources(ctx, [entity]), records: [], fields: [], warnings: [] }
+      : this.rieFacade.getEntityRecords(entity, ctx)));
     const datasets = Object.fromEntries(entityNames.map((entity, index) => [entity, results[index]!])) as Fsos360Datasets;
 
     const regions = new Map<string, string>();
@@ -171,19 +184,11 @@ export class Fsos360ContextService {
       startAt: timeOf(row.StartDate),
       endAt: timeOf(row.EndDate),
     })).filter((assignment) => Boolean(assignment.routeId && assignment.employeeId));
-    const customers = new Map<string, Fsos360Customer>();
-    for (const row of datasets.Customers.available ? datasets.Customers.records : []) {
-      const code = String(row.CustomerCode ?? "").trim();
-      if (code) customers.set(code, {
-        code,
-        name: String(row.CustomerName ?? code),
-        city: String(row.City ?? "").trim(),
-        branchId: String(row.BranchID ?? "").trim(),
-        routeId: String(row.RouteID ?? "").trim(),
-        latitude: numberOf(row.Latitude),
-        longitude: numberOf(row.Longitude),
-      });
-    }
+    const customerContext = datasets.Customers.available
+      ? await this.rieFacade.queryFsos360CustomerContext(ctx, input.customerCodes)
+      : { total: 0, geographies: [], selected: [] };
+    const customers = new Map<string, Fsos360Customer>(customerContext.selected.map(c => [c.code, { ...c, latitude: null, longitude: null }]));
+    const geographies = customerContext.geographies;
     const products = new Map<string, Fsos360Product>();
     for (const row of datasets.Products.available ? datasets.Products.records : []) {
       const code = String(row.ProductCode ?? "").trim();
@@ -198,7 +203,7 @@ export class Fsos360ContextService {
     const regionSet = setOf(filters.regionIds);
     const cityAllowed = new Set<string>();
     const branchAllowed = new Set<string>();
-    for (const customer of customers.values()) {
+    for (const customer of geographies) {
       const branch = branches.get(customer.branchId);
       if (!regionSet || (branch && regionSet.has(branch.regionId))) cityAllowed.add(customer.city);
     }
@@ -207,7 +212,7 @@ export class Fsos360ContextService {
     const citySet = setOf(filters.cityValues);
     if (citySet) {
       branchAllowed.clear();
-      for (const customer of customers.values()) if (citySet.has(customer.city)) branchAllowed.add(customer.branchId);
+      for (const customer of geographies) if (citySet.has(customer.city)) branchAllowed.add(customer.branchId);
     }
     filters.branchIds = clean(input.branchIds, branchAllowed, removedSelections, "branchIds");
     const branchSet = setOf(filters.branchIds);
@@ -280,6 +285,7 @@ export class Fsos360ContextService {
       removedSelections,
       activeAnalysisLevel,
       customers,
+      customerCount: customerContext.total,
       products,
       routes,
       employees,
@@ -289,7 +295,7 @@ export class Fsos360ContextService {
       datasets,
       smallFilterOptions: {
         company: [{ value: user.companyId!, label: "Company" }],
-        regionCity: regionCityOptions(regions, customers, branches, regionSet),
+        regionCity: regionCityOptions(regions, geographies, branches, regionSet),
         branch: optionsFrom(Array.from(branchAllowed, (id) => [id, branches.get(id)?.name ?? id])),
         manager: optionsFrom(Array.from(managerAllowed, (id) => [id, employees.get(id)?.name ?? id])),
         supervisor: optionsFrom(Array.from(supervisorAllowed, (id) => [id, employees.get(id)?.name ?? id])),

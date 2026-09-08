@@ -1,11 +1,14 @@
 import { strict as assert } from "node:assert";
-import test from "node:test";
+import nodeTest from "node:test";
 import {
   fsos360CapabilitiesResponseSchema,
   fsos360FilterOptionsResponseSchema,
   fsos360QueryResponseSchema,
 } from "@field-sales-os/schemas";
 import { Fsos360WorkspaceService } from "./fsos-360-workspace.service";
+import { postgresFacts, postgresTestOptions } from "./fsos-360-postgres.fixture.spec";
+
+const test = (name: string, fn: () => Promise<void>) => nodeTest(name, postgresTestOptions, fn);
 
 const available = (records: Record<string, unknown>[] = []) => ({ available: true, records });
 const unavailable = () => ({ available: false, records: [] });
@@ -21,6 +24,7 @@ function context(overrides: Record<string, unknown> = {}) {
     filters: { companyId: "company-1", salesRepIds: ["rep-1"] },
     removedSelections: {},
     activeAnalysisLevel: "sales-rep",
+    customerCount: 1,
     customers: new Map([["customer-1", { code: "customer-1", name: "Customer", city: "City", branchId: "branch-1", routeId: "route-a" }]]),
     products: new Map([["product-1", { code: "product-1", name: "Product", brand: "Brand", category: "Category" }]]),
     routes: new Map([
@@ -41,7 +45,7 @@ function context(overrides: Record<string, unknown> = {}) {
 }
 
 function workspace(resolvedContext: any) {
-  return new Fsos360WorkspaceService({ resolve: async () => resolvedContext } as any);
+  return new Fsos360WorkspaceService({ resolve: async () => resolvedContext, aggregateFacts: async (_user: unknown, ctx: any, input: any) => postgresFacts(ctx, input) } as any);
 }
 
 const periods = {
