@@ -859,7 +859,7 @@ function activeEntityRowsCte(companyId: string, entityName: string, alias: strin
     WHERE ${Prisma.raw(versionAlias)}."company_id" = ${companyId} AND ${Prisma.raw(versionAlias)}."entity_name" = ${entityName} AND ${Prisma.raw(versionAlias)}."is_active" = TRUE
       AND source_file."company_id" = ${companyId} AND source_file."is_active" = TRUE
       AND source_file.status = 'READY' AND source_file."dataset_type_confirmed" = TRUE
-  ), ${Prisma.raw(`${alias}_merged`)} AS MATERIALIZED (
+  ), ${Prisma.raw(`${alias}_merged`)} AS NOT MATERIALIZED (
     SELECT ${Prisma.raw(rowAlias)}.*, candidate_version.precedence,
       MIN(candidate_version.precedence) OVER (
         PARTITION BY ${partitionByKey}
