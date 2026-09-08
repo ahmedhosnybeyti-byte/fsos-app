@@ -382,6 +382,26 @@ export class SmartLoadingService {
       }
     };
     const ctx = this.rieContext(user);
+    const logManagementSessionStageFailure = (stage: string, error: unknown): void => {
+      const databaseError = error as { code?: unknown; message?: unknown };
+      this.logger.error(JSON.stringify({
+        event: "smart_loading_management_session_stage_failed",
+        stage,
+        code: typeof databaseError?.code === "string" ? databaseError.code : null,
+        message: typeof databaseError?.message === "string" ? databaseError.message.slice(0, 500) : String(error).slice(0, 500),
+        companyId: ctx.companyId,
+        currentUser: user.email,
+        role: user.roleCode,
+      }));
+    };
+    const timedManagementStage = async <T>(stage: string, operation: () => Promise<T>): Promise<T> => {
+      try {
+        return await timed(stage, operation);
+      } catch (error) {
+        logManagementSessionStageFailure(stage, error);
+        throw error;
+      }
+    };
     const selectedSalesRepId = salesRepId?.trim();
     if ((selectedSalesRepId || managerId?.trim() || supervisorId?.trim()) && !["COMPANY_ADMIN", "MANAGER", "SUPERVISOR"].includes(user.roleCode)) {
       throw new ForbiddenException();
@@ -451,13 +471,13 @@ export class SmartLoadingService {
         ? Promise.resolve([])
         : timed("latest-inventory", () => bounded("latest-inventory", withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "ProductCode", as: "productCode" }], latestPer: { partitionBy: { field: "RouteID" }, orderBy: { field: "ReportDate" } }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
       useManagementStaleGrain
-        ? timed("management-stale-rollup", () => this.rieFacade.queryRouteProductStaleness({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, staleDaysThreshold }))
+        ? timedManagementStage("queryRouteProductStaleness", () => this.rieFacade.queryRouteProductStaleness({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, staleDaysThreshold }))
         : Promise.resolve([]),
       useManagementStaleGrain
-        ? timed("management-stock-alignment", () => this.rieFacade.queryManagementStockAlignment({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, salesFrom: isoDay(windowStartMs), salesTo: isoDay(nowMs), customerCodes: [...nextRouteCustomers.keys()] }))
+        ? timedManagementStage("queryManagementStockAlignment", () => this.rieFacade.queryManagementStockAlignment({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, salesFrom: isoDay(windowStartMs), salesTo: isoDay(nowMs), customerCodes: [...nextRouteCustomers.keys()] }))
         : Promise.resolve(null),
       useManagementStaleGrain
-        ? timed("management-vehicle-products", () => this.rieFacade.queryManagementVehicleProducts({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, salesFrom: isoDay(windowStartMs), salesTo: isoDay(nowMs), customerCodes: [...nextRouteCustomers.keys()] }))
+        ? timedManagementStage("queryManagementVehicleProducts", () => this.rieFacade.queryManagementVehicleProducts({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, salesFrom: isoDay(windowStartMs), salesTo: isoDay(nowMs), customerCodes: [...nextRouteCustomers.keys()] }))
         : Promise.resolve([]),
     ]);
     const activeVehicleRouteIds = new Set<string>();
