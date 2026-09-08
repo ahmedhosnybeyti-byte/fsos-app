@@ -10,11 +10,13 @@ import { SubscriptionsModule } from "../subscriptions/subscriptions.module";
 import { PlatformSettingsModule } from "../platform-settings/platform-settings.module";
 import { UserActivityModule } from "../user-activity/user-activity.module";
 import { SmartLoadingManagementCacheModule } from "../smart-loading-management-cache/smart-loading-management-cache.module";
+import { WorkbookIngestionWorkerService } from "./workbook-ingestion-worker.service";
 
 @Module({
   imports: [AuditLogModule, ImportValidationModule, SubscriptionsModule, PlatformSettingsModule, UserActivityModule, SmartLoadingManagementCacheModule],
   providers: [
     FilesService,
+    WorkbookIngestionWorkerService,
     DatasetClassifierService,
     S3StorageProvider,
     { provide: STORAGE_PROVIDER, useExisting: S3StorageProvider },
