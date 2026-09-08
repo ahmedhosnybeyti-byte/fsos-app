@@ -77,6 +77,39 @@ export interface RieScalableQueryResult {
   page: { limit: number; offset: number; hasMore: boolean };
 }
 
+/** Small, SQL-selected customer set for Geo Intelligence. */
+export interface RieGeoCustomerSelectionQuery extends EntityQueryContext {
+  location: { lat: number; lon: number };
+  nearestCount: number;
+  manualCustomerIds?: readonly string[];
+  targetCustomerId?: string;
+}
+export interface RieGeoCustomerSelectionRow {
+  id: string;
+  name: string;
+  lat: number;
+  lon: number;
+  distanceKm: number;
+  source: "target" | "auto" | "manual";
+  excludedBadCoordinates: number;
+}
+export interface RieGeoProductQuery extends EntityQueryContext {
+  customerIds: readonly string[];
+  topProductsLimit: number;
+  /** Existing-customer comparison: exclude these target SKUs in SQL. */
+  excludeCustomerId?: string;
+}
+export interface RieGeoProductRow {
+  sku: string;
+  name: string;
+  category: string | null;
+  totalQty: number;
+  totalValue: number;
+  customerCount: number;
+  totalRowsConsidered: number;
+  targetProductCount: number | null;
+}
+
 /** Product-grain management stale rollup; Route × Product remains SQL-only. */
 export interface RieRouteProductStalenessQuery extends EntityQueryContext {
   /** null/undefined means the caller's full hierarchy scope; [] means no routes. */

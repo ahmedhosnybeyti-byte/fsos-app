@@ -78,6 +78,19 @@ test("scalable query keeps the latest snapshot per visible route before aggregat
   assert.match(sql, /FROM base_latest base/);
 });
 
+test("geo product intelligence keeps invoice joins, exclusions, grouping and limits in PostgreSQL", async () => {
+  let captured: { strings?: readonly string[] } | undefined;
+  const service = new RieScalableQueryService({ $queryRaw: async (query: typeof captured) => { captured = query; return [{ sku: "P-1", name: "Product", category: null, totalQty: 2, totalValue: 20, customerCount: 1, totalRowsConsidered: 4, targetProductCount: 1 }]; } } as never, { resolveAllowedRouteIds: async () => null } as never);
+  const result = await service.queryGeoProducts({ companyId: "company-1", customerIds: ["N-1"], excludeCustomerId: "T-1", topProductsLimit: 5 });
+  assert.equal(result[0]?.sku, "P-1");
+  const sql = captured?.strings?.join(" ") ?? "";
+  assert.match(sql, /INNER JOIN invoice_active/);
+  assert.match(sql, /GROUP BY j\.sku/);
+  assert.match(sql, /NOT EXISTS \(SELECT 1 FROM target_skus/);
+  assert.match(sql, /ORDER BY "totalValue" DESC/);
+  assert.match(sql, /LIMIT/);
+});
+
 test("single active version uses the direct scoped query without newest-wins windowing", async () => {
   let captured: { strings?: readonly string[] } | undefined;
   const service = new RieScalableQueryService({

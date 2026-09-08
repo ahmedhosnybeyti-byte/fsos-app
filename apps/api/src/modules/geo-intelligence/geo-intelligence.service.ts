@@ -19,6 +19,7 @@ import {
 import { AppConfigService } from "../../common/config/app-config.service";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
+import { RieScalableQueryService } from "../rie/scalable-query.service";
 import type { EntityQueryResult } from "../rie/entity-provider.interface";
 import { haversineKm } from "../route-planning/route-balancer.util";
 
@@ -60,6 +61,7 @@ export class GeoIntelligenceService {
   constructor(
     private readonly appConfig: AppConfigService,
     private readonly rieFacade: RieFacade,
+    private readonly scalableQuery: RieScalableQueryService,
   ) {}
 
   // Migration #1 (ADR-001) — throws a clear Arabic error when a Canonical
@@ -228,68 +230,20 @@ export class GeoIntelligenceService {
 
   async analyze(user: AuthenticatedUser, input: GeoIntelligenceAnalyzeInput): Promise<GeoIntelligenceAnalyzeResult> {
     const ctx = this.rieContext(user);
-    const [customersResult, invoicesResult, itemsResult, productsResult] = await Promise.all([
-      this.rieFacade.getEntityRecords("Customers", ctx),
-      this.rieFacade.getEntityRecords("Invoices", ctx),
-      this.rieFacade.getEntityRecords("Invoice Items", ctx),
-      this.rieFacade.getEntityRecords("Products", ctx),
-    ]);
-    this.assertEntityAvailable(customersResult, "Customers");
-    this.assertEntityAvailable(invoicesResult, "Invoices");
-    this.assertEntityAvailable(itemsResult, "Invoice Items");
-
-    const { byId: customerIndex, excludedBadCoordinates } = this.buildCustomerIndex(
-      customersResult.records as SheetRow[],
-      "CustomerCode",
-      "CustomerName",
-      "Latitude",
-      "Longitude",
-    );
-
-    // Resolve the reference customer set.
-    const resolved = new Map<string, { record: CustomerRecord; distanceKm: number | null; source: "auto" | "manual" }>();
-
-    if (input.mode === "auto" || input.mode === "both") {
-      const ranked = Array.from(customerIndex.values())
-        .map((c) => ({ c, d: haversineKm(input.location, c) }))
-        .sort((a, b) => a.d - b.d)
-        .slice(0, input.nearestCount);
-      for (const { c, d } of ranked) resolved.set(c.id, { record: c, distanceKm: d, source: "auto" });
-    }
-
-    if (input.mode === "manual" || input.mode === "both") {
-      for (const id of input.manualCustomerIds) {
-        const c = customerIndex.get(id);
-        if (!c) continue;
-        const existing = resolved.get(id);
-        resolved.set(id, {
-          record: c,
-          distanceKm: existing?.distanceKm ?? haversineKm(input.location, c),
-          source: existing ? existing.source : "manual",
-        });
-      }
-    }
-
-    if (resolved.size === 0) {
+    const selected = await this.scalableQuery.queryGeoCustomerSelection({
+      ...ctx, location: input.location, nearestCount: input.mode === "manual" ? 0 : input.nearestCount,
+      manualCustomerIds: input.mode === "auto" ? [] : input.manualCustomerIds,
+    });
+    if (selected.length === 0) {
       throw new BadRequestException("محدش اتحدد — تأكد من الموقع أو العملاء المختارين");
     }
-
-    // Aggregate product assortment across the resolved set only.
-    const joinedRows = this.buildJoinedSalesRows(invoicesResult, itemsResult, productsResult);
-    const productAgg = this.aggregateProducts(joinedRows, new Set(resolved.keys()), GeoIntelligenceService.RIE_PRODUCT_COLS);
-
-    const topProducts = Array.from(productAgg.values())
-      .sort((a, b) => b.totalValue - a.totalValue)
-      .slice(0, input.topProductsLimit)
-      .map((p) => ({ sku: p.sku, name: p.name, category: p.category, totalQty: p.totalQty, totalValue: p.totalValue, customerCount: p.customers.size }));
+    const products = await this.scalableQuery.queryGeoProducts({ ...ctx, customerIds: selected.map((customer) => customer.id), topProductsLimit: input.topProductsLimit });
 
     return {
-      resolvedCustomers: Array.from(resolved.values())
-        .sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity))
-        .map(({ record, distanceKm, source }) => ({ id: record.id, name: record.name, lat: record.lat, lon: record.lon, distanceKm, source })),
-      topProducts,
-      excludedBadCoordinates,
-      totalRowsConsidered: joinedRows.length,
+      resolvedCustomers: selected.sort((a, b) => a.distanceKm - b.distanceKm).map(({ id, name, lat, lon, distanceKm, source }) => ({ id, name, lat, lon, distanceKm, source: source as "auto" | "manual" })),
+      topProducts: products.map(({ sku, name, category, totalQty, totalValue, customerCount }) => ({ sku, name, category, totalQty, totalValue, customerCount })),
+      excludedBadCoordinates: selected[0]?.excludedBadCoordinates ?? 0,
+      totalRowsConsidered: products[0]?.totalRowsConsidered ?? 0,
     };
   }
 
@@ -332,58 +286,28 @@ export class GeoIntelligenceService {
   // non-fatal degradation, same spirit as the old join's optional columns.
   async compareCustomerViaRie(user: AuthenticatedUser, input: GeoIntelligenceCompareRieInput): Promise<GeoIntelligenceCompareResult> {
     const ctx = this.rieContext(user);
-    const [customersResult, invoicesResult, itemsResult, productsResult] = await Promise.all([
-      this.rieFacade.getEntityRecords("Customers", ctx),
-      this.rieFacade.getEntityRecords("Invoices", ctx),
-      this.rieFacade.getEntityRecords("Invoice Items", ctx),
-      this.rieFacade.getEntityRecords("Products", ctx),
-    ]);
-    this.assertEntityAvailable(customersResult, "Customers");
-    this.assertEntityAvailable(invoicesResult, "Invoices");
-    this.assertEntityAvailable(itemsResult, "Invoice Items");
-
-    const { byId: customerIndex, excludedBadCoordinates } = this.buildCustomerIndex(
-      customersResult.records as SheetRow[],
-      "CustomerCode",
-      "CustomerName",
-      "Latitude",
-      "Longitude",
-    );
-
-    const target = customerIndex.get(input.targetCustomerId);
+    const selected = await this.scalableQuery.queryGeoCustomerSelection({ ...ctx, targetCustomerId: input.targetCustomerId, location: { lat: 0, lon: 0 }, nearestCount: input.nearestCount });
+    const targetRow = selected.find((customer) => customer.source === "target");
+    const target = targetRow && { id: targetRow.id, name: targetRow.name, lat: targetRow.lat, lon: targetRow.lon };
     if (!target) {
       throw new BadRequestException("العميل المطلوب مقارنته غير موجود (أو بدون إحداثيات صالحة)");
     }
 
-    const neighborRanked = Array.from(customerIndex.values())
-      .filter((c) => c.id !== target.id)
-      .map((c) => ({ c, d: haversineKm(target, c) }))
-      .sort((a, b) => a.d - b.d)
-      .slice(0, input.nearestCount);
+    const neighborRanked = selected.filter((customer) => customer.source === "auto");
 
     if (neighborRanked.length === 0) {
       throw new BadRequestException("مفيش عملاء تانيين لديهم بيانات كافية للمقارنة بيهم");
     }
 
-    const joinedRows = this.buildJoinedSalesRows(invoicesResult, itemsResult, productsResult);
-
-    const neighborIds = new Set(neighborRanked.map((n) => n.c.id));
-    const targetProducts = this.aggregateProducts(joinedRows, new Set([target.id]), GeoIntelligenceService.RIE_PRODUCT_COLS);
-    const neighborProducts = this.aggregateProducts(joinedRows, neighborIds, GeoIntelligenceService.RIE_PRODUCT_COLS);
-
-    const gapProducts = Array.from(neighborProducts.values())
-      .filter((p) => !targetProducts.has(p.sku))
-      .sort((a, b) => b.totalValue - a.totalValue)
-      .slice(0, input.topProductsLimit)
-      .map((p) => ({ sku: p.sku, name: p.name, category: p.category, totalQty: p.totalQty, totalValue: p.totalValue, customerCount: p.customers.size }));
+    const products = await this.scalableQuery.queryGeoProducts({ ...ctx, customerIds: neighborRanked.map((customer) => customer.id), excludeCustomerId: target.id, topProductsLimit: input.topProductsLimit });
 
     return {
       targetCustomer: target,
-      neighbors: neighborRanked.map(({ c, d }) => ({ id: c.id, name: c.name, lat: c.lat, lon: c.lon, distanceKm: d, source: "auto" as const })),
-      targetProductCount: targetProducts.size,
-      gapProducts,
-      excludedBadCoordinates,
-      totalRowsConsidered: joinedRows.length,
+      neighbors: neighborRanked.map(({ id, name, lat, lon, distanceKm }) => ({ id, name, lat, lon, distanceKm, source: "auto" as const })),
+      targetProductCount: products[0]?.targetProductCount ?? 0,
+      gapProducts: products.map(({ sku, name, category, totalQty, totalValue, customerCount }) => ({ sku, name, category, totalQty, totalValue, customerCount })),
+      excludedBadCoordinates: selected[0]?.excludedBadCoordinates ?? 0,
+      totalRowsConsidered: products[0]?.totalRowsConsidered ?? 0,
     };
   }
 

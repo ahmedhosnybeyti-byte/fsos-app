@@ -4,7 +4,7 @@ import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { IMPORT_TEMPLATES } from "../import-validation/import-templates.data";
 import type { EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieLatestPerScope, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
+import type { RieDateScope, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoProductQuery, RieGeoProductRow, RieLatestPerScope, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
@@ -143,6 +143,87 @@ export class RieScalableQueryService {
     `);
     const hasMore = input.unboundedFinalResult ? false : rows.length > page.limit;
     return { records: hasMore ? rows.slice(0, page.limit) : rows, page: { ...page, hasMore } };
+  }
+
+  /**
+   * Geo Intelligence's only customer read. Coordinates are validated and the
+   * nearest/manual set is selected in PostgreSQL; Node receives at most the
+   * requested neighbors plus manual selections.
+   */
+  async queryGeoCustomerSelection(input: RieGeoCustomerSelectionQuery): Promise<RieGeoCustomerSelectionRow[]> {
+    const allowedRoutes = input.requestingUser ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser) : null;
+    const route = !allowedRoutes ? [] : allowedRoutes.size === 0
+      ? [Prisma.sql`FALSE`]
+      : [Prisma.sql`${normalizedField({ field: "RouteID", source: "customer_source" })} IN (${Prisma.join([...allowedRoutes])})`];
+    const customers = activeEntityRowsCte(input.companyId, "Customers", "customer", route, [], []);
+    const code = textField({ field: "CustomerCode", source: "customer" });
+    const name = textField({ field: "CustomerName", source: "customer" });
+    const lat = numericField(textField({ field: "Latitude", source: "customer" }));
+    const lon = numericField(textField({ field: "Longitude", source: "customer" }));
+    const distance = (latitude: Prisma.Sql, longitude: Prisma.Sql) => Prisma.sql`6371.0088 * 2 * ASIN(SQRT(POWER(SIN(RADIANS(${latitude} - ${input.location.lat}) / 2), 2) + COS(RADIANS(${input.location.lat})) * COS(RADIANS(${latitude})) * POWER(SIN(RADIANS(${longitude} - ${input.location.lon}) / 2), 2)))`;
+    const valid = Prisma.sql`
+      SELECT DISTINCT ON (BTRIM(COALESCE(${code}, '')))
+        BTRIM(COALESCE(${code}, '')) AS id, BTRIM(COALESCE(${name}, ${code}, '')) AS name,
+        ${lat} AS lat, ${lon} AS lon
+      FROM customer_active customer
+      WHERE BTRIM(COALESCE(${code}, '')) <> '' AND ${lat} BETWEEN -90 AND 90 AND ${lon} BETWEEN -180 AND 180 AND NOT (${lat} = 0 AND ${lon} = 0)
+      ORDER BY BTRIM(COALESCE(${code}, '')), customer."entity_key" DESC`;
+    const invalid = Prisma.sql`SELECT COUNT(DISTINCT BTRIM(COALESCE(${code}, '')))::int AS count FROM customer_active customer WHERE BTRIM(COALESCE(${code}, '')) <> '' AND NOT (${lat} BETWEEN -90 AND 90 AND ${lon} BETWEEN -180 AND 180 AND NOT (${lat} = 0 AND ${lon} = 0))`;
+    const manualIds = [...new Set((input.manualCustomerIds ?? []).map((id) => id.trim()).filter(Boolean))];
+    const rows = input.targetCustomerId
+      ? await this.prisma.$queryRaw<RieGeoCustomerSelectionRow[]>(Prisma.sql`
+          WITH ${customers}, valid AS MATERIALIZED (${valid}), invalid AS MATERIALIZED (${invalid}),
+          target AS MATERIALIZED (SELECT * FROM valid WHERE id = ${input.targetCustomerId}),
+          neighbors AS MATERIALIZED (SELECT valid.*, 6371.0088 * 2 * ASIN(SQRT(POWER(SIN(RADIANS(valid.lat - target.lat) / 2), 2) + COS(RADIANS(target.lat)) * COS(RADIANS(valid.lat)) * POWER(SIN(RADIANS(valid.lon - target.lon) / 2), 2))) AS distance FROM valid, target WHERE valid.id <> target.id ORDER BY distance, valid.id LIMIT ${input.nearestCount})
+          SELECT target.id, target.name, target.lat, target.lon, 0::double precision AS "distanceKm", 'target'::text AS source, (SELECT count FROM invalid) AS "excludedBadCoordinates" FROM target
+          UNION ALL
+          SELECT neighbors.id, neighbors.name, neighbors.lat, neighbors.lon, neighbors.distance AS "distanceKm", 'auto'::text AS source, (SELECT count FROM invalid) AS "excludedBadCoordinates" FROM neighbors
+        `)
+      : await this.prisma.$queryRaw<RieGeoCustomerSelectionRow[]>(Prisma.sql`
+          WITH ${customers}, valid AS MATERIALIZED (${valid}), invalid AS MATERIALIZED (${invalid}),
+          auto AS MATERIALIZED (SELECT valid.*, ${distance(Prisma.raw("valid.lat"), Prisma.raw("valid.lon"))} AS distance FROM valid ORDER BY distance, valid.id LIMIT ${input.nearestCount}),
+          manual AS MATERIALIZED (SELECT valid.*, ${distance(Prisma.raw("valid.lat"), Prisma.raw("valid.lon"))} AS distance FROM valid WHERE valid.id IN (${Prisma.join(manualIds.length ? manualIds : ["__none__"])})),
+          resolved AS MATERIALIZED (SELECT DISTINCT ON (id) * FROM (SELECT *, 'auto'::text AS source FROM auto UNION ALL SELECT *, 'manual'::text AS source FROM manual) candidates ORDER BY id, CASE source WHEN 'auto' THEN 0 ELSE 1 END)
+          SELECT id, name, lat, lon, distance AS "distanceKm", source, (SELECT count FROM invalid) AS "excludedBadCoordinates" FROM resolved
+        `);
+    return rows.map((row) => ({ ...row, lat: Number(row.lat), lon: Number(row.lon), distanceKm: Number(row.distanceKm), excludedBadCoordinates: Number(row.excludedBadCoordinates) }));
+  }
+
+  /** Fact join, product metadata, aggregation, target exclusions, ordering and limit stay in PostgreSQL. */
+  async queryGeoProducts(input: RieGeoProductQuery): Promise<RieGeoProductRow[]> {
+    if (!input.customerIds.length) return [];
+    const allowedRoutes = input.requestingUser ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser) : null;
+    const routePredicate = (source: string) => !allowedRoutes ? [] : allowedRoutes.size === 0
+      ? [Prisma.sql`FALSE`]
+      : [Prisma.sql`${normalizedField({ field: "RouteID", source })} IN (${Prisma.join([...allowedRoutes])})`];
+    const invoices = activeEntityRowsCte(input.companyId, "Invoices", "invoice", routePredicate("invoice_source"), [], []);
+    const items = activeEntityRowsCte(input.companyId, "Invoice Items", "item", routePredicate("item_source"), [], []);
+    const products = activeEntityRowsCte(input.companyId, "Products", "product", [], [], []);
+    const invoiceNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
+    const itemInvoiceNo = normalizedField({ field: "InvoiceNo", source: "item" });
+    const customer = textField({ field: "CustomerCode", source: "invoice" });
+    const productCode = textField({ field: "ProductCode", source: "item" });
+    const productKey = normalizedField({ field: "ProductCode", source: "item" });
+    const productMetaKey = normalizedField({ field: "ProductCode", source: "product" });
+    const qty = numericField(textField({ field: "Quantity", source: "item" }));
+    const value = numericField(textField({ field: "LineTotal", source: "item" }));
+    const rows = await this.prisma.$queryRaw<RieGeoProductRow[]>(Prisma.sql`
+      WITH ${invoices}, ${items}, ${products},
+      product_meta AS MATERIALIZED (SELECT DISTINCT ON (${productMetaKey}) ${productMetaKey} AS sku, BTRIM(COALESCE(${textField({ field: "ProductName", source: "product" })}, ${textField({ field: "ProductCode", source: "product" })}, '')) AS name, NULLIF(BTRIM(COALESCE(${textField({ field: "Category", source: "product" })}, '')), '') AS category FROM product_active product ORDER BY ${productMetaKey}, product."entity_key" DESC),
+      joined AS MATERIALIZED (SELECT BTRIM(COALESCE(${customer}, '')) AS customer_id, BTRIM(COALESCE(${productCode}, '')) AS sku, ${qty} AS qty, ${value} AS value FROM item_active item INNER JOIN invoice_active invoice ON ${itemInvoiceNo} = ${invoiceNo} WHERE BTRIM(COALESCE(${customer}, '')) <> ''),
+      target_skus AS MATERIALIZED (SELECT DISTINCT sku FROM joined WHERE customer_id = ${input.excludeCustomerId ?? "__none__"} AND sku <> ''),
+      totals AS MATERIALIZED (SELECT COUNT(*)::int AS rows FROM joined),
+      target_count AS MATERIALIZED (SELECT COUNT(*)::int AS count FROM target_skus)
+      SELECT j.sku, COALESCE(meta.name, j.sku) AS name, meta.category AS category,
+        COALESCE(SUM(j.qty), 0)::double precision AS "totalQty", COALESCE(SUM(j.value), 0)::double precision AS "totalValue", COUNT(DISTINCT j.customer_id)::int AS "customerCount",
+        totals.rows AS "totalRowsConsidered", ${input.excludeCustomerId ? Prisma.sql`target_count.count` : Prisma.sql`NULL::int`} AS "targetProductCount"
+      FROM joined j LEFT JOIN product_meta meta ON LOWER(BTRIM(j.sku)) = meta.sku CROSS JOIN totals CROSS JOIN target_count
+      WHERE j.customer_id IN (${Prisma.join(input.customerIds)}) AND j.sku <> '' ${input.excludeCustomerId ? Prisma.sql`AND NOT EXISTS (SELECT 1 FROM target_skus WHERE target_skus.sku = j.sku)` : Prisma.empty}
+      GROUP BY j.sku, meta.name, meta.category, totals.rows, target_count.count
+      ORDER BY "totalValue" DESC
+      LIMIT ${input.topProductsLimit}
+    `);
+    return rows.map((row) => ({ ...row, totalQty: Number(row.totalQty), totalValue: Number(row.totalValue), customerCount: Number(row.customerCount), totalRowsConsidered: Number(row.totalRowsConsidered), targetProductCount: row.targetProductCount === null ? null : Number(row.targetProductCount) }));
   }
 
   private async activeVersionCounts(companyId: string, entityNames: readonly string[]): Promise<Map<string, number>> {
