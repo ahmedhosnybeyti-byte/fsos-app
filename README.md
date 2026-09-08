@@ -36,7 +36,7 @@ pnpm db:migrate
 pnpm db:seed
 ```
 
-The seed script prints login credentials for a platform Super Admin and a demo company's Company Admin, plus a placeholder GPT API key — copy them from the terminal output.
+`pnpm db:seed` runs the development-only demo seed and never prints credentials or API keys. It is blocked when `NODE_ENV=production`.
 
 ## Running the app
 

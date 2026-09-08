@@ -142,4 +142,4 @@ curl -X POST https://api.yourdomain.com/api/v1/gpt/verify-access \
 
 `listDatasets`/`getDataset`/`renderAnalysis`/`executeReport` (`GET /gpt/datasets`, `GET /gpt/dataset`, `POST /gpt/render`, `POST /gpt/execute-report`) are still real, callable endpoints with the same auth — useful for testing the backend directly or for a future non-GPT surface — but the GPT itself never calls them anymore (see the Architecture pivot notes above), so they're no longer part of this walkthrough.
 
-The seed script (`pnpm db:seed`) creates a demo company (`acme-demo`) with a placeholder GPT API key (`fso_demo_acme.REPLACE_ME_GPT_API_SECRET`) printed to the console — regenerate a real one from **Settings → Custom GPT** before testing for real, since the seeded one is just to prove the row exists.
+For local testing only, `pnpm db:seed` creates the demo company (`acme-demo`). It never prints its placeholder GPT API key. This demo command is blocked in production; configure a real GPT key from **Settings → Custom GPT** for production use.

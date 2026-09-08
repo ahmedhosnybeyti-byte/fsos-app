@@ -90,16 +90,31 @@ Dashboard → API service → **Settings → Networking → Generate Domain**. C
 the `https://....up.railway.app` URL, then go back to step 2 and set
 `API_URL` to it. Railway redeploys automatically when a variable changes.
 
-## 5. Seed the database once
+## 5. Seed the database once (production-safe only)
 
 Dashboard → API service → click into a running deployment → look for a
-**"Run Command"** / one-off shell option (or use the CLI:
-`railway run pnpm --filter @field-sales-os/database seed`).
+**"Run Command"** / one-off shell option (or use the CLI). Before the first
+run, set these Railway variables to securely generated values:
+
+```
+INITIAL_SUPER_ADMIN_EMAIL=admin@your-domain.example
+INITIAL_SUPER_ADMIN_PASSWORD=<long-random-secret-from-your-secret-manager>
+```
+
+Then run only the production-safe seed:
+
+`railway run pnpm --filter @field-sales-os/database seed`
+
+This seed creates platform reference data and creates the first Super Admin
+only when no Super Admin exists and both variables are present. It never
+creates demo accounts or prints credentials. Do **not** run `pnpm db:seed` or
+`seed:demo` in production; both are development-demo commands and are blocked
+when `NODE_ENV=production`.
 
 `migrate:deploy` already runs automatically on every container start per
-`Dockerfile.api`'s `CMD`, so it doesn't need a manual step — only `seed`
-does, and only once (running it twice just re-seeds the same demo data,
-which is harmless but pointless).
+`Dockerfile.api`'s `CMD`, so it doesn't need a manual step. Run the
+production-safe seed once for a new environment; later runs update reference
+data and do not create a replacement administrator.
 
 ## 6. Re-point the Custom GPT at the new URL
 
@@ -142,10 +157,9 @@ turborepo-prune pattern, producing a minimal Next.js "standalone" server.
    ```
    This redeploys the API automatically; without it the browser will get
    CORS errors calling the API from the deployed web URL.
-6. First login: use whatever SUPER_ADMIN/company credentials `pnpm
-   --filter @field-sales-os/database seed` created (see section 5) — check
-   `packages/database/prisma/seed.ts` for the exact seeded email/password if
-   you don't remember them.
+6. First login: use the email and password supplied through
+   `INITIAL_SUPER_ADMIN_EMAIL` and `INITIAL_SUPER_ADMIN_PASSWORD` in section
+   5. Do not place these credentials in source code, shell history, or logs.
 
 Note: `NEXT_PUBLIC_API_URL` is baked in at build time. If you ever change
 the API's domain later, you must trigger a **new build** of the web service
