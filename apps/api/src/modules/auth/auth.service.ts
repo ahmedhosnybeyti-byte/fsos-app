@@ -216,8 +216,8 @@ export class AuthService {
   }
 
   async refresh(rawRefreshToken: string, meta: RefreshTokenMeta) {
-    const { userId, refreshToken } = await this.tokensService.rotateRefreshToken(rawRefreshToken, meta);
-    const accessToken = this.tokensService.signAccessToken(userId);
+    const { userId, refreshToken, sessionVersion } = await this.tokensService.rotateRefreshToken(rawRefreshToken, meta);
+    const accessToken = this.tokensService.signAccessToken(userId, sessionVersion);
     return { accessToken, refreshToken };
   }
 
@@ -233,8 +233,9 @@ export class AuthService {
   }
 
   private async issueSession(userId: string, meta: RefreshTokenMeta) {
-    const accessToken = this.tokensService.signAccessToken(userId);
-    const refreshToken = await this.tokensService.issueRefreshToken(userId, meta);
+    const sessionVersion = await this.tokensService.getSessionVersion(userId);
+    const accessToken = this.tokensService.signAccessToken(userId, sessionVersion);
+    const refreshToken = await this.tokensService.issueRefreshToken(userId, meta, new Date(), sessionVersion);
     const user = await this.usersService.findById(userId);
     return { accessToken, refreshToken, user };
   }

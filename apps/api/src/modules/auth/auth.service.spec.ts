@@ -20,7 +20,6 @@ function createHarness() {
 
   const service = new AuthService(
     {} as never,
-    {} as never,
     {
       findByIdWithPassword: async () => ({ id: USER_ID, companyId: COMPANY_ID, passwordHash: STORED_HASH }),
       setPasswordHash: async (userId: string, passwordHash: string, mustChangePassword: boolean) => {
@@ -124,7 +123,6 @@ test("resets a target password, forces a change, revokes sessions, and audits th
   const hashMock = t.mock.method(argon2MockTarget, "hash", async () => NEW_HASH);
   const service = new AuthService(
     {} as never,
-    {} as never,
     {
       findById: async () => ({ id: USER_ID, companyId: COMPANY_ID }),
       setPasswordHash: async (userId: string, _passwordHash: string, mustChangePassword: boolean) => passwordUpdates.push({ userId, mustChangePassword }),
@@ -149,7 +147,6 @@ test("prevents a company admin from resetting a user in another company", async 
   const hashMock = t.mock.method(argon2MockTarget, "hash", async () => NEW_HASH);
   const service = new AuthService(
     {} as never,
-    {} as never,
     { findById: async () => ({ id: USER_ID, companyId: "other-company" }), setPasswordHash: async (...args: unknown[]) => passwordUpdates.push(args) } as never,
     {} as never,
     { revokeAllForUser: async (userId: string) => revoked.push(userId) } as never,
@@ -165,43 +162,32 @@ test("prevents a company admin from resetting a user in another company", async 
   assert.deepEqual(revoked, []);
   assert.deepEqual(audits, []);
 });
-test("creates trial companies with files enabled while retaining the four locked screens", async () => {
-  const companyUpdates: Array<{ where: { id: string }; data: { status: string; featureAccess: Record<string, string> } }> = [];
+test("creates a session for a shared-trial user", async () => {
+  const createdUsers: unknown[] = [];
   const service = new AuthService(
     {
-      $transaction: async (callback: (tx: unknown) => Promise<unknown>) => callback({
-        company: {
-          update: async (input: { where: { id: string }; data: { status: string; featureAccess: Record<string, string> } }) => {
-            companyUpdates.push(input);
-            return { id: COMPANY_ID, ...input.data };
-          },
-        },
-      }),
+      company: { findUnique: async () => ({ id: COMPANY_ID }) },
     } as never,
-    { provisionCompany: async () => ({ company: { id: COMPANY_ID } }) } as never,
     {
       findByEmail: async () => null,
-      createCompanyAdmin: async () => ({ id: USER_ID }),
+      createSharedTrialUser: async (input: unknown) => { createdUsers.push(input); return { id: USER_ID }; },
       findById: async () => ({ id: USER_ID }),
     } as never,
-    { createInitialSubscription: async () => ({ status: "TRIAL" }) } as never,
+    { values: { sharedTrial: { saudiArabia: { companySlug: "trial" }, egypt: { companySlug: "trial" } } } } as never,
     {
       signAccessToken: () => "access-token",
       issueRefreshToken: async () => "refresh-token",
+      getSessionVersion: async () => 0,
     } as never,
     { record: async () => undefined } as never,
   );
 
-  await service.register(
+  const result = await service.register(
     { fullName: "Trial Admin", email: "trial-files@example.test", password: "Password1!", whatsapp: "+966500000000", country: "SAUDI_ARABIA", trialRole: "COMPANY_ADMIN" },
     { ip: "127.0.0.1", userAgent: "test" },
   );
 
-  assert.deepEqual(companyUpdates, [{
-    where: { id: COMPANY_ID },
-    data: {
-      status: "ACTIVE",
-      featureAccess: { files: "ENABLED", assistant: "LOCKED", "fsos-360": "LOCKED", settings: "LOCKED", account: "LOCKED", user_activity: "HIDDEN" },
-    },
-  }]);
+  assert.equal(createdUsers.length, 1);
+  assert.equal(result.accessToken, "access-token");
+  assert.equal(result.refreshToken, "refresh-token");
 });

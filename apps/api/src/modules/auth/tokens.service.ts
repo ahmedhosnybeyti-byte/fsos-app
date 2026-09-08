@@ -22,21 +22,27 @@ export class TokensService {
     private readonly prisma: PrismaService,
   ) {}
 
-  signAccessToken(userId: string): string {
-    return this.jwt.sign({ sub: userId }, { secret: this.config.values.jwt.accessSecret, expiresIn: `${TOKEN_TTL.accessTokenMinutes}m` });
+  signAccessToken(userId: string, sessionVersion: number): string {
+    return this.jwt.sign({ sub: userId, sv: sessionVersion }, { secret: this.config.values.jwt.accessSecret, expiresIn: `${TOKEN_TTL.accessTokenMinutes}m` });
   }
 
-  async issueRefreshToken(userId: string, meta: RefreshTokenMeta = {}, sessionStartedAt = new Date()): Promise<string> {
+  async getSessionVersion(userId: string): Promise<number> {
+    const user = await this.prisma.user.findUnique({ where: { id: userId }, select: { sessionVersion: true } });
+    if (!user) throw new UnauthorizedException("Account is not active");
+    return user.sessionVersion;
+  }
+
+  async issueRefreshToken(userId: string, meta: RefreshTokenMeta = {}, sessionStartedAt = new Date(), sessionVersion?: number): Promise<string> {
     const raw = randomBytes(48).toString("base64url");
     const expiresAt = new Date();
     expiresAt.setHours(expiresAt.getHours() + TOKEN_TTL.idleSessionHours);
     await this.prisma.refreshToken.create({
-      data: { userId, tokenHash: hashToken(raw), userAgent: meta.userAgent, ip: meta.ip, expiresAt, sessionStartedAt },
+      data: { userId, tokenHash: hashToken(raw), userAgent: meta.userAgent, ip: meta.ip, expiresAt, sessionStartedAt, sessionVersion: sessionVersion ?? await this.getSessionVersion(userId) },
     });
     return raw;
   }
 
-  async rotateRefreshToken(rawToken: string, meta: RefreshTokenMeta = {}): Promise<{ userId: string; refreshToken: string }> {
+  async rotateRefreshToken(rawToken: string, meta: RefreshTokenMeta = {}): Promise<{ userId: string; refreshToken: string; sessionVersion: number }> {
     const tokenHash = hashToken(rawToken);
     const record = await this.prisma.refreshToken.findUnique({ where: { tokenHash } });
     if (!record) throw new UnauthorizedException("Invalid refresh token");
@@ -54,15 +60,27 @@ export class TokensService {
       throw new UnauthorizedException("Session expired");
     }
 
-    const owner = await this.prisma.user.findUnique({ where: { id: record.userId }, select: { status: true, company: { select: { status: true } } } });
+    const owner = await this.prisma.user.findUnique({ where: { id: record.userId }, select: { status: true, sessionVersion: true, company: { select: { status: true } } } });
     if (!owner || owner.status !== "ACTIVE" || (owner.company && owner.company.status !== "ACTIVE")) {
       await this.revokeAllForUser(record.userId);
       throw new UnauthorizedException("Account is not active");
     }
 
-    await this.prisma.refreshToken.update({ where: { id: record.id }, data: { revokedAt: now } });
-    const refreshToken = await this.issueRefreshToken(record.userId, meta, sessionStartedAt);
-    return { userId: record.userId, refreshToken };
+    // This is the consume operation. The predicate makes it a compare-and-set:
+    // exactly one concurrent request can change an active token to revoked.
+    // It also refuses a token from a session generation invalidated meanwhile.
+    const consumed = await this.prisma.refreshToken.updateMany({
+      where: { id: record.id, revokedAt: null, sessionVersion: owner.sessionVersion, user: { sessionVersion: owner.sessionVersion } },
+      data: { revokedAt: now },
+    });
+    if (consumed.count !== 1) {
+      const current = await this.prisma.refreshToken.findUnique({ where: { id: record.id }, select: { revokedAt: true } });
+      if (current?.revokedAt) await this.revokeAllForUser(record.userId);
+      throw new UnauthorizedException("Invalid refresh token");
+    }
+
+    const refreshToken = await this.issueRefreshToken(record.userId, meta, sessionStartedAt, owner.sessionVersion);
+    return { userId: record.userId, refreshToken, sessionVersion: owner.sessionVersion };
   }
 
   async revokeRefreshToken(rawToken: string): Promise<void> {
@@ -70,10 +88,16 @@ export class TokensService {
   }
 
   async revokeAllForUser(userId: string): Promise<void> {
-    await this.prisma.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: userId }, data: { sessionVersion: { increment: 1 } } });
+      await tx.refreshToken.updateMany({ where: { userId, revokedAt: null }, data: { revokedAt: new Date() } });
+    });
   }
 
   async revokeAllForCompany(companyId: string): Promise<void> {
-    await this.prisma.refreshToken.updateMany({ where: { user: { companyId }, revokedAt: null }, data: { revokedAt: new Date() } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.user.updateMany({ where: { companyId }, data: { sessionVersion: { increment: 1 } } });
+      await tx.refreshToken.updateMany({ where: { user: { companyId }, revokedAt: null }, data: { revokedAt: new Date() } });
+    });
   }
 }

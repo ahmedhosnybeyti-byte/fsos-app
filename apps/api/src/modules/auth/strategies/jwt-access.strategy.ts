@@ -10,6 +10,7 @@ import { RolesService } from "../../roles/roles.service";
 
 interface AccessTokenPayload {
   sub: string;
+  sv?: number;
 }
 
 function cookieExtractor(req: Request): string | null {
@@ -42,6 +43,11 @@ export class JwtAccessStrategy extends PassportStrategy(Strategy, "jwt") {
 
     if (!user || user.status !== "ACTIVE" || (user.company && user.company.status !== "ACTIVE")) {
       throw new UnauthorizedException("Account is no longer active");
+    }
+    // Treat pre-rollout access JWTs as version 0. They remain valid until a
+    // revocation occurs, after which their implicit version no longer matches.
+    if ((payload.sv ?? 0) !== user.sessionVersion) {
+      throw new UnauthorizedException("Session has been revoked");
     }
 
     const permissions = await this.rolesService.getPermissionCodes(user.roleId);

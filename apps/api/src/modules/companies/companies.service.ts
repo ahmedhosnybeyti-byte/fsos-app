@@ -223,6 +223,7 @@ export class CompaniesService {
 
     const updated = await tx.company.update({ where: { id: companyId }, data: { status: transition.to } });
     if (transition.to === "SUSPENDED" || transition.to === "ARCHIVED") {
+      await tx.user.updateMany({ where: { companyId }, data: { sessionVersion: { increment: 1 } } });
       await tx.refreshToken.updateMany({ where: { user: { companyId }, revokedAt: null }, data: { revokedAt: new Date() } });
     }
 

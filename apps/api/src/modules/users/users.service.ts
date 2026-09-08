@@ -430,9 +430,12 @@ export class UsersService {
   // lives in AuthModule, which already imports UsersModule; injecting it
   // here would create a module cycle for what is one updateMany.
   private revokeAllSessions(userId: string) {
-    return this.prisma.refreshToken.updateMany({
-      where: { userId, revokedAt: null },
-      data: { revokedAt: new Date() },
+    return this.prisma.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: userId }, data: { sessionVersion: { increment: 1 } } });
+      return tx.refreshToken.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
     });
   }
 
@@ -447,6 +450,7 @@ export class UsersService {
     try {
       updated = await this.prisma.$transaction(async (tx) => {
         const result = await tx.user.update({ where: { id }, data: { email: normalizedEmail }, select: publicUserSelect });
+        await tx.user.update({ where: { id }, data: { sessionVersion: { increment: 1 } } });
         await tx.refreshToken.updateMany({ where: { userId: id, revokedAt: null }, data: { revokedAt: new Date() } });
         await this.auditLogService.record({ companyId: existing.companyId, userId: actor.userId, action: "identity.email_change_admin", entityType: "User", entityId: id, metadata: { before: { email: existing.email }, after: { email: normalizedEmail } } }, tx);
         await this.auditLogService.record({ companyId: existing.companyId, userId: actor.userId, action: "identity.session_revoked", entityType: "User", entityId: id, metadata: { reason: "admin_email_change" } }, tx);
