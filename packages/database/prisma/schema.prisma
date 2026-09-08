@@ -1287,6 +1287,7 @@ model GptLaunchToken {
 // write audit entries without a migration.
 model AuditLog {
   id         String   @id @default(cuid())
+  eventKey   String   @unique @default(cuid()) @map("event_key")
   companyId  String?  @map("company_id")
   userId     String?  @map("user_id")
   action     String
