@@ -12,10 +12,20 @@ import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { AppConfigService } from "./common/config";
 import { redactSensitiveUrl } from "./common/security/redact-sensitive-url";
 import { API_VERSION_PREFIX } from "@field-sales-os/schemas";
+import { DrainingService, rejectNewWorkWhileDraining } from "./common/runtime/draining.service";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { cors: false });
   const config = app.get(AppConfigService).values;
+  const draining = app.get(DrainingService);
+
+  // Mark draining before Nest begins closing its HTTP server. The middleware
+  // below rejects work arriving on existing keep-alive connections while
+  // app.close() waits for in-flight requests and Prisma disconnects cleanly.
+  for (const signal of ["SIGTERM", "SIGINT"] as const) {
+    process.once(signal, () => draining.beginDraining());
+  }
+  app.enableShutdownHooks(["SIGTERM", "SIGINT"]);
 
   app.use(helmet());
   // Performance pass (2026-07-21): several endpoints return large JSON
@@ -27,6 +37,7 @@ async function bootstrap() {
   // so small responses (auth, health) skip the CPU cost of compressing.
   app.use(compression());
   app.use(cookieParser());
+  app.use(rejectNewWorkWhileDraining(draining));
   app.enableCors({
     origin: config.app.corsOrigins,
     credentials: true,
@@ -71,7 +82,7 @@ async function bootstrap() {
 
   // "health" is excluded so Railway's healthcheck / uptime monitoring can
   // hit plain GET /health instead of GET /api/v1/health.
-  app.setGlobalPrefix(`api/${API_VERSION_PREFIX}`, { exclude: ["health"] });
+  app.setGlobalPrefix(`api/${API_VERSION_PREFIX}`, { exclude: ["health", "health/(.*)"] });
   app.useGlobalFilters(new HttpExceptionFilter());
 
   // Full internal API reference — every module, cookie + bearer auth shown.

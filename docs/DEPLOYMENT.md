@@ -111,10 +111,15 @@ creates demo accounts or prints credentials. Do **not** run `pnpm db:seed` or
 `seed:demo` in production; both are development-demo commands and are blocked
 when `NODE_ENV=production`.
 
-`migrate:deploy` already runs automatically on every container start per
-`Dockerfile.api`'s `CMD`, so it doesn't need a manual step. Run the
-production-safe seed once for a new environment; later runs update reference
-data and do not create a replacement administrator.
+Before each API release that includes a database migration, run this as a
+single Railway one-off command (not as the API service start command):
+
+`railway run sh -c 'cd packages/database && ./node_modules/.bin/prisma migrate deploy'`
+
+After it succeeds, deploy the API replicas. The API container deliberately
+does not run migrations at startup, so replicas never race to alter the
+schema. Run the production-safe seed once for a new environment; later runs
+update reference data and do not create a replacement administrator.
 
 ## 6. Re-point the Custom GPT at the new URL
 
