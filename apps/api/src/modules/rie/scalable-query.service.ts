@@ -76,7 +76,7 @@ export class RieScalableQueryService {
     }
     const select = [...projection, ...(input.aggregates ?? []).map(aggregateSql)];
     const predicates = await this.scopePredicates(input, aliases);
-    const page = normalizePagination(input.pagination, input.internalAggregate === true);
+    const page = normalizePagination(input.pagination, input.internalAggregate === true, input.unboundedFinalResult === true);
     // A derived table may be flattened by PostgreSQL, which lets historical
     // versions re-enter a fact join.  Materialized CTEs form the required
     // execution barrier: only rows belonging to active versions can reach a
@@ -128,6 +128,9 @@ export class RieScalableQueryService {
       ? Prisma.sql` ORDER BY ${Prisma.join(input.orderBy.map((order) => Prisma.sql`${order.aggregate ? quoted(order.aggregate) : textField(order.field!)} ${Prisma.raw((order.direction ?? "asc").toUpperCase())}`))}`
       : input.groupBy?.length ? Prisma.sql` ORDER BY ${Prisma.join(input.groupBy.map(textField))}`
       : input.aggregates?.length ? Prisma.empty : Prisma.sql` ORDER BY base."entity_key"`;
+    const pagination = input.unboundedFinalResult
+      ? Prisma.sql`LIMIT ALL OFFSET ${page.offset}`
+      : Prisma.sql`LIMIT ${page.limit + 1} OFFSET ${page.offset}`;
     const rows = await this.prisma.$queryRaw<EntityRecord[]>(Prisma.sql`
       WITH ${Prisma.join(ctes, ", ")}
       SELECT ${Prisma.join(select)}
@@ -136,9 +139,9 @@ export class RieScalableQueryService {
       WHERE TRUE${where}
       ${grouping}
       ${ordering}
-      LIMIT ${page.limit + 1} OFFSET ${page.offset}
+      ${pagination}
     `);
-    const hasMore = rows.length > page.limit;
+    const hasMore = input.unboundedFinalResult ? false : rows.length > page.limit;
     return { records: hasMore ? rows.slice(0, page.limit) : rows, page: { ...page, hasMore } };
   }
 
@@ -971,9 +974,14 @@ function scopedJoin(join: RieQueryJoin): Prisma.Sql {
   return Prisma.sql`INNER JOIN ${Prisma.raw(`${join.alias}_active`)} ${Prisma.raw(`${join.alias}_scope`)} ON ${normalizedField(baseSource)} = ${normalizedField(scopedSource)}`;
 }
 
-function normalizePagination(input: RieScalableQuery["pagination"], internalAggregate: boolean): { limit: number; offset: number } {
-  const limit = input?.limit ?? DEFAULT_PAGE_SIZE;
+function normalizePagination(input: RieScalableQuery["pagination"], internalAggregate: boolean, unboundedFinalResult = false): { limit: number; offset: number } {
   const offset = input?.offset ?? 0;
+  if (unboundedFinalResult) {
+    if (input?.limit !== undefined) throw new Error("RIE unbounded final result does not accept a page limit.");
+    if (!Number.isInteger(offset) || offset < 0) throw new Error("RIE scalable query offset must be a non-negative integer.");
+    return { limit: 0, offset };
+  }
+  const limit = input?.limit ?? DEFAULT_PAGE_SIZE;
   const maxLimit = internalAggregate ? MAX_INTERNAL_AGGREGATE_PAGE_SIZE : MAX_PAGE_SIZE;
   if (!Number.isInteger(limit) || limit < 1 || limit > maxLimit) throw new Error(`RIE scalable query limit must be an integer between 1 and ${maxLimit}.`);
   if (!Number.isInteger(offset) || offset < 0) throw new Error("RIE scalable query offset must be a non-negative integer.");

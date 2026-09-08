@@ -7,7 +7,6 @@ import {
 } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
-import type { EntityQueryResult } from "../rie/entity-provider.interface";
 import { kMeansVectors, zScoreNormalize } from "./similarity-cluster.util";
 
 // Migration #2 (ADR-001 / RIE Migration Plan, 2026-07-17) — this service no
@@ -16,8 +15,6 @@ import { kMeansVectors, zScoreNormalize } from "./similarity-cluster.util";
 // RieFacade against the Canonical Schema. The clustering algorithm itself
 // (feature vector -> z-score normalize -> k-means, in similarity-cluster.util.ts)
 // is completely unchanged — only how the feature vectors get built changed.
-
-type EntityRow = Record<string, unknown>;
 
 // Same small helpers as every other map module — duplicated deliberately
 // (see heatmap.service.ts's original comment on why: keeps each dashboard
@@ -38,7 +35,7 @@ function isSaneCoordinate(lat: number, lon: number): boolean {
 interface CustomerFeatures {
   totalValue: number;
   orderCount: number;
-  distinctSkus: Set<string>;
+  distinctSkus: number;
 }
 
 @Injectable()
@@ -49,63 +46,43 @@ export class CustomerSimilarityService {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
   }
 
-  private assertAvailable(result: EntityQueryResult, arabicLabel: string): void {
-    if (!result.available) {
+  private async assertSources(ctx: ReturnType<CustomerSimilarityService["rieContext"]>, entityNames: readonly string[], arabicLabel: string): Promise<void> {
+    if (!await this.rieFacade.hasCanonicalEntitySources(ctx, entityNames)) {
       throw new NotFoundException(`بيانات "${arabicLabel}" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.`);
     }
   }
 
-  // The exact per-row aggregation loop the legacy service ran over one
-  // arbitrary mapped file's rows (see the old customer-similarity.service.ts
-  // in git history) — unchanged algorithm, now parameterized so it can run
-  // over whichever Canonical Entity rows the chosen similarityBasis resolves
-  // to (Invoice Items / Collections / Returns) instead of one hand-picked file.
-  private aggregateFeatures(
-    rows: readonly EntityRow[],
-    customerIds: ReadonlySet<string>,
-    customerIdField: string,
-    amountField: string,
-    skuField?: string,
-  ): Map<string, CustomerFeatures> {
-    const features = new Map<string, CustomerFeatures>();
-    for (const row of rows) {
-      const id = String(row[customerIdField] ?? "").trim();
-      if (!id || !customerIds.has(id)) continue;
-      const amount = toFiniteNumber(row[amountField]) ?? 0;
-      let f = features.get(id);
-      if (!f) {
-        f = { totalValue: 0, orderCount: 0, distinctSkus: new Set() };
-        features.set(id, f);
-      }
-      f.totalValue += amount;
-      f.orderCount += 1;
-      if (skuField) {
-        const sku = String(row[skuField] ?? "").trim();
-        if (sku) f.distinctSkus.add(sku);
-      }
-    }
-    return features;
-  }
-
   async query(user: AuthenticatedUser, input: CustomerSimilarityRieQueryInput): Promise<CustomerSimilarityResult> {
     const ctx = this.rieContext(user);
-    const customersResult = await this.rieFacade.getEntityRecords("Customers", ctx);
-    this.assertAvailable(customersResult, "Customers");
+    await this.assertSources(ctx, ["Customers"], "Customers");
+    const dimensionScope = input.scopeField && input.scopeValues?.length
+      ? { fields: [{ field: input.scopeField, values: input.scopeValues }] }
+      : undefined;
+    const factCustomerScope = input.scopeField && input.scopeValues?.length
+      ? { fields: [{ field: input.scopeField, source: "customer", values: input.scopeValues }] }
+      : undefined;
 
-    let customerRecords = customersResult.records;
-    if (input.scopeField && input.scopeValues && input.scopeValues.length > 0) {
-      const scopeSet = new Set(input.scopeValues);
-      customerRecords = customerRecords.filter((row) => scopeSet.has(String(row[input.scopeField!] ?? "")));
-      if (customerRecords.length === 0) {
-        throw new BadRequestException(`لا توجد بيانات مطابقة لـ ${input.scopeField} ضمن [${input.scopeValues.join(", ")}]`);
-      }
+    // This is a projected customer result, not a full entity read. Fact data
+    // never leaves PostgreSQL: it is joined and grouped in the feature query
+    // below.  The explicit cap matches the map/clustering safety limit.
+    const customerResult = await this.rieFacade.queryCanonicalRecords({
+      ...ctx,
+      entityName: "Customers",
+      projection: [
+        { field: "CustomerCode" }, { field: "CustomerName" }, { field: "Latitude" }, { field: "Longitude" },
+      ],
+      scope: dimensionScope,
+      unboundedFinalResult: true,
+    });
+    if (customerResult.records.length === 0 && input.scopeField && input.scopeValues?.length) {
+      throw new BadRequestException(`لا توجد بيانات مطابقة لـ ${input.scopeField} ضمن [${input.scopeValues.join(", ")}]`);
     }
 
     // Customer master: id -> {lat, lon, label}. Coordinates are still
     // required here even though clustering is behavioral, not geographic —
     // the result map plots every customer at their real location.
     const customerIndex = new Map<string, { lat: number; lon: number; label: string }>();
-    for (const row of customerRecords) {
+    for (const row of customerResult.records) {
       const id = String(row.CustomerCode ?? "").trim();
       if (!id || customerIndex.has(id)) continue;
       const lat = toFiniteNumber(row.Latitude);
@@ -113,20 +90,38 @@ export class CustomerSimilarityService {
       if (lat === null || lon === null || !isSaneCoordinate(lat, lon)) continue;
       customerIndex.set(id, { lat, lon, label: String(row.CustomerName ?? id) });
     }
-    const customerIdSet = new Set(customerIndex.keys());
-
-    let featuresByCustomer: Map<string, CustomerFeatures>;
+    let featureRows: readonly Record<string, unknown>[];
     let hasSkuDimension: boolean;
 
     if (input.similarityBasis === "collection") {
-      const collectionsResult = await this.rieFacade.getEntityRecords("Collections", ctx);
-      this.assertAvailable(collectionsResult, "Collections");
-      featuresByCustomer = this.aggregateFeatures(collectionsResult.records, customerIdSet, "CustomerCode", "Amount");
+      await this.assertSources(ctx, ["Collections"], "Collections");
+      const featureResult = await this.rieFacade.queryCanonicalRecords({
+        ...ctx, entityName: "Collections",
+        projection: [{ field: "CustomerCode", as: "customerCode" }],
+        groupBy: [{ field: "CustomerCode" }],
+        joins: input.scopeField && input.scopeValues?.length
+          ? [{ entityName: "Customers", alias: "customer", on: { left: { field: "CustomerCode" }, rightField: "CustomerCode" } }]
+          : [],
+        hierarchyRoute: { field: "RouteID" }, scope: factCustomerScope,
+        aggregates: [{ op: "sum", field: "Amount", as: "totalValue" }, { op: "count", as: "orderCount" }],
+        unboundedFinalResult: true,
+      });
+      featureRows = featureResult.records;
       hasSkuDimension = false; // a collection is a payment, not a line item — same as the legacy design
     } else if (input.similarityBasis === "returns") {
-      const returnsResult = await this.rieFacade.getEntityRecords("Returns", ctx);
-      this.assertAvailable(returnsResult, "Returns");
-      featuresByCustomer = this.aggregateFeatures(returnsResult.records, customerIdSet, "CustomerCode", "TotalAmount");
+      await this.assertSources(ctx, ["Returns"], "Returns");
+      const featureResult = await this.rieFacade.queryCanonicalRecords({
+        ...ctx, entityName: "Returns",
+        projection: [{ field: "CustomerCode", as: "customerCode" }],
+        groupBy: [{ field: "CustomerCode" }],
+        joins: input.scopeField && input.scopeValues?.length
+          ? [{ entityName: "Customers", alias: "customer", on: { left: { field: "CustomerCode" }, rightField: "CustomerCode" } }]
+          : [],
+        hierarchyRoute: { field: "RouteID" }, scope: factCustomerScope,
+        aggregates: [{ op: "sum", field: "TotalAmount", as: "totalValue" }, { op: "count", as: "orderCount" }],
+        unboundedFinalResult: true,
+      });
+      featureRows = featureResult.records;
       // Return Items (SKU-level return lines) has no RIE data-source mapping
       // yet (see excel-entity-provider.mapping.ts) — the legacy
       // returnsFileSkuColumn option has no RIE equivalent yet. A real,
@@ -134,54 +129,47 @@ export class CustomerSimilarityService {
       // dimension under RIE until Return Items is mapped.
       hasSkuDimension = false;
     } else {
-      const [invoicesResult, itemsResult, productsResult] = await Promise.all([
-        this.rieFacade.getEntityRecords("Invoices", ctx),
-        this.rieFacade.getEntityRecords("Invoice Items", ctx),
-        input.salesCategoryValue ? this.rieFacade.getEntityRecords("Products", ctx) : Promise.resolve(null),
-      ]);
-      this.assertAvailable(invoicesResult, "Invoices");
-      this.assertAvailable(itemsResult, "Invoice Items");
-
-      // Invoice Items has no CustomerCode of its own — joined through
-      // Invoices.CustomerCode by InvoiceNo, same as Customer Comparison
-      // (Migration #1) and the same relationship Navigation Engine models
-      // as REL-CU-002/REL-IN-003.
-      const invoiceCustomer = new Map<string, string>();
-      for (const inv of invoicesResult.records) {
-        const no = String(inv.InvoiceNo ?? "").trim();
-        const cust = String(inv.CustomerCode ?? "").trim();
-        if (no && cust) invoiceCustomer.set(no, cust);
-      }
-
-      let productCategory: Map<string, string> | null = null;
-      if (input.salesCategoryValue && productsResult) {
-        this.assertAvailable(productsResult, "Products");
-        productCategory = new Map();
-        for (const p of productsResult.records) {
-          const code = String(p.ProductCode ?? "").trim();
-          if (code) productCategory.set(code, String(p.Category ?? ""));
-        }
-      }
-
-      const joinedRows: EntityRow[] = [];
-      for (const item of itemsResult.records) {
-        const invoiceNo = String(item.InvoiceNo ?? "").trim();
-        const customerCode = invoiceCustomer.get(invoiceNo);
-        if (!customerCode) continue; // item's invoice not found — dropped, same as Migration #1's join
-        const productCode = String(item.ProductCode ?? "").trim();
-        if (productCategory && productCategory.get(productCode) !== input.salesCategoryValue) continue;
-        joinedRows.push({ CustomerCode: customerCode, ProductCode: productCode, LineTotal: item.LineTotal ?? null });
-      }
-      if (input.salesCategoryValue && joinedRows.length === 0) {
+      await this.assertSources(ctx, input.salesCategoryValue ? ["Invoices", "Invoice Items", "Products"] : ["Invoices", "Invoice Items"], "Invoices / Invoice Items");
+      const salesScope = {
+        ...(factCustomerScope ?? {}),
+        ...(input.salesCategoryValue ? { fields: [...(factCustomerScope?.fields ?? []), { field: "Category", source: "product", values: [input.salesCategoryValue] }] } : {}),
+      };
+      const featureResult = await this.rieFacade.queryCanonicalRecords({
+        ...ctx, entityName: "Invoice Items",
+        projection: [{ field: "CustomerCode", source: "invoice", as: "customerCode" }],
+        groupBy: [{ field: "CustomerCode", source: "invoice" }],
+        joins: [
+          { entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } },
+          ...(input.scopeField && input.scopeValues?.length
+            ? [{ entityName: "Customers", alias: "customer", on: { left: { field: "CustomerCode", source: "invoice" }, rightField: "CustomerCode" } }]
+            : []),
+          ...(input.salesCategoryValue ? [{ entityName: "Products", alias: "product", on: { left: { field: "ProductCode" }, rightField: "ProductCode" } }] : []),
+        ],
+        hierarchyRoute: { field: "RouteID", source: "invoice" }, scope: salesScope,
+        aggregates: [
+          { op: "sum", field: "LineTotal", as: "totalValue" }, { op: "count", as: "orderCount" },
+          { op: "countDistinct", field: "ProductCode", as: "distinctSkus" },
+        ], unboundedFinalResult: true,
+      });
+      featureRows = featureResult.records;
+      if (input.salesCategoryValue && featureRows.length === 0) {
         throw new BadRequestException(`مفيش صفوف مطابقة للفئة "${input.salesCategoryValue}"`);
       }
-
-      // Under RIE, every Invoice Items row structurally carries ProductCode
-      // (Import Templates Specification v1.0 §6.10) — unlike the legacy
-      // flow, the SKU dimension for "sales" is no longer optional/dependent
-      // on the admin having mapped a SKU column.
-      featuresByCustomer = this.aggregateFeatures(joinedRows, customerIdSet, "CustomerCode", "LineTotal", "ProductCode");
       hasSkuDimension = true;
+    }
+
+    // The RIE query returns one compact feature row per customer.  Joining it
+    // to the already bounded customer dimension preserves the old behavior:
+    // facts for a customer without valid map coordinates are excluded.
+    const featuresByCustomer = new Map<string, CustomerFeatures>();
+    for (const row of featureRows) {
+      const id = String(row.customerCode ?? "").trim();
+      if (!customerIndex.has(id)) continue;
+      featuresByCustomer.set(id, {
+        totalValue: toFiniteNumber(row.totalValue) ?? 0,
+        orderCount: toFiniteNumber(row.orderCount) ?? 0,
+        distinctSkus: hasSkuDimension ? toFiniteNumber(row.distinctSkus) ?? 0 : 0,
+      });
     }
 
     const customerIds = Array.from(featuresByCustomer.keys());
@@ -195,7 +183,7 @@ export class CustomerSimilarityService {
 
     const rawVectors = customerIds.map((id) => {
       const f = featuresByCustomer.get(id)!;
-      return hasSkuDimension ? [f.totalValue, f.orderCount, f.distinctSkus.size] : [f.totalValue, f.orderCount];
+      return hasSkuDimension ? [f.totalValue, f.orderCount, f.distinctSkus] : [f.totalValue, f.orderCount];
     });
     const normalized = zScoreNormalize(rawVectors);
     const labels = kMeansVectors(normalized, input.clusterCount);
@@ -212,7 +200,7 @@ export class CustomerSimilarityService {
       afterCounts[cluster] = (afterCounts[cluster] ?? 0) + 1;
       profileSums[cluster]!.totalValue += f.totalValue;
       profileSums[cluster]!.orderCount += f.orderCount;
-      profileSums[cluster]!.distinctSkus += f.distinctSkus.size;
+      profileSums[cluster]!.distinctSkus += f.distinctSkus;
       return { id, label: c.label, lat: c.lat, lon: c.lon, sales: f.totalValue, before: cluster, after: cluster };
     });
 
@@ -244,8 +232,15 @@ export class CustomerSimilarityService {
   // untouched — this is a dedicated, narrower endpoint scoped to this
   // screen only.
   async scopeValues(user: AuthenticatedUser, scopeField: CustomerSimilarityScopeField): Promise<CustomerSimilarityValuesResult> {
-    const customersResult = await this.rieFacade.getEntityRecords("Customers", this.rieContext(user));
-    this.assertAvailable(customersResult, "Customers");
+    const ctx = this.rieContext(user);
+    await this.assertSources(ctx, ["Customers"], "Customers");
+    const customersResult = await this.rieFacade.queryCanonicalRecords({
+      ...ctx,
+      entityName: "Customers",
+      projection: [{ field: scopeField }],
+      groupBy: [{ field: scopeField }],
+      pagination: { limit: 300 },
+    });
     const values = new Set<string>();
     for (const row of customersResult.records) {
       const v = String(row[scopeField] ?? "").trim();
@@ -255,8 +250,15 @@ export class CustomerSimilarityService {
   }
 
   async categoryValues(user: AuthenticatedUser): Promise<CustomerSimilarityValuesResult> {
-    const productsResult = await this.rieFacade.getEntityRecords("Products", this.rieContext(user));
-    this.assertAvailable(productsResult, "Products");
+    const ctx = this.rieContext(user);
+    await this.assertSources(ctx, ["Products"], "Products");
+    const productsResult = await this.rieFacade.queryCanonicalRecords({
+      ...ctx,
+      entityName: "Products",
+      projection: [{ field: "Category" }],
+      groupBy: [{ field: "Category" }],
+      pagination: { limit: 300 },
+    });
     const values = new Set<string>();
     for (const row of productsResult.records) {
       const v = String(row.Category ?? "").trim();

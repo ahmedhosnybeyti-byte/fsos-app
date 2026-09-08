@@ -53,6 +53,11 @@ export interface RieScalableQuery extends EntityQueryContext {
    * Never enables raw entity reads or pagination accumulation.
    */
   internalAggregate?: boolean;
+  /**
+   * Explicit opt-in for a screen's final projected result when its complete
+   * customer-level output is required. It does not permit raw fact reads.
+   */
+  unboundedFinalResult?: boolean;
   orderBy?: readonly RieQueryOrder[];
   /**
    * Compiles scoped joins as an uncorrelated membership test.  This preserves
