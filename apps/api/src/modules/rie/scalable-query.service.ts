@@ -275,7 +275,18 @@ export class RieScalableQueryService {
     const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [
       Prisma.sql`${dateText(invoiceDate)} <= ${targetDate}${routeScope(invoiceRoute)}`,
     ], [], []);
-    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], []);
+    const scopedInvoiceNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
+    const scopedInvoiceNumbersCte = Prisma.sql`scoped_invoice_numbers AS MATERIALIZED (
+      SELECT DISTINCT ${scopedInvoiceNo} AS invoice_no
+      FROM invoice_active invoice
+      WHERE ${scopedInvoiceNo} <> ''
+    )`;
+    // InvoiceNo is part of the Invoice Items business key. Restricting rows
+    // to the already-scoped invoice keys before newest-version resolution is
+    // therefore parity-safe and lets PostgreSQL use the InvoiceNo index.
+    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], false, [
+      Prisma.sql`INNER JOIN scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`,
+    ]);
     const inventoryRouteText = normalizedField({ field: "RouteID", source: "inventory" });
     const itemRouteText = normalizedField({ field: "RouteID", source: "item" });
     const invoiceRouteText = normalizedField({ field: "RouteID", source: "invoice" });
@@ -287,7 +298,7 @@ export class RieScalableQueryService {
     const invoiceJoinNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
     const saleDate = dateText(textField({ field: "InvoiceDate", source: "invoice" }));
     const rows = await this.prisma.$queryRaw<RieRouteProductStalenessRow[]>(Prisma.sql`
-      WITH ${inventoryCte}, ${invoiceCte}, ${itemsCte},
+      WITH ${inventoryCte}, ${invoiceCte}, ${scopedInvoiceNumbersCte}, ${itemsCte},
       inventory_latest AS MATERIALIZED (
         SELECT ${inventoryRouteText} AS route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) AS report_date
         FROM inventory_active inventory
@@ -931,7 +942,7 @@ export class RieScalableQueryService {
   }
 }
 
-export function activeEntityRowsCte(companyId: string, entityName: string, alias: string, predicates: readonly Prisma.Sql[], semiJoins: readonly Prisma.Sql[], sourceJoins: readonly Prisma.Sql[], singleActiveVersion = false): Prisma.Sql {
+export function activeEntityRowsCte(companyId: string, entityName: string, alias: string, predicates: readonly Prisma.Sql[], semiJoins: readonly Prisma.Sql[], sourceJoins: readonly Prisma.Sql[], singleActiveVersion = false, preMergeSourceJoins: readonly Prisma.Sql[] = []): Prisma.Sql {
   const cte = `${alias}_active`;
   const rowAlias = `${alias}_source`;
   const versionAlias = `${alias}_version`;
@@ -943,6 +954,7 @@ export function activeEntityRowsCte(companyId: string, entityName: string, alias
       FROM "rie_dataset_versions" ${Prisma.raw(versionAlias)}
       INNER JOIN "files" source_file ON source_file.id = ${Prisma.raw(versionAlias)}."source_file_id"
       INNER JOIN "rie_entity_rows" ${Prisma.raw(rowAlias)} ON ${Prisma.raw(rowAlias)}."dataset_version_id" = ${Prisma.raw(versionAlias)}.id
+      ${preMergeSourceJoins.length ? Prisma.join(preMergeSourceJoins, " ") : Prisma.empty}
       ${sourceJoins.length ? Prisma.join(sourceJoins, " ") : Prisma.empty}
       WHERE ${Prisma.raw(versionAlias)}."company_id" = ${companyId} AND ${Prisma.raw(versionAlias)}."entity_name" = ${entityName} AND ${Prisma.raw(versionAlias)}."is_active" = TRUE
         AND source_file."company_id" = ${companyId} AND source_file."is_active" = TRUE
@@ -982,6 +994,7 @@ export function activeEntityRowsCte(companyId: string, entityName: string, alias
       ) AS newest_precedence
     FROM ${Prisma.raw(`${alias}_versions`)} candidate_version
     INNER JOIN "rie_entity_rows" ${Prisma.raw(rowAlias)} ON ${Prisma.raw(rowAlias)}."dataset_version_id" = candidate_version.id
+    ${preMergeSourceJoins.length ? Prisma.join(preMergeSourceJoins, " ") : Prisma.empty}
     WHERE ${Prisma.raw(rowAlias)}."company_id" = ${companyId} AND ${Prisma.raw(rowAlias)}."entity_name" = ${entityName}
   ), ${Prisma.raw(cte)} AS MATERIALIZED (
     SELECT ${Prisma.raw(rowAlias)}.*
