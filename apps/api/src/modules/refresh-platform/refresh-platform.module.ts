@@ -5,6 +5,7 @@ import { GovernanceModule } from "../governance/governance.module";
 import { ImportEngineService } from "./import-engine.service";
 import { RefreshOrchestratorService } from "./refresh-orchestrator.service";
 import { RefreshHistoryService } from "./refresh-history.service";
+import { RefreshWorkerService } from "./refresh-worker.service";
 import { RefreshPlatformController } from "./refresh-platform.controller";
 
 // Phase 8 — Refresh Platform. Built entirely on top of the Phase 7 Data
@@ -12,7 +13,7 @@ import { RefreshPlatformController } from "./refresh-platform.controller";
 // any of its logic. No existing engine module imports anything from here.
 @Module({
   imports: [DataSourcePlatformModule, AuditLogModule, GovernanceModule],
-  providers: [ImportEngineService, RefreshOrchestratorService, RefreshHistoryService],
+  providers: [ImportEngineService, RefreshOrchestratorService, RefreshHistoryService, RefreshWorkerService],
   controllers: [RefreshPlatformController],
   exports: [RefreshOrchestratorService, RefreshHistoryService],
 })

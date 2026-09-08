@@ -16,13 +16,9 @@ import { ImportEngineService } from "./import-engine.service";
 // scheduling/load distribution. Introducing a job queue (BullMQ/Redis or
 // similar) is real new infrastructure with its own operational cost, and
 // isn't needed to satisfy the MVP's explicit scope ("Full Refresh only").
-// So for this MVP the orchestrator runs synchronously within the HTTP
-// request, and "the Queue" is reduced to its one functional requirement
-// that actually matters at this scale: preventing two conflicting Refresh
-// runs against the same Data Source at once (checked via an open
-// QUEUED/RUNNING RefreshRun row). A real background queue is a natural,
-// separately-approved upgrade once refreshes need to run on a schedule or
-// take long enough to exceed a request timeout.
+// The HTTP path only validates ownership and enqueues a RefreshRun. A local
+// worker claims and executes it, keeping the existing run/status model as the
+// durable queue without introducing separate queue infrastructure.
 @Injectable()
 export class RefreshOrchestratorService {
   constructor(
@@ -45,14 +41,11 @@ export class RefreshOrchestratorService {
       throw new NotFoundException("Data source not found");
     }
 
-    const startedAt = new Date();
-    let run: { id: string };
     try {
-      // The partial unique index on active runs is the atomic claim. A
-      // find-then-create check can allow two concurrent requests through.
-      run = await this.prisma.refreshRun.create({
-        data: { companyId, dataSourceId, triggeredByUserId: actorUserId, refreshType, status: "RUNNING", startedAt },
-        select: { id: true },
+      // The partial unique index on active runs preserves duplicate
+      // prevention while a run is waiting or executing.
+      return await this.prisma.refreshRun.create({
+        data: { companyId, dataSourceId, triggeredByUserId: actorUserId, refreshType, status: "QUEUED" },
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
@@ -60,6 +53,22 @@ export class RefreshOrchestratorService {
       }
       throw error;
     }
+  }
+
+  /** Atomically claims one queued run, then executes the unchanged workflow. */
+  async processQueuedRun(runId: string): Promise<boolean> {
+    const startedAt = new Date();
+    const claim = await this.prisma.refreshRun.updateMany({
+      where: { id: runId, status: "QUEUED" },
+      data: { status: "RUNNING", startedAt },
+    });
+    if (claim.count === 0) return false;
+
+    const run = await this.prisma.refreshRun.findUniqueOrThrow({
+      where: { id: runId },
+      select: { id: true, companyId: true, dataSourceId: true, triggeredByUserId: true },
+    });
+    const { companyId, dataSourceId, triggeredByUserId: actorUserId } = run;
 
     try {
       await this.platformEventsService.emit("RefreshStarted", {
@@ -120,7 +129,7 @@ export class RefreshOrchestratorService {
           entityId: run.id,
           metadata: { dataSourceId, reason: failureMessage },
         });
-        return updatedRun;
+        return Boolean(updatedRun);
       }
 
       const context = await this.contextService.build(companyId, dataSourceId);
@@ -166,11 +175,10 @@ export class RefreshOrchestratorService {
         metadata: { dataSourceId, validationScore: report.validationScore },
       });
 
-      return updatedRun;
+      return Boolean(updatedRun);
     } catch (error) {
-      // A synchronous refresh has no worker to clean up after a thrown
-      // validation/import/event error. Persist the terminal state before the
-      // error escapes so an active-run claim can never remain stranded.
+      // Persist a terminal state before releasing this worker slot so an
+      // active-run claim can never remain stranded after a thrown step.
       const completedAt = new Date();
       await this.prisma.refreshRun.update({
         where: { id: run.id },
@@ -182,7 +190,20 @@ export class RefreshOrchestratorService {
           resultSummary: { unexpectedError: error instanceof Error ? error.message : "Refresh failed" },
         },
       });
-      throw error;
+      return true;
     }
+  }
+
+  /**
+   * A RUNNING row older than the recovery cutoff belongs to a process that
+   * died before writing a terminal state. Requeue it; its existing active-run
+   * claim stays intact and the worker will atomically claim it again.
+   */
+  async recoverStaleRunningRuns(olderThan: Date): Promise<number> {
+    const recovered = await this.prisma.refreshRun.updateMany({
+      where: { status: "RUNNING", startedAt: { lt: olderThan } },
+      data: { status: "QUEUED", startedAt: null },
+    });
+    return recovered.count;
   }
 }
