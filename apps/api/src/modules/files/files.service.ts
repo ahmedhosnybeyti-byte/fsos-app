@@ -1,4 +1,4 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, Inject } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, Logger, NotFoundException, Inject } from "@nestjs/common";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { extname } from "node:path";
 import * as argon2 from "argon2";
@@ -27,6 +27,7 @@ const CUSTOMERS_ENTITY = "Customers";
 const INVOICES_ENTITY = "Invoices";
 const INVOICE_ITEMS_ENTITY = "Invoice Items";
 const POSTGRES_WRITE_BATCH_SIZE = 500;
+const WORKBOOK_INGESTION_MAX_ATTEMPTS = 3;
 
 // Sheet Role text -> platform RoleCode, for automatic account provisioning
 // (see provisionEmployeeAccounts). Deliberately keyword-based, not an exact
@@ -218,6 +219,12 @@ export interface ReplaceFileOutcome {
   otherAccepted: FileRow[];
 }
 
+export interface WorkbookIngestionQueuedResult {
+  id: string;
+  status: "QUEUED";
+  batchId: string;
+}
+
 // 2026-07-20: multi-sheet batch uploads (File.batchId) store every sheet's
 // File row against the SAME physical storageKey — one uploaded .xlsx is
 // literally one object in storage, shared by up to 18 File records (one per
@@ -325,7 +332,7 @@ export class FilesService {
     file: Express.Multer.File;
     viaSuperAdmin?: boolean;
     canProvisionEmployeeAccounts: boolean;
-  }): Promise<BatchUploadResult> {
+  }): Promise<WorkbookIngestionQueuedResult> {
     const { companyId, uploadedByUserId, file, viaSuperAdmin, canProvisionEmployeeAccounts } = params;
 
     this.validateUpload(file, await this.getUploadSizeLimitMb(companyId));
@@ -337,21 +344,35 @@ export class FilesService {
       );
     }
 
-    const result = await this.processWorkbook({ companyId, uploadedByUserId, file, viaSuperAdmin, canProvisionEmployeeAccounts });
-    await this.userActivity.record({ type: "BIZ_FILE_UPLOAD", category: "BUSINESS", actorUserId: uploadedByUserId, subjectUserId: uploadedByUserId, companyId, targetType: "FileBatch", targetId: result.batchId, source: "files.upload", metadata: { acceptedSheets: result.accepted.length, rejectedSheets: result.rejected.length, viaSuperAdmin: Boolean(viaSuperAdmin) } });
+    return this.enqueueWorkbook({ companyId, uploadedByUserId, file, viaSuperAdmin, canProvisionEmployeeAccounts });
+  }
 
-    // Preserve the pre-existing single-file-reject contract (HTTP 422 +
-    // full ValidationReport body — see ImportValidationRejectedException)
-    // for the common case: exactly one sheet was attempted and it failed
-    // outright. A genuine multi-sheet batch (any mix of accepted/rejected/
-    // ignored, or more than one rejected sheet) returns normally instead,
-    // so the caller can render a per-sheet summary — an HTTP exception
-    // can't carry that richer shape as naturally as a 200 response body.
-    if (result.accepted.length === 0 && result.rejected.length === 1 && result.ignored.length === 0 && result.rejected[0]!.report) {
-      throw new ImportValidationRejectedException(result.rejected[0]!.report);
+  private async enqueueWorkbook(params: {
+    companyId: string;
+    uploadedByUserId: string;
+    file: Express.Multer.File;
+    viaSuperAdmin?: boolean;
+    canProvisionEmployeeAccounts: boolean;
+    replaceFileId?: string;
+  }): Promise<WorkbookIngestionQueuedResult> {
+    const { companyId, uploadedByUserId, file, viaSuperAdmin, canProvisionEmployeeAccounts, replaceFileId } = params;
+    const contentHash = createHash("sha256").update(file.buffer).digest("hex");
+    const batchId = randomBytes(12).toString("hex");
+    const storageKey = `${companyId}/_uploads/${Date.now()}-${batchId}-${sanitizeFileName(file.originalname)}`;
+    await this.storage.upload({ key: storageKey, body: file.buffer, contentType: file.mimetype });
+    try {
+      const run = await this.prisma.workbookIngestionRun.create({
+        data: { companyId, triggeredByUserId: uploadedByUserId, storageKey, fileName: file.originalname, mimeType: file.mimetype, sizeBytes: file.size, contentHash, batchId, replaceFileId, viaSuperAdmin: Boolean(viaSuperAdmin), canProvisionEmployeeAccounts },
+        select: { id: true, status: true, batchId: true },
+      });
+      return { id: run.id, status: "QUEUED", batchId: run.batchId };
+    } catch (error) {
+      await this.storage.delete(storageKey).catch(() => undefined);
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictException("This workbook is already queued or being processed.");
+      }
+      throw error;
     }
-
-    return result;
   }
 
   // Sheet + template selection — the ONLY place that decides which Import
@@ -434,6 +455,9 @@ export class FilesService {
     file: Express.Multer.File;
     viaSuperAdmin?: boolean;
     canProvisionEmployeeAccounts: boolean;
+    batchId?: string;
+    storageKey?: string;
+    contentHash?: string;
   }): Promise<BatchUploadResult> {
     const { companyId, uploadedByUserId, file, viaSuperAdmin, canProvisionEmployeeAccounts } = params;
 
@@ -452,7 +476,7 @@ export class FilesService {
     // skipped (not duplicated) — a true partial re-upload instead of an
     // all-or-nothing reject. contentHash itself is unchanged — still one
     // hash per physical file, stored on every sheet's File row as before.
-    const contentHash = createHash("sha256").update(file.buffer).digest("hex");
+    const contentHash = params.contentHash ?? createHash("sha256").update(file.buffer).digest("hex");
 
     let headerWorkbook: XLSX.WorkBook;
     try {
@@ -505,9 +529,9 @@ export class FilesService {
       throw new BadRequestException("Could not read this file — is it a valid .xlsx or .xls workbook?");
     }
 
-    const batchId = randomBytes(12).toString("hex");
-    const storageKey = `${companyId}/_uploads/${Date.now()}-${batchId}-${sanitizeFileName(file.originalname)}`;
-    await this.storage.upload({ key: storageKey, body: file.buffer, contentType: file.mimetype });
+    const batchId = params.batchId ?? randomBytes(12).toString("hex");
+    const storageKey = params.storageKey ?? `${companyId}/_uploads/${Date.now()}-${batchId}-${sanitizeFileName(file.originalname)}`;
+    if (!params.storageKey) await this.storage.upload({ key: storageKey, body: file.buffer, contentType: file.mimetype });
 
     let provisioning: ProvisioningResult | undefined;
     const rejected: RejectedSheetOutcome[] = ambiguous.map((a) => ({
@@ -1159,7 +1183,7 @@ export class FilesService {
     file: Express.Multer.File;
     oldFileId: string;
     canProvisionEmployeeAccounts: boolean;
-  }): Promise<ReplaceFileOutcome> {
+  }): Promise<WorkbookIngestionQueuedResult> {
     const { companyId, uploadedByUserId, file, oldFileId, canProvisionEmployeeAccounts } = params;
     this.validateUpload(file, await this.getUploadSizeLimitMb(companyId));
 
@@ -1167,9 +1191,25 @@ export class FilesService {
     if (!oldFile || oldFile.companyId !== companyId) throw new NotFoundException("File not found");
     if (!oldFile.isActive) throw new BadRequestException("This file is already inactive — nothing to replace.");
 
-    const result = await this.processWorkbook({ companyId, uploadedByUserId, file, canProvisionEmployeeAccounts });
+    return this.enqueueWorkbook({ companyId, uploadedByUserId, file, canProvisionEmployeeAccounts, replaceFileId: oldFileId });
+  }
 
-    const replacement = result.accepted.find((f) => f.datasetType === oldFile.datasetType);
+  private async finalizeReplace(params: {
+    companyId: string;
+    uploadedByUserId: string;
+    oldFileId: string;
+    storageKey: string;
+    result: BatchUploadResult;
+  }): Promise<ReplaceFileOutcome> {
+    const { companyId, uploadedByUserId, oldFileId, storageKey, result } = params;
+    const oldFile = await this.prisma.file.findUnique({ where: { id: oldFileId } });
+    if (!oldFile || oldFile.companyId !== companyId) throw new NotFoundException("File not found");
+
+    const replacement = result.accepted.find((f) => f.datasetType === oldFile.datasetType)
+      ?? await this.prisma.file.findFirst({
+        where: { companyId, datasetType: oldFile.datasetType, storageKey, isActive: true },
+        orderBy: { createdAt: "desc" },
+      });
     if (!replacement) {
       const rejectedMatch = result.rejected.find((r) => r.entity === oldFile.datasetType);
       if (rejectedMatch?.report) throw new ImportValidationRejectedException(rejectedMatch.report);
@@ -1177,6 +1217,11 @@ export class FilesService {
         `The uploaded file doesn't contain a sheet matching "${oldFile.datasetType}" (the entity being replaced). Upload a file with a sheet matching the original's template.`,
       );
     }
+
+    // A worker can die after the old file has been deactivated but before it
+    // writes the terminal job state. Replaying that claimed job must be a
+    // no-op, rather than creating a second SGI audit/config update.
+    if (!oldFile.isActive) return { file: replacement, carryOver: null, otherAccepted: result.accepted.filter((f) => f.id !== replacement.id) };
 
     // SGI's own saved file selection (Task #110's cron replay config) — the
     // one piece of per-file state left (post-ADR-001) that still needs
@@ -1252,6 +1297,55 @@ export class FilesService {
       carryOver,
       otherAccepted: result.accepted.filter((f) => f.id !== replacement.id),
     };
+  }
+
+  /** Worker entrypoint. Claim happens before parsing so only one replica owns a run. */
+  async processQueuedWorkbookRun(runId: string): Promise<void> {
+    const claimed = await this.prisma.workbookIngestionRun.updateMany({
+      where: { id: runId, status: "QUEUED" },
+      data: { status: "RUNNING", startedAt: new Date(), errorMessage: null, attemptCount: { increment: 1 } },
+    });
+    if (claimed.count !== 1) return;
+
+    const run = await this.prisma.workbookIngestionRun.findUnique({ where: { id: runId } });
+    if (!run) return;
+    try {
+      const buffer = await this.storage.download(run.storageKey);
+      const contentHash = createHash("sha256").update(buffer).digest("hex");
+      if (contentHash !== run.contentHash) throw new Error("Queued workbook content hash does not match its persisted blob.");
+      const file = { buffer, originalname: run.fileName, mimetype: run.mimeType, size: run.sizeBytes } as Express.Multer.File;
+      const result = await this.processWorkbook({
+        companyId: run.companyId,
+        uploadedByUserId: run.triggeredByUserId,
+        file,
+        viaSuperAdmin: run.viaSuperAdmin,
+        canProvisionEmployeeAccounts: run.canProvisionEmployeeAccounts,
+        batchId: run.batchId,
+        storageKey: run.storageKey,
+        contentHash: run.contentHash,
+      });
+      if (run.replaceFileId) await this.finalizeReplace({ companyId: run.companyId, uploadedByUserId: run.triggeredByUserId, oldFileId: run.replaceFileId, storageKey: run.storageKey, result });
+      await this.userActivity.record({ type: "BIZ_FILE_UPLOAD", category: "BUSINESS", actorUserId: run.triggeredByUserId, subjectUserId: run.triggeredByUserId, companyId: run.companyId, targetType: "FileBatch", targetId: result.batchId, source: "files.upload", metadata: { acceptedSheets: result.accepted.length, rejectedSheets: result.rejected.length, viaSuperAdmin: run.viaSuperAdmin } });
+      await this.prisma.workbookIngestionRun.update({ where: { id: run.id }, data: { status: "COMPLETED", completedAt: new Date(), result: result as unknown as Prisma.InputJsonValue } });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Workbook processing failed.";
+      this.logger.error(`Workbook ingestion run ${run.id} failed`, error instanceof Error ? error.stack : undefined);
+      const exhausted = run.attemptCount >= WORKBOOK_INGESTION_MAX_ATTEMPTS;
+      await this.prisma.workbookIngestionRun.update({
+        where: { id: run.id },
+        data: exhausted
+          ? { status: "FAILED", completedAt: new Date(), errorMessage: message }
+          : { status: "QUEUED", startedAt: null, errorMessage: message },
+      });
+    }
+  }
+
+  async recoverStaleWorkbookRuns(staleBefore: Date): Promise<number> {
+    const recovered = await this.prisma.workbookIngestionRun.updateMany({
+      where: { status: "RUNNING", startedAt: { lt: staleBefore } },
+      data: { status: "QUEUED", startedAt: null },
+    });
+    return recovered.count;
   }
 
   listActiveForCompany(companyId: string) {

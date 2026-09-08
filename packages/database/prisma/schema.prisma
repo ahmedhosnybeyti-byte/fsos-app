@@ -186,6 +186,13 @@ enum FileStatus {
   FAILED
 }
 
+enum WorkbookIngestionRunStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
 enum TargetSource {
   UPLOAD // parsed from a company's uploaded "Targets"-type File, one row per rep/territory/month
   MANUAL // entered directly in the platform's simple target-list UI
@@ -249,6 +256,7 @@ model Company {
   employees     Employee[]
   dataSources   DataSource[]
   refreshRuns   RefreshRun[]
+  workbookIngestionRuns WorkbookIngestionRun[]
   policies      CompanyPolicy[]
   salesCalendarDays SalesCalendar[]
   prospects     Prospect[]
@@ -473,6 +481,7 @@ model User {
   ownedDataSources DataSource[]
   // Phase 8: refresh runs this user triggered (Migration Readiness Review fix).
   triggeredRefreshRuns RefreshRun[]
+  workbookIngestionRuns WorkbookIngestionRun[] @relation("WorkbookIngestionTriggeredBy")
   discoveredProspects  Prospect[]
   assignedProspectVisitIntents ProspectVisitIntent[] @relation("ProspectVisitIntentAssignedTo")
   createdProspectVisitIntents ProspectVisitIntent[] @relation("ProspectVisitIntentCreatedBy")
@@ -963,12 +972,47 @@ model File {
   prospects  Prospect[]
   rieDatasetVersions RieDatasetVersion[]
   rieCanonicalEntityRows RieCanonicalEntityRow[]
+  replacementRuns WorkbookIngestionRun[] @relation("WorkbookIngestionReplacement")
 
   @@index([companyId, isActive])
   @@index([companyId, datasetType])
   @@index([companyId, batchId])
   @@index([companyId, contentHash])
   @@map("files")
+}
+
+// Durable queue for workbook processing. The HTTP request owns only blob
+// persistence and this row; all CPU/DB-heavy workbook work is worker-owned.
+model WorkbookIngestionRun {
+  id                  String                     @id @default(cuid())
+  companyId           String                     @map("company_id")
+  triggeredByUserId   String                     @map("triggered_by_user_id")
+  storageKey          String                     @map("storage_key")
+  fileName            String                     @map("file_name")
+  mimeType            String                     @map("mime_type")
+  sizeBytes           Int                        @map("size_bytes")
+  contentHash         String                     @map("content_hash")
+  batchId             String                     @map("batch_id")
+  replaceFileId       String?                    @map("replace_file_id")
+  viaSuperAdmin       Boolean                    @default(false) @map("via_super_admin")
+  canProvisionEmployeeAccounts Boolean            @default(false) @map("can_provision_employee_accounts")
+  status              WorkbookIngestionRunStatus @default(QUEUED)
+  attemptCount        Int                        @default(0) @map("attempt_count")
+  startedAt           DateTime?                  @map("started_at")
+  completedAt         DateTime?                  @map("completed_at")
+  result              Json?
+  errorMessage        String?                    @map("error_message")
+  createdAt           DateTime                   @default(now()) @map("created_at")
+  updatedAt           DateTime                   @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  triggeredBy User @relation("WorkbookIngestionTriggeredBy", fields: [triggeredByUserId], references: [id])
+  replaceFile File? @relation("WorkbookIngestionReplacement", fields: [replaceFileId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([companyId, contentHash])
+  @@index([replaceFileId])
+  @@map("workbook_ingestion_runs")
 }
 
 // Phase 1 of the RIE Scale plan: a write-only PostgreSQL shadow of the
