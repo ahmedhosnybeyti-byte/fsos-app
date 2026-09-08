@@ -118,35 +118,42 @@ export class RoutePlanningService {
     return { values: Array.from(values).sort((a, b) => a.localeCompare(b)) };
   }
 
-  // Sales value per customer — Invoice Items joined to Invoices by
-  // CustomerCode, summed by LineTotal. Same join shape as Migrations #1-#3
-  // (REL-CU-002/REL-IN-003 in the Relationship Registry). No date/category
-  // narrowing here — Route Planning never had that in the legacy flow
-  // either (least-change principle).
-  private async computeSalesByCustomer(ctx: ReturnType<RoutePlanningService["rieContext"]>): Promise<Map<string, number>> {
-    const [invoicesResult, itemsResult] = await Promise.all([
-      this.rieFacade.getEntityRecords("Invoices", ctx),
-      this.rieFacade.getEntityRecords("Invoice Items", ctx),
-    ]);
-    this.assertAvailable(invoicesResult, "الفواتير");
-    this.assertAvailable(itemsResult, "أصناف الفاتورة");
-
-    const invoiceCustomer = new Map<string, string>();
-    for (const inv of invoicesResult.records) {
-      const no = String(inv.InvoiceNo ?? "").trim();
-      const cust = String(inv.CustomerCode ?? "").trim();
-      if (no && cust) invoiceCustomer.set(no, cust);
+  // Sales value per selected customer. The Invoice Items -> Invoices join,
+  // CustomerCode scope, and LineTotal sum stay in PostgreSQL; Node receives
+  // only the at-most-one final aggregate row per customer used in this split.
+  private async computeSalesByCustomer(ctx: ReturnType<RoutePlanningService["rieContext"]>, customerCodes: readonly string[]): Promise<Map<string, number>> {
+    if (customerCodes.length === 0) return new Map();
+    if (!await this.rieFacade.hasCanonicalEntitySources(ctx, ["Invoices"])) {
+      throw new NotFoundException('بيانات "الفواتير" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.');
+    }
+    if (!await this.rieFacade.hasCanonicalEntitySources(ctx, ["Invoice Items"])) {
+      throw new NotFoundException('بيانات "أصناف الفاتورة" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.');
     }
 
-    const salesById = new Map<string, number>();
-    for (const item of itemsResult.records) {
-      const invoiceNo = String(item.InvoiceNo ?? "").trim();
-      const customerCode = invoiceCustomer.get(invoiceNo);
-      if (!customerCode) continue; // item's invoice not found — dropped, same as Migration #1's join
-      const amount = toFiniteNumber(item.LineTotal) ?? 0;
-      salesById.set(customerCode, (salesById.get(customerCode) ?? 0) + amount);
-    }
-    return salesById;
+    const allowedRoutes = await this.hierarchyResolver.resolveAllowedRouteIds(ctx.companyId, ctx.requestingUser);
+    const routeScopes = allowedRoutes === null
+      ? []
+      : [
+          { field: "RouteID", source: "base", values: [...allowedRoutes] },
+          { field: "RouteID", source: "invoice", values: [...allowedRoutes] },
+        ];
+    const result = await this.rieFacade.queryCanonicalRecords({
+      ...ctx,
+      entityName: "Invoice Items",
+      projection: [{ field: "CustomerCode", source: "invoice", as: "customerCode" }],
+      joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }],
+      scope: {
+        customer: { source: "invoice", values: customerCodes },
+        ...(routeScopes.length ? { fields: routeScopes } : {}),
+      },
+      hierarchyRoute: { field: "RouteID", source: "base" },
+      groupBy: [{ field: "CustomerCode", source: "invoice" }],
+      aggregates: [{ op: "sum", field: "LineTotal", as: "sales" }],
+      // This is a bounded final aggregate: the caller already limits the
+      // selected-customer scope to Route Planning's 5,000-customer maximum.
+      unboundedFinalResult: true,
+    });
+    return new Map(result.records.map((row) => [String(row.customerCode ?? "").trim(), toFiniteNumber(row.sales) ?? 0]));
   }
 
   async split(user: AuthenticatedUser, input: RoutePlanningRieSplitInput) {
@@ -166,7 +173,8 @@ export class RoutePlanningService {
       );
     }
 
-    const salesById = await this.computeSalesByCustomer(ctx);
+    const customerCodes = [...new Set(scoped.map((row) => String(row.CustomerCode ?? "").trim()).filter(Boolean))];
+    const salesById = await this.computeSalesByCustomer(ctx, customerCodes);
 
     const records: {
       id: string;
