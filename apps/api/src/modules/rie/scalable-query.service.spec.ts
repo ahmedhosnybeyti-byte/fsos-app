@@ -13,6 +13,8 @@ test("scalable query sends scoped joins, grouping, aggregation, and pagination t
   assert.ok(sql.includes('AS MATERIALIZED'));
   assert.ok(sql.includes('base_active'));
   assert.ok(sql.includes('invoice_active'));
+  assert.match(sql, /MIN\(candidate_version\.precedence\) OVER/);
+  assert.doesNotMatch(sql, /NOT EXISTS/);
   assert.ok(sql.includes('base_version."is_active" = TRUE'));
   assert.ok(sql.includes('invoice_version."is_active" = TRUE'));
   assert.ok(captured?.values?.includes("company-1"));
