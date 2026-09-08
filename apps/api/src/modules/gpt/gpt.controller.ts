@@ -1,5 +1,5 @@
-import { Body, Controller, ForbiddenException, Get, Headers, Param, Post, Query, UnauthorizedException } from "@nestjs/common";
-import { ApiBearerAuth, ApiBody, ApiCreatedResponse, ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Headers, Param, Post, Query, UnauthorizedException } from "@nestjs/common";
+import { ApiBearerAuth, ApiBody, ApiCreatedResponse, ApiHeader, ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from "@nestjs/swagger";
 import {
   configureGptSchema,
   executeReportSchema,
@@ -24,6 +24,14 @@ function extractBearerToken(authorizationHeader: string | undefined): string {
     throw new UnauthorizedException("Missing or malformed Authorization header");
   }
   return authorizationHeader.slice("Bearer ".length).trim();
+}
+
+function extractSessionToken(sessionTokenHeader: string | undefined, sessionTokenQuery: string | undefined): string {
+  if (sessionTokenQuery !== undefined) {
+    throw new BadRequestException("Session token must be sent in the X-GPT-Session-Token header, never in the URL");
+  }
+  if (!sessionTokenHeader) throw new UnauthorizedException(SESSION_RECOVERY_MESSAGE);
+  return sessionTokenHeader;
 }
 
 // @nestjs/swagger's ApiBody/ApiQuery/ApiResponse `schema` option is typed
@@ -208,17 +216,18 @@ export class GptController {
     description:
       "Call whenever the user asks what data/files/datasets exist (e.g. \"list my files\", \"هات الملفات\"), or to refresh the list. Never answer from memory, Knowledge, or reasoning — this Action (or verifyAccess's list) is the only valid source.",
   })
-  @ApiQuery({ name: "sessionToken", required: true, type: String, description: "Session token returned by verifyAccess." })
+  @ApiHeader({ name: "X-GPT-Session-Token", required: true, description: "Session token returned by verifyAccess. Never send it in the URL." })
   @ApiOkResponse({
     description: "Every active, confirmed dataset currently available to this company.",
     schema: { type: "array", items: datasetSummarySchema },
   })
   listDatasets(
     @Headers("authorization") authorization: string | undefined,
-    @Query("sessionToken") sessionToken: string | undefined,
+    @Headers("x-gpt-session-token") sessionTokenHeader: string | undefined,
+    @Query("sessionToken") sessionTokenQuery: string | undefined,
   ) {
     const apiKey = extractBearerToken(authorization);
-    if (!sessionToken) throw new UnauthorizedException(SESSION_RECOVERY_MESSAGE);
+    const sessionToken = extractSessionToken(sessionTokenHeader, sessionTokenQuery);
     return this.gptService.listDatasets(apiKey, sessionToken);
   }
 
@@ -230,7 +239,7 @@ export class GptController {
     description:
       "For a standard sales report (total/count/breakdown for one customer/employee/branch), call POST /gpt/execute-report instead. Use getDataset for raw rows, custom filters, or other datasets. Narrow first (customerId/invoiceId/routeId/salesRep/filters); use aggregate for figures.",
   })
-  @ApiQuery({ name: "sessionToken", required: true, type: String, description: "Session token returned by verifyAccess." })
+  @ApiHeader({ name: "X-GPT-Session-Token", required: true, description: "Session token returned by verifyAccess. Never send it in the URL." })
   @ApiQuery({ name: "fileId", required: true, type: String, description: "Dataset id, from verifyAccess's or listDatasets' response." })
   @ApiQuery({ name: "customerId", required: false, type: String, description: "Exact match against this dataset's customer id/code column, if it has one." })
   @ApiQuery({ name: "invoiceId", required: false, type: String, description: "Exact match against this dataset's invoice id/number column, if it has one." })
@@ -307,11 +316,12 @@ export class GptController {
   })
   getDataset(
     @Headers("authorization") authorization: string | undefined,
-    @Query("sessionToken") sessionToken: string | undefined,
+    @Headers("x-gpt-session-token") sessionTokenHeader: string | undefined,
+    @Query("sessionToken") sessionTokenQuery: string | undefined,
     @Query(new ZodValidationPipe(getGptDatasetSchema)) query: GetGptDatasetInput,
   ) {
     const apiKey = extractBearerToken(authorization);
-    if (!sessionToken) throw new UnauthorizedException(SESSION_RECOVERY_MESSAGE);
+    const sessionToken = extractSessionToken(sessionTokenHeader, sessionTokenQuery);
     return this.gptService.getDataset(apiKey, sessionToken, query);
   }
 
@@ -327,7 +337,7 @@ export class GptController {
     description:
       "Call once after replying in chat. Pass a short narrative; add blocks only if helpful. Never call instead of replying or before it. Do NOT use for a standard sales report (no data access) — call POST /gpt/execute-report instead, which fetches data AND records this event in one call.",
   })
-  @ApiQuery({ name: "sessionToken", required: true, type: String, description: "Session token returned by verifyAccess." })
+  @ApiHeader({ name: "X-GPT-Session-Token", required: true, description: "Session token returned by verifyAccess. Never send it in the URL." })
   @ApiBody({
     description: "The narrative text and/or visual blocks to render.",
     schema: {
@@ -360,11 +370,12 @@ export class GptController {
   })
   renderAnalysis(
     @Headers("authorization") authorization: string | undefined,
-    @Query("sessionToken") sessionToken: string | undefined,
+    @Headers("x-gpt-session-token") sessionTokenHeader: string | undefined,
+    @Query("sessionToken") sessionTokenQuery: string | undefined,
     @Body(new ZodValidationPipe(renderAnalysisEventSchema)) body: RenderAnalysisEventInput,
   ) {
     const apiKey = extractBearerToken(authorization);
-    if (!sessionToken) throw new UnauthorizedException(SESSION_RECOVERY_MESSAGE);
+    const sessionToken = extractSessionToken(sessionTokenHeader, sessionTokenQuery);
     return this.gptService.renderAnalysis(apiKey, sessionToken, body);
   }
 
@@ -416,12 +427,11 @@ export class GptController {
       },
     }),
   })
-  @ApiQuery({
-    name: "sessionToken",
+  @ApiHeader({
+    name: "X-GPT-Session-Token",
     required: true,
-    type: String,
     description:
-      "Session token returned by verifyAccess. If unavailable or expired, automatically call verify-access again using the same launchCode already provided earlier in this conversation, then retry this report. Do not ask the user for a new code unless re-verification with the same code fails.",
+      "Session token returned by verifyAccess. Send it only in this header. If unavailable or expired, automatically call verify-access again using the same launchCode already provided earlier in this conversation, then retry this report. Do not ask the user for a new code unless re-verification with the same code fails.",
   })
   @ApiCreatedResponse({
     description: "Computed report — reply to the user using narrative/totalSales/invoiceCount directly; already recorded in Analysis Studio.",
@@ -443,11 +453,12 @@ export class GptController {
   })
   executeReport(
     @Headers("authorization") authorization: string | undefined,
-    @Query("sessionToken") sessionToken: string | undefined,
+    @Headers("x-gpt-session-token") sessionTokenHeader: string | undefined,
+    @Query("sessionToken") sessionTokenQuery: string | undefined,
     @Body(new ZodValidationPipe(executeReportSchema)) body: ExecuteReportInput,
   ) {
     const apiKey = extractBearerToken(authorization);
-    if (!sessionToken) throw new UnauthorizedException(SESSION_RECOVERY_MESSAGE);
+    const sessionToken = extractSessionToken(sessionTokenHeader, sessionTokenQuery);
     return this.gptService.executeReport(apiKey, sessionToken, body);
   }
 }

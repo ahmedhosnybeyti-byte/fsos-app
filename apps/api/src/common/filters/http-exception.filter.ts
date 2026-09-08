@@ -1,5 +1,6 @@
 import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus, Logger } from "@nestjs/common";
 import type { Request, Response } from "express";
+import { redactSensitiveQueryValues, redactSensitiveUrl } from "../security/redact-sensitive-url";
 
 // Normalizes every thrown error (HttpException or otherwise) into one JSON
 // shape so both the web app and the ChatGPT Action caller can rely on a
@@ -39,9 +40,10 @@ export class HttpExceptionFilter implements ExceptionFilter {
     // made exactly this class of failure impossible to diagnose from logs.
     // Widened to log every non-2xx; the response body sent to the client is
     // unchanged either way.
-    const logLine = `${request.method} ${request.url} -> ${status} | ${safeRequestSummary(request)}`;
+    const safeUrl = redactSensitiveUrl(request.url);
+    const logLine = `${request.method} ${safeUrl} -> ${status} | ${safeRequestSummary(request)}`;
     if (status >= 500) {
-      this.logger.error(logLine, exception instanceof Error ? exception.stack : undefined);
+      this.logger.error(logLine, exception instanceof Error && exception.stack ? redactSensitiveQueryValues(exception.stack) : undefined);
     } else if (status >= 400) {
       this.logger.warn(logLine);
     }
@@ -52,7 +54,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
       errors: body && typeof body === "object" && "errors" in body ? (body as { errors: unknown }).errors : undefined,
       code: body && typeof body === "object" && "code" in body ? (body as { code: unknown }).code : undefined,
       messageAr: body && typeof body === "object" && "messageAr" in body ? (body as { messageAr: unknown }).messageAr : undefined,
-      path: request.url,
+      path: safeUrl,
       timestamp: new Date().toISOString(),
     });
   }

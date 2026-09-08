@@ -10,6 +10,7 @@ import cookieParser from "cookie-parser";
 import { AppModule } from "./app.module";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { AppConfigService } from "./common/config";
+import { redactSensitiveUrl } from "./common/security/redact-sensitive-url";
 import { API_VERSION_PREFIX } from "@field-sales-os/schemas";
 
 async function bootstrap() {
@@ -53,9 +54,10 @@ async function bootstrap() {
     const sampler = rssBefore ? setInterval(() => { peakRss = Math.max(peakRss, process.memoryUsage().rss); }, 50) : undefined;
     sampler?.unref();
 
-    requestTraceLogger.log(`IN  id=${requestId} ${req.method} ${req.originalUrl} at=${new Date().toISOString()}`);
+    const safeUrl = redactSensitiveUrl(req.originalUrl);
+    requestTraceLogger.log(`IN  id=${requestId} ${req.method} ${safeUrl} at=${new Date().toISOString()}`);
     res.on("finish", () => {
-      requestTraceLogger.log(`OUT id=${requestId} ${req.method} ${req.originalUrl} status=${res.statusCode} ${Date.now() - start}ms`);
+      requestTraceLogger.log(`OUT id=${requestId} ${req.method} ${safeUrl} status=${res.statusCode} ${Date.now() - start}ms`);
       if (sampler) clearInterval(sampler);
       if (rssBefore) {
         const rssAfter = process.memoryUsage().rss;
