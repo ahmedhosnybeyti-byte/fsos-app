@@ -1,4 +1,5 @@
-import { ConflictException, Injectable } from "@nestjs/common";
+import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
+import { Prisma } from "@field-sales-os/database";
 import type { RefreshType } from "@field-sales-os/schemas";
 import { PrismaService } from "../../common/prisma";
 import { AuditLogService } from "../audit-log/audit-log.service";
@@ -34,123 +35,154 @@ export class RefreshOrchestratorService {
   ) {}
 
   async requestRefresh(companyId: string, dataSourceId: string, actorUserId: string | null, refreshType: RefreshType = "FULL") {
-    const conflicting = await this.prisma.refreshRun.findFirst({
-      where: { dataSourceId, status: { in: ["QUEUED", "RUNNING"] } },
+    // Ownership is established before creating a run or touching the source.
+    // Never use an unscoped source id as an authorization boundary.
+    const source = await this.prisma.dataSource.findFirst({
+      where: { id: dataSourceId, companyId },
+      select: { id: true },
     });
-    if (conflicting) {
-      throw new ConflictException("A refresh is already in progress for this data source");
+    if (!source) {
+      throw new NotFoundException("Data source not found");
     }
 
-    const run = await this.prisma.refreshRun.create({
-      data: { companyId, dataSourceId, triggeredByUserId: actorUserId, refreshType, status: "QUEUED" },
-    });
-
     const startedAt = new Date();
-    await this.prisma.refreshRun.update({ where: { id: run.id }, data: { status: "RUNNING", startedAt } });
-    await this.platformEventsService.emit("RefreshStarted", {
-      companyId,
-      userId: actorUserId,
-      entityType: "RefreshRun",
-      entityId: run.id,
-      metadata: { dataSourceId },
-    });
+    let run: { id: string };
+    try {
+      // The partial unique index on active runs is the atomic claim. A
+      // find-then-create check can allow two concurrent requests through.
+      run = await this.prisma.refreshRun.create({
+        data: { companyId, dataSourceId, triggeredByUserId: actorUserId, refreshType, status: "RUNNING", startedAt },
+        select: { id: true },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+        throw new ConflictException("A refresh is already in progress for this data source");
+      }
+      throw error;
+    }
 
-    // Refresh Validation — reuses Data Source Validation as its first step,
-    // exactly as the constitution's workflow diagram shows.
-    const validation = await this.validationService.validate(companyId, dataSourceId);
+    try {
+      await this.platformEventsService.emit("RefreshStarted", {
+        companyId,
+        userId: actorUserId,
+        entityType: "RefreshRun",
+        entityId: run.id,
+        metadata: { dataSourceId },
+      });
 
-    if (!validation.valid) {
+      // Refresh Validation — reuses Data Source Validation as its first step,
+      // exactly as the constitution's workflow diagram shows.
+      const validation = await this.validationService.validate(companyId, dataSourceId);
+
+      if (!validation.valid) {
+        const completedAt = new Date();
+        const failureMessage = validation.checks
+          .filter((c) => !c.passed)
+          .map((c) => c.message ?? c.name)
+          .join("; ");
+
+        const [updatedRun] = await Promise.all([
+          this.prisma.refreshRun.update({
+            where: { id: run.id },
+            data: {
+              status: "FAILED",
+              completedAt,
+              durationMs: completedAt.getTime() - startedAt.getTime(),
+              errorCount: validation.checks.filter((c) => !c.passed).length,
+              dataQualityScore: 0,
+              resultSummary: {
+                totalCategories: 0,
+                matchedCategories: [],
+                missingFiles: [],
+                invalidSchema: [],
+                validationScore: 0,
+                structuralValidationError: failureMessage,
+              },
+            },
+          }),
+          this.prisma.dataSource.updateMany({
+            where: { id: dataSourceId, companyId },
+            data: { lastValidatedAt: completedAt, healthStatus: "ERROR" },
+          }),
+          this.auditLogService.record({
+            companyId,
+            userId: actorUserId,
+            action: "refresh.failed",
+            entityType: "DataSource",
+            entityId: dataSourceId,
+            metadata: { runId: run.id, reason: failureMessage },
+          }),
+        ]);
+        await this.platformEventsService.emit("RefreshFailed", {
+          companyId,
+          userId: actorUserId,
+          entityType: "RefreshRun",
+          entityId: run.id,
+          metadata: { dataSourceId, reason: failureMessage },
+        });
+        return updatedRun;
+      }
+
+      const context = await this.contextService.build(companyId, dataSourceId);
+      const report = await this.importEngine.run(context);
       const completedAt = new Date();
-      const failureMessage = validation.checks
-        .filter((c) => !c.passed)
-        .map((c) => c.message ?? c.name)
-        .join("; ");
 
       const [updatedRun] = await Promise.all([
         this.prisma.refreshRun.update({
           where: { id: run.id },
           data: {
-            status: "FAILED",
+            status: "COMPLETED",
             completedAt,
             durationMs: completedAt.getTime() - startedAt.getTime(),
-            errorCount: validation.checks.filter((c) => !c.passed).length,
-            dataQualityScore: 0,
-            resultSummary: {
-              totalCategories: 0,
-              matchedCategories: [],
-              missingFiles: [],
-              invalidSchema: [],
-              validationScore: 0,
-              structuralValidationError: failureMessage,
-            },
+            importedRecords: report.matchedCategories.length,
+            errorCount: report.missingFiles.length + report.invalidSchema.length,
+            dataQualityScore: report.validationScore,
+            resultSummary: report,
           },
         }),
-        this.prisma.dataSource.update({
-          where: { id: dataSourceId },
-          data: { lastValidatedAt: completedAt, healthStatus: "ERROR" },
+        this.prisma.dataSource.updateMany({
+          where: { id: dataSourceId, companyId },
+          data: {
+            lastRefreshAt: completedAt,
+            lastValidatedAt: completedAt,
+            healthStatus: computeHealthStatus({ structuralValid: true, validationScore: report.validationScore }),
+          },
         }),
         this.auditLogService.record({
           companyId,
           userId: actorUserId,
-          action: "refresh.failed",
+          action: "refresh.completed",
           entityType: "DataSource",
           entityId: dataSourceId,
-          metadata: { runId: run.id, reason: failureMessage },
+          metadata: { runId: run.id, validationScore: report.validationScore, missingFiles: report.missingFiles },
         }),
       ]);
-      await this.platformEventsService.emit("RefreshFailed", {
+
+      await this.platformEventsService.emit("RefreshCompleted", {
         companyId,
         userId: actorUserId,
         entityType: "RefreshRun",
         entityId: run.id,
-        metadata: { dataSourceId, reason: failureMessage },
+        metadata: { dataSourceId, validationScore: report.validationScore },
       });
+
       return updatedRun;
-    }
-
-    const context = await this.contextService.build(companyId, dataSourceId);
-    const report = await this.importEngine.run(context);
-    const completedAt = new Date();
-
-    const [updatedRun] = await Promise.all([
-      this.prisma.refreshRun.update({
+    } catch (error) {
+      // A synchronous refresh has no worker to clean up after a thrown
+      // validation/import/event error. Persist the terminal state before the
+      // error escapes so an active-run claim can never remain stranded.
+      const completedAt = new Date();
+      await this.prisma.refreshRun.update({
         where: { id: run.id },
         data: {
-          status: "COMPLETED",
+          status: "FAILED",
           completedAt,
           durationMs: completedAt.getTime() - startedAt.getTime(),
-          importedRecords: report.matchedCategories.length,
-          errorCount: report.missingFiles.length + report.invalidSchema.length,
-          dataQualityScore: report.validationScore,
-          resultSummary: report,
+          errorCount: 1,
+          resultSummary: { unexpectedError: error instanceof Error ? error.message : "Refresh failed" },
         },
-      }),
-      this.prisma.dataSource.update({
-        where: { id: dataSourceId },
-        data: {
-          lastRefreshAt: completedAt,
-          lastValidatedAt: completedAt,
-          healthStatus: computeHealthStatus({ structuralValid: true, validationScore: report.validationScore }),
-        },
-      }),
-      this.auditLogService.record({
-        companyId,
-        userId: actorUserId,
-        action: "refresh.completed",
-        entityType: "DataSource",
-        entityId: dataSourceId,
-        metadata: { runId: run.id, validationScore: report.validationScore, missingFiles: report.missingFiles },
-      }),
-    ]);
-
-    await this.platformEventsService.emit("RefreshCompleted", {
-      companyId,
-      userId: actorUserId,
-      entityType: "RefreshRun",
-      entityId: run.id,
-      metadata: { dataSourceId, validationScore: report.validationScore },
-    });
-
-    return updatedRun;
+      });
+      throw error;
+    }
   }
 }
