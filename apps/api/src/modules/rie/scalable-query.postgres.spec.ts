@@ -100,7 +100,7 @@ test("scalable RIE incremental merge in PostgreSQL", {
   await t.test("a single active version uses the direct path with identical records", async () => {
     const result = await service.query({ companyId: "company-1", entityName: "Visits", projection: [{ field: "VisitID" }, { field: "VisitStatus" }], pagination: { limit: 10 } });
     assert.deepEqual(result.records, [{ VisitID: "VIS-1", VisitStatus: "Productive" }]);
-    assert.doesNotMatch(lastQuery!.text, /base_merged|base_versions AS|ROW_NUMBER\(\) OVER|MIN\(candidate_version\.precedence\) OVER/);
+    assert.doesNotMatch(lastQuery!.text, /base_candidates|base_versions AS|ROW_NUMBER\(\) OVER|MIN\(candidate_version\.precedence\) OVER/);
     const explained = await db.query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${lastQuery!.text}`, lastQuery!.values);
     const plan = (explained.rows[0]!["QUERY PLAN"] as Array<Record<string, unknown>>)[0]!;
     const allNodes = (node: Record<string, unknown>): Record<string, unknown>[] => [node, ...((node.Plans ?? []) as Record<string, unknown>[]).flatMap(allNodes)];
@@ -220,7 +220,7 @@ test("scalable RIE incremental merge in PostgreSQL", {
         scope: { route: { values: ["R-1"] } }, pagination: { limit: 1 },
       });
       assert.deepEqual(result.records, [{ count: 4000 }]);
-      assert.doesNotMatch(lastQuery!.text, /base_merged|base_versions AS|ROW_NUMBER\(\) OVER|MIN\(candidate_version\.precedence\) OVER/);
+      assert.doesNotMatch(lastQuery!.text, /base_candidates|base_versions AS|ROW_NUMBER\(\) OVER|MIN\(candidate_version\.precedence\) OVER/);
       const explained = await db.query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${lastQuery!.text}`, lastQuery!.values);
       const plan = (explained.rows[0]!["QUERY PLAN"] as Array<Record<string, unknown>>)[0]!;
       const allNodes = (node: Record<string, unknown>): Record<string, unknown>[] => [node, ...((node.Plans ?? []) as Record<string, unknown>[]).flatMap(allNodes)];

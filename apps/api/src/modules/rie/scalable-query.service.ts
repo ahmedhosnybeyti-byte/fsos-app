@@ -967,8 +967,14 @@ export function activeEntityRowsCte(companyId: string, entityName: string, alias
   const primaryKey = IMPORT_TEMPLATES.find((template) => template.entity === entityName)?.primaryKey;
   if (!primaryKey?.length) throw new Error(`RIE scalable query requires a canonical primary key for "${entityName}".`);
   for (const field of primaryKey) assertIdentifier(field, "primary key");
-  const keyIsBlank = Prisma.join(primaryKey.map((field) => Prisma.sql`BTRIM(COALESCE(${textField({ source: rowAlias, field })}, '')) = ''`), " OR ");
   const partitionByKey = Prisma.join(primaryKey.map((field) => normalizedField({ source: rowAlias, field })), ", ");
+  const candidateAlias = `${alias}_candidate`;
+  // The newest-wins window needs only its business key and row identity.
+  // In particular, keep `data` out of this sort/window stage: it is the
+  // potentially large JSONB payload that made concurrent multi-version
+  // merges spill their materialized working set to PostgreSQL temp files.
+  const narrowKeys = primaryKey.map((field, index) => Prisma.sql`${normalizedField({ source: rowAlias, field })} AS ${quoted(`key_${index}`)}`);
+  const keyIsBlank = Prisma.join(primaryKey.map((_, index) => Prisma.sql`${Prisma.raw(candidateAlias)}.${quoted(`key_${index}`)} = ''`), " OR ");
 
   // Match the entity provider's newest-upload-wins merge by the template's
   // business key, not entity_key (invoice-line storage keys may have an
@@ -987,8 +993,9 @@ export function activeEntityRowsCte(companyId: string, entityName: string, alias
     WHERE ${Prisma.raw(versionAlias)}."company_id" = ${companyId} AND ${Prisma.raw(versionAlias)}."entity_name" = ${entityName} AND ${Prisma.raw(versionAlias)}."is_active" = TRUE
       AND source_file."company_id" = ${companyId} AND source_file."is_active" = TRUE
       AND source_file.status = 'READY' AND source_file."dataset_type_confirmed" = TRUE
-  ), ${Prisma.raw(`${alias}_merged`)} AS NOT MATERIALIZED (
-    SELECT ${Prisma.raw(rowAlias)}.*, candidate_version.precedence,
+  ), ${Prisma.raw(`${alias}_candidates`)} AS NOT MATERIALIZED (
+    SELECT ${Prisma.raw(rowAlias)}.id AS "row_id", ${Prisma.raw(rowAlias)}."dataset_version_id", ${Prisma.raw(rowAlias)}."entity_key", candidate_version.precedence,
+      ${Prisma.join(narrowKeys)},
       MIN(candidate_version.precedence) OVER (
         PARTITION BY ${partitionByKey}
       ) AS newest_precedence
@@ -998,10 +1005,11 @@ export function activeEntityRowsCte(companyId: string, entityName: string, alias
     WHERE ${Prisma.raw(rowAlias)}."company_id" = ${companyId} AND ${Prisma.raw(rowAlias)}."entity_name" = ${entityName}
   ), ${Prisma.raw(cte)} AS MATERIALIZED (
     SELECT ${Prisma.raw(rowAlias)}.*
-    FROM ${Prisma.raw(`${alias}_merged`)} ${Prisma.raw(rowAlias)}
+    FROM ${Prisma.raw(`${alias}_candidates`)} ${Prisma.raw(candidateAlias)}
+    INNER JOIN "rie_entity_rows" ${Prisma.raw(rowAlias)} ON ${Prisma.raw(rowAlias)}.id = ${Prisma.raw(candidateAlias)}."row_id"
     ${sourceJoins.length ? Prisma.join(sourceJoins, " ") : Prisma.empty}
     WHERE TRUE
-      AND (${keyIsBlank} OR ${Prisma.raw(rowAlias)}.precedence = ${Prisma.raw(rowAlias)}.newest_precedence)
+      AND (${keyIsBlank} OR ${Prisma.raw(candidateAlias)}.precedence = ${Prisma.raw(candidateAlias)}.newest_precedence)
       ${predicates.length ? Prisma.sql`AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty}
       ${semiJoins.length ? Prisma.sql`AND ${Prisma.join(semiJoins, " AND ")}` : Prisma.empty}
   )`;
