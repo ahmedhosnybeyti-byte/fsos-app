@@ -13,9 +13,16 @@ test("scalable query sends scoped joins, grouping, aggregation, and pagination t
   assert.ok(sql.includes('AS MATERIALIZED'));
   assert.ok(sql.includes('base_active'));
   assert.ok(sql.includes('invoice_active'));
-  assert.match(sql, /base_merged AS NOT MATERIALIZED/);
-  assert.match(sql, /invoice_merged AS NOT MATERIALIZED/);
+  assert.match(sql, /base_candidates AS NOT MATERIALIZED/);
+  assert.match(sql, /invoice_candidates AS NOT MATERIALIZED/);
   assert.match(sql, /MIN\(candidate_version\.precedence\) OVER/);
+  assert.match(sql, /base_source\.id AS "row_id"/);
+  assert.match(sql, /INNER JOIN "rie_entity_rows" base_source ON base_source\.id = base_candidate\."row_id"/);
+  // The multi-version window carries identity, precedence, and normalized
+  // business keys only; JSONB must be fetched only after the winner is known.
+  const baseCandidates = sql.slice(sql.indexOf("base_candidates AS NOT MATERIALIZED"), sql.indexOf("base_active AS MATERIALIZED"));
+  assert.doesNotMatch(baseCandidates, /base_source\.\*/);
+  assert.doesNotMatch(baseCandidates, /SELECT\s+base_source\."data"/);
   assert.doesNotMatch(sql, /NOT EXISTS/);
   assert.ok(sql.includes('base_version."is_active" = TRUE'));
   assert.ok(sql.includes('invoice_version."is_active" = TRUE'));
@@ -103,7 +110,7 @@ test("single active version uses the direct scoped query without newest-wins win
   await service.query({ companyId: "company-1", entityName: "Visits", projection: [], aggregates: [{ op: "count", as: "count" }], scope: { route: { values: ["R-1"] } } });
   const sql = captured?.strings?.join(" ") ?? "";
   assert.match(sql, /base_active AS MATERIALIZED/);
-  assert.doesNotMatch(sql, /base_merged|base_versions|ROW_NUMBER\(\) OVER|MIN\(candidate_version\.precedence\) OVER/);
+  assert.doesNotMatch(sql, /base_candidates|base_versions|ROW_NUMBER\(\) OVER|MIN\(candidate_version\.precedence\) OVER/);
 });
 
 test("management lost opportunities keeps both covered and uncovered rows and returns paged totals", async () => {
