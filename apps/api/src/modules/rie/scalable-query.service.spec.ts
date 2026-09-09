@@ -2,6 +2,55 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 import { RieScalableQueryService } from "./scalable-query.service";
 
+const scalableQueryInput = () => ({
+  companyId: "company-1",
+  entityName: "Customers",
+  projection: [{ field: "CustomerCode" }],
+  pagination: { limit: 1 },
+});
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+test("process-wide RIE semaphore limits expensive raw queries to 12 and resumes queued requests", async () => {
+  let active = 0;
+  let maximumActive = 0;
+  let executions = 0;
+  const service = new RieScalableQueryService({
+    $queryRaw: async () => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      executions += 1;
+      await delay(5);
+      active -= 1;
+      return [];
+    },
+  } as never, { resolveAllowedRouteIds: async () => null } as never);
+
+  const results = await Promise.all(Array.from({ length: 24 }, () => service.query(scalableQueryInput())));
+
+  assert.equal(results.length, 24);
+  assert.equal(executions, 48); // active-version metadata + final RIE query per request
+  assert.ok(maximumActive <= 12, `expected at most 12 active raw queries, got ${maximumActive}`);
+  assert.equal(active, 0);
+});
+
+test("process-wide RIE semaphore releases permits after raw-query errors", async () => {
+  let shouldFail = true;
+  const service = new RieScalableQueryService({
+    $queryRaw: async () => {
+      if (shouldFail) {
+        shouldFail = false;
+        throw new Error("expected raw query failure");
+      }
+      return [];
+    },
+  } as never, { resolveAllowedRouteIds: async () => null } as never);
+
+  await assert.rejects(() => service.query(scalableQueryInput()), /expected raw query failure/);
+  const result = await service.query(scalableQueryInput());
+  assert.deepEqual(result.records, []);
+});
+
 test("scalable query sends scoped joins, grouping, aggregation, and pagination to PostgreSQL", async () => {
   let captured: { strings?: readonly string[]; values?: readonly unknown[] } | undefined;
   const service = new RieScalableQueryService({ $queryRaw: async (query: typeof captured) => { captured = query; return [{ customer: "C-1", sales: 10 }, { customer: "C-2", sales: 9 }]; } } as never, { resolveAllowedRouteIds: async () => new Set(["rt-1"]) } as never);
