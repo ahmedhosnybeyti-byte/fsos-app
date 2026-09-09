@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger } from "@nestjs/common";
 import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
@@ -10,6 +10,93 @@ const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
 const MAX_INTERNAL_AGGREGATE_PAGE_SIZE = 25_000;
 const SAFE_IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*$/;
+const EXPENSIVE_RIE_QUERY_CONCURRENCY = 12;
+const EXPENSIVE_RIE_QUERY_QUEUE_TIMEOUT_MS = 10_000;
+
+type RieQueryPermit = Readonly<{ activeCount: number; queueWaitMs: number; release: () => void }>;
+type RieQueryAcquireOptions = Readonly<{ signal?: AbortSignal; timeoutMs?: number }>;
+type RieQueryWaiter = Readonly<{
+  resolve: (permit: RieQueryPermit) => void;
+  reject: (reason: Error) => void;
+  cancel: () => void;
+}>;
+
+class RieQueryQueueTimeoutError extends Error {
+  constructor() {
+    super("Timed out waiting for an RIE query execution slot.");
+    this.name = "RieQueryQueueTimeoutError";
+  }
+}
+
+class RieQueryQueueCancelledError extends Error {
+  constructor() {
+    super("RIE query execution was cancelled while waiting for a slot.");
+    this.name = "RieQueryQueueCancelledError";
+  }
+}
+
+/** One in-process gate shared by every RIE service instance. */
+class ProcessWideRieQuerySemaphore {
+  private activeCount = 0;
+  private readonly waiters: RieQueryWaiter[] = [];
+
+  constructor(private readonly limit: number) {}
+
+  acquire({ signal, timeoutMs = EXPENSIVE_RIE_QUERY_QUEUE_TIMEOUT_MS }: RieQueryAcquireOptions = {}): Promise<RieQueryPermit> {
+    if (signal?.aborted) return Promise.reject(new RieQueryQueueCancelledError());
+    const queuedAt = Date.now();
+    if (this.activeCount < this.limit) {
+      this.activeCount += 1;
+      return Promise.resolve(this.permit(0));
+    }
+    return new Promise<RieQueryPermit>((resolve, reject) => {
+      let settled = false;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const remove = () => {
+        const index = this.waiters.indexOf(waiter);
+        if (index >= 0) this.waiters.splice(index, 1);
+        if (timeout) clearTimeout(timeout);
+        signal?.removeEventListener("abort", onAbort);
+      };
+      const fail = (reason: Error) => {
+        if (settled) return;
+        settled = true;
+        remove();
+        reject(reason);
+      };
+      const onAbort = () => fail(new RieQueryQueueCancelledError());
+      const waiter: RieQueryWaiter = {
+        resolve: (permit) => {
+          if (settled) return;
+          settled = true;
+          remove();
+          resolve({ activeCount: permit.activeCount, release: permit.release, queueWaitMs: Date.now() - queuedAt });
+        },
+        reject: fail,
+        cancel: () => fail(new RieQueryQueueCancelledError()),
+      };
+      this.waiters.push(waiter);
+      if (timeoutMs > 0) timeout = setTimeout(() => fail(new RieQueryQueueTimeoutError()), timeoutMs);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) waiter.cancel();
+    });
+  }
+
+  private permit(queueWaitMs: number): RieQueryPermit {
+    let released = false;
+    return {
+      activeCount: this.activeCount,
+      queueWaitMs,
+      release: () => {
+        if (released) return;
+        released = true;
+        const next = this.waiters.shift();
+        if (next) next.resolve(this.permit(0));
+        else this.activeCount -= 1;
+      },
+    };
+  }
+}
 
 /**
  * Read-only PostgreSQL query layer for canonical high-cardinality data.
@@ -18,7 +105,20 @@ const SAFE_IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*$/;
  */
 @Injectable()
 export class RieScalableQueryService {
+  private static readonly expensiveQuerySemaphore = new ProcessWideRieQuerySemaphore(EXPENSIVE_RIE_QUERY_CONCURRENCY);
+  private readonly logger = new Logger(RieScalableQueryService.name);
+
   constructor(private readonly prisma: PrismaService, private readonly hierarchyResolver: CanonicalHierarchyResolverService) {}
+
+  private async runExpensiveQuery<T>(operation: string, execute: () => Promise<T>, options?: RieQueryAcquireOptions): Promise<T> {
+    const permit = await RieScalableQueryService.expensiveQuerySemaphore.acquire(options);
+    try {
+      this.logger.log(JSON.stringify({ event: "rie_expensive_query_acquired", operation, queueWaitMs: permit.queueWaitMs, activeCount: permit.activeCount }));
+      return await execute();
+    } finally {
+      permit.release();
+    }
+  }
 
   async query(input: RieScalableQuery): Promise<RieScalableQueryResult> {
     if (!input.companyId?.trim()) throw new Error("RIE scalable query requires companyId.");
@@ -131,7 +231,7 @@ export class RieScalableQueryService {
     const pagination = input.unboundedFinalResult
       ? Prisma.sql`LIMIT ALL OFFSET ${page.offset}`
       : Prisma.sql`LIMIT ${page.limit + 1} OFFSET ${page.offset}`;
-    const rows = await this.prisma.$queryRaw<EntityRecord[]>(Prisma.sql`
+    const rows = await this.runExpensiveQuery("query", () => this.prisma.$queryRaw<EntityRecord[]>(Prisma.sql`
       WITH ${Prisma.join(ctes, ", ")}
       SELECT ${Prisma.join(select)}
       FROM ${baseReference}
@@ -140,7 +240,7 @@ export class RieScalableQueryService {
       ${grouping}
       ${ordering}
       ${pagination}
-    `);
+    `));
     const hasMore = input.unboundedFinalResult ? false : rows.length > page.limit;
     return { records: hasMore ? rows.slice(0, page.limit) : rows, page: { ...page, hasMore } };
   }
@@ -171,21 +271,21 @@ export class RieScalableQueryService {
     const invalid = Prisma.sql`SELECT COUNT(DISTINCT BTRIM(COALESCE(${code}, '')))::int AS count FROM customer_active customer WHERE BTRIM(COALESCE(${code}, '')) <> '' AND NOT (${lat} BETWEEN -90 AND 90 AND ${lon} BETWEEN -180 AND 180 AND NOT (${lat} = 0 AND ${lon} = 0))`;
     const manualIds = [...new Set((input.manualCustomerIds ?? []).map((id) => id.trim()).filter(Boolean))];
     const rows = input.targetCustomerId
-      ? await this.prisma.$queryRaw<RieGeoCustomerSelectionRow[]>(Prisma.sql`
+      ? await this.runExpensiveQuery("queryGeoCustomerSelection", () => this.prisma.$queryRaw<RieGeoCustomerSelectionRow[]>(Prisma.sql`
           WITH ${customers}, valid AS MATERIALIZED (${valid}), invalid AS MATERIALIZED (${invalid}),
           target AS MATERIALIZED (SELECT * FROM valid WHERE id = ${input.targetCustomerId}),
           neighbors AS MATERIALIZED (SELECT valid.*, 6371.0088 * 2 * ASIN(SQRT(POWER(SIN(RADIANS(valid.lat - target.lat) / 2), 2) + COS(RADIANS(target.lat)) * COS(RADIANS(valid.lat)) * POWER(SIN(RADIANS(valid.lon - target.lon) / 2), 2))) AS distance FROM valid, target WHERE valid.id <> target.id ORDER BY distance, valid.id LIMIT ${input.nearestCount})
           SELECT target.id, target.name, target.lat, target.lon, 0::double precision AS "distanceKm", 'target'::text AS source, (SELECT count FROM invalid) AS "excludedBadCoordinates" FROM target
           UNION ALL
           SELECT neighbors.id, neighbors.name, neighbors.lat, neighbors.lon, neighbors.distance AS "distanceKm", 'auto'::text AS source, (SELECT count FROM invalid) AS "excludedBadCoordinates" FROM neighbors
-        `)
-      : await this.prisma.$queryRaw<RieGeoCustomerSelectionRow[]>(Prisma.sql`
+        `))
+      : await this.runExpensiveQuery("queryGeoCustomerSelection", () => this.prisma.$queryRaw<RieGeoCustomerSelectionRow[]>(Prisma.sql`
           WITH ${customers}, valid AS MATERIALIZED (${valid}), invalid AS MATERIALIZED (${invalid}),
           auto AS MATERIALIZED (SELECT valid.*, ${distance(Prisma.raw("valid.lat"), Prisma.raw("valid.lon"))} AS distance FROM valid ORDER BY distance, valid.id LIMIT ${input.nearestCount}),
           manual AS MATERIALIZED (SELECT valid.*, ${distance(Prisma.raw("valid.lat"), Prisma.raw("valid.lon"))} AS distance FROM valid WHERE valid.id IN (${Prisma.join(manualIds.length ? manualIds : ["__none__"])})),
           resolved AS MATERIALIZED (SELECT DISTINCT ON (id) * FROM (SELECT *, 'auto'::text AS source FROM auto UNION ALL SELECT *, 'manual'::text AS source FROM manual) candidates ORDER BY id, CASE source WHEN 'auto' THEN 0 ELSE 1 END)
           SELECT id, name, lat, lon, distance AS "distanceKm", source, (SELECT count FROM invalid) AS "excludedBadCoordinates" FROM resolved
-        `);
+        `));
     return rows.map((row) => ({ ...row, lat: Number(row.lat), lon: Number(row.lon), distanceKm: Number(row.distanceKm), excludedBadCoordinates: Number(row.excludedBadCoordinates) }));
   }
 
@@ -207,7 +307,7 @@ export class RieScalableQueryService {
     const productMetaKey = normalizedField({ field: "ProductCode", source: "product" });
     const qty = numericField(textField({ field: "Quantity", source: "item" }));
     const value = numericField(textField({ field: "LineTotal", source: "item" }));
-    const rows = await this.prisma.$queryRaw<RieGeoProductRow[]>(Prisma.sql`
+    const rows = await this.runExpensiveQuery("queryGeoProducts", () => this.prisma.$queryRaw<RieGeoProductRow[]>(Prisma.sql`
       WITH ${invoices}, ${items}, ${products},
       product_meta AS MATERIALIZED (SELECT DISTINCT ON (${productMetaKey}) ${productMetaKey} AS sku, BTRIM(COALESCE(${textField({ field: "ProductName", source: "product" })}, ${textField({ field: "ProductCode", source: "product" })}, '')) AS name, NULLIF(BTRIM(COALESCE(${textField({ field: "Category", source: "product" })}, '')), '') AS category FROM product_active product ORDER BY ${productMetaKey}, product."entity_key" DESC),
       joined AS MATERIALIZED (SELECT BTRIM(COALESCE(${customer}, '')) AS customer_id, BTRIM(COALESCE(${productCode}, '')) AS sku, ${qty} AS qty, ${value} AS value FROM item_active item INNER JOIN invoice_active invoice ON ${itemInvoiceNo} = ${invoiceNo} WHERE BTRIM(COALESCE(${customer}, '')) <> ''),
@@ -222,12 +322,12 @@ export class RieScalableQueryService {
       GROUP BY j.sku, meta.name, meta.category, totals.rows, target_count.count
       ORDER BY "totalValue" DESC
       LIMIT ${input.topProductsLimit}
-    `);
+    `));
     return rows.map((row) => ({ ...row, totalQty: Number(row.totalQty), totalValue: Number(row.totalValue), customerCount: Number(row.customerCount), totalRowsConsidered: Number(row.totalRowsConsidered), targetProductCount: row.targetProductCount === null ? null : Number(row.targetProductCount) }));
   }
 
   private async activeVersionCounts(companyId: string, entityNames: readonly string[]): Promise<Map<string, number>> {
-    const rows = await this.prisma.$queryRaw<Array<{ entityName: string; versionCount: bigint | number }>>(Prisma.sql`
+    const rows = await this.runExpensiveQuery("activeVersionCounts", () => this.prisma.$queryRaw<Array<{ entityName: string; versionCount: bigint | number }>>(Prisma.sql`
       SELECT version."entity_name" AS "entityName", COUNT(*) AS "versionCount"
       FROM "rie_dataset_versions" version
       INNER JOIN "files" source_file ON source_file.id = version."source_file_id"
@@ -236,7 +336,7 @@ export class RieScalableQueryService {
         AND source_file."is_active" = TRUE AND source_file.status = 'READY'
         AND source_file."dataset_type_confirmed" = TRUE
       GROUP BY version."entity_name"
-    `);
+    `));
     return new Map(rows.map(({ entityName, versionCount }) => [entityName, Number(versionCount)]));
   }
 
@@ -297,7 +397,7 @@ export class RieScalableQueryService {
     const invoiceNo = normalizedField({ field: "InvoiceNo", source: "item" });
     const invoiceJoinNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
     const saleDate = dateText(textField({ field: "InvoiceDate", source: "invoice" }));
-    const rows = await this.prisma.$queryRaw<RieRouteProductStalenessRow[]>(Prisma.sql`
+    const rows = await this.runExpensiveQuery("queryRouteProductStaleness", () => this.prisma.$queryRaw<RieRouteProductStalenessRow[]>(Prisma.sql`
       WITH ${inventoryCte}, ${invoiceCte}, ${scopedInvoiceNumbersCte}, ${itemsCte},
       inventory_latest AS MATERIALIZED (
         SELECT ${inventoryRouteText} AS route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) AS report_date
@@ -336,7 +436,7 @@ export class RieScalableQueryService {
       FROM route_stale
       GROUP BY product_code
       ORDER BY product_code
-    `);
+    `));
     return rows;
   }
 
@@ -383,7 +483,7 @@ export class RieScalableQueryService {
     const invoiceNo = normalizedField({ field: "InvoiceNo", source: "item" });
     const invoiceJoinNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
     const effectiveSaleRoute = Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "RouteID", source: "item" })}, '')), ''), ${textField({ field: "RouteID", source: "invoice" })}, '')))`;
-    return this.prisma.$queryRaw<RieManagementVehicleProductRow[]>(Prisma.sql`
+    return this.runExpensiveQuery("queryManagementVehicleProducts", () => this.prisma.$queryRaw<RieManagementVehicleProductRow[]>(Prisma.sql`
       WITH ${inventoryCte}, ${invoiceCte}, ${itemsCte},
       inventory_latest AS MATERIALIZED (
         SELECT ${inventoryRoute} AS route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) AS report_date
@@ -422,7 +522,7 @@ export class RieScalableQueryService {
       FROM vehicle_product
       GROUP BY product_code
       ORDER BY product_code
-    `);
+    `));
   }
 
   /** Current Vehicle Stock is the approved actual-loaded quantity for Loading Risk. */
@@ -455,7 +555,7 @@ export class RieScalableQueryService {
     const routeId = normalizedField({ field: "RouteID", source: "route" }), routeRep = normalizedField({ field: "SalesRepID", source: "route" }), routeSupervisor = normalizedField({ field: "SupervisorID", source: "route" }), routeManager = normalizedField({ field: "ManagerID", source: "route" }), repId = normalizedField({ field: "EmployeeID", source: "rep" }), supervisorId = normalizedField({ field: "EmployeeID", source: "supervisor" }), managerId = normalizedField({ field: "EmployeeID", source: "manager" });
     const person = input.personLevel === "manager" ? { id: managerId, name: textField({ field: "EmployeeName", source: "manager" }) } : input.personLevel === "supervisor" ? { id: supervisorId, name: textField({ field: "EmployeeName", source: "supervisor" }) } : { id: repId, name: textField({ field: "EmployeeName", source: "rep" }) };
     const productCode = normalizedField({ field: "ProductCode", source: "product" }), productName = textField({ field: "ProductName", source: "product" });
-    const rows = await this.prisma.$queryRaw<RieManagementLoadingRiskRow[]>(Prisma.sql`
+    const rows = await this.runExpensiveQuery("queryManagementLoadingRisk", () => this.prisma.$queryRaw<RieManagementLoadingRiskRow[]>(Prisma.sql`
       WITH ${inventoryCte}, ${invoiceCte}, ${itemsCte}, ${routesCte}, ${repCte}, ${supervisorCte}, ${managerCte}, ${productCte},
       latest_inventory AS MATERIALIZED (SELECT ${invRoute} route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) report_date FROM inventory_active inventory GROUP BY ${invRoute}),
       stock AS MATERIALIZED (SELECT ${invRoute} route_id, ${invProduct} product_code, SUM(${invQuantity})::double precision current_stock FROM inventory_active inventory INNER JOIN latest_inventory latest ON latest.route_id=${invRoute} AND NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')=latest.report_date WHERE ${invProduct}<>'' GROUP BY ${invRoute}, ${invProduct}),
@@ -489,7 +589,7 @@ export class RieScalableQueryService {
       SELECT person_json.people,
         JSONB_BUILD_OBJECT('directReportsCount',scope_debug.direct_reports_count,'routeCount',route_scope_debug.route_count,'loadingRiskRowsBeforeAggregation',risk_debug.loading_risk_rows_before_aggregation) debug
       FROM person_json CROSS JOIN scope_debug CROSS JOIN route_scope_debug CROSS JOIN risk_debug
-    `);
+    `));
     return rows[0] ?? { people: [] };
   }
 
@@ -570,7 +670,7 @@ export class RieScalableQueryService {
         ? { id: supervisorId, name: textField({ field: "EmployeeName", source: "supervisor" }) }
         : { id: repId, name: textField({ field: "EmployeeName", source: "rep" }) };
     const productCode = normalizedField({ field: "ProductCode", source: "product" });
-    const rawRows = await this.prisma.$queryRaw<Array<{
+    const rawRows = await this.runExpensiveQuery("queryManagementLostOpportunities", () => this.prisma.$queryRaw<Array<{
       affectedPersonCount: number;
       affectedRouteCount: number;
       lostOpportunityCount: number;
@@ -699,7 +799,7 @@ export class RieScalableQueryService {
       )
       SELECT summary."affectedPersonCount", summary."affectedRouteCount", summary."lostOpportunityCount", page_result."hasMore", page_result.rows, top_people_result."topPeople"
       FROM summary CROSS JOIN page_result CROSS JOIN top_people_result
-    `);
+    `));
     const result = rawRows[0];
     return {
       affectedPersonCount: Number(result?.affectedPersonCount ?? 0),
@@ -755,7 +855,7 @@ export class RieScalableQueryService {
     const invoiceJoinNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
     const effectiveSaleRoute = Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "RouteID", source: "item" })}, '')), ''), ${textField({ field: "RouteID", source: "invoice" })}, '')))`;
     const productCategory = Prisma.sql`NULLIF(BTRIM(COALESCE(${textField({ field: "Category", source: "product" })}, '')), '')`;
-    const rows = await this.prisma.$queryRaw<RieManagementStockAlignmentRow[]>(Prisma.sql`
+    const rows = await this.runExpensiveQuery("queryManagementStockAlignment", () => this.prisma.$queryRaw<RieManagementStockAlignmentRow[]>(Prisma.sql`
       WITH ${inventoryCte}, ${invoiceCte}, ${itemsCte}, ${productsCte},
       inventory_latest AS MATERIALIZED (
         SELECT ${inventoryRoute} AS route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) AS report_date
@@ -811,7 +911,7 @@ export class RieScalableQueryService {
         'alignmentPercent', alignment_percent
       ) ORDER BY category NULLS LAST) FROM category_alignment), '[]'::jsonb) AS "categoryAlignments"
       FROM route_product_alignment
-    `);
+    `));
     return rows[0] ?? { alignmentPercent: 100, categoryAlignments: [] };
   }
 
@@ -850,7 +950,7 @@ export class RieScalableQueryService {
     const effectiveSaleRoute = Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${itemRoute}, '')), ''), ${invoiceRoute}, '')))`;
     const quantity = numericField(textField({ field: "Quantity", source: "item" }));
     const invoiceDate = dateText(textField({ field: "InvoiceDate", source: "invoice" }));
-    const rows = await this.prisma.$queryRaw<RieStalePurchaseRow[]>(Prisma.sql`
+    const rows = await this.runExpensiveQuery("queryStalePurchases", () => this.prisma.$queryRaw<RieStalePurchaseRow[]>(Prisma.sql`
       WITH ${invoiceCte}, ${itemCte}, ${customerCte},
       purchase_by_product_customer AS MATERIALIZED (
         SELECT ${itemProductText} AS product_code, ${customerCode} AS customer_code,
@@ -882,7 +982,7 @@ export class RieScalableQueryService {
       LEFT JOIN customer_names names ON names.customer_code = BTRIM(COALESCE(purchases.customer_code, ''))
       GROUP BY purchases.product_code
       ORDER BY purchases.product_code
-    `);
+    `));
     return rows;
   }
 

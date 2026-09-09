@@ -2,6 +2,104 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 import { RieScalableQueryService } from "./scalable-query.service";
 
+const scalableQueryInput = () => ({
+  companyId: "company-1",
+  entityName: "Customers",
+  projection: [{ field: "CustomerCode" }],
+  pagination: { limit: 1 },
+});
+
+const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const deferred = <T>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+};
+
+type InternalSemaphoreService = {
+  runExpensiveQuery<T>(operation: string, execute: () => Promise<T>, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<T>;
+  logger: { log(message: string): void };
+};
+
+const internalSemaphore = (service: RieScalableQueryService) => service as unknown as InternalSemaphoreService;
+
+test("process-wide RIE semaphore limits expensive raw queries to 12 and resumes queued requests", async () => {
+  let active = 0;
+  let maximumActive = 0;
+  let executions = 0;
+  const service = new RieScalableQueryService({
+    $queryRaw: async () => {
+      active += 1;
+      maximumActive = Math.max(maximumActive, active);
+      executions += 1;
+      await delay(5);
+      active -= 1;
+      return [];
+    },
+  } as never, { resolveAllowedRouteIds: async () => null } as never);
+
+  const results = await Promise.all(Array.from({ length: 24 }, () => service.query(scalableQueryInput())));
+
+  assert.equal(results.length, 24);
+  assert.equal(executions, 48); // active-version metadata + final RIE query per request
+  assert.ok(maximumActive <= 12, `expected at most 12 active raw queries, got ${maximumActive}`);
+  assert.equal(active, 0);
+});
+
+test("process-wide RIE semaphore releases permits after raw-query errors", async () => {
+  let shouldFail = true;
+  const service = new RieScalableQueryService({
+    $queryRaw: async () => {
+      if (shouldFail) {
+        shouldFail = false;
+        throw new Error("expected raw query failure");
+      }
+      return [];
+    },
+  } as never, { resolveAllowedRouteIds: async () => null } as never);
+
+  await assert.rejects(() => service.query(scalableQueryInput()), /expected raw query failure/);
+  const result = await service.query(scalableQueryInput());
+  assert.deepEqual(result.records, []);
+});
+
+test("cancelled and timed-out RIE queue waiters never execute and do not leak permits", async () => {
+  const service = internalSemaphore(new RieScalableQueryService({ $queryRaw: async () => [] } as never, { resolveAllowedRouteIds: async () => null } as never));
+  const releases = Array.from({ length: 12 }, () => deferred<void>());
+  const holders = releases.map((release) => service.runExpensiveQuery("hold", () => release.promise));
+  await delay(0);
+
+  let cancelledExecuted = false;
+  const controller = new AbortController();
+  const cancelled = service.runExpensiveQuery("cancelled", async () => { cancelledExecuted = true; }, { signal: controller.signal });
+  controller.abort();
+  await assert.rejects(() => cancelled, { name: "RieQueryQueueCancelledError" });
+
+  let timedOutExecuted = false;
+  await assert.rejects(
+    () => service.runExpensiveQuery("timed-out", async () => { timedOutExecuted = true; }, { timeoutMs: 5 }),
+    { name: "RieQueryQueueTimeoutError" },
+  );
+
+  releases.forEach(({ resolve }) => resolve());
+  await Promise.all(holders);
+  let postCancellationExecuted = false;
+  await service.runExpensiveQuery("post-cancellation", async () => { postCancellationExecuted = true; });
+  assert.equal(cancelledExecuted, false);
+  assert.equal(timedOutExecuted, false);
+  assert.equal(postCancellationExecuted, true);
+});
+
+test("process-wide RIE semaphore releases permits when diagnostic logging throws", async () => {
+  const service = internalSemaphore(new RieScalableQueryService({ $queryRaw: async () => [] } as never, { resolveAllowedRouteIds: async () => null } as never));
+  service.logger = { log: () => { throw new Error("expected logging failure"); } };
+  await assert.rejects(() => service.runExpensiveQuery("logging-error", async () => undefined), /expected logging failure/);
+  service.logger = { log: () => undefined };
+  let executed = false;
+  await service.runExpensiveQuery("after-logging-error", async () => { executed = true; });
+  assert.equal(executed, true);
+});
+
 test("scalable query sends scoped joins, grouping, aggregation, and pagination to PostgreSQL", async () => {
   let captured: { strings?: readonly string[]; values?: readonly unknown[] } | undefined;
   const service = new RieScalableQueryService({ $queryRaw: async (query: typeof captured) => { captured = query; return [{ customer: "C-1", sales: 10 }, { customer: "C-2", sales: 9 }]; } } as never, { resolveAllowedRouteIds: async () => new Set(["rt-1"]) } as never);
