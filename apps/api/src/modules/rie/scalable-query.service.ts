@@ -11,23 +11,75 @@ const MAX_PAGE_SIZE = 5_000;
 const MAX_INTERNAL_AGGREGATE_PAGE_SIZE = 25_000;
 const SAFE_IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*$/;
 const EXPENSIVE_RIE_QUERY_CONCURRENCY = 12;
+const EXPENSIVE_RIE_QUERY_QUEUE_TIMEOUT_MS = 10_000;
 
 type RieQueryPermit = Readonly<{ activeCount: number; queueWaitMs: number; release: () => void }>;
+type RieQueryAcquireOptions = Readonly<{ signal?: AbortSignal; timeoutMs?: number }>;
+type RieQueryWaiter = Readonly<{
+  resolve: (permit: RieQueryPermit) => void;
+  reject: (reason: Error) => void;
+  cancel: () => void;
+}>;
+
+class RieQueryQueueTimeoutError extends Error {
+  constructor() {
+    super("Timed out waiting for an RIE query execution slot.");
+    this.name = "RieQueryQueueTimeoutError";
+  }
+}
+
+class RieQueryQueueCancelledError extends Error {
+  constructor() {
+    super("RIE query execution was cancelled while waiting for a slot.");
+    this.name = "RieQueryQueueCancelledError";
+  }
+}
 
 /** One in-process gate shared by every RIE service instance. */
 class ProcessWideRieQuerySemaphore {
   private activeCount = 0;
-  private readonly waiters: Array<(permit: RieQueryPermit) => void> = [];
+  private readonly waiters: RieQueryWaiter[] = [];
 
   constructor(private readonly limit: number) {}
 
-  acquire(): Promise<RieQueryPermit> {
+  acquire({ signal, timeoutMs = EXPENSIVE_RIE_QUERY_QUEUE_TIMEOUT_MS }: RieQueryAcquireOptions = {}): Promise<RieQueryPermit> {
+    if (signal?.aborted) return Promise.reject(new RieQueryQueueCancelledError());
     const queuedAt = Date.now();
     if (this.activeCount < this.limit) {
       this.activeCount += 1;
       return Promise.resolve(this.permit(0));
     }
-    return new Promise<RieQueryPermit>((resolve) => this.waiters.push(resolve)).then(({ activeCount, release }) => ({ activeCount, release, queueWaitMs: Date.now() - queuedAt }));
+    return new Promise<RieQueryPermit>((resolve, reject) => {
+      let settled = false;
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const remove = () => {
+        const index = this.waiters.indexOf(waiter);
+        if (index >= 0) this.waiters.splice(index, 1);
+        if (timeout) clearTimeout(timeout);
+        signal?.removeEventListener("abort", onAbort);
+      };
+      const fail = (reason: Error) => {
+        if (settled) return;
+        settled = true;
+        remove();
+        reject(reason);
+      };
+      const onAbort = () => fail(new RieQueryQueueCancelledError());
+      const waiter: RieQueryWaiter = {
+        resolve: (permit) => {
+          if (settled) return;
+          settled = true;
+          remove();
+          resolve({ activeCount: permit.activeCount, release: permit.release, queueWaitMs: Date.now() - queuedAt });
+        },
+        reject: fail,
+        cancel: () => fail(new RieQueryQueueCancelledError()),
+      };
+      this.waiters.push(waiter);
+      if (timeoutMs > 0) timeout = setTimeout(() => fail(new RieQueryQueueTimeoutError()), timeoutMs);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) waiter.cancel();
+    });
   }
 
   private permit(queueWaitMs: number): RieQueryPermit {
@@ -39,7 +91,7 @@ class ProcessWideRieQuerySemaphore {
         if (released) return;
         released = true;
         const next = this.waiters.shift();
-        if (next) next(this.permit(0));
+        if (next) next.resolve(this.permit(0));
         else this.activeCount -= 1;
       },
     };
@@ -58,10 +110,10 @@ export class RieScalableQueryService {
 
   constructor(private readonly prisma: PrismaService, private readonly hierarchyResolver: CanonicalHierarchyResolverService) {}
 
-  private async runExpensiveQuery<T>(operation: string, execute: () => Promise<T>): Promise<T> {
-    const permit = await RieScalableQueryService.expensiveQuerySemaphore.acquire();
-    this.logger.log(JSON.stringify({ event: "rie_expensive_query_acquired", operation, queueWaitMs: permit.queueWaitMs, activeCount: permit.activeCount }));
+  private async runExpensiveQuery<T>(operation: string, execute: () => Promise<T>, options?: RieQueryAcquireOptions): Promise<T> {
+    const permit = await RieScalableQueryService.expensiveQuerySemaphore.acquire(options);
     try {
+      this.logger.log(JSON.stringify({ event: "rie_expensive_query_acquired", operation, queueWaitMs: permit.queueWaitMs, activeCount: permit.activeCount }));
       return await execute();
     } finally {
       permit.release();

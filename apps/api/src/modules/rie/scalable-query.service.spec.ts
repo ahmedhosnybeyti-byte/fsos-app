@@ -10,6 +10,18 @@ const scalableQueryInput = () => ({
 });
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+const deferred = <T>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
+};
+
+type InternalSemaphoreService = {
+  runExpensiveQuery<T>(operation: string, execute: () => Promise<T>, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<T>;
+  logger: { log(message: string): void };
+};
+
+const internalSemaphore = (service: RieScalableQueryService) => service as unknown as InternalSemaphoreService;
 
 test("process-wide RIE semaphore limits expensive raw queries to 12 and resumes queued requests", async () => {
   let active = 0;
@@ -49,6 +61,43 @@ test("process-wide RIE semaphore releases permits after raw-query errors", async
   await assert.rejects(() => service.query(scalableQueryInput()), /expected raw query failure/);
   const result = await service.query(scalableQueryInput());
   assert.deepEqual(result.records, []);
+});
+
+test("cancelled and timed-out RIE queue waiters never execute and do not leak permits", async () => {
+  const service = internalSemaphore(new RieScalableQueryService({ $queryRaw: async () => [] } as never, { resolveAllowedRouteIds: async () => null } as never));
+  const releases = Array.from({ length: 12 }, () => deferred<void>());
+  const holders = releases.map((release) => service.runExpensiveQuery("hold", () => release.promise));
+  await delay(0);
+
+  let cancelledExecuted = false;
+  const controller = new AbortController();
+  const cancelled = service.runExpensiveQuery("cancelled", async () => { cancelledExecuted = true; }, { signal: controller.signal });
+  controller.abort();
+  await assert.rejects(() => cancelled, { name: "RieQueryQueueCancelledError" });
+
+  let timedOutExecuted = false;
+  await assert.rejects(
+    () => service.runExpensiveQuery("timed-out", async () => { timedOutExecuted = true; }, { timeoutMs: 5 }),
+    { name: "RieQueryQueueTimeoutError" },
+  );
+
+  releases.forEach(({ resolve }) => resolve());
+  await Promise.all(holders);
+  let postCancellationExecuted = false;
+  await service.runExpensiveQuery("post-cancellation", async () => { postCancellationExecuted = true; });
+  assert.equal(cancelledExecuted, false);
+  assert.equal(timedOutExecuted, false);
+  assert.equal(postCancellationExecuted, true);
+});
+
+test("process-wide RIE semaphore releases permits when diagnostic logging throws", async () => {
+  const service = internalSemaphore(new RieScalableQueryService({ $queryRaw: async () => [] } as never, { resolveAllowedRouteIds: async () => null } as never));
+  service.logger = { log: () => { throw new Error("expected logging failure"); } };
+  await assert.rejects(() => service.runExpensiveQuery("logging-error", async () => undefined), /expected logging failure/);
+  service.logger = { log: () => undefined };
+  let executed = false;
+  await service.runExpensiveQuery("after-logging-error", async () => { executed = true; });
+  assert.equal(executed, true);
 });
 
 test("scalable query sends scoped joins, grouping, aggregation, and pagination to PostgreSQL", async () => {
