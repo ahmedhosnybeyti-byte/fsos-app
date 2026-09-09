@@ -90,6 +90,25 @@ test("cancelled and timed-out RIE queue waiters never execute and do not leak pe
   assert.equal(postCancellationExecuted, true);
 });
 
+test("default RIE queue timeout permits a waiter held beyond the former 10-second limit", async () => {
+  const service = internalSemaphore(new RieScalableQueryService({ $queryRaw: async () => [] } as never, { resolveAllowedRouteIds: async () => null } as never));
+  const releases = Array.from({ length: 12 }, () => deferred<void>());
+  const holders = releases.map((release) => service.runExpensiveQuery("hold", () => release.promise));
+  await delay(0);
+
+  let executed = false;
+  const queued = service.runExpensiveQuery("default-timeout", async () => { executed = true; });
+  const releaseTimer = setTimeout(() => releases.forEach(({ resolve }) => resolve()), 10_100);
+  try {
+    await queued;
+    assert.equal(executed, true);
+  } finally {
+    clearTimeout(releaseTimer);
+    releases.forEach(({ resolve }) => resolve());
+    await Promise.all(holders);
+  }
+});
+
 test("process-wide RIE semaphore releases permits when diagnostic logging throws", async () => {
   const service = internalSemaphore(new RieScalableQueryService({ $queryRaw: async () => [] } as never, { resolveAllowedRouteIds: async () => null } as never));
   service.logger = { log: () => { throw new Error("expected logging failure"); } };
