@@ -15,10 +15,10 @@ const PAGE_SIZE = 100;
 
 type ManagementScope = { managerId?: string; supervisorId?: string; salesRepId?: string };
 
-function useManagementLostOpportunities(targetDate: string, scope: ManagementScope, offset = 0) {
+function useManagementLostOpportunities(targetDate: string, scope: ManagementScope, offset = 0, limit = PAGE_SIZE) {
   return useQuery({
-    queryKey: ["smart-loading", "management-risks", "lost-opportunities", targetDate, scope.managerId, scope.supervisorId, scope.salesRepId, PAGE_SIZE, offset],
-    queryFn: () => smartLoadingApi.getManagementLostOpportunities(targetDate, scope, PAGE_SIZE, offset),
+    queryKey: ["smart-loading", "management-risks", "lost-opportunities", targetDate, scope.managerId, scope.supervisorId, scope.salesRepId, limit, offset],
+    queryFn: () => smartLoadingApi.getManagementLostOpportunities(targetDate, scope, limit, offset),
     staleTime: 60_000,
   });
 }
@@ -26,7 +26,8 @@ function useManagementLostOpportunities(targetDate: string, scope: ManagementSco
 export function ManagementLostOpportunitiesCard({ targetDate, scope, onSelectPerson }: { targetDate: string; scope: ManagementScope; onSelectPerson: (person: { employeeId: string; employeeName: string }) => void }) {
   const { locale, t } = useTranslation();
   const [isPopoverOpen, setPopoverOpen] = useState(false);
-  const query = useManagementLostOpportunities(targetDate, scope);
+  // The card needs counts only; details remain behind the explicit table/rep selection.
+  const query = useManagementLostOpportunities(targetDate, scope, 0, 1);
   const label = (key: string, fallback: string) => {
     const translated = t(key as never);
     return translated === key ? fallback : translated;

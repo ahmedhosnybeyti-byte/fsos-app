@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { SmartLoadingScreen } from "@/components/smart-loading/smart-loading-screen";
 import { smartLoadingApi } from "@/lib/api/smart-loading";
+import { useAuth } from "@/hooks/use-auth";
 import { DEFAULT_SMART_LOADING_STALE_DAYS } from "@field-sales-os/schemas";
 
 function tomorrowIso(): string {
@@ -13,14 +14,18 @@ function tomorrowIso(): string {
 }
 
 export default function SmartLoadingPage() {
+  const { user } = useAuth();
   const [targetDate, setTargetDate] = useState(tomorrowIso);
   const [staleDaysThreshold, setStaleDaysThreshold] = useState(DEFAULT_SMART_LOADING_STALE_DAYS);
   const [salesRepId, setSalesRepId] = useState<string>();
   const [managerId, setManagerId] = useState<string>();
   const [supervisorId, setSupervisorId] = useState<string>();
+  const managementView = ["COMPANY_ADMIN", "MANAGER", "SUPERVISOR"].includes(user?.role.code ?? "");
+  const deferManagementDetails = managementView && !salesRepId;
   const session = useQuery({
     queryKey: ["smart-loading", "session", targetDate, staleDaysThreshold, salesRepId, managerId, supervisorId],
     queryFn: () => smartLoadingApi.getSession(targetDate, staleDaysThreshold, salesRepId, managerId, supervisorId),
+    enabled: !deferManagementDetails,
     placeholderData: (previous) => previous,
   });
 
@@ -36,6 +41,7 @@ export default function SmartLoadingPage() {
       salesRepId={salesRepId}
       managerId={managerId}
       supervisorId={supervisorId}
+      deferManagementDetails={deferManagementDetails}
       onSalesRepChange={setSalesRepId}
       onManagementScopeChange={({ managerId: nextManagerId, supervisorId: nextSupervisorId, salesRepId: nextSalesRepId }) => {
         setManagerId(nextManagerId);

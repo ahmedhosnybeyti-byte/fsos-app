@@ -84,6 +84,7 @@ export function SmartLoadingScreen({
   salesRepId,
   managerId,
   supervisorId,
+  deferManagementDetails = false,
   onSalesRepChange,
   onManagementScopeChange,
 }: {
@@ -98,6 +99,7 @@ export function SmartLoadingScreen({
   salesRepId?: string;
   managerId?: string;
   supervisorId?: string;
+  deferManagementDetails?: boolean;
   onSalesRepChange: (value: string | undefined) => void;
   onManagementScopeChange: (scope: ManagementScopeSelection) => void;
 }) {
@@ -639,6 +641,16 @@ export function SmartLoadingScreen({
     );
   }
 
+  if (managementView && deferManagementDetails) {
+    return <ManagementHeadersOnly
+      locale={locale}
+      targetDate={targetDate}
+      managerId={managerId}
+      supervisorId={supervisorId}
+      onManagementScopeChange={onManagementScopeChange}
+    />;
+  }
+
   if (session?.state !== "ready") {
     return (
       <ScreenState
@@ -1070,6 +1082,18 @@ export function SmartLoadingScreen({
       )}
     </div>
   );
+}
+
+/** Management starts with dimensions and aggregate counts only. Selecting a rep enables the existing full session. */
+function ManagementHeadersOnly({ locale, targetDate, managerId, supervisorId, onManagementScopeChange }: { locale: "ar" | "en"; targetDate: string; managerId?: string; supervisorId?: string; onManagementScopeChange: (scope: ManagementScopeSelection) => void }) {
+  return <div dir={locale === "ar" ? "rtl" : "ltr"} className="space-y-6 pb-10">
+    <header className="glass-hero rise-in relative p-6"><h1 className="flex items-center gap-2 text-2xl font-semibold"><PackagePlus className="h-5 w-5" />Smart Loading</h1></header>
+    <ManagementHierarchyFilters locale={locale} managementStockAlignmentPercent={null} onManagementScopeChange={onManagementScopeChange} managementScope={{ managerId, supervisorId }} />
+    <div className="grid items-stretch gap-3 md:grid-cols-2">
+      <ManagementLoadingRisk targetDate={targetDate} onSelectPerson={() => undefined} />
+      <ManagementLostOpportunitiesCard targetDate={targetDate} scope={{ managerId, supervisorId }} onSelectPerson={() => undefined} />
+    </div>
+  </div>;
 }
 
 function LostOpportunitiesDialog({
