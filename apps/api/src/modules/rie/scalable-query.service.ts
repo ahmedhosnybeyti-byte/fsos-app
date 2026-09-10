@@ -369,12 +369,13 @@ export class RieScalableQueryService {
     const inventoryDate = textField({ field: "ReportDate", source: "inventory_source" });
     const invoiceRoute = { field: "RouteID", source: "invoice_source" };
     const invoiceDate = textField({ field: "InvoiceDate", source: "invoice_source" });
+    const activeVersionCounts = await this.activeVersionCounts(input.companyId, ["Van Inventory", "Invoices", "Invoice Items"]);
     const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [
       Prisma.sql`${dateText(inventoryDate)} <= ${targetDate}${routeScope(inventoryRoute)}`,
-    ], [], []);
+    ], [], [], activeVersionCounts.get("Van Inventory") === 1);
     const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [
       Prisma.sql`${dateText(invoiceDate)} <= ${targetDate}${routeScope(invoiceRoute)}`,
-    ], [], []);
+    ], [], [], activeVersionCounts.get("Invoices") === 1);
     const scopedInvoiceNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
     const scopedInvoiceNumbersCte = Prisma.sql`scoped_invoice_numbers AS MATERIALIZED (
       SELECT DISTINCT ${scopedInvoiceNo} AS invoice_no
@@ -384,7 +385,7 @@ export class RieScalableQueryService {
     // InvoiceNo is part of the Invoice Items business key. Restricting rows
     // to the already-scoped invoice keys before newest-version resolution is
     // therefore parity-safe and lets PostgreSQL use the InvoiceNo index.
-    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], false, [
+    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], activeVersionCounts.get("Invoice Items") === 1, [
       Prisma.sql`INNER JOIN scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`,
     ]);
     const inventoryRouteText = normalizedField({ field: "RouteID", source: "inventory" });

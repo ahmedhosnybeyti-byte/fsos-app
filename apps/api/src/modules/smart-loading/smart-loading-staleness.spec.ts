@@ -73,7 +73,13 @@ test("management RIE stale rollup returns Product grain for more than 5,000 rout
     staleRouteProducts: Array.from({ length: 5_001 }, (_, index) => ({ routeId: `route-${index}`, currentVehicleStock: 1, lastSaleDate: "2026-08-01" })),
   }];
   const query = new RieScalableQueryService(
-    { $queryRaw: async () => expected } as never,
+    { $queryRaw: async (sql: { strings?: readonly string[] }) => (sql.strings?.join(" ").includes('COUNT(*) AS "versionCount"')
+      ? [
+        { entityName: "Van Inventory", versionCount: 1 },
+        { entityName: "Invoices", versionCount: 1 },
+        { entityName: "Invoice Items", versionCount: 1 },
+      ]
+      : expected) } as never,
     { resolveAllowedRouteIds: async () => null } as never,
   );
   const rows = await query.queryRouteProductStaleness({
@@ -85,6 +91,59 @@ test("management RIE stale rollup returns Product grain for more than 5,000 rout
 
   assert.deepEqual(rows, expected);
   assert.equal(rows[0]?.staleRouteProducts.length, 5_001);
+});
+
+test("route-product staleness uses direct CTEs and preserves its single-version result", async () => {
+  const expected = [{ productCode: "sku-1", quantity: 2, lastSaleDate: "2026-08-01", isStale: true, staleRouteProductCount: 1, staleRouteProducts: [] }];
+  let statement: { strings?: readonly string[] } | undefined;
+  const query = new RieScalableQueryService(
+    { $queryRaw: async (sql: { strings?: readonly string[] }) => {
+      if (sql.strings?.join(" ").includes('COUNT(*) AS "versionCount"')) {
+        return [
+          { entityName: "Van Inventory", versionCount: 1 },
+          { entityName: "Invoices", versionCount: 1 },
+          { entityName: "Invoice Items", versionCount: 1 },
+        ];
+      }
+      statement = sql;
+      return expected;
+    } } as never,
+    { resolveAllowedRouteIds: async () => null } as never,
+  );
+
+  const rows = await query.queryRouteProductStaleness({ companyId: "company-1", targetDate: "2026-08-10", staleDaysThreshold: 4 });
+
+  assert.deepEqual(rows, expected);
+  const sql = statement?.strings?.join(" ") ?? "";
+  assert.doesNotMatch(sql, /inventory_candidates|invoice_candidates|item_candidates|MIN\(candidate_version\.precedence\) OVER/);
+  assert.match(sql, /inventory_active AS MATERIALIZED/);
+  assert.match(sql, /invoice_active AS MATERIALIZED/);
+  assert.match(sql, /item_active AS MATERIALIZED/);
+});
+
+test("route-product staleness keeps newest-wins CTEs when any entity has multiple active versions", async () => {
+  let statement: { strings?: readonly string[] } | undefined;
+  const query = new RieScalableQueryService(
+    { $queryRaw: async (sql: { strings?: readonly string[] }) => {
+      if (sql.strings?.join(" ").includes('COUNT(*) AS "versionCount"')) {
+        return [
+          { entityName: "Van Inventory", versionCount: 2 },
+          { entityName: "Invoices", versionCount: 1 },
+          { entityName: "Invoice Items", versionCount: 3 },
+        ];
+      }
+      statement = sql;
+      return [];
+    } } as never,
+    { resolveAllowedRouteIds: async () => null } as never,
+  );
+
+  await query.queryRouteProductStaleness({ companyId: "company-1", targetDate: "2026-08-10", staleDaysThreshold: 4 });
+
+  const sql = statement?.strings?.join(" ") ?? "";
+  assert.match(sql, /inventory_candidates/);
+  assert.doesNotMatch(sql, /invoice_candidates/);
+  assert.match(sql, /item_candidates/);
 });
 
 test("management vehicle monitor returns every inventory product at Product grain for a large route scope", async () => {
