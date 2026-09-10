@@ -443,7 +443,35 @@ export class VisitCopilotService {
   private readonly logger = new Logger(VisitCopilotService.name);
   private readonly discoverySearchesInFlight = new Map<string, Promise<GoogleSearchResult>>();
 
-  async discoveryLimit(user: AuthenticatedUser) {
+  /** The supervisor picker is deliberately backed only by the existing
+   * Employee -> manager relation.  It never widens the actor's RIE scope. */
+  async supervisedSalesReps(user: AuthenticatedUser) {
+    if (user.roleCode !== "SUPERVISOR" || !user.companyId) throw new ForbiddenException();
+    const supervisor = await this.prisma.employee.findFirst({ where: { companyId: user.companyId, userId: user.userId }, select: { id: true } });
+    if (!supervisor) return [];
+    return this.prisma.employee.findMany({
+      where: { companyId: user.companyId, managerId: supervisor.id, user: { is: { companyId: user.companyId, status: "ACTIVE", role: { code: "SALES_REP" } } } },
+      select: { userId: true, employeeCode: true, fullName: true }, orderBy: [{ fullName: "asc" }, { employeeCode: "asc" }],
+    }).then((rows) => rows.flatMap((row) => row.userId ? [{ userId: row.userId, employeeCode: row.employeeCode, fullName: row.fullName }] : []));
+  }
+
+  private async scopedActor(user: AuthenticatedUser, salesRepUserId?: string): Promise<AuthenticatedUser> {
+    if (user.roleCode === "SALES_REP") {
+      if (salesRepUserId) throw new ForbiddenException();
+      return user;
+    }
+    if (user.roleCode !== "SUPERVISOR" || !user.companyId || !salesRepUserId) throw new ForbiddenException();
+    const supervisor = await this.prisma.employee.findFirst({ where: { companyId: user.companyId, userId: user.userId }, select: { id: true } });
+    const rep = supervisor && await this.prisma.employee.findFirst({
+      where: { companyId: user.companyId, managerId: supervisor.id, userId: salesRepUserId, user: { is: { companyId: user.companyId, status: "ACTIVE", role: { code: "SALES_REP" } } } },
+      select: { user: { select: { id: true, email: true } } },
+    });
+    if (!rep?.user) throw new ForbiddenException();
+    return { ...user, userId: rep.user.id, email: rep.user.email, roleCode: "SALES_REP" };
+  }
+
+  async discoveryLimit(user: AuthenticatedUser, salesRepUserId?: string) {
+    user = await this.scopedActor(user, salesRepUserId);
     const account = await this.prisma.user.findUnique({ where: { id: user.userId }, select: { discoveryQuotaDay: true, discoveryIssuedToday: true, company: { select: { profile: { select: { timeZone: true } } } } } });
     const today = companyDayStart(account?.company?.profile?.timeZone);
     const used = account?.discoveryQuotaDay?.getTime() === today.getTime() ? account.discoveryIssuedToday : 0;
@@ -544,7 +572,8 @@ export class VisitCopilotService {
   // 1) GET /visit-copilot/daily-brief
   // ------------------------------------------------------------------
 
-  async dailyBrief(user: AuthenticatedUser, query: VisitCopilotDailyBriefQuery): Promise<DailyBriefResult> {
+  async dailyBrief(user: AuthenticatedUser, query: VisitCopilotDailyBriefQuery, salesRepUserId?: string): Promise<DailyBriefResult> {
+    user = await this.scopedActor(user, salesRepUserId);
     return auditMemory("visit-copilot-daily-brief", () => this.buildDailyBrief(user, query), { companyId: user.companyId, userId: user.userId });
   }
 
@@ -756,7 +785,8 @@ export class VisitCopilotService {
   // 2) POST /visit-copilot/plan
   // ------------------------------------------------------------------
 
-  async plan(user: AuthenticatedUser, body: VisitCopilotPlanRequest) {
+  async plan(user: AuthenticatedUser, body: VisitCopilotPlanRequest, salesRepUserId?: string) {
+    user = await this.scopedActor(user, salesRepUserId);
     const brief = await this.buildDailyBrief(user, body);
     let customers: DailyBriefCustomer[];
     if (body.mode === "priority") {
@@ -828,7 +858,8 @@ export class VisitCopilotService {
   // 3) GET /visit-copilot/briefing/:customerCode
   // ------------------------------------------------------------------
 
-  async briefing(user: AuthenticatedUser, customerCode: string, query: VisitCopilotBriefingQuery): Promise<CustomerBriefingResult> {
+  async briefing(user: AuthenticatedUser, customerCode: string, query: VisitCopilotBriefingQuery, salesRepUserId?: string): Promise<CustomerBriefingResult> {
+    user = await this.scopedActor(user, salesRepUserId);
     return auditMemory("customer-360", () => this.briefingMeasured(user, customerCode, query), { companyId: user.companyId, customerCode });
   }
 
@@ -1207,7 +1238,8 @@ export class VisitCopilotService {
   // 4) POST /visit-copilot/chat
   // ------------------------------------------------------------------
 
-  async chat(user: AuthenticatedUser, body: VisitCopilotChatRequest): Promise<VisitCopilotChatResult> {
+  async chat(user: AuthenticatedUser, body: VisitCopilotChatRequest, salesRepUserId?: string): Promise<VisitCopilotChatResult> {
+    user = await this.scopedActor(user, salesRepUserId);
     // ------------------------------------------------------------------
     // FDA Local Decision Layer — tried BEFORE any AI call ("Cheapest Path
     // Wins"). Customer mode only: Dictionary Engine resolves a customer
@@ -1983,7 +2015,8 @@ export class VisitCopilotService {
   // 5) GET /visit-copilot/discovery — Customer Discovery (Phase 2)
   // ------------------------------------------------------------------
 
-  async discovery(user: AuthenticatedUser, query: VisitCopilotDiscoveryQuery): Promise<DiscoveryResult> {
+  async discovery(user: AuthenticatedUser, query: VisitCopilotDiscoveryQuery, salesRepUserId?: string): Promise<DiscoveryResult> {
+    user = await this.scopedActor(user, salesRepUserId);
     const warnings: string[] = [];
     // The existing-customer layer must use the exact same daily route scope
     // as the plan/list above it.  Do not reconstruct this from Customers in
@@ -2018,7 +2051,8 @@ export class VisitCopilotService {
   //    opted in with its own key (CompanyProfile.discoveryProvider).
   // ------------------------------------------------------------------
 
-  async discoverySearch(user: AuthenticatedUser, body: VisitCopilotGoogleSearchRequest): Promise<GoogleSearchResult> {
+  async discoverySearch(user: AuthenticatedUser, body: VisitCopilotGoogleSearchRequest, salesRepUserId?: string): Promise<GoogleSearchResult> {
+    user = await this.scopedActor(user, salesRepUserId);
     // A double tap / network retry reaches this service at most once while the
     // same request is still running; the quota reservation remains atomic for
     // separate requests and across API instances.
@@ -2172,7 +2206,8 @@ export class VisitCopilotService {
   // 7) PATCH /visit-copilot/prospects/:id/status
   // ------------------------------------------------------------------
 
-  async updateProspectStatus(user: AuthenticatedUser, prospectId: string, body: VisitCopilotProspectStatusRequest): Promise<Prospect> {
+  async updateProspectStatus(user: AuthenticatedUser, prospectId: string, body: VisitCopilotProspectStatusRequest, salesRepUserId?: string): Promise<Prospect> {
+    user = await this.scopedActor(user, salesRepUserId);
     const prospect = await this.prisma.prospect.findFirst({ where: { id: prospectId.trim(), companyId: user.companyId! } });
     // Another company's prospect is indistinguishable from a missing one.
     if (!prospect) throw new NotFoundException("العميل المحتمل غير موجود.");
@@ -2183,7 +2218,8 @@ export class VisitCopilotService {
   // 8) GET /visit-copilot/route-opportunities
   // ------------------------------------------------------------------
 
-  async routeOpportunities(user: AuthenticatedUser, query: VisitCopilotDiscoveryQuery): Promise<RouteOpportunitiesResult> {
+  async routeOpportunities(user: AuthenticatedUser, query: VisitCopilotDiscoveryQuery, salesRepUserId?: string): Promise<RouteOpportunitiesResult> {
+    user = await this.scopedActor(user, salesRepUserId);
     const warnings: string[] = [];
     const stats = await this.buildDiscoveryStats(user, query, warnings);
     const rows = await this.prisma.prospect.findMany({ where: { companyId: user.companyId!, status: "NEW" } });
@@ -2218,7 +2254,8 @@ export class VisitCopilotService {
   // 9) GET /visit-copilot/prospect-briefing/:id
   // ------------------------------------------------------------------
 
-  async prospectBriefing(user: AuthenticatedUser, prospectId: string, query: VisitCopilotBriefingQuery): Promise<ProspectBriefingResult> {
+  async prospectBriefing(user: AuthenticatedUser, prospectId: string, query: VisitCopilotBriefingQuery, salesRepUserId?: string): Promise<ProspectBriefingResult> {
+    user = await this.scopedActor(user, salesRepUserId);
     return this.buildProspectBriefing(user, prospectId, query);
   }
 

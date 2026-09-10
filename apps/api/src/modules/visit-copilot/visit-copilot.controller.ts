@@ -38,40 +38,46 @@ import { VisitCopilotService } from "./visit-copilot.service";
 export class VisitCopilotController {
   constructor(private readonly visitCopilotService: VisitCopilotService) {}
 
+  @Get("sales-reps")
+  @Auth("SUPERVISOR")
+  salesReps(@CurrentUser() user: AuthenticatedUser) {
+    return this.visitCopilotService.supervisedSalesReps(user);
+  }
+
   @Get("daily-brief")
-  @Auth()
+  @Auth("SALES_REP", "SUPERVISOR")
   dailyBrief(
     @CurrentUser() user: AuthenticatedUser,
-    @Query(new ZodValidationPipe(visitCopilotDailyBriefQuerySchema)) query: VisitCopilotDailyBriefQuery,
+    @Query(new ZodValidationPipe(visitCopilotDailyBriefQuerySchema)) query: VisitCopilotDailyBriefQuery, @Query("salesRepUserId") salesRepUserId?: string,
   ) {
     if (!user.companyId) throw new ForbiddenException();
-    return this.visitCopilotService.dailyBrief(user, query);
+    return this.visitCopilotService.dailyBrief(user, query, salesRepUserId);
   }
 
   @Post("plan")
-  @Auth()
-  plan(@CurrentUser() user: AuthenticatedUser, @Body(new ZodValidationPipe(visitCopilotPlanRequestSchema)) body: VisitCopilotPlanRequest) {
+  @Auth("SALES_REP", "SUPERVISOR")
+  plan(@CurrentUser() user: AuthenticatedUser, @Body(new ZodValidationPipe(visitCopilotPlanRequestSchema)) body: VisitCopilotPlanRequest, @Query("salesRepUserId") salesRepUserId?: string) {
     if (!user.companyId) throw new ForbiddenException();
-    return this.visitCopilotService.plan(user, body);
+    return this.visitCopilotService.plan(user, body, salesRepUserId);
   }
 
   @Get("briefing/:customerCode")
-  @Auth()
+  @Auth("SALES_REP", "SUPERVISOR")
   briefing(
     @CurrentUser() user: AuthenticatedUser,
     @Param("customerCode") customerCode: string,
-    @Query(new ZodValidationPipe(visitCopilotBriefingQuerySchema)) query: VisitCopilotBriefingQuery,
+    @Query(new ZodValidationPipe(visitCopilotBriefingQuerySchema)) query: VisitCopilotBriefingQuery, @Query("salesRepUserId") salesRepUserId?: string,
   ) {
     if (!user.companyId) throw new ForbiddenException();
-    return this.visitCopilotService.briefing(user, customerCode, query);
+    return this.visitCopilotService.briefing(user, customerCode, query, salesRepUserId);
   }
 
   @Post("chat")
-  @Auth()
+  @Auth("SALES_REP", "SUPERVISOR")
   @RequiresPaidPlan()
-  chat(@CurrentUser() user: AuthenticatedUser, @Body(new ZodValidationPipe(visitCopilotChatRequestSchema)) body: VisitCopilotChatRequest) {
+  chat(@CurrentUser() user: AuthenticatedUser, @Body(new ZodValidationPipe(visitCopilotChatRequestSchema)) body: VisitCopilotChatRequest, @Query("salesRepUserId") salesRepUserId?: string) {
     if (!user.companyId) throw new ForbiddenException();
-    return this.visitCopilotService.chat(user, body);
+    return this.visitCopilotService.chat(user, body, salesRepUserId);
   }
 
   // "ملخص اليوم 360°" — see visit-copilot.schemas.ts's DTO comment. No scope
@@ -79,7 +85,7 @@ export class VisitCopilotController {
   // `user` (SgiService.getLatest's own hierarchy filter), same as every
   // other endpoint in this controller.
   @Get("daily-360-summary")
-  @Auth()
+  @Auth("SALES_REP", "SUPERVISOR")
   daily360Summary(
     @CurrentUser() user: AuthenticatedUser,
     @Query(new ZodValidationPipe(visitCopilotDaily360SummaryQuerySchema)) query: VisitCopilotDaily360SummaryQuery,
@@ -93,13 +99,13 @@ export class VisitCopilotController {
   // ------------------------------------------------------------------
 
   @Get("lost-opportunity-exclusions")
-  @Auth()
+  @Auth("SALES_REP", "SUPERVISOR")
   listLostOpportunityExclusions(@CurrentUser() user: AuthenticatedUser) {
     return this.visitCopilotService.listLostOpportunityExclusions(user);
   }
 
   @Post("lost-opportunity-exclusions")
-  @Auth()
+  @Auth("SALES_REP", "SUPERVISOR")
   createLostOpportunityExclusion(
     @CurrentUser() user: AuthenticatedUser,
     @Body(new ZodValidationPipe(createLostOpportunityExclusionSchema)) body: CreateLostOpportunityExclusion,
@@ -108,19 +114,19 @@ export class VisitCopilotController {
   }
 
   @Post("lost-opportunity-exclusions/:id/revoke")
-  @Auth()
+  @Auth("SALES_REP", "SUPERVISOR")
   revokeLostOpportunityExclusion(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.visitCopilotService.revokeLostOpportunityExclusion(user, id);
   }
 
   @Get("discovery")
-  @Auth()
+  @Auth("SALES_REP", "SUPERVISOR")
   discovery(
     @CurrentUser() user: AuthenticatedUser,
-    @Query(new ZodValidationPipe(visitCopilotDiscoveryQuerySchema)) query: VisitCopilotDiscoveryQuery,
+    @Query(new ZodValidationPipe(visitCopilotDiscoveryQuerySchema)) query: VisitCopilotDiscoveryQuery, @Query("salesRepUserId") salesRepUserId?: string,
   ) {
     if (!user.companyId) throw new ForbiddenException();
-    return this.visitCopilotService.discovery(user, query);
+    return this.visitCopilotService.discovery(user, query, salesRepUserId);
   }
 
   // "Search around me" — provider-based (OSM/Overpass by default, Google
@@ -128,30 +134,30 @@ export class VisitCopilotController {
   // path is kept for frontend compatibility; "search" is the
   // provider-neutral alias for new callers.
   @Post("discovery/google-search")
-  @Auth()
+  @Auth("SALES_REP", "SUPERVISOR")
   googleSearch(
     @CurrentUser() user: AuthenticatedUser,
-    @Body(new ZodValidationPipe(visitCopilotGoogleSearchRequestSchema)) body: VisitCopilotGoogleSearchRequest,
+    @Body(new ZodValidationPipe(visitCopilotGoogleSearchRequestSchema)) body: VisitCopilotGoogleSearchRequest, @Query("salesRepUserId") salesRepUserId?: string,
   ) {
     if (!user.companyId) throw new ForbiddenException();
-    return this.visitCopilotService.discoverySearch(user, body);
+    return this.visitCopilotService.discoverySearch(user, body, salesRepUserId);
   }
 
   @Post("discovery/search")
-  @Auth()
+  @Auth("SALES_REP", "SUPERVISOR")
   discoverySearch(
     @CurrentUser() user: AuthenticatedUser,
-    @Body(new ZodValidationPipe(visitCopilotGoogleSearchRequestSchema)) body: VisitCopilotGoogleSearchRequest,
+    @Body(new ZodValidationPipe(visitCopilotGoogleSearchRequestSchema)) body: VisitCopilotGoogleSearchRequest, @Query("salesRepUserId") salesRepUserId?: string,
   ) {
     if (!user.companyId) throw new ForbiddenException();
-    return this.visitCopilotService.discoverySearch(user, body);
+    return this.visitCopilotService.discoverySearch(user, body, salesRepUserId);
   }
 
   @Get("discovery/limit")
-  @Auth()
-  discoveryLimit(@CurrentUser() user: AuthenticatedUser) {
+  @Auth("SALES_REP", "SUPERVISOR")
+  discoveryLimit(@CurrentUser() user: AuthenticatedUser, @Query("salesRepUserId") salesRepUserId?: string) {
     if (!user.companyId) throw new ForbiddenException();
-    return this.visitCopilotService.discoveryLimit(user);
+    return this.visitCopilotService.discoveryLimit(user, salesRepUserId);
   }
 
   @Post("admin/users/:id/reset-discovery-daily-limit")
@@ -161,36 +167,36 @@ export class VisitCopilotController {
   }
 
   @Patch("prospects/:id/status")
-  @Auth()
+  @Auth("SALES_REP", "SUPERVISOR")
   updateProspectStatus(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
-    @Body(new ZodValidationPipe(visitCopilotProspectStatusRequestSchema)) body: VisitCopilotProspectStatusRequest,
+    @Body(new ZodValidationPipe(visitCopilotProspectStatusRequestSchema)) body: VisitCopilotProspectStatusRequest, @Query("salesRepUserId") salesRepUserId?: string,
   ) {
     if (!user.companyId) throw new ForbiddenException();
-    return this.visitCopilotService.updateProspectStatus(user, id, body);
+    return this.visitCopilotService.updateProspectStatus(user, id, body, salesRepUserId);
   }
 
   @Get("route-opportunities")
-  @Auth()
+  @Auth("SALES_REP", "SUPERVISOR")
   routeOpportunities(
     @CurrentUser() user: AuthenticatedUser,
-    @Query(new ZodValidationPipe(visitCopilotDiscoveryQuerySchema)) query: VisitCopilotDiscoveryQuery,
+    @Query(new ZodValidationPipe(visitCopilotDiscoveryQuerySchema)) query: VisitCopilotDiscoveryQuery, @Query("salesRepUserId") salesRepUserId?: string,
   ) {
     if (!user.companyId) throw new ForbiddenException();
-    return this.visitCopilotService.routeOpportunities(user, query);
+    return this.visitCopilotService.routeOpportunities(user, query, salesRepUserId);
   }
 
   // Same query shape as the customer briefing (period + vanStock) — the
   // response mirrors the customer briefing too, plus isProspect:true.
   @Get("prospect-briefing/:id")
-  @Auth()
+  @Auth("SALES_REP", "SUPERVISOR")
   prospectBriefing(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
-    @Query(new ZodValidationPipe(visitCopilotBriefingQuerySchema)) query: VisitCopilotBriefingQuery,
+    @Query(new ZodValidationPipe(visitCopilotBriefingQuerySchema)) query: VisitCopilotBriefingQuery, @Query("salesRepUserId") salesRepUserId?: string,
   ) {
     if (!user.companyId) throw new ForbiddenException();
-    return this.visitCopilotService.prospectBriefing(user, id, query);
+    return this.visitCopilotService.prospectBriefing(user, id, query, salesRepUserId);
   }
 }

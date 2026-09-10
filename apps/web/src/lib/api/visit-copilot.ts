@@ -32,57 +32,59 @@ interface PeriodParams {
 interface PlanDateParams {
   date?: string;
 }
+type RepScope = { salesRepUserId?: string };
 
 export const visitCopilotApi = {
-  dailyBrief: (params: PeriodParams & PlanDateParams, signal?: AbortSignal) =>
+  supervisedSalesReps: () => apiFetch<Array<{ userId: string; employeeCode: string; fullName: string }>>("/visit-copilot/sales-reps"),
+  dailyBrief: (params: PeriodParams & PlanDateParams & RepScope, signal?: AbortSignal) =>
     apiFetch<VisitCopilotDailyBrief>("/visit-copilot/daily-brief", {
-      query: { period: params.period, from: params.from, to: params.to, date: params.date },
+      query: { period: params.period, from: params.from, to: params.to, date: params.date, salesRepUserId: params.salesRepUserId },
       signal,
     }),
 
-  plan: (body: VisitCopilotPlanRequest) => apiFetch<VisitCopilotPlanResult>("/visit-copilot/plan", { method: "POST", body }),
+  plan: (body: VisitCopilotPlanRequest & RepScope) => apiFetch<VisitCopilotPlanResult>("/visit-copilot/plan", { method: "POST", body, query: { salesRepUserId: body.salesRepUserId } }),
 
-  briefing: (params: PeriodParams & { customerCode: string; vanStock: boolean; locale?: "ar" | "en" }) =>
+  briefing: (params: PeriodParams & { customerCode: string; vanStock: boolean; locale?: "ar" | "en" } & RepScope) =>
     apiFetch<VisitCopilotBriefing>(`/visit-copilot/briefing/${encodeURIComponent(params.customerCode)}`, {
-      query: { period: params.period, from: params.from, to: params.to, vanStock: params.vanStock, locale: params.locale },
+      query: { period: params.period, from: params.from, to: params.to, vanStock: params.vanStock, locale: params.locale, salesRepUserId: params.salesRepUserId },
     }),
 
   // Chat body carries exactly one of customerCode / prospectId (Phase 2).
-  chat: (body: VisitCopilotChatRequest) => apiFetch<VisitCopilotChatResponse>("/visit-copilot/chat", { method: "POST", body }),
+  chat: (body: VisitCopilotChatRequest & RepScope) => apiFetch<VisitCopilotChatResponse>("/visit-copilot/chat", { method: "POST", body, query: { salesRepUserId: body.salesRepUserId } }),
 
   // ——— Phase 2: Customer Discovery ———
-  discovery: (params: PeriodParams & PlanDateParams & { minimumScore?: number }, signal?: AbortSignal) =>
+  discovery: (params: PeriodParams & PlanDateParams & { minimumScore?: number } & RepScope, signal?: AbortSignal) =>
     apiFetch<VisitCopilotDiscoveryResult>("/visit-copilot/discovery", {
-      query: { period: params.period, from: params.from, to: params.to, date: params.date, minimumScore: params.minimumScore },
+      query: { period: params.period, from: params.from, to: params.to, date: params.date, minimumScore: params.minimumScore, salesRepUserId: params.salesRepUserId },
       signal,
     }),
 
-  googleSearch: (body: VisitCopilotGoogleSearchRequest) =>
-    apiFetch<VisitCopilotGoogleSearchResult>("/visit-copilot/discovery/search", { method: "POST", body }),
+  googleSearch: (body: VisitCopilotGoogleSearchRequest & RepScope) =>
+    apiFetch<VisitCopilotGoogleSearchResult>("/visit-copilot/discovery/search", { method: "POST", body, query: { salesRepUserId: body.salesRepUserId } }),
 
-  discoveryLimit: () => apiFetch<VisitCopilotDiscoveryLimit>("/visit-copilot/discovery/limit"),
+  discoveryLimit: (salesRepUserId?: string) => apiFetch<VisitCopilotDiscoveryLimit>("/visit-copilot/discovery/limit", { query: { salesRepUserId } }),
 
   resetDiscoveryDailyLimit: (userId: string) =>
     apiFetch<{ success: true; resetAt: string; dailyLimit: number; remaining: number }>(`/visit-copilot/admin/users/${encodeURIComponent(userId)}/reset-discovery-daily-limit`, { method: "POST" }),
 
-  prospectStatus: (params: { id: string; status: VisitCopilotProspectStatus }) =>
+  prospectStatus: (params: { id: string; status: VisitCopilotProspectStatus } & RepScope) =>
     apiFetch<VisitCopilotProspect>(`/visit-copilot/prospects/${encodeURIComponent(params.id)}/status`, {
       method: "PATCH",
-      body: { status: params.status },
+      body: { status: params.status }, query: { salesRepUserId: params.salesRepUserId },
     }),
 
   createProspectVisit: (body: { prospectId: string; scheduledFor: string }) =>
     apiFetch("/prospect-visits", { method: "POST", body }),
 
-  routeOpportunities: (params: PeriodParams) =>
+  routeOpportunities: (params: PeriodParams & RepScope) =>
     apiFetch<VisitCopilotRouteOpportunities>("/visit-copilot/route-opportunities", {
-      query: { period: params.period, from: params.from, to: params.to },
+      query: { period: params.period, from: params.from, to: params.to, salesRepUserId: params.salesRepUserId },
     }),
 
   // Same shape as the customer briefing + isProspect: true.
-  prospectBriefing: (params: PeriodParams & { id: string; vanStock: boolean }) =>
+  prospectBriefing: (params: PeriodParams & { id: string; vanStock: boolean } & RepScope) =>
     apiFetch<VisitCopilotBriefing>(`/visit-copilot/prospect-briefing/${encodeURIComponent(params.id)}`, {
-      query: { period: params.period, from: params.from, to: params.to, vanStock: params.vanStock },
+      query: { period: params.period, from: params.from, to: params.to, vanStock: params.vanStock, salesRepUserId: params.salesRepUserId },
     }),
 
   // "ملخص اليوم 360°" (2026-07-28) — no scope param; role scoping is
