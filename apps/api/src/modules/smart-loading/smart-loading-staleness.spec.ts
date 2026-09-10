@@ -87,6 +87,31 @@ test("management RIE stale rollup returns Product grain for more than 5,000 rout
   assert.equal(rows[0]?.staleRouteProducts.length, 5_001);
 });
 
+test("management stale SQL scopes invoice-item merge keys from stocked Route × Product before aggregation", async () => {
+  let statement: { strings: readonly string[] } | undefined;
+  const query = new RieScalableQueryService(
+    { $queryRaw: async (sql: { strings: readonly string[] }) => { statement = sql; return []; } } as never,
+    { resolveAllowedRouteIds: async () => null } as never,
+  );
+
+  await query.queryRouteProductStaleness({
+    companyId: "company-1",
+    targetDate: "2026-08-10",
+    staleDaysThreshold: 4,
+    routeIds: ["route-a"],
+  });
+
+  const sql = statement!.strings.join("?");
+  assert.match(sql, /scoped_route_products AS MATERIALIZED/);
+  assert.match(sql, /scoped_item_keys AS MATERIALIZED/);
+  assert.match(sql, /INNER JOIN scoped_invoices scoped_invoice/);
+  assert.match(sql, /INNER JOIN scoped_route_products scoped_product/);
+  assert.match(sql, /INNER JOIN scoped_item_keys scoped_item/);
+  assert.match(sql, /INNER JOIN scoped_route_products stocked_route_product/);
+  assert.ok(sql.indexOf("scoped_item_keys AS MATERIALIZED") < sql.indexOf("item_versions AS MATERIALIZED"));
+  assert.match(sql, /MIN\(candidate_version\.precedence\) OVER/);
+});
+
 test("management vehicle monitor returns every inventory product at Product grain for a large route scope", async () => {
   const expected = [
     { productCode: "sku-a", currentVehicleStock: 10, weeklyAverageSales: 2, alignmentPercent: 100 },

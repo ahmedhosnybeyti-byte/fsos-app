@@ -375,20 +375,7 @@ export class RieScalableQueryService {
     const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [
       Prisma.sql`${dateText(invoiceDate)} <= ${targetDate}${routeScope(invoiceRoute)}`,
     ], [], []);
-    const scopedInvoiceNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
-    const scopedInvoiceNumbersCte = Prisma.sql`scoped_invoice_numbers AS MATERIALIZED (
-      SELECT DISTINCT ${scopedInvoiceNo} AS invoice_no
-      FROM invoice_active invoice
-      WHERE ${scopedInvoiceNo} <> ''
-    )`;
-    // InvoiceNo is part of the Invoice Items business key. Restricting rows
-    // to the already-scoped invoice keys before newest-version resolution is
-    // therefore parity-safe and lets PostgreSQL use the InvoiceNo index.
-    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], false, [
-      Prisma.sql`INNER JOIN scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`,
-    ]);
     const inventoryRouteText = normalizedField({ field: "RouteID", source: "inventory" });
-    const itemRouteText = normalizedField({ field: "RouteID", source: "item" });
     const invoiceRouteText = normalizedField({ field: "RouteID", source: "invoice" });
     const effectiveSaleRoute = Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "RouteID", source: "item" })}, '')), ''), ${textField({ field: "RouteID", source: "invoice" })}, '')))`;
     const inventoryProduct = normalizedField({ field: "ProductCode", source: "inventory" });
@@ -397,8 +384,44 @@ export class RieScalableQueryService {
     const invoiceNo = normalizedField({ field: "InvoiceNo", source: "item" });
     const invoiceJoinNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
     const saleDate = dateText(textField({ field: "InvoiceDate", source: "invoice" }));
+    const scopedInvoicesCte = Prisma.sql`scoped_invoices AS MATERIALIZED (
+      SELECT DISTINCT ${invoiceJoinNo} AS invoice_no, ${invoiceRouteText} AS route_id
+      FROM invoice_active invoice
+      WHERE ${invoiceJoinNo} <> ''
+    )`;
+    const scopedRouteProductsCte = Prisma.sql`scoped_route_products AS MATERIALIZED (
+      SELECT DISTINCT route_id, product_code
+      FROM inventory_by_route_product
+      WHERE product_code <> ''
+    )`;
+    // ProductCode can change on an updated invoice line, so filtering a single
+    // version by ProductCode before newest-wins could resurrect an older line.
+    // Instead, find every historically scoped InvoiceNo × LineNo first, then
+    // pass every active-version candidate for each key into the unchanged
+    // newest-wins window. This restricts fact work early without changing the
+    // canonical winner or its final Route × Product eligibility.
+    const itemSourceInvoiceNo = normalizedField({ field: "InvoiceNo", source: "item_source" });
+    const itemSourceLineNo = normalizedField({ field: "LineNo", source: "item_source" });
+    const itemSourceProduct = normalizedField({ field: "ProductCode", source: "item_source" });
+    const effectiveItemSourceRoute = Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "RouteID", source: "item_source" })}, '')), ''), scoped_invoice.route_id, '')))`;
+    const scopedItemKeysCte = Prisma.sql`scoped_item_keys AS MATERIALIZED (
+      SELECT DISTINCT ${itemSourceInvoiceNo} AS invoice_no, ${itemSourceLineNo} AS line_no
+      FROM "rie_dataset_versions" item_version
+      INNER JOIN "files" source_file ON source_file.id = item_version."source_file_id"
+      INNER JOIN "rie_entity_rows" item_source ON item_source."dataset_version_id" = item_version.id
+      INNER JOIN scoped_invoices scoped_invoice ON ${itemSourceInvoiceNo} = scoped_invoice.invoice_no
+      INNER JOIN scoped_route_products scoped_product ON scoped_product.route_id = ${effectiveItemSourceRoute}
+        AND scoped_product.product_code = ${itemSourceProduct}
+      WHERE item_version."company_id" = ${input.companyId} AND item_version."entity_name" = 'Invoice Items' AND item_version."is_active" = TRUE
+        AND source_file."company_id" = ${input.companyId} AND source_file."is_active" = TRUE
+        AND source_file.status = 'READY' AND source_file."dataset_type_confirmed" = TRUE
+        AND item_source."company_id" = ${input.companyId} AND item_source."entity_name" = 'Invoice Items'
+    )`;
+    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], false, [
+      Prisma.sql`INNER JOIN scoped_item_keys scoped_item ON ${itemSourceInvoiceNo} = scoped_item.invoice_no AND ${itemSourceLineNo} = scoped_item.line_no`,
+    ]);
     const rows = await this.runExpensiveQuery("queryRouteProductStaleness", () => this.prisma.$queryRaw<RieRouteProductStalenessRow[]>(Prisma.sql`
-      WITH ${inventoryCte}, ${invoiceCte}, ${scopedInvoiceNumbersCte}, ${itemsCte},
+      WITH ${inventoryCte}, ${invoiceCte},
       inventory_latest AS MATERIALIZED (
         SELECT ${inventoryRouteText} AS route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) AS report_date
         FROM inventory_active inventory
@@ -411,12 +434,13 @@ export class RieScalableQueryService {
           AND NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '') = latest.report_date
         GROUP BY ${inventoryRouteText}, ${inventoryProduct}
       ),
+      ${scopedRouteProductsCte}, ${scopedInvoicesCte}, ${scopedItemKeysCte}, ${itemsCte},
       sales_by_route_product AS MATERIALIZED (
         SELECT ${effectiveSaleRoute} AS route_id, ${itemProduct} AS product_code, MAX(${saleDate}) AS last_sale_date
         FROM item_active item
         INNER JOIN invoice_active invoice ON ${invoiceNo} = ${invoiceJoinNo}
-        INNER JOIN (SELECT DISTINCT route_id FROM inventory_by_route_product) stocked_routes ON stocked_routes.route_id = ${effectiveSaleRoute}
-        WHERE ${itemProduct} <> ''
+        INNER JOIN scoped_route_products stocked_route_product ON stocked_route_product.route_id = ${effectiveSaleRoute}
+          AND stocked_route_product.product_code = ${itemProduct}
         GROUP BY ${effectiveSaleRoute}, ${itemProduct}
       ),
       route_stale AS MATERIALIZED (
