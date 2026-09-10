@@ -119,6 +119,9 @@ test("route-product staleness uses direct CTEs and preserves its single-version 
   assert.match(sql, /inventory_active AS MATERIALIZED/);
   assert.match(sql, /invoice_active AS MATERIALIZED/);
   assert.match(sql, /item_active AS MATERIALIZED/);
+  assert.doesNotMatch(sql, /SELECT inventory_source\.\*/);
+  assert.doesNotMatch(sql, /SELECT invoice_source\.\*/);
+  assert.doesNotMatch(sql, /SELECT item_source\.\*/);
 });
 
 test("route-product staleness keeps newest-wins CTEs when any entity has multiple active versions", async () => {
@@ -144,6 +147,9 @@ test("route-product staleness keeps newest-wins CTEs when any entity has multipl
   assert.match(sql, /inventory_candidates/);
   assert.doesNotMatch(sql, /invoice_candidates/);
   assert.match(sql, /item_candidates/);
+  assert.doesNotMatch(sql, /SELECT inventory_source\.\*/);
+  assert.doesNotMatch(sql, /SELECT invoice_source\.\*/);
+  assert.doesNotMatch(sql, /SELECT item_source\.\*/);
 });
 
 test("management vehicle monitor returns every inventory product at Product grain for a large route scope", async () => {
