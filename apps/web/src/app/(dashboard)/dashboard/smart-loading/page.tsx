@@ -21,7 +21,9 @@ export default function SmartLoadingPage() {
   const [managerId, setManagerId] = useState<string>();
   const [supervisorId, setSupervisorId] = useState<string>();
   const managementView = ["COMPANY_ADMIN", "MANAGER", "SUPERVISOR"].includes(user?.role.code ?? "");
-  const deferManagementDetails = managementView && !salesRepId;
+  // Management starts with headers only. Once a manager, supervisor, or rep
+  // is selected, fetch the existing session scoped to that selection.
+  const deferManagementDetails = managementView && !managerId && !supervisorId && !salesRepId;
   const session = useQuery({
     queryKey: ["smart-loading", "session", targetDate, staleDaysThreshold, salesRepId, managerId, supervisorId],
     queryFn: () => smartLoadingApi.getSession(targetDate, staleDaysThreshold, salesRepId, managerId, supervisorId),
@@ -32,7 +34,7 @@ export default function SmartLoadingPage() {
   return (
     <SmartLoadingScreen
       session={session.data}
-      isLoading={session.isLoading}
+      isLoading={session.isLoading || (managementView && session.isFetching)}
       isError={session.isError}
       targetDate={targetDate}
       onTargetDateChange={setTargetDate}

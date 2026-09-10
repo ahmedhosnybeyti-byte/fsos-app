@@ -617,6 +617,15 @@ export function SmartLoadingScreen({
   async function closeAndExport() { if (hasUnappliedChanges) await applyRecalculation(); if (recalculationError || !window.confirm(locale === "ar" ? "هل أنت متأكد من إغلاق جلسة التحميل؟" : "Close the loading session?")) return; await exportExcel(); resetOperationalState(); }
   function startNewSession() { if (!window.confirm(locale === "ar" ? "بدء جلسة جديدة؟" : "Start a new session?")) return; window.sessionStorage.removeItem("smart-loading-work"); resetOperationalState(); }
   if (isLoading) {
+    if (managementView && (managerId || supervisorId || salesRepId)) {
+      return <ManagementScopeLoading
+        locale={locale}
+        managerId={managerId}
+        supervisorId={supervisorId}
+        salesRepId={salesRepId}
+        onManagementScopeChange={onManagementScopeChange}
+      />;
+    }
     return (
       <div className="space-y-3">
         {[1, 2, 3].map((placeholder) => (
@@ -1092,6 +1101,16 @@ function ManagementHeadersOnly({ locale, targetDate, managerId, supervisorId, on
     <div className="grid items-stretch gap-3 md:grid-cols-2">
       <ManagementLoadingRisk targetDate={targetDate} onSelectPerson={() => undefined} />
       <ManagementLostOpportunitiesCard targetDate={targetDate} scope={{ managerId, supervisorId }} onSelectPerson={() => undefined} />
+    </div>
+  </div>;
+}
+
+/** Keep the selected hierarchy visible while its scoped analysis is loading. */
+function ManagementScopeLoading({ locale, managerId, supervisorId, salesRepId, onManagementScopeChange }: { locale: "ar" | "en"; managerId?: string; supervisorId?: string; salesRepId?: string; onManagementScopeChange: (scope: ManagementScopeSelection) => void }) {
+  return <div dir={locale === "ar" ? "rtl" : "ltr"} className="space-y-6 pb-10">
+    <ManagementHierarchyFilters locale={locale} managementStockAlignmentPercent={null} onManagementScopeChange={onManagementScopeChange} managementScope={{ managerId, supervisorId, salesRepId }} />
+    <div className="space-y-3">
+      {[1, 2, 3].map((placeholder) => <Skeleton key={placeholder} className="h-32 w-full" />)}
     </div>
   </div>;
 }
@@ -1829,11 +1848,16 @@ function ManagementHierarchyFilters({ locale, managementStockAlignmentPercent, o
   const hierarchy = useQuery({ queryKey: ["smart-loading", "management-hierarchy", managerId, supervisorId], queryFn: () => smartLoadingApi.getHierarchyOptions(managerId || undefined, supervisorId || undefined), placeholderData: (previous) => previous });
   const tr = locale === "ar";
   const optionLabel = (options: { value: string; label: string }[] | undefined, value: string) => options?.find((option) => option.value === value)?.label;
-  const Select = ({ label, value, options, placeholder, onChange }: { label: string; value: string; options: { value: string; label: string }[]; placeholder: string; onChange: (value: string) => void }) => <label className="grid gap-1 text-xs text-muted-foreground"><span>{label}</span><select className="h-8 rounded-md border bg-background px-2 text-sm text-foreground" value={value} onChange={(event) => onChange(event.target.value)}><option value="">{placeholder}</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
-  const showManagers = roleCode === "COMPANY_ADMIN" && !managerId;
-  const showSupervisors = (roleCode === "COMPANY_ADMIN" && Boolean(managerId) && !supervisorId) || (roleCode === "MANAGER" && !supervisorId);
-  const showSalesReps = Boolean(supervisorId) || roleCode === "SUPERVISOR";
-  return <Card dir={tr ? "rtl" : "ltr"} className="glass-card glow-ai rise-in relative z-10 order-2 flex h-full min-h-0 flex-col lg:col-start-1 lg:row-start-1 lg:row-span-2"><CardHeader className="shrink-0 px-4 pb-2 pt-4"><CardTitle className="text-base">{tr ? "الطلبات المؤكدة المجمعة" : "Aggregated confirmed orders"}</CardTitle><CardDescription>{tr ? "حدد التسلسل الإداري للوصول إلى المندوب." : "Select the management hierarchy to reach a sales rep."}</CardDescription></CardHeader><CardContent className="space-y-4 p-4 pt-1"><div className="grid gap-2">{showManagers && <Select label={tr ? "المدير" : "Manager"} value={managerId} options={hierarchy.data?.managers ?? []} placeholder={tr ? "اختر مديرًا" : "Select a manager"} onChange={(value) => { onManagementScopeChange({ managerId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, value) }); }} />}{showSupervisors && <Select label={tr ? "المشرف" : "Supervisor"} value={supervisorId} options={hierarchy.data?.supervisors ?? []} placeholder={tr ? "اختر مشرفًا" : "Select a supervisor"} onChange={(value) => { onManagementScopeChange({ managerId: managerId || undefined, supervisorId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, managerId), supervisorName: optionLabel(hierarchy.data?.supervisors, value) }); }} />}{showSalesReps && <Select label={tr ? "مندوب المبيعات" : "Sales Rep"} value={salesRepId} options={hierarchy.data?.salesReps ?? []} placeholder={tr ? "اختر مندوبًا" : "Select a sales rep"} onChange={(value) => { onManagementScopeChange({ managerId: managerId || undefined, supervisorId: supervisorId || undefined, managerName: optionLabel(hierarchy.data?.managers, managerId), supervisorName: optionLabel(hierarchy.data?.supervisors, value), salesRepId: value || undefined, salesRepName: optionLabel(hierarchy.data?.salesReps, value) }); }} />}</div>{managementStockAlignmentPercent !== null && <div dir="ltr" className="grid grid-cols-3 gap-2"><ManagementStockAlignmentMetric label={tr ? "توافق مخزون الإدارة" : "Management Stock Alignment"} value={managementStockAlignmentPercent} locale={locale} /><Card aria-label="Reserved management KPI" className="glass-card h-24 border-dashed border-border/60 bg-background/30 shadow-none" /></div>}</CardContent></Card>;
+  const Select = ({ label, value, options, placeholder, disabled = false, onChange }: { label: string; value: string; options: { value: string; label: string }[]; placeholder: string; disabled?: boolean; onChange: (value: string) => void }) => <label className="grid gap-1 text-xs text-muted-foreground"><span>{label}</span><select disabled={disabled} className="h-8 rounded-md border bg-background px-2 text-sm text-foreground disabled:cursor-not-allowed disabled:opacity-60" value={value} onChange={(event) => onChange(event.target.value)}><option value="">{placeholder}</option>{options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>;
+  const isCompanyAdmin = roleCode === "COMPANY_ADMIN";
+  const isManager = roleCode === "MANAGER";
+  const isSupervisor = roleCode === "SUPERVISOR";
+  const showManagers = isCompanyAdmin;
+  const showSupervisors = isCompanyAdmin || isManager;
+  const showSalesReps = isCompanyAdmin || isManager || isSupervisor;
+  const supervisorDisabled = isCompanyAdmin && !managerId;
+  const salesRepDisabled = (isCompanyAdmin || isManager) && !supervisorId;
+  return <Card dir={tr ? "rtl" : "ltr"} className="glass-card glow-ai rise-in relative z-10 order-2 flex h-full min-h-0 flex-col lg:col-start-1 lg:row-start-1 lg:row-span-2"><CardHeader className="shrink-0 px-4 pb-2 pt-4"><CardTitle className="text-base">{tr ? "الطلبات المؤكدة المجمعة" : "Aggregated confirmed orders"}</CardTitle><CardDescription>{tr ? "حدد التسلسل الإداري للوصول إلى المندوب." : "Select the management hierarchy to reach a sales rep."}</CardDescription></CardHeader><CardContent className="space-y-4 p-4 pt-1"><div className="grid gap-2 sm:grid-cols-3">{showManagers && <Select label={tr ? "المدير" : "Manager"} value={managerId} options={hierarchy.data?.managers ?? []} placeholder={tr ? "اختر مديرًا" : "Select a manager"} onChange={(value) => { onManagementScopeChange({ managerId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, value) }); }} />}{showSupervisors && <Select disabled={supervisorDisabled} label={tr ? "المشرف" : "Supervisor"} value={supervisorId} options={hierarchy.data?.supervisors ?? []} placeholder={tr ? "اختر مشرفًا" : "Select a supervisor"} onChange={(value) => { onManagementScopeChange({ managerId: managerId || undefined, supervisorId: value || undefined, managerName: optionLabel(hierarchy.data?.managers, managerId), supervisorName: optionLabel(hierarchy.data?.supervisors, value) }); }} />}{showSalesReps && <Select disabled={salesRepDisabled} label={tr ? "مندوب المبيعات" : "Sales Rep"} value={salesRepId} options={hierarchy.data?.salesReps ?? []} placeholder={tr ? "اختر مندوبًا" : "Select a sales rep"} onChange={(value) => { onManagementScopeChange({ managerId: managerId || undefined, supervisorId: supervisorId || undefined, managerName: optionLabel(hierarchy.data?.managers, managerId), supervisorName: optionLabel(hierarchy.data?.supervisors, value), salesRepId: value || undefined, salesRepName: optionLabel(hierarchy.data?.salesReps, value) }); }} />}</div>{managementStockAlignmentPercent !== null && <div dir="ltr" className="grid grid-cols-3 gap-2"><ManagementStockAlignmentMetric label={tr ? "توافق مخزون الإدارة" : "Management Stock Alignment"} value={managementStockAlignmentPercent} locale={locale} /><Card aria-label="Reserved management KPI" className="glass-card h-24 border-dashed border-border/60 bg-background/30 shadow-none" /></div>}</CardContent></Card>;
 }
 
 function SessionMetric({ label, value }: { label: string; value: string }) { return <div><p className="truncate text-[11px] text-muted-foreground">{label}</p><p className="font-semibold">{value}</p></div>; }
