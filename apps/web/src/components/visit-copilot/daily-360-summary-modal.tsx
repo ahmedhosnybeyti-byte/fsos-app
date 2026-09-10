@@ -45,6 +45,7 @@ interface Props {
   selectedDate: string;
   from?: string;
   to?: string;
+  salesRepId?: string;
 }
 
 function priorityBadgeClass(priority: VisitCopilot360ExecutionStep["priority"]): string {
@@ -60,7 +61,7 @@ function withoutRepeatedCustomerName(customerName: string, reason: string): stri
   return text.slice(name.length).replace(/^[\s—–:-]+/, "") || reason;
 }
 
-export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate, from, to }: Props) {
+export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate, from, to, salesRepId }: Props) {
   const { t, locale } = useTranslation();
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -72,8 +73,8 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
 
   const daily360Query = daily360SummaryQuery({ period, from, to, selectedDate });
   const query = useQuery({
-    queryKey: [...daily360Query.queryKey, locale],
-    queryFn: () => visitCopilotApi.daily360Summary({ ...daily360Query.request, locale }),
+    queryKey: [...daily360Query.queryKey, locale, salesRepId],
+    queryFn: () => visitCopilotApi.daily360Summary({ ...daily360Query.request, locale, salesRepId }),
     enabled: open,
     // A rep might tap the button twice while the report is generating —
     // react-query already de-dupes concurrent identical requests, but keep

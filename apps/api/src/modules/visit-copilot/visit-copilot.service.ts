@@ -443,31 +443,41 @@ export class VisitCopilotService {
   private readonly logger = new Logger(VisitCopilotService.name);
   private readonly discoverySearchesInFlight = new Map<string, Promise<GoogleSearchResult>>();
 
-  /** The supervisor picker is deliberately backed only by the existing
-   * Employee -> manager relation.  It never widens the actor's RIE scope. */
+  /** A small PostgreSQL/RIE hierarchy dimension. The RIE applies the same
+   * canonical route scope before the Employees join, so this never reads a
+   * full employee hierarchy into Node. */
   async supervisedSalesReps(user: AuthenticatedUser) {
     if (user.roleCode !== "SUPERVISOR" || !user.companyId) throw new ForbiddenException();
-    const supervisor = await this.prisma.employee.findFirst({ where: { companyId: user.companyId, userId: user.userId }, select: { id: true } });
-    if (!supervisor) return [];
-    return this.prisma.employee.findMany({
-      where: { companyId: user.companyId, managerId: supervisor.id, user: { is: { companyId: user.companyId, status: "ACTIVE", role: { code: "SALES_REP" } } } },
-      select: { userId: true, employeeCode: true, fullName: true }, orderBy: [{ fullName: "asc" }, { employeeCode: "asc" }],
-    }).then((rows) => rows.flatMap((row) => row.userId ? [{ userId: row.userId, employeeCode: row.employeeCode, fullName: row.fullName }] : []));
+    const result = await this.rieFacade.queryCanonicalRecords({
+      ...this.rieContext(user),
+      entityName: "Routes",
+      hierarchyRoute: { field: "RouteID" },
+      joins: [
+        { entityName: "Employees", alias: "rep", type: "inner", on: { left: { field: "SalesRepID" }, rightField: "EmployeeID" } },
+        { entityName: "Employees", alias: "supervisor", type: "inner", on: { left: { field: "SupervisorID" }, rightField: "EmployeeID" } },
+        { entityName: "Employees", alias: "manager", type: "inner", on: { left: { field: "ManagerID" }, rightField: "EmployeeID" } },
+      ],
+      projection: [{ field: "EmployeeID", source: "rep", as: "employeeCode" }, { field: "EmployeeName", source: "rep", as: "fullName" }],
+      groupBy: [{ field: "EmployeeID", source: "rep" }, { field: "EmployeeName", source: "rep" }],
+      orderBy: [{ field: { field: "EmployeeName", source: "rep" }, direction: "asc" }],
+      pagination: { limit: 500 },
+    });
+    if (result.page.hasMore) throw new BadRequestException("Visit Copilot hierarchy options exceed the safe response limit.");
+    return result.records.map((row) => ({ employeeCode: String(row.employeeCode ?? "").trim(), fullName: String(row.fullName ?? row.employeeCode ?? "").trim() })).filter((rep) => rep.employeeCode && rep.fullName);
   }
 
-  private async scopedActor(user: AuthenticatedUser, salesRepUserId?: string): Promise<AuthenticatedUser> {
+  private async scopedActor(user: AuthenticatedUser, salesRepId?: string): Promise<AuthenticatedUser> {
     if (user.roleCode === "SALES_REP") {
-      if (salesRepUserId) throw new ForbiddenException();
+      if (salesRepId) throw new ForbiddenException();
       return user;
     }
-    if (user.roleCode !== "SUPERVISOR" || !user.companyId || !salesRepUserId) throw new ForbiddenException();
-    const supervisor = await this.prisma.employee.findFirst({ where: { companyId: user.companyId, userId: user.userId }, select: { id: true } });
-    const rep = supervisor && await this.prisma.employee.findFirst({
-      where: { companyId: user.companyId, managerId: supervisor.id, userId: salesRepUserId, user: { is: { companyId: user.companyId, status: "ACTIVE", role: { code: "SALES_REP" } } } },
-      select: { user: { select: { id: true, email: true } } },
-    });
-    if (!rep?.user) throw new ForbiddenException();
-    return { ...user, userId: rep.user.id, email: rep.user.email, roleCode: "SALES_REP" };
+    if (user.roleCode !== "SUPERVISOR" || !user.companyId || !salesRepId) throw new ForbiddenException();
+    const options = await this.supervisedSalesReps(user);
+    if (!options.some((rep) => rep.employeeCode === salesRepId)) throw new ForbiddenException();
+    const rep = await this.prisma.employee.findFirst({ where: { companyId: user.companyId, employeeCode: salesRepId }, select: { userId: true, contactEmail: true, user: { select: { email: true } } } });
+    const email = rep?.user?.email ?? rep?.contactEmail;
+    if (!rep || !email) throw new ForbiddenException();
+    return { ...user, userId: rep.userId ?? user.userId, email, roleCode: "SALES_REP" };
   }
 
   async discoveryLimit(user: AuthenticatedUser, salesRepUserId?: string) {
@@ -1619,7 +1629,8 @@ export class VisitCopilotService {
     };
   }
 
-  async daily360Summary(user: AuthenticatedUser, query: VisitCopilotDaily360SummaryQuery): Promise<VisitCopilot360Summary> {
+  async daily360Summary(user: AuthenticatedUser, query: VisitCopilotDaily360SummaryQuery, salesRepId?: string): Promise<VisitCopilot360Summary> {
+    user = await this.scopedActor(user, salesRepId);
     const warnings: string[] = [];
     const narrativeLocale = (query as VisitCopilotDaily360SummaryQuery & { locale?: "ar" | "en" }).locale ?? "ar";
 

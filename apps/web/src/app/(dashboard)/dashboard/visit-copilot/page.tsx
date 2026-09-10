@@ -129,7 +129,7 @@ function VisitCopilotScreen() {
   const { t, locale } = useTranslation();
   const { user } = useAuth();
   const isSupervisor = user?.role.code === "SUPERVISOR";
-  const [salesRepUserId, setSalesRepUserId] = useState<string>("");
+  const [salesRepId, setSalesRepId] = useState<string>("");
   const salesRepsQuery = useQuery({ queryKey: ["visit-copilot", "sales-reps"], queryFn: visitCopilotApi.supervisedSalesReps, enabled: isSupervisor });
   const searchParams = useSearchParams();
   // Scan orchestration remains backend work. This view-only seam is set by a
@@ -212,9 +212,9 @@ function VisitCopilotScreen() {
   // to the current key once the key has moved on, which is what satisfies
   // "cancel/ignore any previous request when the date changes."
   const briefQuery = useQuery({
-    queryKey: ["visit-copilot", "daily-brief", period, from, to, vanStock, planDate, salesRepUserId],
-    queryFn: ({ signal }) => visitCopilotApi.dailyBrief({ ...periodParams, date: planDate, salesRepUserId: salesRepUserId || undefined }, signal),
-    enabled: customPeriodReady && (!isSupervisor || !!salesRepUserId),
+    queryKey: ["visit-copilot", "daily-brief", period, from, to, vanStock, planDate, salesRepId],
+    queryFn: ({ signal }) => visitCopilotApi.dailyBrief({ ...periodParams, date: planDate, salesRepId: salesRepId || undefined }, signal),
+    enabled: customPeriodReady && (!isSupervisor || !!salesRepId),
   });
 
   // The map is driven only by the freshly resolved daily route, never by
@@ -246,8 +246,8 @@ function VisitCopilotScreen() {
   });
 
   const briefingQuery = useQuery({
-    queryKey: ["visit-copilot", "briefing", selectedCode, period, from, to, vanStock, salesRepUserId],
-    queryFn: () => visitCopilotApi.briefing({ customerCode: selectedCode!, ...periodParams, vanStock, locale, salesRepUserId: salesRepUserId || undefined }),
+    queryKey: ["visit-copilot", "briefing", selectedCode, period, from, to, vanStock, salesRepId],
+    queryFn: () => visitCopilotApi.briefing({ customerCode: selectedCode!, ...periodParams, vanStock, locale, salesRepId: salesRepId || undefined }),
     enabled: !!selectedCode && customPeriodReady,
   });
 
@@ -279,8 +279,8 @@ function VisitCopilotScreen() {
     // Keep the Discovery map on the same selected daily route as the brief.
     // Including planDate in both the key and request discards stale markers
     // when the rep switches dates.
-    queryKey: ["visit-copilot", "discovery", period, from, to, planDate, dailyRouteCustomerCodes, minimumProspectScore, salesRepUserId],
-    queryFn: ({ signal }) => visitCopilotApi.discovery({ ...periodParams, date: planDate, minimumScore: minimumProspectScore === "" ? undefined : Number(minimumProspectScore), salesRepUserId: salesRepUserId || undefined }, signal),
+    queryKey: ["visit-copilot", "discovery", period, from, to, planDate, dailyRouteCustomerCodes, minimumProspectScore, salesRepId],
+    queryFn: ({ signal }) => visitCopilotApi.discovery({ ...periodParams, date: planDate, minimumScore: minimumProspectScore === "" ? undefined : Number(minimumProspectScore), salesRepId: salesRepId || undefined }, signal),
     // Wait for daily-brief for this date before fetching map data. React
     // Query aborts either request through the forwarded signal on fast date
     // changes, so an old route cannot repopulate the map.
@@ -291,13 +291,13 @@ function VisitCopilotScreen() {
   // never touches the plan itself.
   const routeOppQuery = useQuery({
     queryKey: ["visit-copilot", "route-opportunities", period, from, to],
-    queryFn: () => visitCopilotApi.routeOpportunities({ ...periodParams, salesRepUserId: salesRepUserId || undefined }),
+    queryFn: () => visitCopilotApi.routeOpportunities({ ...periodParams, salesRepId: salesRepId || undefined }),
     enabled: !!plan && customPeriodReady,
   });
 
   const prospectBriefingQuery = useQuery({
     queryKey: ["visit-copilot", "prospect-briefing", selectedProspectId, period, from, to, vanStock],
-    queryFn: () => visitCopilotApi.prospectBriefing({ id: selectedProspectId!, ...periodParams, vanStock, salesRepUserId: salesRepUserId || undefined }),
+    queryFn: () => visitCopilotApi.prospectBriefing({ id: selectedProspectId!, ...periodParams, vanStock, salesRepId: salesRepId || undefined }),
     enabled: !!selectedProspectId && customPeriodReady,
   });
 
@@ -312,7 +312,7 @@ function VisitCopilotScreen() {
 
   const discoveryLimitQuery = useQuery<VisitCopilotDiscoveryLimit>({
     queryKey: ["visit-copilot", "discovery-limit"],
-    queryFn: () => visitCopilotApi.discoveryLimit(salesRepUserId || undefined),
+    queryFn: () => visitCopilotApi.discoveryLimit(salesRepId || undefined),
     enabled: showDiscovery,
   });
 
@@ -330,7 +330,7 @@ function VisitCopilotScreen() {
   });
 
   const googleSearchMutation = useMutation({
-    mutationFn: ({ searchId: _searchId, ...request }: { searchId: number; lat: number; lon: number; radiusMeters: number; salesRepUserId?: string }) => visitCopilotApi.googleSearch(request),
+    mutationFn: ({ searchId: _searchId, ...request }: { searchId: number; lat: number; lon: number; radiusMeters: number; salesRepId?: string }) => visitCopilotApi.googleSearch(request),
     onSuccess: (data, variables) => {
       if (variables.searchId !== latestGoogleSearchId.current) return;
       // disabled:true means no Places API key server-side — surface the
@@ -402,7 +402,7 @@ function VisitCopilotScreen() {
 
   function buildPlan(mode: VisitCopilotPlanMode) {
     if (!customPeriodReady || planMutation.isPending) return;
-    planMutation.mutate({ mode, ...periodParams, date: planDate, salesRepUserId: salesRepUserId || undefined });
+    planMutation.mutate({ mode, ...periodParams, date: planDate, salesRepId: salesRepId || undefined });
   }
 
   // "Search around me": GPS first; if geolocation is missing/denied, fall
@@ -423,7 +423,7 @@ function VisitCopilotScreen() {
     latestGoogleSearchId.current = searchId;
     setLatestGoogleProspects([]);
     setSelectedDiscoveryProspectId(null);
-    googleSearchMutation.mutate({ searchId, lat: discoveryCenter.lat, lon: discoveryCenter.lng, radiusMeters: discoveryRadiusMeters, salesRepUserId: salesRepUserId || undefined });
+    googleSearchMutation.mutate({ searchId, lat: discoveryCenter.lat, lon: discoveryCenter.lng, radiusMeters: discoveryRadiusMeters, salesRepId: salesRepId || undefined });
   }
 
   function sendChat(text: string) {
@@ -438,7 +438,7 @@ function VisitCopilotScreen() {
     const history = chatMessages.slice(-MAX_HISTORY_SENT).map(({ role, content }) => ({ role, content }));
     setChatMessages((prev) => [...prev, { role: "user", content: trimmed }]);
     setChatInput("");
-    chatMutation.mutate({ ...target, ...periodParams, vanStock, message: trimmed, history, salesRepUserId: salesRepUserId || undefined });
+    chatMutation.mutate({ ...target, ...periodParams, vanStock, message: trimmed, history, salesRepId: salesRepId || undefined });
   }
 
   function toggleAction(index: number) {
@@ -479,15 +479,11 @@ function VisitCopilotScreen() {
     prospectVisitMutation.mutate({ prospectId, scheduledFor });
   }
 
-  if (isSupervisor && !salesRepUserId) return (
-    <div className="mx-auto max-w-2xl space-y-4 p-4">
-      <h1 className="text-2xl font-bold">Visit Copilot</h1>
-      <div className="glass-card space-y-3 p-4"><Label>اختر مندوب المبيعات</Label><Select value={salesRepUserId} onValueChange={setSalesRepUserId}><SelectTrigger><SelectValue placeholder="اختر مندوبًا" /></SelectTrigger><SelectContent>{salesRepsQuery.data?.map((rep) => <SelectItem key={rep.userId} value={rep.userId}>{rep.fullName} ({rep.employeeCode})</SelectItem>)}</SelectContent></Select>{salesRepsQuery.isLoading && <Skeleton className="h-10 w-full" />}{salesRepsQuery.data?.length === 0 && <p className="text-sm text-muted-foreground">لا يوجد مندوبون تابعون لك.</p>}</div>
-    </div>
-  );
-
   return (
     <div className="relative space-y-6 max-md:space-y-3">
+
+      {isSupervisor && <div className="glass-card space-y-2 p-4"><Label>اختر مندوب المبيعات</Label><Select value={salesRepId} onValueChange={(next) => { setSalesRepId(next); setPlan(null); setSelectedCode(null); setSelectedProspectId(null); setChatMessages([]); setShowDiscovery(false); setShow360Summary(false); }}><SelectTrigger><SelectValue placeholder="اختر مندوبًا" /></SelectTrigger><SelectContent>{salesRepsQuery.data?.map((rep) => <SelectItem key={rep.employeeCode} value={rep.employeeCode}>{rep.fullName} ({rep.employeeCode})</SelectItem>)}</SelectContent></Select>{salesRepsQuery.isLoading && <Skeleton className="h-10 w-full" />}</div>}
+      {isSupervisor && !salesRepId ? <p className="text-sm text-muted-foreground">اختر مندوبًا لعرض Visit Copilot.</p> : <>
 
       <div className="rise-in flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -516,7 +512,7 @@ function VisitCopilotScreen() {
         <div className="flex flex-wrap items-center gap-2 max-md:w-full">
           {/* "ملخص اليوم 360°" — visible and reachable from the top of the
               screen at all times, per the acceptance criteria. */}
-          {!isSupervisor && <Button
+          <Button
             variant="secondary"
             className="glow-ai h-11 gap-2 max-md:h-10 max-md:flex-1 max-md:px-3 max-md:text-xs"
             onClick={() => setShow360Summary(true)}
@@ -524,7 +520,7 @@ function VisitCopilotScreen() {
           >
             <Sparkles className="h-4 w-4 text-ai" />
             {t("copilot.summary360Button")}
-          </Button>}
+          </Button>
           {/* Persistent Discovery toggle — never auto-opens the section. */}
           <Button
             variant={showDiscovery ? "default" : "secondary"}
@@ -539,14 +535,15 @@ function VisitCopilotScreen() {
         </div>
       </div>
 
-      {!isSupervisor && <Daily360SummaryModal
+      <Daily360SummaryModal
         open={show360Summary}
         onOpenChange={setShow360Summary}
         period={period}
         selectedDate={planDate}
         from={period === "custom" && from ? from : undefined}
         to={period === "custom" && to ? to : undefined}
-      />}
+        salesRepId={salesRepId || undefined}
+      />
 
       {/* Global controls — small, always visible (they also drive Visit Mode). */}
       <div className="glass-card rise-in rise-d1 flex flex-wrap items-end gap-4 p-4 max-md:gap-2.5 max-md:p-3">
@@ -1090,7 +1087,7 @@ function VisitCopilotScreen() {
                   <Button
                     variant="secondary"
                     className="h-11 gap-2 max-md:h-10 max-md:flex-1 max-md:px-3 max-md:text-xs"
-                    onClick={() => statusMutation.mutate({ id: selectedProspectId, status: "VISITED", salesRepUserId: salesRepUserId || undefined })}
+                    onClick={() => statusMutation.mutate({ id: selectedProspectId, status: "VISITED", salesRepId: salesRepId || undefined })}
                     disabled={statusMutation.isPending}
                   >
                     {statusMutation.isPending ? <Spinner className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}
@@ -1165,6 +1162,7 @@ function VisitCopilotScreen() {
           </div>
         </div>
       )}
+      </>}
     </div>
   );
 }
