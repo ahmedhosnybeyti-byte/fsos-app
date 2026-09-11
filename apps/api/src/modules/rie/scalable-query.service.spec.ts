@@ -23,7 +23,7 @@ type InternalSemaphoreService = {
 
 const internalSemaphore = (service: RieScalableQueryService) => service as unknown as InternalSemaphoreService;
 
-test("process-wide RIE semaphore limits expensive raw queries to 20 and resumes queued requests", async () => {
+test("process-wide RIE semaphore limits expensive raw queries to 30 and resumes queued requests", async () => {
   let active = 0;
   let maximumActive = 0;
   let executions = 0;
@@ -38,11 +38,11 @@ test("process-wide RIE semaphore limits expensive raw queries to 20 and resumes 
     },
   } as never, { resolveAllowedRouteIds: async () => null } as never);
 
-  const results = await Promise.all(Array.from({ length: 24 }, () => service.query(scalableQueryInput())));
+  const results = await Promise.all(Array.from({ length: 34 }, () => service.query(scalableQueryInput())));
 
-  assert.equal(results.length, 24);
-  assert.equal(executions, 48); // active-version metadata + final RIE query per request
-  assert.ok(maximumActive <= 20, `expected at most 20 active raw queries, got ${maximumActive}`);
+  assert.equal(results.length, 34);
+  assert.equal(executions, 68); // active-version metadata + final RIE query per request
+  assert.ok(maximumActive <= 30, `expected at most 30 active raw queries, got ${maximumActive}`);
   assert.equal(active, 0);
 });
 
@@ -65,7 +65,7 @@ test("process-wide RIE semaphore releases permits after raw-query errors", async
 
 test("cancelled and timed-out RIE queue waiters never execute and do not leak permits", async () => {
   const service = internalSemaphore(new RieScalableQueryService({ $queryRaw: async () => [] } as never, { resolveAllowedRouteIds: async () => null } as never));
-  const releases = Array.from({ length: 20 }, () => deferred<void>());
+  const releases = Array.from({ length: 30 }, () => deferred<void>());
   const holders = releases.map((release) => service.runExpensiveQuery("hold", () => release.promise));
   await delay(0);
 
@@ -92,7 +92,7 @@ test("cancelled and timed-out RIE queue waiters never execute and do not leak pe
 
 test("default RIE queue timeout permits a waiter held beyond the former 10-second limit", async () => {
   const service = internalSemaphore(new RieScalableQueryService({ $queryRaw: async () => [] } as never, { resolveAllowedRouteIds: async () => null } as never));
-  const releases = Array.from({ length: 20 }, () => deferred<void>());
+  const releases = Array.from({ length: 30 }, () => deferred<void>());
   const holders = releases.map((release) => service.runExpensiveQuery("hold", () => release.promise));
   await delay(0);
 
