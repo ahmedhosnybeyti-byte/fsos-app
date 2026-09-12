@@ -20,6 +20,8 @@ function useManagementLostOpportunities(targetDate: string, scope: ManagementSco
     queryKey: ["smart-loading", "management-risks", "lost-opportunities", targetDate, scope.managerId, scope.supervisorId, scope.salesRepId, PAGE_SIZE, offset],
     queryFn: () => smartLoadingApi.getManagementLostOpportunities(targetDate, scope, PAGE_SIZE, offset),
     staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 }
 

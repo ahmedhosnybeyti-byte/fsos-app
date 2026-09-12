@@ -23,6 +23,8 @@ export function ManagementLoadingRisk({ targetDate, onSelectPerson }: Management
     queryKey: ["smart-loading", "management-risks", "loading", targetDate],
     queryFn: () => smartLoadingApi.getManagementLoadingRisk(targetDate),
     staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
   // The API already returns a small management-only result. Ordering it by
   // affected products, then routes, surfaces the largest operational risk

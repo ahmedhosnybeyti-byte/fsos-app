@@ -22,6 +22,8 @@ export default function SmartLoadingPage() {
     queryKey: ["smart-loading", "session", targetDate, staleDaysThreshold, salesRepId, managerId, supervisorId],
     queryFn: () => smartLoadingApi.getSession(targetDate, staleDaysThreshold, salesRepId, managerId, supervisorId),
     placeholderData: (previous) => previous,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   return (
