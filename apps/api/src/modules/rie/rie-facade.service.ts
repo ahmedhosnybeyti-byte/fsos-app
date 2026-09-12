@@ -184,6 +184,11 @@ export class RieFacade {
     return this.scalableQuery.query(query);
   }
 
+  /** Request-scoped active-version metadata for callers issuing related RIE queries. */
+  getActiveVersionCounts(companyId: string, entityNames: readonly string[]): Promise<Map<string, number>> {
+    return this.scalableQuery.getActiveVersionCounts(companyId, entityNames);
+  }
+
   queryRouteProductStaleness(query: RieRouteProductStalenessQuery): Promise<RieRouteProductStalenessRow[]> {
     return this.scalableQuery.queryRouteProductStaleness(query);
   }

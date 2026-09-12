@@ -10,7 +10,7 @@ const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
 const MAX_INTERNAL_AGGREGATE_PAGE_SIZE = 25_000;
 const SAFE_IDENTIFIER = /^[A-Za-z][A-Za-z0-9_]*$/;
-const EXPENSIVE_RIE_QUERY_CONCURRENCY = 30;
+const EXPENSIVE_RIE_QUERY_CONCURRENCY = 20;
 const EXPENSIVE_RIE_QUERY_QUEUE_TIMEOUT_MS = 30_000;
 
 type RieQueryPermit = Readonly<{ activeCount: number; queueWaitMs: number; release: () => void }>;
@@ -175,7 +175,8 @@ export class RieScalableQueryService {
         }
       }
     }
-    const select = [...projection, ...(input.aggregates ?? []).map(aggregateSql)];
+    if (input.totalCountAs) assertIdentifier(input.totalCountAs, "total-count alias");
+    const select = [...projection, ...(input.aggregates ?? []).map(aggregateSql), ...(input.totalCountAs ? [Prisma.sql`COUNT(*) OVER () AS ${quoted(input.totalCountAs)}`] : [])];
     const predicates = await this.scopePredicates(input, aliases);
     const page = normalizePagination(input.pagination, input.internalAggregate === true, input.unboundedFinalResult === true);
     // A derived table may be flattened by PostgreSQL, which lets historical
@@ -216,7 +217,7 @@ export class RieScalableQueryService {
     const baseDrivenByScopedJoins = canCollapseScopedJoins || driveBaseFromScopedJoins;
     const baseSemiJoins = baseDrivenByScopedJoins ? [] : scopedSemiJoinsFor("base", joins, scopedJoinAliases, input.preferHashedScopedSemiJoin);
     const baseSourceJoins = baseDrivenByScopedJoins ? joins.map(scopedJoin) : [];
-    const activeVersionCounts = await this.activeVersionCounts(input.companyId, [...new Set(activeRows.map(({ entityName }) => entityName))]);
+    const activeVersionCounts = input.activeVersionCounts ?? await this.getActiveVersionCounts(input.companyId, [...new Set(activeRows.map(({ entityName }) => entityName))]);
     const ctes = orderedActiveRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias, ctePredicates.get(alias) ?? [], alias === "base" ? baseSemiJoins : scopedSemiJoinsFor(alias, joins, scopedJoinAliases), alias === "base" ? baseSourceJoins : [], activeVersionCounts.get(entityName) === 1));
     if (input.latestPer) ctes.push(latestPerCte(input.latestPer));
     const baseReference = input.latestPer ? Prisma.sql`base_latest base` : activeEntityRowsReference("base");
@@ -328,7 +329,7 @@ export class RieScalableQueryService {
     return rows.map((row) => ({ ...row, totalQty: Number(row.totalQty), totalValue: Number(row.totalValue), customerCount: Number(row.customerCount), totalRowsConsidered: Number(row.totalRowsConsidered), targetProductCount: row.targetProductCount === null ? null : Number(row.targetProductCount) }));
   }
 
-  private async activeVersionCounts(companyId: string, entityNames: readonly string[]): Promise<Map<string, number>> {
+  async getActiveVersionCounts(companyId: string, entityNames: readonly string[]): Promise<Map<string, number>> {
     const rows = await this.runExpensiveQuery("activeVersionCounts", () => this.prisma.$queryRaw<Array<{ entityName: string; versionCount: bigint | number }>>(Prisma.sql`
       SELECT version."entity_name" AS "entityName", COUNT(*) AS "versionCount"
       FROM "rie_dataset_versions" version

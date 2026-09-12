@@ -884,16 +884,22 @@ export class DecisionAnalyticsStudioService {
     const joins = this.decisionJoins();
     const projection = [{ field: "InvoiceNo", as: "invoiceNo" }, { field: "LineNo", as: "lineNo" }, { field: "LineTotal", as: "amount" }, { field: "InvoiceDate", source: "invoice", as: "date" }, { field: "CustomerCode", source: "invoice", as: "customerCode" }, { field: "CustomerName", source: "customer", as: "customerName" }, { field: "City", source: "customer", as: "city" }, { field: "Channel", source: "customer", as: "channel" }, { field: "ProductCode", as: "productCode" }, { field: "ProductName", source: "product", as: "productName" }, { field: "Category", source: "product", as: "category" }, { field: "Brand", source: "product", as: "brand" }, { field: "EmployeeName", source: "rep", as: "repName" }, { field: "EmployeeName", source: "supervisor", as: "supervisorName" }];
     const common = { ...ctx, entityName: "Invoice Items", joins, hierarchyRoute: { field: "RouteID", source: "invoice" }, scope };
-    const [pageResult, countResult] = await Promise.all([
-      this.rieFacade.queryCanonicalRecords({ ...common, projection, orderBy: [{ field: { field: "InvoiceDate", source: "invoice" }, direction: "desc" }, { field: { field: "InvoiceNo" }, direction: "asc" }, { field: { field: "LineNo" }, direction: "asc" }], pagination: { limit: input.pageSize, offset: (input.page - 1) * input.pageSize } }),
-      this.rieFacade.queryCanonicalRecords({ ...common, projection: [], aggregates: [{ op: "count", as: "totalRows" }], pagination: { limit: 1 } }),
-    ]);
+    const pageResult = await this.rieFacade.queryCanonicalRecords({
+      ...common,
+      projection,
+      // Window count runs over the exact same scoped/newest-wins relation as
+      // the page, before ORDER BY/LIMIT/OFFSET; it replaces the duplicate
+      // count query without changing its definition.
+      totalCountAs: "totalRows",
+      orderBy: [{ field: { field: "InvoiceDate", source: "invoice" }, direction: "desc" }, { field: { field: "InvoiceNo" }, direction: "asc" }, { field: { field: "LineNo" }, direction: "asc" }],
+      pagination: { limit: input.pageSize, offset: (input.page - 1) * input.pageSize },
+    });
     const rows: DecisionTableRow[] = pageResult.records.map((r) => {
       return {
         invoiceNo: String(r.invoiceNo ?? ""), lineNo: toFiniteNumber(r.lineNo) ?? 0, date: r.date ? new Date(String(r.date)).toISOString() : null,
         customerCode: String(r.customerCode ?? ""), customerName: String(r.customerName ?? r.customerCode ?? ""), city: String(r.city ?? ""), channel: String(r.channel ?? ""), productCode: String(r.productCode ?? ""), productName: String(r.productName ?? r.productCode ?? ""), category: String(r.category ?? ""), brand: String(r.brand ?? ""), repName: String(r.repName ?? ""), supervisorName: String(r.supervisorName ?? ""), amount: toFiniteNumber(r.amount) ?? 0,
       };
     });
-    return { rows, page: input.page, pageSize: input.pageSize, totalRows: toFiniteNumber(countResult.records[0]?.totalRows) ?? 0 };
+    return { rows, page: input.page, pageSize: input.pageSize, totalRows: toFiniteNumber(pageResult.records[0]?.totalRows) ?? 0 };
   }
 }

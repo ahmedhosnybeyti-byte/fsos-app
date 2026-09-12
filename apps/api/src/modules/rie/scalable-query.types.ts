@@ -59,6 +59,10 @@ export interface RieScalableQuery extends EntityQueryContext {
    */
   unboundedFinalResult?: boolean;
   orderBy?: readonly RieQueryOrder[];
+  /** Adds COUNT(*) OVER () to the already scoped relation for a paged result. */
+  totalCountAs?: string;
+  /** Internal request-scoped active-version metadata, obtained through RIE once. */
+  activeVersionCounts?: ReadonlyMap<string, number>;
   /**
    * Compiles scoped joins as an uncorrelated membership test.  This preserves
    * the normalised-equality semantics while allowing PostgreSQL to hash the
