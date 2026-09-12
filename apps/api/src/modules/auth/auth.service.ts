@@ -26,6 +26,16 @@ export class AuthService {
   // COMPANY_ADMIN user on a trial subscription — the platform never lets a
   // signup join an existing company or pick its own role.
   async register(dto: RegisterInput, meta: RefreshTokenMeta) {
+    const settings = await this.prisma.platformSettings.upsert({
+      where: { id: "platform_settings" },
+      update: {},
+      create: { id: "platform_settings" },
+      select: { showTrialRegistration: true },
+    });
+    if (!settings.showTrialRegistration) {
+      throw new ForbiddenException("Public trial registration is currently unavailable");
+    }
+
     const existing = await this.usersService.findByEmail(dto.email);
     if (existing) throw new ConflictException("An account with this email already exists");
 

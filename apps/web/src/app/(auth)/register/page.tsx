@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -15,10 +16,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { usePublicTrialRegistration } from "@/components/marketing/public-trial-registration";
 
 export default function RegisterPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { data: trialRegistration, isLoading: isTrialRegistrationLoading } = usePublicTrialRegistration();
+
+  useEffect(() => {
+    if (trialRegistration?.showTrialRegistration === false) router.replace("/login");
+  }, [router, trialRegistration?.showTrialRegistration]);
 
   const {
     register,
@@ -41,6 +48,10 @@ export default function RegisterPage() {
       toast.error(error instanceof ApiError ? error.message : "Something went wrong. Please try again.");
     },
   });
+
+  if (isTrialRegistrationLoading || trialRegistration?.showTrialRegistration !== true) {
+    return null;
+  }
 
   return (
     <Card className="glass-hero rise-in rise-d1 relative border-0">

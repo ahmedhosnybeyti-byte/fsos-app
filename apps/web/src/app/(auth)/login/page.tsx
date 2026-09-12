@@ -15,6 +15,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
+import { PublicTrialRegistration } from "@/components/marketing/public-trial-registration";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -62,12 +63,14 @@ export default function LoginPage() {
             {mutation.isPending && <Spinner />}
             Log in
           </Button>
-          <p className="text-center text-sm text-muted-foreground">
-            No account yet?{" "}
-            <Link href="/register" className="text-primary hover:underline">
-              Start a free trial
-            </Link>
-          </p>
+          <PublicTrialRegistration>
+            <p className="text-center text-sm text-muted-foreground">
+              No account yet?{" "}
+              <Link href="/register" className="text-primary hover:underline">
+                Start a free trial
+              </Link>
+            </p>
+          </PublicTrialRegistration>
         </CardFooter>
       </form>
     </Card>

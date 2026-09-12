@@ -166,6 +166,7 @@ test("creates a session for a shared-trial user", async () => {
   const createdUsers: unknown[] = [];
   const service = new AuthService(
     {
+      platformSettings: { upsert: async () => ({ showTrialRegistration: true }) },
       company: { findUnique: async () => ({ id: COMPANY_ID }) },
     } as never,
     {
@@ -190,4 +191,24 @@ test("creates a session for a shared-trial user", async () => {
   assert.equal(createdUsers.length, 1);
   assert.equal(result.accessToken, "access-token");
   assert.equal(result.refreshToken, "refresh-token");
+});
+
+test("rejects self-registration when public trial registration is disabled", async () => {
+  const createdUsers: unknown[] = [];
+  const service = new AuthService(
+    { platformSettings: { upsert: async () => ({ showTrialRegistration: false }) } } as never,
+    { findByEmail: async () => null, createSharedTrialUser: async (input: unknown) => { createdUsers.push(input); } } as never,
+    {} as never,
+    {} as never,
+    {} as never,
+  );
+
+  await assert.rejects(
+    () => service.register(
+      { fullName: "Trial Admin", email: "blocked@example.test", password: "Password1!", whatsapp: "+966500000000", country: "SAUDI_ARABIA", trialRole: "COMPANY_ADMIN" },
+      { ip: "127.0.0.1", userAgent: "test" },
+    ),
+    (error: unknown) => error instanceof ForbiddenException,
+  );
+  assert.deepEqual(createdUsers, []);
 });

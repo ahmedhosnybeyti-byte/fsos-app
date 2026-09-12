@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatMoneyCents } from "@/lib/utils";
+import { PublicTrialRegistration } from "./public-trial-registration";
 
 export function PricingSection() {
   const { data: plans, isLoading, isError } = useQuery({ queryKey: ["plans", "public"], queryFn: plansApi.listPublic });
@@ -66,9 +67,11 @@ export function PricingSection() {
                 <FeatureRow label={`${plan.features?.support ?? "community"} support`} />
               </CardContent>
               <CardFooter>
-                <Button asChild className="w-full" variant={plan.code === "professional" ? "default" : "outline"}>
-                  <Link href="/register">Start free trial</Link>
-                </Button>
+                <PublicTrialRegistration>
+                  <Button asChild className="w-full" variant={plan.code === "professional" ? "default" : "outline"}>
+                    <Link href="/register">Start free trial</Link>
+                  </Button>
+                </PublicTrialRegistration>
               </CardFooter>
             </Card>
           ))}

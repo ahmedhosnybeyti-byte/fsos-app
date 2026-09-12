@@ -1,6 +1,9 @@
+"use client";
+
 import Link from "next/link";
 import { Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PublicTrialRegistration } from "./public-trial-registration";
 
 export function SiteHeader() {
   return (
@@ -29,9 +32,11 @@ export function SiteHeader() {
           <Button variant="ghost" asChild>
             <Link href="/login">Log in</Link>
           </Button>
-          <Button asChild>
-            <Link href="/register">Start free trial</Link>
-          </Button>
+          <PublicTrialRegistration>
+            <Button asChild>
+              <Link href="/register">Start free trial</Link>
+            </Button>
+          </PublicTrialRegistration>
         </div>
       </div>
     </header>
