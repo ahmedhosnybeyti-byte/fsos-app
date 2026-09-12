@@ -375,7 +375,7 @@ export class RieScalableQueryService {
     const inventoryProjection = Prisma.sql`${normalizedField({ field: "RouteID", source: "inventory_source" })} AS route_id, NULLIF(BTRIM(COALESCE(${inventoryDate}, '')), '') AS report_date, ${normalizedField({ field: "ProductCode", source: "inventory_source" })} AS product_code, ${numericField(textField({ field: "Quantity", source: "inventory_source" }))} AS quantity`;
     const invoiceProjection = Prisma.sql`${normalizedField({ field: "InvoiceNo", source: "invoice_source" })} AS invoice_no, ${normalizedField({ field: "RouteID", source: "invoice_source" })} AS route_id, ${dateText(invoiceDate)} AS invoice_date`;
     const itemProjection = Prisma.sql`${normalizedField({ field: "InvoiceNo", source: "item_source" })} AS invoice_no, ${normalizedField({ field: "RouteID", source: "item_source" })} AS route_id, ${normalizedField({ field: "ProductCode", source: "item_source" })} AS product_code`;
-    const activeVersionCounts = await this.activeVersionCounts(input.companyId, ["Van Inventory", "Invoices", "Invoice Items"]);
+    const activeVersionCounts = await this.getActiveVersionCounts(input.companyId, ["Van Inventory", "Invoices", "Invoice Items"]);
     const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [
       Prisma.sql`${dateText(inventoryDate)} <= ${targetDate}${routeScope(inventoryRoute)}`,
     ], [], [], activeVersionCounts.get("Van Inventory") === 1, [], inventoryProjection);
