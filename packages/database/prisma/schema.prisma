@@ -1241,6 +1241,9 @@ model PlatformSettings {
   trialDurationDays            Int      @default(7) @map("trial_duration_days")
   defaultPlanCode              String   @default("trial") @map("default_plan_code")
   autoStartTrialOnRegistration Boolean  @default(true) @map("auto_start_trial_on_registration")
+  // Controls only whether the public landing page offers the registration
+  // entry point. It deliberately does not alter trial or registration logic.
+  showTrialRegistration        Boolean  @default(true) @map("show_trial_registration")
   // Aggregate cap on active Customer rows a TRIAL-status company may hold
   // (checked at file-upload time only — see FilesService). Balances letting
   // genuine evaluators test with a realistic dataset against unbounded

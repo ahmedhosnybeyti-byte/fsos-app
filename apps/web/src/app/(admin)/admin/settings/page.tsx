@@ -24,6 +24,7 @@ export default function PlatformSettingsPage() {
   const [trialDurationDays, setTrialDurationDays] = useState(14);
   const [defaultPlanCode, setDefaultPlanCode] = useState("trial");
   const [autoStart, setAutoStart] = useState(true);
+  const [showTrialRegistration, setShowTrialRegistration] = useState(true);
   const [gptBaseUrl, setGptBaseUrl] = useState("");
 
   useEffect(() => {
@@ -32,6 +33,7 @@ export default function PlatformSettingsPage() {
     setTrialDurationDays(settings.trialDurationDays);
     setDefaultPlanCode(settings.defaultPlanCode);
     setAutoStart(settings.autoStartTrialOnRegistration);
+    setShowTrialRegistration(settings.showTrialRegistration);
     setGptBaseUrl(settings.gptBaseUrl);
   }, [settings]);
 
@@ -42,6 +44,7 @@ export default function PlatformSettingsPage() {
         trialDurationDays,
         defaultPlanCode,
         autoStartTrialOnRegistration: autoStart,
+        showTrialRegistration,
       }),
     onSuccess: async () => {
       toast.success("Platform settings saved");
@@ -122,6 +125,13 @@ export default function PlatformSettingsPage() {
             </div>
           ) : (
             <div className="space-y-6">
+              <SettingRow
+                label="إظهار زر إنشاء التجربة"
+                description="يتحكم فقط في ظهور زر Start free trial بالصفحة العامة. لا يغيّر منطق التجربة أو التسجيل."
+              >
+                <Switch checked={showTrialRegistration} onCheckedChange={setShowTrialRegistration} />
+              </SettingRow>
+
               <SettingRow
                 label="Trials enabled"
                 description="Master switch. When off, new companies never get a time-boxed trial — see the effective behavior below."

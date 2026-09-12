@@ -612,6 +612,7 @@ export interface PlatformSettings {
   trialDurationDays: number;
   defaultPlanCode: string;
   autoStartTrialOnRegistration: boolean;
+  showTrialRegistration: boolean;
   gptBaseUrl: string;
   updatedAt: string;
 }

@@ -29,6 +29,11 @@ export class PlatformSettingsService {
     });
   }
 
+  async getPublicTrialRegistrationVisibility() {
+    const settings = await this.get();
+    return { showTrialRegistration: settings.showTrialRegistration };
+  }
+
   async update(dto: UpdatePlatformSettingsInput, updatedByUserId: string) {
     if (dto.defaultPlanCode) {
       const plan = await this.prisma.plan.findUnique({ where: { code: dto.defaultPlanCode } });
