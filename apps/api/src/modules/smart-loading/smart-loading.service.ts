@@ -465,21 +465,20 @@ export class SmartLoadingService {
 
     // Management keeps Route × Product inside RIE/PostgreSQL and receives
     // only the established Product-grain result. Sales Rep remains unchanged.
-    const [activeVehicleRouteRows, inventoryRows, managementStaleRows, managementStockAlignment, managementVehicleRows] = await Promise.all([
-      timed("active-vehicle-routes", () => bounded("active-vehicle-routes", withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }], groupBy: [{ field: "RouteID" }], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
+    const [activeVehicleRouteRows, inventoryRows, managementBundle] = await Promise.all([
+      useManagementStaleGrain
+        ? timedManagementStage("queryManagementActiveVehicleRoutes", () => this.rieFacade.queryManagementActiveVehicleRoutes({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso }))
+        : timed("active-vehicle-routes", () => bounded("active-vehicle-routes", withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }], groupBy: [{ field: "RouteID" }], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
       useManagementStaleGrain
         ? Promise.resolve([])
         : timed("latest-inventory", () => bounded("latest-inventory", withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "ProductCode", as: "productCode" }], latestPer: { partitionBy: { field: "RouteID" }, orderBy: { field: "ReportDate" } }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
       useManagementStaleGrain
-        ? timedManagementStage("queryRouteProductStaleness", () => this.rieFacade.queryRouteProductStaleness({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, staleDaysThreshold }))
-        : Promise.resolve([]),
-      useManagementStaleGrain
-        ? timedManagementStage("queryManagementStockAlignment", () => this.rieFacade.queryManagementStockAlignment({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, salesFrom: isoDay(windowStartMs), salesTo: isoDay(nowMs), customerCodes: [...nextRouteCustomers.keys()] }))
+        ? timedManagementStage("queryManagementSmartLoadingBundle", () => this.rieFacade.queryManagementSmartLoadingBundle({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, staleDaysThreshold, salesFrom: isoDay(windowStartMs), salesTo: isoDay(nowMs), customerCodes: [...nextRouteCustomers.keys()] }))
         : Promise.resolve(null),
-      useManagementStaleGrain
-        ? timedManagementStage("queryManagementVehicleProducts", () => this.rieFacade.queryManagementVehicleProducts({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, salesFrom: isoDay(windowStartMs), salesTo: isoDay(nowMs), customerCodes: [...nextRouteCustomers.keys()] }))
-        : Promise.resolve([]),
     ]);
+    const managementStaleRows = managementBundle?.routeProductStaleness ?? [];
+    const managementStockAlignment = managementBundle?.stockAlignment ?? null;
+    const managementVehicleRows = managementBundle?.vehicleProducts ?? [];
     const activeVehicleRouteIds = new Set<string>();
     const vehicleStockByProduct = new Map<string, number>();
     for (const row of activeVehicleRouteRows) {

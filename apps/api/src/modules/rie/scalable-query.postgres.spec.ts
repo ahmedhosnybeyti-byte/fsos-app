@@ -83,6 +83,12 @@ test("scalable RIE incremental merge in PostgreSQL", {
   await upload("only-visits", "Visits", "2026-08-01", [
     { key: "VIS-1", data: { VisitID: "VIS-1", VisitDate: "2026-08-01", RouteID: "R-1", VisitStatus: "Productive" } },
   ]);
+  await upload("smart-loading-inventory", "Van Inventory", "2026-08-10", [
+    { key: "2026-08-10|NEW|P-1|EA", data: { ReportDate: "2026-08-10", RouteID: "NEW", ProductCode: "P-1", Unit: "EA", Quantity: 1 } },
+  ]);
+  await upload("smart-loading-products", "Products", "2026-08-01", [
+    { key: "P-1", data: { ProductCode: "P-1", ProductName: "Product 1", Category: "Food" } },
+  ]);
 
   let lastQuery: Prisma.Sql | undefined;
   const service = new RieScalableQueryService({
@@ -155,6 +161,58 @@ test("scalable RIE incremental merge in PostgreSQL", {
       (node["Relation Name"] ? (Number(node["Actual Rows"]) + Number(node["Rows Removed by Filter"] ?? 0)) * Number(node["Actual Loops"]) : 0)
       + ((node.Plans ?? []) as Record<string, unknown>[]).reduce((sum, child) => sum + scanned(child), 0);
     t.diagnostic(`PostgreSQL fixture: relation rows visited=${scanned(root)}, returned=${root["Actual Rows"]}, executionMs=${plan["Execution Time"]}`);
+  });
+
+  await t.test("management Smart Loading bundle preserves all three legacy SQL results", async () => {
+    const input = {
+      companyId: "company-1",
+      routeIds: ["new"],
+      targetDate: "2026-08-10",
+      salesFrom: "2026-07-01",
+      salesTo: "2026-08-10",
+      customerCodes: ["c-1"],
+    };
+    const executionMs = async (sql: Prisma.Sql) => {
+      const explained = await db.query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${sql.text}`, sql.values);
+      const plan = (explained.rows[0]!["QUERY PLAN"] as Array<Record<string, unknown>>)[0]!;
+      return { milliseconds: Number(plan["Execution Time"]), plan };
+    };
+    const routeProductStaleness = await service.queryRouteProductStaleness({ ...input, staleDaysThreshold: 4 });
+    const stalePlan = await executionMs(lastQuery!);
+    const stockAlignment = await service.queryManagementStockAlignment(input);
+    const alignmentPlan = await executionMs(lastQuery!);
+    const vehicleProducts = await service.queryManagementVehicleProducts(input);
+    const vehiclePlan = await executionMs(lastQuery!);
+    const bundle = await service.queryManagementSmartLoadingBundle({ ...input, staleDaysThreshold: 4 });
+
+    assert.deepEqual(bundle, { routeProductStaleness, stockAlignment, vehicleProducts });
+    const bundlePlan = await executionMs(lastQuery!);
+    const plan = bundlePlan.plan;
+    const allNodes = (node: Record<string, unknown>): Record<string, unknown>[] => [node, ...((node.Plans ?? []) as Record<string, unknown>[]).flatMap(allNodes)];
+    const nodes = allNodes(plan.Plan as Record<string, unknown>);
+    assert.ok(nodes.every((node) => node["Parent Relationship"] !== "SubPlan"));
+    assert.ok(nodes.every((node) => !(node["Node Type"] === "Nested Loop" && (node.Plans as Record<string, unknown>[] | undefined)?.some((child) => child["Node Type"] === "Seq Scan" && Number(child["Actual Loops"] ?? 0) > 1))));
+    const legacyMilliseconds = stalePlan.milliseconds + alignmentPlan.milliseconds + vehiclePlan.milliseconds;
+    t.diagnostic(`Smart Loading PostgreSQL fixture: legacySqlMs=${legacyMilliseconds.toFixed(3)}, bundleSqlMs=${bundlePlan.milliseconds.toFixed(3)}`);
+  });
+
+  await t.test("management active vehicle routes preserve the generic scoped result", async () => {
+    const generic = await service.query({
+      companyId: "company-1",
+      entityName: "Van Inventory",
+      projection: [{ field: "RouteID", as: "routeId" }],
+      groupBy: [{ field: "RouteID" }],
+      aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }],
+      scope: { route: { values: ["new"] }, date: { field: "ReportDate", to: "2026-08-10" } },
+    });
+    const coordinated = await service.queryManagementActiveVehicleRoutes({
+      companyId: "company-1", routeIds: ["new"], targetDate: "2026-08-10",
+    });
+
+    assert.deepEqual(coordinated, generic.records.map((row) => ({
+      routeId: String(row.routeId).toLowerCase(),
+      latestReportDate: row.latestReportDate,
+    })));
   });
 
   await t.test("representative high-cardinality Visits, Collections and Invoices plans stay set-based", async () => {

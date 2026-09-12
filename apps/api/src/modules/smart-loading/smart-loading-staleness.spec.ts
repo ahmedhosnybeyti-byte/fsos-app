@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { isRouteInActiveVehicleScope, isSaleOnOrBeforeTargetDate, isStaleVehicleInventory, managementStaleRouteProductCases, managementStaleRouteProductCount, normalizedProductCode, rollupManagementStaleProductCodes } from "./smart-loading.service";
+import { isRouteInActiveVehicleScope, isSaleOnOrBeforeTargetDate, isStaleVehicleInventory, managementStaleRouteProductCases, managementStaleRouteProductCount, normalizedProductCode, rollupManagementStaleProductCodes, SmartLoadingService } from "./smart-loading.service";
 import { RieScalableQueryService } from "../rie/scalable-query.service";
 
 const asOfDate = new Date("2026-08-10T00:00:00.000Z");
@@ -202,6 +202,190 @@ test("management stock alignment keeps Route A's shortage despite Route B's surp
   assert.match(statement!.strings.join("?"), /FULL OUTER JOIN expected_by_route_product/);
   assert.match(statement!.strings.join("?"), /SUM\(LEAST\(current_stock, expected_sales\)\)/);
   assert.match(statement!.strings.join("?"), /category_alignment/);
+});
+
+test("management Smart Loading bundle shares scoped foundations and acquires one expensive permit", async () => {
+  const expected = {
+    routeProductStaleness: [{
+      productCode: "sku-a", quantity: 17, lastSaleDate: "2026-08-01", isStale: true,
+      staleRouteProductCount: 1,
+      staleRouteProducts: [{ routeId: "route-a", currentVehicleStock: 7, lastSaleDate: "2026-08-01" }],
+    }],
+    stockAlignment: { alignmentPercent: 85, categoryAlignments: [{ category: "Food", alignmentPercent: 85 }] },
+    vehicleProducts: [{ productCode: "sku-a", currentVehicleStock: 17, weeklyAverageSales: 20, alignmentPercent: 85 }],
+  };
+  let rawQueryCount = 0;
+  let statement: { strings?: readonly string[]; values?: readonly unknown[] } | undefined;
+  const acquiredOperations: string[] = [];
+  const query = new RieScalableQueryService({
+    $queryRaw: async (sql: { strings?: readonly string[]; values?: readonly unknown[] }) => {
+      rawQueryCount += 1;
+      if ((sql.strings?.join(" ") ?? "").includes('COUNT(*) AS "versionCount"')) {
+        return [
+          { entityName: "Van Inventory", versionCount: 1 },
+          { entityName: "Invoices", versionCount: 2 },
+          { entityName: "Invoice Items", versionCount: 2 },
+          { entityName: "Products", versionCount: 1 },
+        ];
+      }
+      statement = sql;
+      return [expected];
+    },
+  } as never, { resolveAllowedRouteIds: async () => new Set(["route-a", "route-b"]) } as never);
+  (query as unknown as { logger: { log(message: string): void } }).logger = {
+    log: (message) => {
+      const event = JSON.parse(message) as { event?: string; operation?: string };
+      if (event.event === "rie_expensive_query_acquired" && event.operation) acquiredOperations.push(event.operation);
+    },
+  };
+
+  const result = await query.queryManagementSmartLoadingBundle({
+    companyId: "company-1",
+    requestingUser: { roleCode: "MANAGER", email: "manager@example.com" },
+    routeIds: ["route-a", "outside-route"],
+    targetDate: "2026-08-10",
+    staleDaysThreshold: 4,
+    salesFrom: "2026-05-10",
+    salesTo: "2026-08-09",
+    customerCodes: ["Customer-A"],
+  });
+
+  assert.deepEqual(result, expected);
+  assert.equal(rawQueryCount, 2, "metadata and bundle SQL should execute under the same permit");
+  assert.deepEqual(acquiredOperations, ["queryManagementSmartLoadingBundle"]);
+  const sql = statement?.strings?.join("?") ?? "";
+  assert.match(sql, /stock_by_route_product AS MATERIALIZED/);
+  assert.equal((sql.match(/stock_by_route_product AS MATERIALIZED/g) ?? []).length, 1);
+  assert.match(sql, /stale_scoped_invoice_numbers AS MATERIALIZED/);
+  assert.match(sql, /window_scoped_invoice_numbers AS MATERIALIZED/);
+  assert.match(sql, /window_sales_by_route_product AS MATERIALIZED/);
+  assert.match(sql, /stale_invoice_candidates/);
+  assert.match(sql, /window_invoice_candidates/);
+  assert.match(sql, /stale_item_candidates/);
+  assert.match(sql, /window_item_candidates/);
+  assert.doesNotMatch(sql, /inventory_candidates|product_candidates/);
+  assert.doesNotMatch(sql, /SELECT\s+\w+_source\.\*/);
+  assert.doesNotMatch(sql, /CROSS JOIN/);
+  assert.ok(statement?.values?.includes("route-a"));
+  assert.ok(!statement?.values?.includes("outside-route"));
+  assert.ok(statement?.values?.includes("customer-a"));
+  assert.ok(statement?.values?.includes("2026-05-10"));
+  assert.ok(statement?.values?.includes("2026-08-09"));
+  assert.ok(statement?.values?.includes("2026-08-10"));
+});
+
+test("management heavy Promise section acquires exactly two RIE permits", async () => {
+  const acquiredOperations: string[] = [];
+  const query = new RieScalableQueryService({
+    $queryRaw: async (sql: { strings?: readonly string[] }) => {
+      const text = sql.strings?.join(" ") ?? "";
+      if (text.includes('COUNT(*) AS "versionCount"')) {
+        return [
+          { entityName: "Van Inventory", versionCount: 1 },
+          { entityName: "Invoices", versionCount: 1 },
+          { entityName: "Invoice Items", versionCount: 1 },
+          { entityName: "Products", versionCount: 1 },
+        ];
+      }
+      if (text.includes('AS "latestReportDate"')) return [{ routeId: "route-a", latestReportDate: "2026-08-10" }];
+      return [{
+        routeProductStaleness: [],
+        stockAlignment: { alignmentPercent: 100, categoryAlignments: [] },
+        vehicleProducts: [],
+      }];
+    },
+  } as never, { resolveAllowedRouteIds: async () => new Set(["route-a"]) } as never);
+  (query as unknown as { logger: { log(message: string): void } }).logger = {
+    log: (message) => {
+      const event = JSON.parse(message) as { event?: string; operation?: string };
+      if (event.event === "rie_expensive_query_acquired" && event.operation) acquiredOperations.push(event.operation);
+    },
+  };
+  const common = {
+    companyId: "company-1",
+    requestingUser: { roleCode: "SUPERVISOR", email: "supervisor@example.com" },
+    routeIds: ["route-a"],
+    targetDate: "2026-08-10",
+  } as const;
+
+  await Promise.all([
+    query.queryManagementActiveVehicleRoutes(common),
+    query.queryManagementSmartLoadingBundle({
+      ...common, staleDaysThreshold: 4, salesFrom: "2026-05-10", salesTo: "2026-08-10", customerCodes: ["customer-a"],
+    }),
+  ]);
+
+  assert.deepEqual(acquiredOperations.sort(), ["queryManagementActiveVehicleRoutes", "queryManagementSmartLoadingBundle"]);
+});
+
+test("management session uses the unified bundle and never calls the three compatibility methods", async () => {
+  let bundleCalls = 0;
+  let activeRouteCalls = 0;
+  const facade = {
+    queryCanonicalRecords: async () => ({ records: [], page: { limit: 5_000, offset: 0, hasMore: false } }),
+    queryManagementActiveVehicleRoutes: async () => { activeRouteCalls += 1; return []; },
+    queryManagementSmartLoadingBundle: async () => {
+      bundleCalls += 1;
+      return {
+        routeProductStaleness: [],
+        stockAlignment: { alignmentPercent: 100, categoryAlignments: [] },
+        vehicleProducts: [],
+      };
+    },
+    queryRouteProductStaleness: async () => { throw new Error("legacy staleness call must not run"); },
+    queryManagementStockAlignment: async () => { throw new Error("legacy alignment call must not run"); },
+    queryManagementVehicleProducts: async () => { throw new Error("legacy vehicle call must not run"); },
+  };
+  const service = new SmartLoadingService(
+    facade as never,
+    { detect: async () => ({ status: "no-customers", opportunities: [] }) } as never,
+    {} as never,
+    {} as never,
+  );
+
+  const session = await service.getSession({
+    userId: "user-1", companyId: "company-1", email: "admin@example.com",
+    roleCode: "COMPANY_ADMIN", permissions: [], mustChangePassword: false, orgUnitId: null,
+  }, "2099-01-01", 4);
+
+  assert.equal(session.state, "ready");
+  assert.equal(bundleCalls, 1);
+  assert.equal(activeRouteCalls, 1);
+  if (session.state === "ready") {
+    assert.equal(session.managementStockAlignmentPercent, 100);
+    assert.deepEqual(session.managementVehicleProducts, []);
+  }
+});
+
+test("Sales Rep session keeps the existing non-management path", async () => {
+  let genericCalls = 0;
+  const facade = {
+    queryCanonicalRecords: async () => {
+      genericCalls += 1;
+      return { records: [], page: { limit: 5_000, offset: 0, hasMore: false } };
+    },
+    queryManagementActiveVehicleRoutes: async () => { throw new Error("management active routes must not run"); },
+    queryManagementSmartLoadingBundle: async () => { throw new Error("management bundle must not run"); },
+  };
+  const service = new SmartLoadingService(
+    facade as never,
+    { detect: async () => ({ status: "no-customers", opportunities: [] }) } as never,
+    {} as never,
+    {} as never,
+  );
+
+  const session = await service.getSession({
+    userId: "rep-1", companyId: "company-1", email: "rep@example.com",
+    roleCode: "SALES_REP", permissions: [], mustChangePassword: false, orgUnitId: null,
+  }, "2099-01-01", 4);
+
+  assert.equal(session.state, "ready");
+  assert.equal(genericCalls, 4);
+  if (session.state === "ready") {
+    assert.equal(session.managementStockAlignmentPercent, null);
+    assert.equal(session.managementVehicleProducts, null);
+    assert.equal(session.managementStaleRouteProducts, null);
+  }
 });
 
 test("management counts the same stale product once for each stale route", () => {

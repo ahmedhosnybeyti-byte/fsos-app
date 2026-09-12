@@ -19,7 +19,7 @@ import { RieScalableQueryService } from "./scalable-query.service";
 import { RieFsos360QueryService } from "./fsos-360-query.service";
 import type { Fsos360Query } from "@field-sales-os/schemas";
 import type { Fsos360ResolvedContext } from "../decision-analytics-studio/fsos-360-context.service";
-import type { RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery } from "./scalable-query.types";
+import type { RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery } from "./scalable-query.types";
 
 /**
  * The smallest sales grain used by analytics: an invoice line, or the same
@@ -199,6 +199,14 @@ export class RieFacade {
 
   queryManagementVehicleProducts(query: RieManagementVehicleProductsQuery): Promise<RieManagementVehicleProductRow[]> {
     return this.scalableQuery.queryManagementVehicleProducts(query);
+  }
+
+  queryManagementSmartLoadingBundle(query: RieManagementSmartLoadingBundleQuery): Promise<RieManagementSmartLoadingBundle> {
+    return this.scalableQuery.queryManagementSmartLoadingBundle(query);
+  }
+
+  queryManagementActiveVehicleRoutes(query: RieManagementActiveVehicleRoutesQuery): Promise<RieManagementActiveVehicleRouteRow[]> {
+    return this.scalableQuery.queryManagementActiveVehicleRoutes(query);
   }
 
   queryFsos360Facts(ctx: EntityQueryContext, context: Fsos360ResolvedContext, input: Fsos360Query) {

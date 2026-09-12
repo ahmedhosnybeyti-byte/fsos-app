@@ -172,6 +172,26 @@ export interface RieManagementVehicleProductRow {
   alignmentPercent: number;
 }
 
+/** One coordinated Smart Loading management operation; Route × Product stays in PostgreSQL. */
+export interface RieManagementSmartLoadingBundleQuery extends RieManagementStockAlignmentQuery {
+  staleDaysThreshold: number;
+}
+export interface RieManagementSmartLoadingBundle {
+  routeProductStaleness: RieRouteProductStalenessRow[];
+  stockAlignment: RieManagementStockAlignmentRow;
+  vehicleProducts: RieManagementVehicleProductRow[];
+}
+
+/** Small management route set backed by current inventory through targetDate. */
+export interface RieManagementActiveVehicleRoutesQuery extends EntityQueryContext {
+  routeIds?: readonly string[] | null;
+  targetDate: string;
+}
+export interface RieManagementActiveVehicleRouteRow {
+  routeId: string;
+  latestReportDate: string | null;
+}
+
 /** One compact Person → Route → Product document; all fact aggregation is SQL-only. */
 export interface RieManagementLoadingRiskQuery extends EntityQueryContext {
   targetDate: string;
