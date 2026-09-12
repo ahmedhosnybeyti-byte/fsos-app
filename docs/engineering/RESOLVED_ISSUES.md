@@ -28,6 +28,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Status:** Verified already optimized with scoped scalar CTEs and scoped invoice keys; no change was required.
 - **Regression-prevention rule:** Do not rewrite this query without measured evidence of a regression or bottleneck.
 
+## Smart Loading Management — duplicate heavy RIE acquisitions
+
+- **Symptom/evidence:** One management session independently ran route/product staleness, stock alignment, and vehicle products. Those three results consumed four expensive permits because staleness also acquired one for active-version metadata. The surrounding active-route read added another expected acquisition (and, in the generic implementation, one additional logged metadata acquisition).
+- **Root cause:** The three operations rebuilt the same scoped Van Inventory foundation, while stock alignment and vehicle products also rebuilt the same fixed-window Invoice/Invoice Item sales aggregate.
+- **Fix:** A management-only bundle now resolves route permission once, obtains active-version metadata through an ungated helper while holding one outer permit, shares latest inventory/stock and fixed-window sales CTEs, and retains a separate through-target-date sales branch for staleness. The management active-route read is likewise coordinated under one permit. PostgreSQL still owns newest-wins resolution, filtering, joins, Route × Product aggregation, and compact JSON result construction.
+- **Commit:** `c4f6e44`.
+- **Regression-prevention rule:** Keep the three Smart Loading management calculations behind one bundle permit; never call the public gated active-version helper from inside a held permit, merge the distinct staleness/window horizons, or move Route × Product facts into Node.
+
 ## Decision Analytics Studio — duplicate Visits scan
 
 - **Symptom:** Current/prior visit KPI computation scanned the Visits fact more than once.
