@@ -35,6 +35,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Commit:** `3464b6b5cb9153d3c8ae38afacc4b0f08456c585`.
 - **Regression-prevention rule:** Related visit KPIs in one request should share one scoped Visits fact query whenever semantics allow.
 
+## Team Performance — duplicate comparison-period fact scans
+
+- **Symptom/evidence:** With comparison dates enabled, one request executed six independent current/prior per-rep fact scans (Sales, Collections, and Returns), plus summary and target work.
+- **Root cause:** Each comparison period was issued as a separate RIE query even though both periods shared the same company, hierarchy, route, active-version, and grouping contract.
+- **Fix:** One scoped RIE query per metric now applies an OR-union of the two date ranges before aggregation and uses PostgreSQL `FILTER` aggregates to produce current and prior values independently. Overlapping ranges deliberately contribute to both values, preserving prior semantics.
+- **Commit:** `dbca799`.
+- **Regression-prevention rule:** For comparison-period Team Performance metrics, scan each scoped fact relation once and use independently filtered PostgreSQL aggregates; do not split current and prior into separate fact queries.
+
 ## Visit Copilot performance
 
 - **Status:** Already optimized. It resolves the scoped customer slice first and performs fact aggregation in PostgreSQL.
