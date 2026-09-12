@@ -156,6 +156,7 @@ export class RieScalableQueryService {
       if (aggregate.multiplierFallback) assertField(aggregate.multiplierFallback, aliases);
       if (aggregate.filterPositiveField) assertField(aggregate.filterPositiveField, aliases);
       if (aggregate.filterValues) assertField(aggregate.filterValues, aliases);
+      for (const filterDate of aggregate.filterDates ?? []) assertField(filterDate, aliases);
       if (aggregate.op !== "count" && !aggregate.field) throw new Error(`${aggregate.op} aggregate requires a field.`);
       if (aggregate.op === "sumProduct" && !aggregate.multiplier) throw new Error("sumProduct aggregate requires a multiplier field.");
     }
@@ -1073,6 +1074,12 @@ export class RieScalableQueryService {
       const field = scoped(date);
       if (field) predicates.push(datePredicate(field, cteAliases));
     }
+    const dateAnyPredicates = (input.scope?.dateAny ?? []).flatMap((date) => {
+      assertField(date, aliases);
+      const field = scoped(date);
+      return field ? [datePredicate(field, cteAliases)] : [];
+    });
+    if (dateAnyPredicates.length) predicates.push(Prisma.sql`(${Prisma.join(dateAnyPredicates, " OR ")})`);
     addScopedValueScope(predicates, input.scope?.route, "RouteID", aliases, cteAliases, scoped);
     // This predicate intentionally stays at the joined-query level: its
     // primary/fallback fields live on different entity aliases. The regular
@@ -1285,18 +1292,17 @@ function datePredicate(scope: RieDateScope, aliases: Set<string>): Prisma.Sql {
 }
 function aggregateSql(aggregate: RieQueryAggregation): Prisma.Sql {
   const alias = quoted(aggregate.as);
-  const valuesFilter = aggregate.filterValues
-    ? Prisma.sql` FILTER (WHERE ${normalizedField(aggregate.filterValues)} IN (${Prisma.join(aggregate.filterValues.values.map((value) => value.trim().toLowerCase()))}))`
-    : Prisma.empty;
-  if (aggregate.op === "count" && !aggregate.field) return Prisma.sql`COUNT(*)${valuesFilter}::double precision AS ${alias}`;
+  const rowFilters: Prisma.Sql[] = [];
+  if (aggregate.filterPositiveField) rowFilters.push(Prisma.sql`${numericField(textField(aggregate.filterPositiveField))} > 0`);
+  else if (aggregate.filterValues) rowFilters.push(Prisma.sql`${normalizedField(aggregate.filterValues)} IN (${Prisma.join(aggregate.filterValues.values.map((value) => value.trim().toLowerCase()))})`);
+  if (aggregate.filterDates?.length) rowFilters.push(Prisma.sql`(${Prisma.join(aggregate.filterDates.map((scope) => datePredicate(scope, new Set([scope.source ?? "base"]))), " OR ")})`);
+  const rowFilter = rowFilters.length ? Prisma.sql` FILTER (WHERE ${Prisma.join(rowFilters, " AND ")})` : Prisma.empty;
+  if (aggregate.op === "count" && !aggregate.field) return Prisma.sql`COUNT(*)${rowFilter}::double precision AS ${alias}`;
   const field = textField({ field: aggregate.field!, source: aggregate.source });
-  const positiveFilter = aggregate.filterPositiveField
-    ? Prisma.sql` FILTER (WHERE ${numericField(textField(aggregate.filterPositiveField))} > 0)`
-    : valuesFilter;
-  if (aggregate.op === "count") return Prisma.sql`COUNT(NULLIF(BTRIM(COALESCE(${field}, '')), ''))${positiveFilter}::double precision AS ${alias}`;
-  if (aggregate.op === "countDistinct") return Prisma.sql`(COUNT(DISTINCT NULLIF(BTRIM(COALESCE(${field}, '')), ''))${positiveFilter})::double precision AS ${alias}`;
-  if (aggregate.op === "arrayAggDistinct") return Prisma.sql`ARRAY_AGG(DISTINCT NULLIF(BTRIM(COALESCE(${field}, '')), '')) FILTER (WHERE NULLIF(BTRIM(COALESCE(${field}, '')), '') IS NOT NULL) AS ${alias}`;
-  if (aggregate.op === "minText" || aggregate.op === "maxText") return Prisma.sql`${Prisma.raw(aggregate.op === "minText" ? "MIN" : "MAX")}(NULLIF(BTRIM(COALESCE(${field}, '')), ''))${positiveFilter} AS ${alias}`;
+  if (aggregate.op === "count") return Prisma.sql`COUNT(NULLIF(BTRIM(COALESCE(${field}, '')), ''))${rowFilter}::double precision AS ${alias}`;
+  if (aggregate.op === "countDistinct") return Prisma.sql`(COUNT(DISTINCT NULLIF(BTRIM(COALESCE(${field}, '')), ''))${rowFilter})::double precision AS ${alias}`;
+  if (aggregate.op === "arrayAggDistinct") return Prisma.sql`ARRAY_AGG(DISTINCT NULLIF(BTRIM(COALESCE(${field}, '')), '')) FILTER (WHERE NULLIF(BTRIM(COALESCE(${field}, '')), '') IS NOT NULL${rowFilters.length ? Prisma.sql` AND ${Prisma.join(rowFilters, " AND ")}` : Prisma.empty}) AS ${alias}`;
+  if (aggregate.op === "minText" || aggregate.op === "maxText") return Prisma.sql`${Prisma.raw(aggregate.op === "minText" ? "MIN" : "MAX")}(NULLIF(BTRIM(COALESCE(${field}, '')), ''))${rowFilter} AS ${alias}`;
   const numeric = numericField(field);
   if (aggregate.op === "sumProduct") {
     const multiplier = textField(aggregate.multiplier!);
@@ -1304,11 +1310,11 @@ function aggregateSql(aggregate: RieQueryAggregation): Prisma.Sql {
     if (aggregate.multiplierFallback) {
       const fallback = textField(aggregate.multiplierFallback);
       const numericFallback = Prisma.sql`CASE WHEN BTRIM(COALESCE(${fallback}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${fallback}, ''))::double precision ELSE NULL END`;
-      return Prisma.sql`SUM(${numeric} * CASE WHEN ${multiplier} IS NULL THEN ${numericFallback} ELSE ${numericMultiplier} END)${positiveFilter} AS ${alias}`;
+      return Prisma.sql`SUM(${numeric} * CASE WHEN ${multiplier} IS NULL THEN ${numericFallback} ELSE ${numericMultiplier} END)${rowFilter} AS ${alias}`;
     }
-    return Prisma.sql`SUM(${numeric} * ${numericMultiplier})${positiveFilter} AS ${alias}`;
+    return Prisma.sql`SUM(${numeric} * ${numericMultiplier})${rowFilter} AS ${alias}`;
   }
-  return Prisma.sql`${Prisma.raw({ sum: "SUM", avg: "AVG", min: "MIN", max: "MAX" }[aggregate.op])}(${numeric})${positiveFilter} AS ${alias}`;
+  return Prisma.sql`${Prisma.raw({ sum: "SUM", avg: "AVG", min: "MIN", max: "MAX" }[aggregate.op])}(${numeric})${rowFilter} AS ${alias}`;
 }
 function numericField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`; }
 /** Matches RIE date filtering while making the route-stale subtraction safe. */

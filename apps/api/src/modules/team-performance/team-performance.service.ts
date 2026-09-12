@@ -83,6 +83,26 @@ export class TeamPerformanceService {
     ], groupBy: [{ field: "SalesRepID", source: "route" }, { field: "EmployeeName", source: "rep" }, { field: "Email", source: "rep" }, { field: "Email", source: "manager" }, { field: "EmployeeName", source: "manager" }], joins: [...definition.joins, route, rep, manager], hierarchyRoute: routeField, scope: { date: { ...definition.date, from, to }, ...(routeIds?.length ? { route: { values: routeIds, source: definition.routeSource === "base" ? undefined : definition.routeSource } } : {}) }, aggregates: [{ op: "arrayAggDistinct", field: "RouteID", source: definition.routeSource === "base" ? undefined : definition.routeSource, as: "routeIds" }, { op: "sum", field: definition.amount, as: "value" }], pagination: { limit: 5000 } });
   }
 
+  /** One fact scan emits both independently scoped current and prior values. */
+  private perRepComparisonMetric(ctx: ReturnType<TeamPerformanceService["rieContext"]>, metric: Metric, current: { from: string; to: string }, prior: { from: string; to: string }, routeIds?: string[], activeVersionCounts?: ReadonlyMap<string, number>) {
+    const definition = metric === "sales"
+      ? { entityName: "Invoice Items", amount: "LineTotal", date: { field: "InvoiceDate", source: "invoice" }, routeSource: "invoice", joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }] }
+      : metric === "collection"
+        ? { entityName: "Collections", amount: "Amount", date: { field: "CollectionDate" }, routeSource: "base", joins: [] }
+        : { entityName: "Returns", amount: "TotalAmount", date: { field: "ReturnDate" }, routeSource: "base", joins: [] };
+    const route = { entityName: "Routes", alias: "route", type: "left" as const, on: { left: { field: "RouteID", source: definition.routeSource === "base" ? undefined : definition.routeSource }, rightField: "RouteID" } };
+    const rep = { entityName: "Employees", alias: "rep", type: "left" as const, on: { left: { field: "SalesRepID", source: "route" }, rightField: "EmployeeID" } };
+    const manager = { entityName: "Employees", alias: "manager", type: "left" as const, on: { left: { field: "DirectManagerID", source: "rep" }, rightField: "EmployeeID" } };
+    const routeField = { field: "RouteID", ...(definition.routeSource === "base" ? {} : { source: definition.routeSource }) };
+    const periods = [{ ...definition.date, ...current }, { ...definition.date, ...prior }];
+    return this.rieFacade.queryCanonicalRecords({ ...ctx, activeVersionCounts, entityName: definition.entityName, projection: [
+      { field: "SalesRepID", source: "route", as: "salesRepId" }, { field: "EmployeeName", source: "rep", as: "repName" }, { field: "Email", source: "rep", as: "repEmail" }, { field: "Email", source: "manager", as: "supervisorEmail" }, { field: "EmployeeName", source: "manager", as: "supervisorName" },
+    ], groupBy: [{ field: "SalesRepID", source: "route" }, { field: "EmployeeName", source: "rep" }, { field: "Email", source: "rep" }, { field: "Email", source: "manager" }, { field: "EmployeeName", source: "manager" }], joins: [...definition.joins, route, rep, manager], hierarchyRoute: routeField, scope: { dateAny: periods, ...(routeIds?.length ? { route: { values: routeIds, source: definition.routeSource === "base" ? undefined : definition.routeSource } } : {}) }, aggregates: [
+      { op: "arrayAggDistinct", field: "RouteID", source: definition.routeSource === "base" ? undefined : definition.routeSource, filterDates: periods, as: "routeIds" },
+      { op: "sum", field: definition.amount, filterDates: [periods[0]!], as: "current" }, { op: "sum", field: definition.amount, filterDates: [periods[1]!], as: "prior" },
+    ], pagination: { limit: 5000 } });
+  }
+
   async query(user: AuthenticatedUser, input: TeamPerformanceRieQueryInput): Promise<TeamPerformanceResult> {
     const ctx = this.rieContext(user);
     const hasPrior = !!(input.priorDateFrom && input.priorDateTo);
@@ -90,9 +110,10 @@ export class TeamPerformanceService {
       this.prisma.rieDatasetVersion.findMany({ where: { companyId: ctx.companyId, entityName: { in: ["Routes", "Invoices", "Invoice Items", "Collections", "Returns"] }, isActive: true }, select: { entityName: true } }),
       this.rieFacade.getActiveVersionCounts(ctx.companyId, ["Routes", "Invoices", "Invoice Items", "Collections", "Returns", "Targets", "Employees"]),
     ]);
-    const [salesCurrent, collectionCurrent, returnsCurrent, salesPrior, collectionPrior, returnsPrior, salesSummary, targetsResult] = await Promise.all([
-      this.perRepMetric(ctx, "sales", input.dateFrom, input.dateTo, input.routeIds, activeVersionCounts), this.perRepMetric(ctx, "collection", input.dateFrom, input.dateTo, input.routeIds, activeVersionCounts), this.perRepMetric(ctx, "returns", input.dateFrom, input.dateTo, input.routeIds, activeVersionCounts),
-      hasPrior ? this.perRepMetric(ctx, "sales", input.priorDateFrom!, input.priorDateTo!, input.routeIds, activeVersionCounts) : Promise.resolve(null), hasPrior ? this.perRepMetric(ctx, "collection", input.priorDateFrom!, input.priorDateTo!, input.routeIds, activeVersionCounts) : Promise.resolve(null), hasPrior ? this.perRepMetric(ctx, "returns", input.priorDateFrom!, input.priorDateTo!, input.routeIds, activeVersionCounts) : Promise.resolve(null),
+    const [salesCurrent, collectionCurrent, returnsCurrent, salesSummary, targetsResult] = await Promise.all([
+      hasPrior ? this.perRepComparisonMetric(ctx, "sales", { from: input.dateFrom, to: input.dateTo }, { from: input.priorDateFrom!, to: input.priorDateTo! }, input.routeIds, activeVersionCounts) : this.perRepMetric(ctx, "sales", input.dateFrom, input.dateTo, input.routeIds, activeVersionCounts),
+      hasPrior ? this.perRepComparisonMetric(ctx, "collection", { from: input.dateFrom, to: input.dateTo }, { from: input.priorDateFrom!, to: input.priorDateTo! }, input.routeIds, activeVersionCounts) : this.perRepMetric(ctx, "collection", input.dateFrom, input.dateTo, input.routeIds, activeVersionCounts),
+      hasPrior ? this.perRepComparisonMetric(ctx, "returns", { from: input.dateFrom, to: input.dateTo }, { from: input.priorDateFrom!, to: input.priorDateTo! }, input.routeIds, activeVersionCounts) : this.perRepMetric(ctx, "returns", input.dateFrom, input.dateTo, input.routeIds, activeVersionCounts),
       this.rieFacade.queryCanonicalRecords({ ...ctx, activeVersionCounts, entityName: "Invoice Items", projection: [], joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }], hierarchyRoute: { field: "RouteID", source: "invoice" }, scope: { date: { field: "InvoiceDate", source: "invoice", from: input.dateFrom, to: input.dateTo }, ...(input.routeIds?.length ? { route: { values: input.routeIds, source: "invoice" } } : {}) }, aggregates: [{ op: "countDistinct", field: "CustomerCode", source: "invoice", as: "customers" }, { op: "countDistinct", field: "InvoiceNo", as: "invoices" }, { op: "countDistinct", field: "ProductCode", as: "skus" }], pagination: { limit: 1 } }),
       this.rieFacade.queryCanonicalRecords({ ...ctx, activeVersionCounts, entityName: "Targets", projection: [], scope: { ...(input.routeIds?.length ? { route: { values: input.routeIds } } : {}), fields: [{ field: "Year", values: [String(new Date(input.dateFrom).getUTCFullYear())] }, { field: "Month", values: [String(new Date(input.dateFrom).getUTCMonth() + 1)] }] }, aggregates: [{ op: "sum", field: "SalesTarget", as: "SalesTarget" }, { op: "sum", field: "CollectionTarget", as: "CollectionTarget" }, { op: "sum", field: "ActiveCustomersTarget", as: "ActiveCustomersTarget" }, { op: "sum", field: "SKUDistributionTarget", as: "SKUDistributionTarget" }], pagination: { limit: 1 } }),
     ]);
@@ -107,7 +128,13 @@ export class TeamPerformanceService {
       for (const routeId of routeIds) if (!entry.routeIds.includes(routeId)) entry.routeIds.push(routeId);
       entry[prior ? `${metric}Prior` as "salesPrior" | "collectionPrior" | "returnsPrior" : metric] += this.numeric(r.value);
     });
-    merge(salesCurrent, "sales", false); merge(collectionCurrent, "collection", false); merge(returnsCurrent, "returns", false); merge(salesPrior, "sales", true); merge(collectionPrior, "collection", true); merge(returnsPrior, "returns", true);
+    if (hasPrior) {
+      const mergeComparison = (result: RieScalableQueryResult | null, metric: Metric) => result?.records.forEach((row) => {
+        const current = { ...row, value: (row as SmallRow).current }, prior = { ...row, value: (row as SmallRow).prior };
+        merge({ records: [current], page: result.page }, metric, false); merge({ records: [prior], page: result.page }, metric, true);
+      });
+      mergeComparison(salesCurrent, "sales"); mergeComparison(collectionCurrent, "collection"); mergeComparison(returnsCurrent, "returns");
+    } else { merge(salesCurrent, "sales", false); merge(collectionCurrent, "collection", false); merge(returnsCurrent, "returns", false); }
 
     const reps: TeamPerformanceRepRow[] = Array.from(acc.values()).map((r) => ({
       routeIds: Array.from(r.routeIds),
