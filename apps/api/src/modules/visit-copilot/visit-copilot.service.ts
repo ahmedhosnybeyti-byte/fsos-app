@@ -1444,14 +1444,14 @@ export class VisitCopilotService {
 
     const routeById = new Map(routes.records.map((row) => [String(row.RouteID ?? "").trim(), row]));
     const employeeIds = [...new Set(routes.records.flatMap((row) => [row.ManagerID, row.SupervisorID, row.SalesRepID].map((value) => String(value ?? "").trim()).filter(Boolean)))];
-    const employees = employeeIds.length ? await this.rieFacade.queryCanonicalRecords({
-      ...ctx, entityName: "Employees",
-      projection: ["EmployeeID", "EmployeeName"].map((field) => ({ field })),
-      scope: { fields: [{ field: "EmployeeID", values: employeeIds }] }, pagination: { limit: 5_000 },
-    }) : { records: [], page: { hasMore: false } };
-    if (employees.page.hasMore) throw new BadRequestException("نتيجة موظفي hierarchy للفرص القائمة تجاوزت الحد المدعوم.");
-
-    const employeeName = new Map(employees.records.map((row) => [String(row.EmployeeID ?? "").trim(), String(row.EmployeeName ?? row.EmployeeID ?? "").trim()]));
+    // Employee is the operational source of truth after ingestion. This is a
+    // bounded lookup for only the employee IDs already present on the scoped
+    // routes, not a new full read.
+    const employees = employeeIds.length ? await this.prisma.employee.findMany({
+      where: { companyId: user.companyId!, employeeCode: { in: employeeIds } },
+      select: { employeeCode: true, fullName: true },
+    }) : [];
+    const employeeName = new Map(employees.map((employee) => [employee.employeeCode, employee.fullName.trim()]));
     const label = (value: unknown) => {
       const id = String(value ?? "").trim();
       return id ? employeeName.get(id) || id : null;

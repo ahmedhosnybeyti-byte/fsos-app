@@ -369,13 +369,30 @@ export class RieScalableQueryService {
     const inventoryDate = textField({ field: "ReportDate", source: "inventory_source" });
     const invoiceRoute = { field: "RouteID", source: "invoice_source" };
     const invoiceDate = textField({ field: "InvoiceDate", source: "invoice_source" });
+    const inventoryProjection = Prisma.sql`
+      ${normalizedField({ field: "RouteID", source: "inventory_source" })} AS route_id,
+      NULLIF(BTRIM(COALESCE(${inventoryDate}, '')), '') AS report_date,
+      ${normalizedField({ field: "ProductCode", source: "inventory_source" })} AS product_code,
+      ${numericField(textField({ field: "Quantity", source: "inventory_source" }))} AS quantity
+    `;
+    const invoiceProjection = Prisma.sql`
+      ${normalizedField({ field: "InvoiceNo", source: "invoice_source" })} AS invoice_no,
+      ${normalizedField({ field: "RouteID", source: "invoice_source" })} AS route_id,
+      ${dateText(invoiceDate)} AS invoice_date
+    `;
+    const itemProjection = Prisma.sql`
+      ${normalizedField({ field: "InvoiceNo", source: "item_source" })} AS invoice_no,
+      ${normalizedField({ field: "RouteID", source: "item_source" })} AS route_id,
+      ${normalizedField({ field: "ProductCode", source: "item_source" })} AS product_code
+    `;
+    const activeVersionCounts = await this.activeVersionCounts(input.companyId, ["Van Inventory", "Invoices", "Invoice Items"]);
     const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [
       Prisma.sql`${dateText(inventoryDate)} <= ${targetDate}${routeScope(inventoryRoute)}`,
-    ], [], []);
+    ], [], [], activeVersionCounts.get("Van Inventory") === 1, [], inventoryProjection);
     const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [
       Prisma.sql`${dateText(invoiceDate)} <= ${targetDate}${routeScope(invoiceRoute)}`,
-    ], [], []);
-    const scopedInvoiceNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
+    ], [], [], activeVersionCounts.get("Invoices") === 1, [], invoiceProjection);
+    const scopedInvoiceNo = Prisma.raw('invoice.invoice_no');
     const scopedInvoiceNumbersCte = Prisma.sql`scoped_invoice_numbers AS MATERIALIZED (
       SELECT DISTINCT ${scopedInvoiceNo} AS invoice_no
       FROM invoice_active invoice
@@ -384,23 +401,23 @@ export class RieScalableQueryService {
     // InvoiceNo is part of the Invoice Items business key. Restricting rows
     // to the already-scoped invoice keys before newest-version resolution is
     // therefore parity-safe and lets PostgreSQL use the InvoiceNo index.
-    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], false, [
+    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], activeVersionCounts.get("Invoice Items") === 1, [
       Prisma.sql`INNER JOIN scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`,
-    ]);
-    const inventoryRouteText = normalizedField({ field: "RouteID", source: "inventory" });
-    const itemRouteText = normalizedField({ field: "RouteID", source: "item" });
-    const invoiceRouteText = normalizedField({ field: "RouteID", source: "invoice" });
-    const effectiveSaleRoute = Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "RouteID", source: "item" })}, '')), ''), ${textField({ field: "RouteID", source: "invoice" })}, '')))`;
-    const inventoryProduct = normalizedField({ field: "ProductCode", source: "inventory" });
-    const itemProduct = normalizedField({ field: "ProductCode", source: "item" });
-    const inventoryQuantity = numericField(textField({ field: "Quantity", source: "inventory" }));
-    const invoiceNo = normalizedField({ field: "InvoiceNo", source: "item" });
-    const invoiceJoinNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
-    const saleDate = dateText(textField({ field: "InvoiceDate", source: "invoice" }));
+    ], itemProjection);
+    const inventoryRouteText = Prisma.raw('inventory.route_id');
+    const itemRouteText = Prisma.raw('item.route_id');
+    const invoiceRouteText = Prisma.raw('invoice.route_id');
+    const effectiveSaleRoute = Prisma.sql`COALESCE(NULLIF(item.route_id, ''), invoice.route_id, '')`;
+    const inventoryProduct = Prisma.raw('inventory.product_code');
+    const itemProduct = Prisma.raw('item.product_code');
+    const inventoryQuantity = Prisma.raw('inventory.quantity');
+    const invoiceNo = Prisma.raw('item.invoice_no');
+    const invoiceJoinNo = Prisma.raw('invoice.invoice_no');
+    const saleDate = Prisma.raw('invoice.invoice_date');
     const rows = await this.runExpensiveQuery("queryRouteProductStaleness", () => this.prisma.$queryRaw<RieRouteProductStalenessRow[]>(Prisma.sql`
       WITH ${inventoryCte}, ${invoiceCte}, ${scopedInvoiceNumbersCte}, ${itemsCte},
       inventory_latest AS MATERIALIZED (
-        SELECT ${inventoryRouteText} AS route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) AS report_date
+        SELECT ${inventoryRouteText} AS route_id, MAX(inventory.report_date) AS report_date
         FROM inventory_active inventory
         GROUP BY ${inventoryRouteText}
       ),
@@ -408,7 +425,7 @@ export class RieScalableQueryService {
         SELECT ${inventoryRouteText} AS route_id, ${inventoryProduct} AS product_code, SUM(${inventoryQuantity})::double precision AS quantity
         FROM inventory_active inventory
         INNER JOIN inventory_latest latest ON latest.route_id = ${inventoryRouteText}
-          AND NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '') = latest.report_date
+          AND inventory.report_date = latest.report_date
         GROUP BY ${inventoryRouteText}, ${inventoryProduct}
       ),
       sales_by_route_product AS MATERIALIZED (

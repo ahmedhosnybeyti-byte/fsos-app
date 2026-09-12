@@ -395,11 +395,21 @@ export class SmartLoadingService {
       }));
     };
     const timedManagementStage = async <T>(stage: string, operation: () => Promise<T>): Promise<T> => {
+      const startedAt = performance.now();
       try {
         return await timed(stage, operation);
       } catch (error) {
         logManagementSessionStageFailure(stage, error);
         throw error;
+      } finally {
+        this.logger.log(JSON.stringify({
+          event: "smart_loading_management_session_stage_timing",
+          stage,
+          durationMs: Number((performance.now() - startedAt).toFixed(1)),
+          companyId: ctx.companyId,
+          currentUser: user.email,
+          role: user.roleCode,
+        }));
       }
     };
     const selectedSalesRepId = salesRepId?.trim();
@@ -705,6 +715,15 @@ export class SmartLoadingService {
     );
     stageTimingsMs["priority-recommendation-calculations"] = Number((performance.now() - calculationsStartedAt).toFixed(1));
     stageTimingsMs.total = Number((performance.now() - timingStartedAt).toFixed(1));
+    if (useManagementStaleGrain) {
+      this.logger.log(JSON.stringify({
+        event: "smart_loading_management_session_timing",
+        durationMs: stageTimingsMs.total,
+        companyId: ctx.companyId,
+        currentUser: user.email,
+        role: user.roleCode,
+      }));
+    }
     if (SMART_LOADING_TIMING_AUDIT_ENABLED) {
       this.logger.log(JSON.stringify({ event: "smart_loading_session_timing", companyId: ctx.companyId, timingsMs: stageTimingsMs }));
     }
