@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Patch } from "@nestjs/common";
+import { Body, Controller, Get, Header, Patch } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
 import { updatePlatformSettingsSchema, type UpdatePlatformSettingsInput } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
+import { Public } from "../../common/decorators/public.decorator";
 import { SkipSubscriptionCheck } from "../../common/decorators/skip-subscription-check.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
@@ -12,6 +13,13 @@ import { PlatformSettingsService } from "./platform-settings.service";
 @Controller("platform-settings")
 export class PlatformSettingsController {
   constructor(private readonly platformSettingsService: PlatformSettingsService) {}
+
+  @Get("public-trial-registration")
+  @Public()
+  @Header("Cache-Control", "no-store")
+  getPublicTrialRegistrationVisibility() {
+    return this.platformSettingsService.getPublicTrialRegistrationVisibility();
+  }
 
   @Get()
   @Auth("SUPER_ADMIN")

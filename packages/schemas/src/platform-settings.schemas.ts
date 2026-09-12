@@ -7,6 +7,7 @@ export const updatePlatformSettingsSchema = z.object({
   trialDurationDays: z.number().int().min(1).max(365).optional(),
   defaultPlanCode: z.string().min(1).max(40).optional(),
   autoStartTrialOnRegistration: z.boolean().optional(),
+  showTrialRegistration: z.boolean().optional(),
   // Base URL of the platform's one Custom GPT — what "Open Custom GPT"
   // opens after a launch code is minted. Never a conversation URL (/c/...).
   gptBaseUrl: z.string().url().optional(),

@@ -1,6 +1,7 @@
 import Link from "next/link";
-import { ArrowRight, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { TrialRegistrationLink } from "@/components/marketing/trial-registration-link";
 
 export default function LandingPage() {
   return (
@@ -17,11 +18,7 @@ export default function LandingPage() {
           <h1 className="text-4xl font-semibold tracking-tight sm:text-5xl">Murshidak</h1>
           <p className="mt-4 text-base text-slate-300 sm:text-lg">AI-powered field sales intelligence</p>
           <div className="mt-9 flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
-            <Button size="lg" asChild className="shadow-[0_0_32px_-6px_hsl(var(--primary)/0.7)]">
-              <Link href="/register">
-                Start free trial <ArrowRight className="h-4 w-4" />
-              </Link>
-            </Button>
+            <TrialRegistrationLink />
             <Button size="lg" variant="outline" asChild className="border-white/20 bg-white/[0.03] text-slate-100 hover:bg-white/10 hover:text-white">
               <Link href="/login">Log in</Link>
             </Button>
