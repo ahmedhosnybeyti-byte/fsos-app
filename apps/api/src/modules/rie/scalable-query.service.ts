@@ -155,6 +155,7 @@ export class RieScalableQueryService {
       if (aggregate.multiplier) assertField(aggregate.multiplier, aliases);
       if (aggregate.multiplierFallback) assertField(aggregate.multiplierFallback, aliases);
       if (aggregate.filterPositiveField) assertField(aggregate.filterPositiveField, aliases);
+      if (aggregate.filterValues) assertField(aggregate.filterValues, aliases);
       if (aggregate.op !== "count" && !aggregate.field) throw new Error(`${aggregate.op} aggregate requires a field.`);
       if (aggregate.op === "sumProduct" && !aggregate.multiplier) throw new Error("sumProduct aggregate requires a multiplier field.");
     }
@@ -200,6 +201,7 @@ export class RieScalableQueryService {
         ...(aggregate.multiplier ? [aggregate.multiplier] : []),
         ...(aggregate.multiplierFallback ? [aggregate.multiplierFallback] : []),
         ...(aggregate.filterPositiveField ? [aggregate.filterPositiveField] : []),
+        ...(aggregate.filterValues ? [aggregate.filterValues] : []),
       ])]
         .some((field) => field.source && scopedJoinAliases.has(field.source));
     const driveBaseFromScopedJoins = input.driveBaseFromScopedJoins === true;
@@ -470,25 +472,33 @@ export class RieScalableQueryService {
       : effectiveRoutes.length
         ? Prisma.sql` AND ${normalizedField(field)} IN (${Prisma.join(effectiveRoutes)})`
         : Prisma.sql` AND FALSE`;
+    const inventoryProjection = Prisma.sql`${normalizedField({ field: "RouteID", source: "inventory_source" })} AS route_id, NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory_source" })}, '')), '') AS report_date, ${normalizedField({ field: "ProductCode", source: "inventory_source" })} AS product_code, ${numericField(textField({ field: "Quantity", source: "inventory_source" }))} AS quantity`;
+    const invoiceProjection = Prisma.sql`${normalizedField({ field: "InvoiceNo", source: "invoice_source" })} AS invoice_no, ${normalizedField({ field: "RouteID", source: "invoice_source" })} AS route_id`;
+    const itemProjection = Prisma.sql`${normalizedField({ field: "InvoiceNo", source: "item_source" })} AS invoice_no, ${normalizedField({ field: "RouteID", source: "item_source" })} AS route_id, ${normalizedField({ field: "ProductCode", source: "item_source" })} AS product_code, ${numericField(textField({ field: "Quantity", source: "item_source" }))} AS quantity`;
     const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [
       Prisma.sql`${dateText(textField({ field: "ReportDate", source: "inventory_source" }))} <= ${targetDate}${routeScope({ field: "RouteID", source: "inventory_source" })}`,
-    ], [], []);
+    ], [], [], false, [], inventoryProjection);
     const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [
       Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} >= ${salesFrom} AND ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${salesTo}${routeScope({ field: "RouteID", source: "invoice_source" })}${customerCodes.length ? Prisma.sql` AND ${normalizedField({ field: "CustomerCode", source: "invoice_source" })} IN (${Prisma.join(customerCodes)})` : Prisma.sql` AND FALSE`}`,
-    ], [], []);
-    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], []);
-    const inventoryRoute = normalizedField({ field: "RouteID", source: "inventory" });
-    const inventoryProduct = normalizedField({ field: "ProductCode", source: "inventory" });
-    const inventoryQuantity = numericField(textField({ field: "Quantity", source: "inventory" }));
-    const itemProduct = normalizedField({ field: "ProductCode", source: "item" });
-    const itemQuantity = numericField(textField({ field: "Quantity", source: "item" }));
-    const invoiceNo = normalizedField({ field: "InvoiceNo", source: "item" });
-    const invoiceJoinNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
-    const effectiveSaleRoute = Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "RouteID", source: "item" })}, '')), ''), ${textField({ field: "RouteID", source: "invoice" })}, '')))`;
+    ], [], [], false, [], invoiceProjection);
+    const scopedInvoiceNumbersCte = Prisma.sql`scoped_invoice_numbers AS MATERIALIZED (
+      SELECT DISTINCT invoice.invoice_no FROM invoice_active invoice WHERE invoice.invoice_no <> ''
+    )`;
+    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], false, [
+      Prisma.sql`INNER JOIN scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`,
+    ], itemProjection);
+    const inventoryRoute = Prisma.raw("inventory.route_id");
+    const inventoryProduct = Prisma.raw("inventory.product_code");
+    const inventoryQuantity = Prisma.raw("inventory.quantity");
+    const itemProduct = Prisma.raw("item.product_code");
+    const itemQuantity = Prisma.raw("item.quantity");
+    const invoiceNo = Prisma.raw("item.invoice_no");
+    const invoiceJoinNo = Prisma.raw("invoice.invoice_no");
+    const effectiveSaleRoute = Prisma.sql`COALESCE(NULLIF(item.route_id, ''), invoice.route_id, '')`;
     return this.runExpensiveQuery("queryManagementVehicleProducts", () => this.prisma.$queryRaw<RieManagementVehicleProductRow[]>(Prisma.sql`
-      WITH ${inventoryCte}, ${invoiceCte}, ${itemsCte},
+      WITH ${inventoryCte}, ${invoiceCte}, ${scopedInvoiceNumbersCte}, ${itemsCte},
       inventory_latest AS MATERIALIZED (
-        SELECT ${inventoryRoute} AS route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) AS report_date
+        SELECT ${inventoryRoute} AS route_id, MAX(inventory.report_date) AS report_date
         FROM inventory_active inventory
         GROUP BY ${inventoryRoute}
       ),
@@ -496,7 +506,7 @@ export class RieScalableQueryService {
         SELECT ${inventoryRoute} AS route_id, ${inventoryProduct} AS product_code, SUM(${inventoryQuantity})::double precision AS current_stock
         FROM inventory_active inventory
         INNER JOIN inventory_latest latest ON latest.route_id = ${inventoryRoute}
-          AND NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '') = latest.report_date
+          AND inventory.report_date = latest.report_date
         WHERE ${inventoryProduct} <> ''
         GROUP BY ${inventoryRoute}, ${inventoryProduct}
       ),
@@ -1274,12 +1284,15 @@ function datePredicate(scope: RieDateScope, aliases: Set<string>): Prisma.Sql {
 }
 function aggregateSql(aggregate: RieQueryAggregation): Prisma.Sql {
   const alias = quoted(aggregate.as);
-  if (aggregate.op === "count" && !aggregate.field) return Prisma.sql`COUNT(*)::double precision AS ${alias}`;
+  const valuesFilter = aggregate.filterValues
+    ? Prisma.sql` FILTER (WHERE ${normalizedField(aggregate.filterValues)} IN (${Prisma.join(aggregate.filterValues.values.map((value) => value.trim().toLowerCase()))}))`
+    : Prisma.empty;
+  if (aggregate.op === "count" && !aggregate.field) return Prisma.sql`COUNT(*)${valuesFilter}::double precision AS ${alias}`;
   const field = textField({ field: aggregate.field!, source: aggregate.source });
   const positiveFilter = aggregate.filterPositiveField
     ? Prisma.sql` FILTER (WHERE ${numericField(textField(aggregate.filterPositiveField))} > 0)`
-    : Prisma.empty;
-  if (aggregate.op === "count") return Prisma.sql`COUNT(NULLIF(BTRIM(COALESCE(${field}, '')), ''))::double precision AS ${alias}`;
+    : valuesFilter;
+  if (aggregate.op === "count") return Prisma.sql`COUNT(NULLIF(BTRIM(COALESCE(${field}, '')), ''))${positiveFilter}::double precision AS ${alias}`;
   if (aggregate.op === "countDistinct") return Prisma.sql`(COUNT(DISTINCT NULLIF(BTRIM(COALESCE(${field}, '')), ''))${positiveFilter})::double precision AS ${alias}`;
   if (aggregate.op === "arrayAggDistinct") return Prisma.sql`ARRAY_AGG(DISTINCT NULLIF(BTRIM(COALESCE(${field}, '')), '')) FILTER (WHERE NULLIF(BTRIM(COALESCE(${field}, '')), '') IS NOT NULL) AS ${alias}`;
   if (aggregate.op === "minText" || aggregate.op === "maxText") return Prisma.sql`${Prisma.raw(aggregate.op === "minText" ? "MIN" : "MAX")}(NULLIF(BTRIM(COALESCE(${field}, '')), ''))${positiveFilter} AS ${alias}`;

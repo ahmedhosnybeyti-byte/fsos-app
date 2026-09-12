@@ -447,12 +447,11 @@ export class DecisionAnalyticsStudioService {
     const joins = this.customerJoins();
     const common = { ...ctx, entityName: "Visits", projection: [], joins, hierarchyRoute: { field: "RouteID", source: "customer" }, scope: this.decisionScope(f, { field: "VisitDate", source: "base", from, to }, false), pagination: { limit: 1 } } as const;
     const customerScope = this.decisionScope(f, undefined, false, "base");
-    const [visitCounts, productiveCounts, customerCounts] = await Promise.all([
-      this.rieFacade.queryCanonicalRecords({ ...common, aggregates: [{ op: "count", as: "totalVisits" }, { op: "countDistinct", field: "CustomerCode", as: "visitedCustomers" }] }),
-      this.rieFacade.queryCanonicalRecords({ ...common, scope: { ...common.scope, fields: [...(common.scope.fields ?? []), { field: "VisitStatus", values: ["Productive"] }] }, aggregates: [{ op: "count", as: "productiveVisits" }] }),
+    const [visitCounts, customerCounts] = await Promise.all([
+      this.rieFacade.queryCanonicalRecords({ ...common, aggregates: [{ op: "count", as: "totalVisits" }, { op: "countDistinct", field: "CustomerCode", as: "visitedCustomers" }, { op: "count", filterValues: { field: "VisitStatus", values: ["Productive"] }, as: "productiveVisits" }] }),
       this.rieFacade.queryCanonicalRecords({ ...ctx, entityName: "Customers", projection: [], joins: [{ entityName: "Routes", alias: "route", type: "left" as const, on: { left: { field: "RouteID" }, rightField: "RouteID" } }, { entityName: "Employees", alias: "rep", type: "left" as const, on: { left: { field: "SalesRepID", source: "route" }, rightField: "EmployeeID" } }, { entityName: "Employees", alias: "supervisor", type: "left" as const, on: { left: { field: "DirectManagerID", source: "rep" }, rightField: "EmployeeID" } }], hierarchyRoute: { field: "RouteID" }, scope: customerScope, aggregates: [{ op: "countDistinct", field: "CustomerCode", as: "scopedCustomers" }], pagination: { limit: 1 } }),
     ]);
-    return { records: [{ ...(visitCounts.records[0] ?? {}), ...(productiveCounts.records[0] ?? {}), ...(customerCounts.records[0] ?? {}) }] };
+    return { records: [{ ...(visitCounts.records[0] ?? {}), ...(customerCounts.records[0] ?? {}) }] };
   }
 
   private async insightsFor(ctx: ReturnType<DecisionAnalyticsStudioService["rieContext"]>, situations: readonly SgiSituation[], repDirectory: readonly { email: string; supervisorEmail: string | null }[], f: ReturnType<DecisionAnalyticsStudioService["compileFilters"]>) {

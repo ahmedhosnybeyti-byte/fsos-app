@@ -175,6 +175,10 @@ test("management vehicle monitor returns every inventory product at Product grai
   assert.match(statement!.strings.join("?"), /FULL OUTER JOIN sales_by_route_product/);
   assert.match(statement!.strings.join("?"), /GROUP BY product_code/);
   assert.match(statement!.strings.join("?"), /SUM\(LEAST\(current_stock, weekly_average_sales\)\)/);
+  assert.match(statement!.strings.join("?"), /scoped_invoice_numbers/);
+  assert.doesNotMatch(statement!.strings.join("?"), /SELECT inventory_source\.\*/);
+  assert.doesNotMatch(statement!.strings.join("?"), /SELECT invoice_source\.\*/);
+  assert.doesNotMatch(statement!.strings.join("?"), /SELECT item_source\.\*/);
 });
 
 test("management stock alignment keeps Route A's shortage despite Route B's surplus", async () => {
