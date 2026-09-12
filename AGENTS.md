@@ -2,6 +2,19 @@
 
 These are permanent architecture rules for the project and are not specific to any individual screen.
 
+## Persistent engineering memory
+
+Before making performance-sensitive backend, data-query, or scalability changes, read:
+
+- `docs/engineering/PERFORMANCE_GUARDRAILS.md`
+- `docs/engineering/RESOLVED_ISSUES.md`
+
+Keep the following rules in every implementation: PostgreSQL is the runtime source of truth; apply Company / Manager / Supervisor / Sales Rep / Route / Date scope as early as possible; let PostgreSQL perform heavy filtering, joins, and aggregation; and return small prepared results to Node/UI. Do not load large datasets for Node-side filter/map/reduce/join work, unnecessarily materialize `source.*` or full JSON rows, or repeatedly scan a large fact within one request. Murshidak primarily uses D-1 / Snapshot data, not live field data.
+
+Performance work must preserve business logic, permissions, hierarchy scope, newest-wins semantics, response shape, and UX. Do not introduce needless polling or recalculation, and do not treat higher RIE concurrency as the default performance fix. New screens and features must be designed for performance and scalability from the outset. Do not reopen a resolved issue without new measured evidence.
+
+After an important verified engineering fix, update `RESOLVED_ISSUES.md` with the symptom, root cause, fix, commit, and regression-prevention rule.
+
 1. **Excel is an ingestion gateway only.** After upload:
    - New → Insert
    - Changed → Update
