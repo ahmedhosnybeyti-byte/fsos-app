@@ -8,6 +8,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Root cause/evidence:** The constrained RIE queue was the visible bottleneck under mixed load. Raising RIE concurrency from 20 to 30 did not solve it and substantially increased PostgreSQL CPU/RAM.
 - **Regression-prevention rule:** Do **not** treat increasing RIE concurrency as the default solution. Identify and measure the real bottleneck first.
 
+## RIE request-level acquisition and fan-out
+
+- **Symptom/evidence:** A production Smart Loading session performed 16 logical RIE operations, 29 PostgreSQL operations, 34 hierarchy-resolution calls, and 15 active-version resolutions in one action (Phase 0 telemetry, 2026-09-13).
+- **Root cause:** Related facade calls were individually governed, but had no shared request-level coordination for hierarchy scope, active-version metadata, or feature fan-out.
+- **Fix:** Add the request-scoped `RieRequestPlannerService`; it caps migrated action fan-out at three simultaneous facade operations and 24 total operations, and reuses only hierarchy route sets and active-version counts. Smart Loading session is the first migrated feature; its specialized management bundle and response contract are unchanged.
+- **Commit:** `3224a36987328765d583cd6d612e40b858a92a5c`.
+- **Regression-prevention rule:** Migrate a feature through `RieFacade.runPlannedRequest()` before adding concurrent RIE work. Never place fact rows in the planner cache, bypass PostgreSQL scoping, or raise the global RIE semaphore as a substitute for a request budget.
+
 ## Smart Loading — `queryManagementStockAlignment`
 
 - **Symptom:** Slow/heavy query execution and materialization pressure.
