@@ -10,7 +10,7 @@ import cookieParser from "cookie-parser";
 import { AppModule } from "./app.module";
 import { HttpExceptionFilter } from "./common/filters/http-exception.filter";
 import { AppConfigService } from "./common/config";
-import { redactSensitiveUrl } from "./common/security/redact-sensitive-url";
+import { redactRequestTraceUrl } from "./common/security/redact-request-trace-url";
 import { API_VERSION_PREFIX } from "@field-sales-os/schemas";
 import { DrainingService, rejectNewWorkWhileDraining } from "./common/runtime/draining.service";
 import { classifyRieHttpAction, completeRieRequest, markRieRequestCancelled, runWithRieRequestContext } from "./common/observability/rie-observability";
@@ -76,7 +76,7 @@ async function bootstrap() {
         completeRieRequest(res.statusCode);
       };
 
-      const safeUrl = redactSensitiveUrl(req.originalUrl);
+      const safeUrl = redactRequestTraceUrl(req.originalUrl);
       requestTraceLogger.log(`IN  id=${traceId} ${req.method} ${safeUrl} at=${new Date().toISOString()}`);
       req.once("aborted", () => markRieRequestCancelled());
       res.once("finish", () => {
