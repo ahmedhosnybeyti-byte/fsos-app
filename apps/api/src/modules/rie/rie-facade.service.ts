@@ -20,6 +20,7 @@ import { RieFsos360QueryService } from "./fsos-360-query.service";
 import type { Fsos360Query } from "@field-sales-os/schemas";
 import type { Fsos360ResolvedContext } from "../decision-analytics-studio/fsos-360-context.service";
 import type { RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery } from "./scalable-query.types";
+import { fingerprintRieQueryShape, observeRieLogicalOperation, observeRiePostgres, recordActiveVersionResolution, scopeMetadata } from "../../common/observability/rie-observability";
 
 /**
  * The smallest sales grain used by analytics: an invoice line, or the same
@@ -118,7 +119,7 @@ export class RieFacade {
   // ------------------------------------------------------------------
 
   navigate(request: NavigationRequest): Promise<NavigationResult> {
-    return this.navigationEngine.navigate(request);
+    return observeRieLogicalOperation("navigate", undefined, () => this.navigationEngine.navigate(request));
   }
 
   // ------------------------------------------------------------------
@@ -129,22 +130,24 @@ export class RieFacade {
   // ------------------------------------------------------------------
 
   async executeQuery(plan: ExecutionPlan, options: RieQueryOptions = {}): Promise<RieQueryResult> {
-    const executionResult = await this.queryExecutionEngine.execute(plan);
-    const businessRulesResult = this.businessRulesEngine.apply(executionResult, options.businessRuleContext ?? {});
+    return observeRieLogicalOperation("executeQuery", undefined, async () => {
+      const executionResult = await this.queryExecutionEngine.execute(plan);
+      const businessRulesResult = this.businessRulesEngine.apply(executionResult, options.businessRuleContext ?? {});
 
-    if (!executionResult.success) {
-      this.logger.warn(`Execution Plan "${plan.planId}" completed with success=false (${executionResult.errors.length} error(s)).`);
-    }
+      if (!executionResult.success) {
+        this.logger.warn(`Execution Plan "${plan.planId}" completed with success=false (${executionResult.errors.length} error(s)).`);
+      }
 
-    return {
-      success: executionResult.success,
-      finalEntity: executionResult.finalEntity,
-      records: businessRulesResult.records,
-      annotations: businessRulesResult.annotations,
-      warnings: executionResult.warnings,
-      errors: executionResult.errors,
-      executionResult,
-    };
+      return {
+        success: executionResult.success,
+        finalEntity: executionResult.finalEntity,
+        records: businessRulesResult.records,
+        annotations: businessRulesResult.annotations,
+        warnings: executionResult.warnings,
+        errors: executionResult.errors,
+        executionResult,
+      };
+    });
   }
 
   // ------------------------------------------------------------------
@@ -159,7 +162,7 @@ export class RieFacade {
   // ------------------------------------------------------------------
 
   getEntityRecords(entityName: string, options: EntityQueryOptions): Promise<EntityQueryResult> {
-    return this.entityProvider.getRecords(entityName, options);
+    return observeRieLogicalOperation("getEntityRecords", scopeMetadata(options), () => this.entityProvider.getRecords(entityName, options));
   }
 
   /**
@@ -171,73 +174,73 @@ export class RieFacade {
     if ((!query.filters || query.filters.length === 0) && (!query.limit || query.limit < 1)) {
       throw new Error(`RIE scoped query for ${query.entityName} requires filters or a positive limit.`);
     }
-    return this.entityProvider.getRecords(query.entityName, {
+    return observeRieLogicalOperation("getScopedEntityRecords", scopeMetadata(query), () => this.entityProvider.getRecords(query.entityName, {
       companyId: query.companyId,
       requestingUser: query.requestingUser,
       filters: query.filters,
       limit: query.limit,
-    });
+    }));
   }
 
   /** Bounded PostgreSQL query surface for high-cardinality canonical data. */
   queryCanonicalRecords(query: RieScalableQuery): Promise<RieScalableQueryResult> {
-    return this.scalableQuery.query(query);
+    return observeRieLogicalOperation("queryCanonicalRecords", scopeMetadata(query), () => this.scalableQuery.query(query));
   }
 
   /** Request-scoped active-version metadata for callers issuing related RIE queries. */
   getActiveVersionCounts(companyId: string, entityNames: readonly string[]): Promise<Map<string, number>> {
-    return this.scalableQuery.getActiveVersionCounts(companyId, entityNames);
+    return observeRieLogicalOperation("getActiveVersionCounts", { companyId }, () => this.scalableQuery.getActiveVersionCounts(companyId, entityNames));
   }
 
   queryRouteProductStaleness(query: RieRouteProductStalenessQuery): Promise<RieRouteProductStalenessRow[]> {
-    return this.scalableQuery.queryRouteProductStaleness(query);
+    return observeRieLogicalOperation("queryRouteProductStaleness", scopeMetadata(query), () => this.scalableQuery.queryRouteProductStaleness(query));
   }
 
   queryManagementStockAlignment(query: RieManagementStockAlignmentQuery): Promise<RieManagementStockAlignmentRow> {
-    return this.scalableQuery.queryManagementStockAlignment(query);
+    return observeRieLogicalOperation("queryManagementStockAlignment", scopeMetadata(query), () => this.scalableQuery.queryManagementStockAlignment(query));
   }
 
   queryManagementVehicleProducts(query: RieManagementVehicleProductsQuery): Promise<RieManagementVehicleProductRow[]> {
-    return this.scalableQuery.queryManagementVehicleProducts(query);
+    return observeRieLogicalOperation("queryManagementVehicleProducts", scopeMetadata(query), () => this.scalableQuery.queryManagementVehicleProducts(query));
   }
 
   queryManagementSmartLoadingBundle(query: RieManagementSmartLoadingBundleQuery): Promise<RieManagementSmartLoadingBundle> {
-    return this.scalableQuery.queryManagementSmartLoadingBundle(query);
+    return observeRieLogicalOperation("queryManagementSmartLoadingBundle", scopeMetadata(query), () => this.scalableQuery.queryManagementSmartLoadingBundle(query));
   }
 
   queryManagementActiveVehicleRoutes(query: RieManagementActiveVehicleRoutesQuery): Promise<RieManagementActiveVehicleRouteRow[]> {
-    return this.scalableQuery.queryManagementActiveVehicleRoutes(query);
+    return observeRieLogicalOperation("queryManagementActiveVehicleRoutes", scopeMetadata(query), () => this.scalableQuery.queryManagementActiveVehicleRoutes(query));
   }
 
   queryFsos360Facts(ctx: EntityQueryContext, context: Fsos360ResolvedContext, input: Fsos360Query) {
     if (!this.fsos360Query) throw new Error('FSOS 360 query service is not configured.');
-    return this.fsos360Query.aggregate(ctx, context, input);
+    return observeRieLogicalOperation("queryFsos360Facts", scopeMetadata(ctx), () => this.fsos360Query!.aggregate(ctx, context, input));
   }
 
   queryFsos360CustomerContext(...args: Parameters<RieFsos360QueryService['customerContext']>) {
     if (!this.fsos360Query) throw new Error('FSOS 360 query service is not configured.');
-    return this.fsos360Query.customerContext(...args);
+    return observeRieLogicalOperation("queryFsos360CustomerContext", scopeMetadata(args[0]), () => this.fsos360Query!.customerContext(...args));
   }
 
   queryFsos360CustomerOptions(...args: Parameters<RieFsos360QueryService['customerOptions']>) {
     if (!this.fsos360Query) throw new Error('FSOS 360 query service is not configured.');
-    return this.fsos360Query.customerOptions(...args);
+    return observeRieLogicalOperation("queryFsos360CustomerOptions", scopeMetadata(args[0]), () => this.fsos360Query!.customerOptions(...args));
   }
 
   queryManagementLoadingRisk(query: RieManagementLoadingRiskQuery): Promise<RieManagementLoadingRiskRow> {
-    return this.scalableQuery.queryManagementLoadingRisk(query);
+    return observeRieLogicalOperation("queryManagementLoadingRisk", scopeMetadata(query), () => this.scalableQuery.queryManagementLoadingRisk(query));
   }
 
   queryManagementLostOpportunities(query: RieManagementLostOpportunitiesQuery): Promise<RieManagementLostOpportunitiesResult> {
-    return this.scalableQuery.queryManagementLostOpportunities(query);
+    return observeRieLogicalOperation("queryManagementLostOpportunities", scopeMetadata(query), () => this.scalableQuery.queryManagementLostOpportunities(query));
   }
 
   queryStalePurchases(query: RieStalePurchasesQuery): Promise<RieStalePurchaseRow[]> {
-    return this.scalableQuery.queryStalePurchases(query);
+    return observeRieLogicalOperation("queryStalePurchases", scopeMetadata(query), () => this.scalableQuery.queryStalePurchases(query));
   }
 
   readCanonicalEntity(query: RieScalableEntityRead): Promise<EntityQueryResult> {
-    return this.scalableQuery.readEntity(query);
+    return observeRieLogicalOperation("readCanonicalEntity", scopeMetadata(query), () => this.scalableQuery.readEntity(query));
   }
 
   /**
@@ -250,6 +253,13 @@ export class RieFacade {
     context: EntityQueryContext,
     options: { fromTime?: number; toTime?: number; aggregate?: boolean } = {},
   ): Promise<RieInvoiceSalesRow[]> {
+    return observeRieLogicalOperation("getInvoiceSalesRows", scopeMetadata(context), () => this.getInvoiceSalesRowsUnobserved(context, options));
+  }
+
+  private async getInvoiceSalesRowsUnobserved(
+    context: EntityQueryContext,
+    options: { fromTime?: number; toTime?: number; aggregate?: boolean },
+  ): Promise<RieInvoiceSalesRow[]> {
     const companyId = context.companyId;
     const files = await this.filesService.listConfirmedActiveForCompany(companyId);
     const invoiceFiles = files.filter((file) => file.datasetType === ENTITY_DATASET_TYPE_MAP.Invoices!.datasetType);
@@ -259,6 +269,7 @@ export class RieFacade {
       where: { companyId, entityName: { in: ["Invoices", "Invoice Items"] }, isActive: true, sourceFileId: { in: [...invoiceFiles, ...itemFiles].map((file) => file.id) } },
       select: { entityName: true, sourceFileId: true },
     });
+    recordActiveVersionResolution(2, activeVersions.length);
     const versionKey = new Set(activeVersions.map((version) => `${version.entityName}:${version.sourceFileId}`));
     if (invoiceFiles.some((file) => !versionKey.has(`Invoices:${file.id}`)) || itemFiles.some((file) => !versionKey.has(`Invoice Items:${file.id}`))) return [];
 
@@ -280,7 +291,7 @@ export class RieFacade {
       ? Prisma.sql`0`
       : Prisma.sql`COALESCE(NULLIF(BTRIM(item."data" ->> 'LineNo'), '')::double precision, 0)`;
     const groupBy = options.aggregate ? Prisma.sql`1, 3, 4, 5` : Prisma.sql`1, 2, 3, 4, 5`;
-    const rows = await this.prisma.$queryRaw<Array<{ invoiceNo: string; lineNo: number; time: Date | null; customerCode: string; productCode: string; amount: number }>>(Prisma.sql`
+    const rows = await observeRiePostgres("getInvoiceSalesRows.sql", fingerprintRieQueryShape({ kind: "specialized", operation: "getInvoiceSalesRows", aggregate: Boolean(options.aggregate), hasFrom: options.fromTime !== undefined, hasTo: options.toTime !== undefined }), "direct", () => this.prisma.$queryRaw<Array<{ invoiceNo: string; lineNo: number; time: Date | null; customerCode: string; productCode: string; amount: number }>>(Prisma.sql`
       WITH selected_invoice_files("source_file_id", precedence) AS (VALUES ${Prisma.join(invoiceFileValues)}),
       invoice_rows AS (
         SELECT r."data", selected_invoice_files.precedence
@@ -310,22 +321,31 @@ export class RieFacade {
         ${routeFilter("inv")} ${routeFilter("item")}
         ${dates.length ? Prisma.sql`AND ${Prisma.join(dates, ' AND ')}` : Prisma.empty}
       GROUP BY ${groupBy}
-    `);
+    `));
     return rows.map((row) => ({ ...row, lineNo: Number(row.lineNo), time: row.time ? row.time.getTime() : null, amount: Number(row.amount) }));
   }
 
   async hasInvoiceSalesSources(context: EntityQueryContext): Promise<boolean> {
+    return observeRieLogicalOperation("hasInvoiceSalesSources", scopeMetadata(context), () => this.hasInvoiceSalesSourcesUnobserved(context));
+  }
+
+  private async hasInvoiceSalesSourcesUnobserved(context: EntityQueryContext): Promise<boolean> {
     const files = await this.filesService.listConfirmedActiveForCompany(context.companyId);
     const invoiceFiles = files.filter((file) => file.datasetType === ENTITY_DATASET_TYPE_MAP.Invoices!.datasetType);
     const itemFiles = files.filter((file) => file.datasetType === ENTITY_DATASET_TYPE_MAP["Invoice Items"]!.datasetType);
     if (invoiceFiles.length === 0 || itemFiles.length === 0) return false;
     const versions = await this.prisma.rieDatasetVersion.findMany({ where: { companyId: context.companyId, entityName: { in: ["Invoices", "Invoice Items"] }, isActive: true, sourceFileId: { in: [...invoiceFiles, ...itemFiles].map((file) => file.id) } }, select: { entityName: true, sourceFileId: true } });
+    recordActiveVersionResolution(2, versions.length);
     const active = new Set(versions.map((version) => `${version.entityName}:${version.sourceFileId}`));
     return invoiceFiles.every((file) => active.has(`Invoices:${file.id}`)) && itemFiles.every((file) => active.has(`Invoice Items:${file.id}`));
   }
 
   /** Metadata-only availability check; never materializes canonical rows. */
   async hasCanonicalEntitySources(context: EntityQueryContext, entityNames: readonly string[]): Promise<boolean> {
+    return observeRieLogicalOperation("hasCanonicalEntitySources", scopeMetadata(context), () => this.hasCanonicalEntitySourcesUnobserved(context, entityNames));
+  }
+
+  private async hasCanonicalEntitySourcesUnobserved(context: EntityQueryContext, entityNames: readonly string[]): Promise<boolean> {
     const files = await this.filesService.listConfirmedActiveForCompany(context.companyId);
     const expected = entityNames.flatMap((entityName) => {
       const mapping = ENTITY_DATASET_TYPE_MAP[entityName];
@@ -335,6 +355,7 @@ export class RieFacade {
     const fileIds = files.filter((file) => expected.some((item) => item.datasetType === file.datasetType)).map((file) => file.id);
     if (!fileIds.length) return false;
     const versions = await this.prisma.rieDatasetVersion.findMany({ where: { companyId: context.companyId, entityName: { in: [...entityNames] }, isActive: true, sourceFileId: { in: fileIds } }, select: { entityName: true, sourceFileId: true } });
+    recordActiveVersionResolution(entityNames.length, versions.length);
     const active = new Set(versions.map((version) => `${version.entityName}:${version.sourceFileId}`));
     return expected.every(({ entityName, datasetType }) => {
       const entityFiles = files.filter((file) => file.datasetType === datasetType);

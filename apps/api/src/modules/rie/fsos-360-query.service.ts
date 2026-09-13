@@ -8,6 +8,7 @@ import { activeEntityRowsCte } from "./scalable-query.service";
 import { IMPORT_TEMPLATES } from '../import-validation/import-templates.data';
 import type { EntityQueryContext } from "./entity-provider.interface";
 import type { Fsos360ResolvedContext } from "../decision-analytics-studio/fsos-360-context.service";
+import { fingerprintRieQueryShape, observeRiePostgres } from "../../common/observability/rie-observability";
 
 export interface Fsos360PeriodAggregate {
   sales: number; orders: number; salesRows: number; collections: number; returns: number;
@@ -43,6 +44,10 @@ const values = (expr: Prisma.Sql, list?: readonly string[]) => list?.length ? Pr
 export class RieFsos360QueryService {
   constructor(private readonly prisma: PrismaService, private readonly hierarchy: CanonicalHierarchyResolverService) {}
 
+  private postgres<T>(operation: string, execute: () => Promise<T>): Promise<T> {
+    return observeRiePostgres(operation, fingerprintRieQueryShape({ kind: "specialized", operation, version: 1 }), "direct", execute);
+  }
+
   private async customerCtes(ctx: EntityQueryContext) {
     const allowed = ctx.requestingUser ? await this.hierarchy.resolveAllowedRouteIds(ctx.companyId, ctx.requestingUser) : null;
     return Prisma.sql`${activeEntityRowsCte(ctx.companyId, 'Customers', 'customer', allowed ? [allowed.size ? Prisma.sql`LOWER(${str('customer_source', 'RouteID')}) IN (${Prisma.join([...allowed])})` : Prisma.sql`FALSE`] : [], [], [])},
@@ -60,19 +65,19 @@ export class RieFsos360QueryService {
   /** Distinct geography combinations and requested selections only; no customer master collection. */
   async customerContext(ctx: EntityQueryContext, selectedCodes: readonly string[] = []) {
     const ctes = await this.customerCtes(ctx);
-    const rows = await this.prisma.$queryRaw<Array<{ total: number; geographies: { city: string; branchId: string; routeId: string }[]; selected: { code: string; name: string; city: string; branchId: string; routeId: string }[] }>>(Prisma.sql`
+    const rows = await this.postgres("fsos360.customerContext.sql", () => this.prisma.$queryRaw<Array<{ total: number; geographies: { city: string; branchId: string; routeId: string }[]; selected: { code: string; name: string; city: string; branchId: string; routeId: string }[] }>>(Prisma.sql`
       WITH ${ctes}, geographies AS (SELECT city, "branchId", "routeId", MIN(first_row) first_row FROM customers GROUP BY 1, 2, 3)
       SELECT (SELECT COUNT(*)::int FROM customers) total,
         COALESCE((SELECT jsonb_agg(to_jsonb(g) - 'first_row' ORDER BY first_row) FROM geographies g), '[]') geographies,
         COALESCE((SELECT jsonb_agg(c) FROM customers c WHERE ${selectedCodes.length ? Prisma.sql`code IN (${Prisma.join(selectedCodes)})` : Prisma.sql`FALSE`}), '[]') selected
-    `);
+    `));
     return rows[0]!;
   }
 
   async customerOptions(ctx: EntityQueryContext, filters: Fsos360Filters, branches: Map<string, { regionId: string }>, input: Pick<Fsos360FilterOptionsQuery, 'query' | 'page' | 'pageSize'>, candidateCodes?: string[]) {
     const ctes = await this.customerCtes(ctx);
     const region = Prisma.sql`COALESCE(${JSON.stringify(Object.fromEntries([...branches].map(([id, b]) => [id, b.regionId])))}::jsonb ->> c."branchId", '')`;
-    const rows = await this.prisma.$queryRaw<Array<{ options: { value: string; label: string; meta: { city: string; routeId: string } }[]; total: number }>>(Prisma.sql`
+    const rows = await this.postgres("fsos360.customerOptions.sql", () => this.prisma.$queryRaw<Array<{ options: { value: string; label: string; meta: { city: string; routeId: string } }[]; total: number }>>(Prisma.sql`
       WITH ${ctes}, options AS MATERIALIZED (
         SELECT c.code value, c.name label, c.first_row, jsonb_build_object('city', c.city, 'routeId', c."routeId") meta
         FROM customers c WHERE ${values(region, filters.regionIds)} AND ${values(Prisma.sql`c.city`, filters.cityValues)}
@@ -82,7 +87,7 @@ export class RieFsos360QueryService {
           AND STRPOS(LOWER(c.code || ' ' || c.name || ' ' || c.city || ' ' || c."routeId"), ${input.query.trim().toLocaleLowerCase()}) > 0
       ), page AS (SELECT value, label, meta FROM options ORDER BY label COLLATE "und-x-icu", first_row OFFSET ${(input.page - 1) * input.pageSize} LIMIT ${input.pageSize})
       SELECT COALESCE((SELECT jsonb_agg(p) FROM page p), '[]') options, (SELECT COUNT(*)::int FROM options) total
-    `);
+    `));
     return rows[0]!;
   }
 
@@ -110,7 +115,7 @@ export class RieFsos360QueryService {
     const customerScope = Prisma.sql`${values(Prisma.sql`c.region`, f.regionIds)} AND ${values(Prisma.sql`c.city`, f.cityValues)} AND ${values(Prisma.sql`c.branch`, f.branchIds)} AND ${values(Prisma.sql`c.route`, f.routeIds)} AND ${values(Prisma.sql`c.code`, f.customerCodes)}`;
     const customerRep = context.activeAnalysisLevel === 'sales-rep' || f.salesRepIds?.length
       ? Prisma.sql`EXISTS (SELECT 1 FROM assignments a WHERE a."routeId" = c.route AND a.role = 'SalesRep' AND a."startAt" <= w."from" AND (a."endAt" IS NULL OR w."from" <= a."endAt") AND ${values(Prisma.sql`a."employeeId"`, f.salesRepIds)})` : Prisma.sql`TRUE`;
-    const rows = await this.prisma.$queryRaw<{ result: Fsos360FactAggregate }[]>(Prisma.sql`
+    const rows = await this.postgres("fsos360.aggregate.sql", () => this.prisma.$queryRaw<{ result: Fsos360FactAggregate }[]>(Prisma.sql`
       WITH ${active('Customers', 'customer')}, ${active('Products', 'product')}, ${active('Invoices', 'invoice')},
       ${active('Invoice Items', 'item')}, ${active('Collections', 'collection')}, ${active('Returns', 'returned')}, ${active('Visits', 'visit')},
       customer_ordered AS (SELECT c.*, ROW_NUMBER() OVER (ORDER BY precedence, created_at, id) seq FROM customer_active c),
@@ -213,7 +218,7 @@ export class RieFsos360QueryService {
         'treemap', COALESCE((SELECT jsonb_agg(to_jsonb(t) - 'rank' ORDER BY rank) FROM tree_top t), '[]'),
         'geo', jsonb_build_object('points', COALESCE((SELECT jsonb_agg(t) FROM geo_top t), '[]'), 'totalRows', (SELECT COUNT(*) FROM geo_rows), 'mappedRows', (SELECT COUNT(*) FROM geo_top), 'unmappedRows', (SELECT COUNT(*) FROM geo_valid WHERE NOT valid))
       ) result
-    `);
+    `));
     return rows[0]!.result;
   }
 }

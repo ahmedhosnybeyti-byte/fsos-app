@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import { RieScalableQueryService } from "./scalable-query.service";
+import { runWithRieRequestContext, setRieTelemetryTestSink } from "../../common/observability/rie-observability";
 
 const scalableQueryInput = () => ({
   companyId: "company-1",
@@ -18,7 +19,6 @@ const deferred = <T>() => {
 
 type InternalSemaphoreService = {
   runExpensiveQuery<T>(operation: string, execute: () => Promise<T>, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<T>;
-  logger: { log(message: string): void };
 };
 
 const internalSemaphore = (service: RieScalableQueryService) => service as unknown as InternalSemaphoreService;
@@ -109,14 +109,18 @@ test("default RIE queue timeout permits a waiter held beyond the former 10-secon
   }
 });
 
-test("process-wide RIE semaphore releases permits when diagnostic logging throws", async () => {
+test("process-wide RIE semaphore and business work are fail-open when telemetry throws", async () => {
   const service = internalSemaphore(new RieScalableQueryService({ $queryRaw: async () => [] } as never, { resolveAllowedRouteIds: async () => null } as never));
-  service.logger = { log: () => { throw new Error("expected logging failure"); } };
-  await assert.rejects(() => service.runExpensiveQuery("logging-error", async () => undefined), /expected logging failure/);
-  service.logger = { log: () => undefined };
-  let executed = false;
-  await service.runExpensiveQuery("after-logging-error", async () => { executed = true; });
-  assert.equal(executed, true);
+  const restore = setRieTelemetryTestSink(() => { throw new Error("expected telemetry failure"); });
+  try {
+    let executed = false;
+    await runWithRieRequestContext({ traceId: "telemetry-failure", feature: "test", action: "test", routeTemplate: "/test" }, () =>
+      service.runExpensiveQuery("logging-error", async () => { executed = true; }),
+    );
+    assert.equal(executed, true);
+  } finally {
+    restore();
+  }
 });
 
 test("scalable query sends scoped joins, grouping, aggregation, and pagination to PostgreSQL", async () => {

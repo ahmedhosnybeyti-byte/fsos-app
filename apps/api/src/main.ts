@@ -13,6 +13,7 @@ import { AppConfigService } from "./common/config";
 import { redactSensitiveUrl } from "./common/security/redact-sensitive-url";
 import { API_VERSION_PREFIX } from "@field-sales-os/schemas";
 import { DrainingService, rejectNewWorkWhileDraining } from "./common/runtime/draining.service";
+import { classifyRieHttpAction, completeRieRequest, markRieRequestCancelled, runWithRieRequestContext } from "./common/observability/rie-observability";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { cors: false });
@@ -54,30 +55,44 @@ async function bootstrap() {
   // the same credential without ever persisting the credential itself.
   const requestTraceLogger = new Logger("RequestTrace");
   app.use((req: import("express").Request, res: import("express").Response, next: () => void) => {
-    const requestId = randomUUID();
-    (req as import("express").Request & { requestId?: string }).requestId = requestId;
-    res.setHeader("X-Request-Id", requestId);
-    const start = Date.now();
-    const memoryAuditEnabled = process.env.REQUEST_MEMORY_AUDIT_ENABLED === "true";
-    const importantRequest = /^\/api\/v1\/(decision-analytics-studio|dashboard-performance|heatmap|team-performance|smart-loading\/session)/.test(req.path);
-    const rssBefore = memoryAuditEnabled && importantRequest ? process.memoryUsage().rss : 0;
-    let peakRss = rssBefore;
-    const sampler = rssBefore ? setInterval(() => { peakRss = Math.max(peakRss, process.memoryUsage().rss); }, 50) : undefined;
-    sampler?.unref();
+    const traceId = randomUUID();
+    const action = classifyRieHttpAction(req.method, req.path);
+    runWithRieRequestContext({ traceId, ...action }, () => {
+      (req as import("express").Request & { requestId?: string; traceId?: string }).requestId = traceId;
+      (req as import("express").Request & { requestId?: string; traceId?: string }).traceId = traceId;
+      res.setHeader("X-Request-Id", traceId);
+      res.setHeader("X-Trace-Id", traceId);
+      const start = Date.now();
+      const memoryAuditEnabled = process.env.REQUEST_MEMORY_AUDIT_ENABLED === "true";
+      const importantRequest = /^\/api\/v1\/(decision-analytics-studio|dashboard-performance|heatmap|team-performance|smart-loading\/session)/.test(req.path);
+      const rssBefore = memoryAuditEnabled && importantRequest ? process.memoryUsage().rss : 0;
+      let peakRss = rssBefore;
+      const sampler = rssBefore ? setInterval(() => { peakRss = Math.max(peakRss, process.memoryUsage().rss); }, 50) : undefined;
+      sampler?.unref();
+      let finalized = false;
+      const finalize = () => {
+        if (finalized) return;
+        finalized = true;
+        completeRieRequest(res.statusCode);
+      };
 
-    const safeUrl = redactSensitiveUrl(req.originalUrl);
-    requestTraceLogger.log(`IN  id=${requestId} ${req.method} ${safeUrl} at=${new Date().toISOString()}`);
-    res.on("finish", () => {
-      requestTraceLogger.log(`OUT id=${requestId} ${req.method} ${safeUrl} status=${res.statusCode} ${Date.now() - start}ms`);
-      if (sampler) clearInterval(sampler);
-      if (rssBefore) {
-        const rssAfter = process.memoryUsage().rss;
-        const mb = (value: number) => Number((value / (1024 * 1024)).toFixed(1));
-        requestTraceLogger.log(JSON.stringify({ event: "request_memory_audit", endpoint: `${req.method} ${req.path}`, durationMs: Date.now() - start, rssBeforeMB: mb(rssBefore), peakRssMB: mb(Math.max(peakRss, rssAfter)), rssAfterMB: mb(rssAfter), deltaRssMB: mb(rssAfter - rssBefore) }));
-      }
+      const safeUrl = redactSensitiveUrl(req.originalUrl);
+      requestTraceLogger.log(`IN  id=${traceId} ${req.method} ${safeUrl} at=${new Date().toISOString()}`);
+      req.once("aborted", () => markRieRequestCancelled());
+      res.once("finish", () => {
+        requestTraceLogger.log(`OUT id=${traceId} ${req.method} ${safeUrl} status=${res.statusCode} ${Date.now() - start}ms`);
+        if (sampler) clearInterval(sampler);
+        if (rssBefore) {
+          const rssAfter = process.memoryUsage().rss;
+          const mb = (value: number) => Number((value / (1024 * 1024)).toFixed(1));
+          requestTraceLogger.log(JSON.stringify({ event: "request_memory_audit", endpoint: `${req.method} ${req.path}`, durationMs: Date.now() - start, rssBeforeMB: mb(rssBefore), peakRssMB: mb(Math.max(peakRss, rssAfter)), rssAfterMB: mb(rssAfter), deltaRssMB: mb(rssAfter - rssBefore) }));
+        }
+        finalize();
+      });
+      res.once("close", finalize);
+
+      next();
     });
-
-    next();
   });
 
   // "health" is excluded so Railway's healthcheck / uptime monitoring can

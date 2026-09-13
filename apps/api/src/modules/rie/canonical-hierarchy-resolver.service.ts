@@ -2,6 +2,7 @@ import { ForbiddenException, Injectable } from "@nestjs/common";
 import { PrismaService } from "../../common/prisma";
 import { normalizeHeader, type DatasetRow, type HierarchyFilterUser } from "../files/dataset-query.util";
 import { ENTITY_DATASET_TYPE_MAP } from "./excel-entity-provider.mapping";
+import { observeHierarchyResolution } from "../../common/observability/rie-observability";
 
 // Routes and Employees are read from the active PostgreSQL RIE
 // materialization.  Excel is ingestion-only: hierarchy resolution must never
@@ -67,6 +68,10 @@ export class CanonicalHierarchyResolverService {
   // null if the role isn't route-scoped (caller treats null as "no
   // route-based restriction applies" — see applyHierarchyFilter).
   async resolveAllowedRouteIds(companyId: string, user: HierarchyFilterUser): Promise<Set<string> | null> {
+    return observeHierarchyResolution({ companyId, roleCode: user.roleCode, hasHierarchy: true }, () => this.resolveAllowedRouteIdsInternal(companyId, user));
+  }
+
+  private async resolveAllowedRouteIdsInternal(companyId: string, user: HierarchyFilterUser): Promise<Set<string> | null> {
     if (!ROUTE_SCOPED_ROLES.has(user.roleCode)) return null;
 
     // An explicit operational assignment wins. Accounts provisioned from an
