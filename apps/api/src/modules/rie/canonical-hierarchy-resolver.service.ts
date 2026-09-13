@@ -3,6 +3,7 @@ import { PrismaService } from "../../common/prisma";
 import { normalizeHeader, type DatasetRow, type HierarchyFilterUser } from "../files/dataset-query.util";
 import { ENTITY_DATASET_TYPE_MAP } from "./excel-entity-provider.mapping";
 import { observeHierarchyResolution } from "../../common/observability/rie-observability";
+import { RieRequestPlannerService } from "./rie-request-planner.service";
 
 // Routes and Employees are read from the active PostgreSQL RIE
 // materialization.  Excel is ingestion-only: hierarchy resolution must never
@@ -62,13 +63,16 @@ const ROUTE_ASSIGNMENT_COLUMNS = ["SalesRepID", "SupervisorID", "ManagerID"] as 
 export class CanonicalHierarchyResolverService {
   private readonly rawCache = new Map<string, HierarchyRawCacheEntry>();
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly requestPlanner?: RieRequestPlannerService) {}
 
   // Returns the set of Route IDs (lowercased/trimmed) this user may see, or
   // null if the role isn't route-scoped (caller treats null as "no
   // route-based restriction applies" — see applyHierarchyFilter).
   async resolveAllowedRouteIds(companyId: string, user: HierarchyFilterUser): Promise<Set<string> | null> {
-    return observeHierarchyResolution({ companyId, roleCode: user.roleCode, hasHierarchy: true }, () => this.resolveAllowedRouteIdsInternal(companyId, user));
+    const resolve = () => observeHierarchyResolution({ companyId, roleCode: user.roleCode, hasHierarchy: true }, () => this.resolveAllowedRouteIdsInternal(companyId, user));
+    return this.requestPlanner
+      ? this.requestPlanner.resolveHierarchy(companyId, user.roleCode, user.email, resolve)
+      : resolve();
   }
 
   private async resolveAllowedRouteIdsInternal(companyId: string, user: HierarchyFilterUser): Promise<Set<string> | null> {

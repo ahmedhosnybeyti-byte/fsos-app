@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 import { isRouteInActiveVehicleScope, isSaleOnOrBeforeTargetDate, isStaleVehicleInventory, managementStaleRouteProductCases, managementStaleRouteProductCount, normalizedProductCode, rollupManagementStaleProductCodes, SmartLoadingService } from "./smart-loading.service";
 import { RieScalableQueryService } from "../rie/scalable-query.service";
+import { runWithRieRequestContext, setRieTelemetryTestSink } from "../../common/observability/rie-observability";
 
 const asOfDate = new Date("2026-08-10T00:00:00.000Z");
 const daysAgo = (days: number) => asOfDate.getTime() - days * 86_400_000;
@@ -232,23 +233,24 @@ test("management Smart Loading bundle shares scoped foundations and acquires one
       return [expected];
     },
   } as never, { resolveAllowedRouteIds: async () => new Set(["route-a", "route-b"]) } as never);
-  (query as unknown as { logger: { log(message: string): void } }).logger = {
-    log: (message) => {
-      const event = JSON.parse(message) as { event?: string; operation?: string };
-      if (event.event === "rie_expensive_query_acquired" && event.operation) acquiredOperations.push(event.operation);
-    },
-  };
-
-  const result = await query.queryManagementSmartLoadingBundle({
-    companyId: "company-1",
-    requestingUser: { roleCode: "MANAGER", email: "manager@example.com" },
-    routeIds: ["route-a", "outside-route"],
-    targetDate: "2026-08-10",
-    staleDaysThreshold: 4,
-    salesFrom: "2026-05-10",
-    salesTo: "2026-08-09",
-    customerCodes: ["Customer-A"],
-  });
+  const restore = setRieTelemetryTestSink((event) => {
+    if (event.layer === "semaphore" && typeof event.operation === "string") acquiredOperations.push(event.operation);
+  }, 1);
+  let result: Awaited<ReturnType<typeof query.queryManagementSmartLoadingBundle>>;
+  try {
+    result = await runWithRieRequestContext({ traceId: "bundle-test", feature: "smart_loading", action: "get_session", routeTemplate: "/smart-loading/session" }, () => query.queryManagementSmartLoadingBundle({
+      companyId: "company-1",
+      requestingUser: { roleCode: "MANAGER", email: "manager@example.com" },
+      routeIds: ["route-a", "outside-route"],
+      targetDate: "2026-08-10",
+      staleDaysThreshold: 4,
+      salesFrom: "2026-05-10",
+      salesTo: "2026-08-09",
+      customerCodes: ["Customer-A"],
+    }));
+  } finally {
+    restore();
+  }
 
   assert.deepEqual(result, expected);
   assert.equal(rawQueryCount, 2, "metadata and bundle SQL should execute under the same permit");
@@ -295,12 +297,6 @@ test("management heavy Promise section acquires exactly two RIE permits", async 
       }];
     },
   } as never, { resolveAllowedRouteIds: async () => new Set(["route-a"]) } as never);
-  (query as unknown as { logger: { log(message: string): void } }).logger = {
-    log: (message) => {
-      const event = JSON.parse(message) as { event?: string; operation?: string };
-      if (event.event === "rie_expensive_query_acquired" && event.operation) acquiredOperations.push(event.operation);
-    },
-  };
   const common = {
     companyId: "company-1",
     requestingUser: { roleCode: "SUPERVISOR", email: "supervisor@example.com" },
@@ -308,12 +304,19 @@ test("management heavy Promise section acquires exactly two RIE permits", async 
     targetDate: "2026-08-10",
   } as const;
 
-  await Promise.all([
-    query.queryManagementActiveVehicleRoutes(common),
-    query.queryManagementSmartLoadingBundle({
-      ...common, staleDaysThreshold: 4, salesFrom: "2026-05-10", salesTo: "2026-08-10", customerCodes: ["customer-a"],
-    }),
-  ]);
+  const restore = setRieTelemetryTestSink((event) => {
+    if (event.layer === "semaphore" && typeof event.operation === "string") acquiredOperations.push(event.operation);
+  }, 1);
+  try {
+    await runWithRieRequestContext({ traceId: "heavy-section-test", feature: "smart_loading", action: "get_session", routeTemplate: "/smart-loading/session" }, () => Promise.all([
+      query.queryManagementActiveVehicleRoutes(common),
+      query.queryManagementSmartLoadingBundle({
+        ...common, staleDaysThreshold: 4, salesFrom: "2026-05-10", salesTo: "2026-08-10", customerCodes: ["customer-a"],
+      }),
+    ]));
+  } finally {
+    restore();
+  }
 
   assert.deepEqual(acquiredOperations.sort(), ["queryManagementActiveVehicleRoutes", "queryManagementSmartLoadingBundle"]);
 });
@@ -322,6 +325,7 @@ test("management session uses the unified bundle and never calls the three compa
   let bundleCalls = 0;
   let activeRouteCalls = 0;
   const facade = {
+    runPlannedRequest: <T>(_options: unknown, execute: () => Promise<T>) => execute(),
     queryCanonicalRecords: async () => ({ records: [], page: { limit: 5_000, offset: 0, hasMore: false } }),
     queryManagementActiveVehicleRoutes: async () => { activeRouteCalls += 1; return []; },
     queryManagementSmartLoadingBundle: async () => {
@@ -360,6 +364,7 @@ test("management session uses the unified bundle and never calls the three compa
 test("Sales Rep session keeps the existing non-management path", async () => {
   let genericCalls = 0;
   const facade = {
+    runPlannedRequest: <T>(_options: unknown, execute: () => Promise<T>) => execute(),
     queryCanonicalRecords: async () => {
       genericCalls += 1;
       return { records: [], page: { limit: 5_000, offset: 0, hasMore: false } };

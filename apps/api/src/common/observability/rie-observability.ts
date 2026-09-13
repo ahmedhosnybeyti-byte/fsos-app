@@ -40,6 +40,14 @@ interface RieRequestCounters {
   versionResolutionCount: number;
   activeVersionEntityCount: number;
   activeSourceVersionCount: number;
+  requestPlanCount: number;
+  plannedOperationCount: number;
+  plannedOperationQueueWaitTotalMs: number;
+  plannedOperationQueueWaitMaxMs: number;
+  plannedOperationMaxActiveCount: number;
+  plannedOperationBudgetExceededCount: number;
+  hierarchyReuseCount: number;
+  activeVersionReuseCount: number;
   timeoutCount: number;
   cancellationCount: number;
 }
@@ -92,6 +100,14 @@ const emptyCounters = (): RieRequestCounters => ({
   versionResolutionCount: 0,
   activeVersionEntityCount: 0,
   activeSourceVersionCount: 0,
+  requestPlanCount: 0,
+  plannedOperationCount: 0,
+  plannedOperationQueueWaitTotalMs: 0,
+  plannedOperationQueueWaitMaxMs: 0,
+  plannedOperationMaxActiveCount: 0,
+  plannedOperationBudgetExceededCount: 0,
+  hierarchyReuseCount: 0,
+  activeVersionReuseCount: 0,
   timeoutCount: 0,
   cancellationCount: 0,
 });
@@ -199,6 +215,14 @@ export function completeRieRequest(statusCode: number): void {
     versionResolutionCount: root.versionResolutionCount,
     activeVersionEntityCount: root.activeVersionEntityCount,
     activeSourceVersionCount: root.activeSourceVersionCount,
+    requestPlanCount: root.requestPlanCount,
+    plannedOperationCount: root.plannedOperationCount,
+    plannedOperationQueueWaitTotalMs: Number(root.plannedOperationQueueWaitTotalMs.toFixed(3)),
+    plannedOperationQueueWaitMaxMs: Number(root.plannedOperationQueueWaitMaxMs.toFixed(3)),
+    plannedOperationMaxActiveCount: root.plannedOperationMaxActiveCount,
+    plannedOperationBudgetExceededCount: root.plannedOperationBudgetExceededCount,
+    hierarchyReuseCount: root.hierarchyReuseCount,
+    activeVersionReuseCount: root.activeVersionReuseCount,
     timeoutCount: root.timeoutCount,
     cancellationCount: root.cancellationCount,
     outcome,
@@ -320,6 +344,35 @@ export function recordActiveVersionResolution(entityCount: number, activeSourceV
   root.versionResolutionCount += 1;
   root.activeVersionEntityCount += entityCount;
   root.activeSourceVersionCount += activeSourceVersionCount;
+}
+
+/** Planner telemetry is aggregate-only; plan names and operation names stay out of request summaries. */
+export function recordRieRequestPlanStarted(_planName: string, _maxConcurrentOperations: number, _maxOperations: number): void {
+  const root = requestStorage.getStore()?.root;
+  if (root) root.requestPlanCount += 1;
+}
+
+export function recordRieRequestPlanOperation(_operation: string, queueWaitMs: number, activeCount: number, budgetExceeded: boolean): void {
+  const root = requestStorage.getStore()?.root;
+  if (!root) return;
+  if (budgetExceeded) {
+    root.plannedOperationBudgetExceededCount += 1;
+    return;
+  }
+  root.plannedOperationCount += 1;
+  root.plannedOperationQueueWaitTotalMs += queueWaitMs;
+  root.plannedOperationQueueWaitMaxMs = Math.max(root.plannedOperationQueueWaitMaxMs, queueWaitMs);
+  root.plannedOperationMaxActiveCount = Math.max(root.plannedOperationMaxActiveCount, activeCount);
+}
+
+export function recordRieHierarchyReuse(): void {
+  const root = requestStorage.getStore()?.root;
+  if (root) root.hierarchyReuseCount += 1;
+}
+
+export function recordRieActiveVersionReuse(): void {
+  const root = requestStorage.getStore()?.root;
+  if (root) root.activeVersionReuseCount += 1;
 }
 
 export function fingerprintRieQueryShape(shape: unknown): string {

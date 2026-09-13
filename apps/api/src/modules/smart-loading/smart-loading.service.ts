@@ -370,6 +370,14 @@ export class SmartLoadingService {
   }
 
   async getSession(user: AuthenticatedUser, requestedTargetDate?: string, staleDaysThreshold = DEFAULT_SMART_LOADING_STALE_DAYS, salesRepId?: string, managerId?: string, supervisorId?: string): Promise<SmartLoadingSession> {
+    return this.rieFacade.runPlannedRequest({
+      name: "smart_loading.session",
+      maxConcurrentOperations: 3,
+      maxOperations: 24,
+    }, () => this.getSessionUnplanned(user, requestedTargetDate, staleDaysThreshold, salesRepId, managerId, supervisorId));
+  }
+
+  private async getSessionUnplanned(user: AuthenticatedUser, requestedTargetDate?: string, staleDaysThreshold = DEFAULT_SMART_LOADING_STALE_DAYS, salesRepId?: string, managerId?: string, supervisorId?: string): Promise<SmartLoadingSession> {
     if (!user.companyId) throw new ForbiddenException();
     const timingStartedAt = performance.now();
     const stageTimingsMs: Record<string, number> = {};

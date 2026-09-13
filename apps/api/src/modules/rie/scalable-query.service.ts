@@ -2,6 +2,7 @@ import { Injectable } from "@nestjs/common";
 import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
+import { RieRequestPlannerService } from "./rie-request-planner.service";
 import { IMPORT_TEMPLATES } from "../import-validation/import-templates.data";
 import type { EntityRecord, EntityQueryResult } from "./entity-provider.interface";
 import type { RieDateScope, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoProductQuery, RieGeoProductRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
@@ -108,7 +109,7 @@ class ProcessWideRieQuerySemaphore {
 export class RieScalableQueryService {
   private static readonly expensiveQuerySemaphore = new ProcessWideRieQuerySemaphore(EXPENSIVE_RIE_QUERY_CONCURRENCY);
 
-  constructor(private readonly prisma: PrismaService, private readonly hierarchyResolver: CanonicalHierarchyResolverService) {}
+  constructor(private readonly prisma: PrismaService, private readonly hierarchyResolver: CanonicalHierarchyResolverService, private readonly requestPlanner?: RieRequestPlannerService) {}
 
   private async runExpensiveQuery<T>(operation: string, execute: () => Promise<T>, options?: RieQueryAcquireOptions): Promise<T> {
     const queuedAt = Date.now();
@@ -358,7 +359,19 @@ export class RieScalableQueryService {
   }
 
   async getActiveVersionCounts(companyId: string, entityNames: readonly string[]): Promise<Map<string, number>> {
-    return this.runExpensiveQuery("activeVersionCounts", () => this.queryActiveVersionCountsUngated(companyId, entityNames));
+    return this.resolveActiveVersionCounts(companyId, entityNames, (missingEntityNames) =>
+      this.runExpensiveQuery("activeVersionCounts", () => this.queryActiveVersionCountsUngated(companyId, missingEntityNames)),
+    );
+  }
+
+  private resolveActiveVersionCounts(
+    companyId: string,
+    entityNames: readonly string[],
+    resolve: (missingEntityNames: readonly string[]) => Promise<Map<string, number>>,
+  ): Promise<Map<string, number>> {
+    return this.requestPlanner
+      ? this.requestPlanner.resolveActiveVersionCounts(companyId, entityNames, resolve)
+      : resolve(entityNames);
   }
 
   /**
@@ -579,7 +592,7 @@ export class RieScalableQueryService {
         : Prisma.sql` AND FALSE`;
 
     return this.runExpensiveQuery("queryManagementActiveVehicleRoutes", async () => {
-      const activeVersionCounts = await this.queryActiveVersionCountsUngated(input.companyId, ["Van Inventory"]);
+      const activeVersionCounts = await this.resolveActiveVersionCounts(input.companyId, ["Van Inventory"], (missingEntityNames) => this.queryActiveVersionCountsUngated(input.companyId, missingEntityNames));
       const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [
         Prisma.sql`${dateText(textField({ field: "ReportDate", source: "inventory_source" }))} <= ${targetDate}${routeScope}`,
       ], [], [], activeVersionCounts.get("Van Inventory") === 1, [], Prisma.sql`
@@ -626,9 +639,10 @@ export class RieScalableQueryService {
         : Prisma.sql` AND FALSE`;
 
     return this.runExpensiveQuery("queryManagementSmartLoadingBundle", async () => {
-      // This helper is deliberately ungated: the bundle already owns the one
-      // permit for both metadata lookup and the coordinated PostgreSQL query.
-      const activeVersionCounts = await this.queryActiveVersionCountsUngated(input.companyId, ["Van Inventory", "Invoices", "Invoice Items", "Products"]);
+      // The bundle already owns its one semaphore permit. Its metadata lookup
+      // remains ungated while the request planner reuses any earlier entity
+      // counts from this same action.
+      const activeVersionCounts = await this.resolveActiveVersionCounts(input.companyId, ["Van Inventory", "Invoices", "Invoice Items", "Products"], (missingEntityNames) => this.queryActiveVersionCountsUngated(input.companyId, missingEntityNames));
       const inventoryProjection = Prisma.sql`
         ${normalizedField({ field: "RouteID", source: "inventory_source" })} AS route_id,
         NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory_source" })}, '')), '') AS report_date,

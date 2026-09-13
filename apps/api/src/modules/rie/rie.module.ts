@@ -10,6 +10,7 @@ import { BusinessRulesEngineService } from "./business-rules-engine.service";
 import { RieFacade } from "./rie-facade.service";
 import { RieScalableQueryService } from "./scalable-query.service";
 import { RieFsos360QueryService } from "./fsos-360-query.service";
+import { RieRequestPlannerService } from "./rie-request-planner.service";
 
 // RIE module — Relationship Intelligence Engine.
 //
@@ -40,6 +41,7 @@ import { RieFsos360QueryService } from "./fsos-360-query.service";
     NavigationEngineService,
     QueryExecutionEngineService,
     BusinessRulesEngineService,
+    RieRequestPlannerService,
     RieScalableQueryService,
     RieFsos360QueryService,
     RieFacade,

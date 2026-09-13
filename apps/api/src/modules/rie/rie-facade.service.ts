@@ -21,6 +21,7 @@ import type { Fsos360Query } from "@field-sales-os/schemas";
 import type { Fsos360ResolvedContext } from "../decision-analytics-studio/fsos-360-context.service";
 import type { RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRieLogicalOperation, observeRiePostgres, recordActiveVersionResolution, scopeMetadata } from "../../common/observability/rie-observability";
+import { RieRequestPlannerService, type RieRequestPlanOptions } from "./rie-request-planner.service";
 
 /**
  * The smallest sales grain used by analytics: an invoice line, or the same
@@ -77,7 +78,20 @@ export class RieFacade {
     private readonly hierarchyResolver: CanonicalHierarchyResolverService,
     private readonly scalableQuery: RieScalableQueryService,
     private readonly fsos360Query?: RieFsos360QueryService,
+    private readonly requestPlanner?: RieRequestPlannerService,
   ) {}
+
+  /**
+   * Opt-in request planning for a migrated feature. Legacy consumers retain
+   * their existing path until they are deliberately moved behind this method.
+   */
+  runPlannedRequest<T>(options: RieRequestPlanOptions, execute: () => Promise<T>): Promise<T> {
+    return this.requestPlanner ? this.requestPlanner.runPlan(options, execute) : execute();
+  }
+
+  private plannedOperation<T>(operation: string, execute: () => Promise<T>): Promise<T> {
+    return this.requestPlanner ? this.requestPlanner.execute(operation, execute) : execute();
+  }
 
   // ------------------------------------------------------------------
   // Graph introspection (delegates to Graph Builder's own read-only API).
@@ -184,63 +198,63 @@ export class RieFacade {
 
   /** Bounded PostgreSQL query surface for high-cardinality canonical data. */
   queryCanonicalRecords(query: RieScalableQuery): Promise<RieScalableQueryResult> {
-    return observeRieLogicalOperation("queryCanonicalRecords", scopeMetadata(query), () => this.scalableQuery.query(query));
+    return observeRieLogicalOperation("queryCanonicalRecords", scopeMetadata(query), () => this.plannedOperation("queryCanonicalRecords", () => this.scalableQuery.query(query)));
   }
 
   /** Request-scoped active-version metadata for callers issuing related RIE queries. */
   getActiveVersionCounts(companyId: string, entityNames: readonly string[]): Promise<Map<string, number>> {
-    return observeRieLogicalOperation("getActiveVersionCounts", { companyId }, () => this.scalableQuery.getActiveVersionCounts(companyId, entityNames));
+    return observeRieLogicalOperation("getActiveVersionCounts", { companyId }, () => this.plannedOperation("getActiveVersionCounts", () => this.scalableQuery.getActiveVersionCounts(companyId, entityNames)));
   }
 
   queryRouteProductStaleness(query: RieRouteProductStalenessQuery): Promise<RieRouteProductStalenessRow[]> {
-    return observeRieLogicalOperation("queryRouteProductStaleness", scopeMetadata(query), () => this.scalableQuery.queryRouteProductStaleness(query));
+    return observeRieLogicalOperation("queryRouteProductStaleness", scopeMetadata(query), () => this.plannedOperation("queryRouteProductStaleness", () => this.scalableQuery.queryRouteProductStaleness(query)));
   }
 
   queryManagementStockAlignment(query: RieManagementStockAlignmentQuery): Promise<RieManagementStockAlignmentRow> {
-    return observeRieLogicalOperation("queryManagementStockAlignment", scopeMetadata(query), () => this.scalableQuery.queryManagementStockAlignment(query));
+    return observeRieLogicalOperation("queryManagementStockAlignment", scopeMetadata(query), () => this.plannedOperation("queryManagementStockAlignment", () => this.scalableQuery.queryManagementStockAlignment(query)));
   }
 
   queryManagementVehicleProducts(query: RieManagementVehicleProductsQuery): Promise<RieManagementVehicleProductRow[]> {
-    return observeRieLogicalOperation("queryManagementVehicleProducts", scopeMetadata(query), () => this.scalableQuery.queryManagementVehicleProducts(query));
+    return observeRieLogicalOperation("queryManagementVehicleProducts", scopeMetadata(query), () => this.plannedOperation("queryManagementVehicleProducts", () => this.scalableQuery.queryManagementVehicleProducts(query)));
   }
 
   queryManagementSmartLoadingBundle(query: RieManagementSmartLoadingBundleQuery): Promise<RieManagementSmartLoadingBundle> {
-    return observeRieLogicalOperation("queryManagementSmartLoadingBundle", scopeMetadata(query), () => this.scalableQuery.queryManagementSmartLoadingBundle(query));
+    return observeRieLogicalOperation("queryManagementSmartLoadingBundle", scopeMetadata(query), () => this.plannedOperation("queryManagementSmartLoadingBundle", () => this.scalableQuery.queryManagementSmartLoadingBundle(query)));
   }
 
   queryManagementActiveVehicleRoutes(query: RieManagementActiveVehicleRoutesQuery): Promise<RieManagementActiveVehicleRouteRow[]> {
-    return observeRieLogicalOperation("queryManagementActiveVehicleRoutes", scopeMetadata(query), () => this.scalableQuery.queryManagementActiveVehicleRoutes(query));
+    return observeRieLogicalOperation("queryManagementActiveVehicleRoutes", scopeMetadata(query), () => this.plannedOperation("queryManagementActiveVehicleRoutes", () => this.scalableQuery.queryManagementActiveVehicleRoutes(query)));
   }
 
   queryFsos360Facts(ctx: EntityQueryContext, context: Fsos360ResolvedContext, input: Fsos360Query) {
     if (!this.fsos360Query) throw new Error('FSOS 360 query service is not configured.');
-    return observeRieLogicalOperation("queryFsos360Facts", scopeMetadata(ctx), () => this.fsos360Query!.aggregate(ctx, context, input));
+    return observeRieLogicalOperation("queryFsos360Facts", scopeMetadata(ctx), () => this.plannedOperation("queryFsos360Facts", () => this.fsos360Query!.aggregate(ctx, context, input)));
   }
 
   queryFsos360CustomerContext(...args: Parameters<RieFsos360QueryService['customerContext']>) {
     if (!this.fsos360Query) throw new Error('FSOS 360 query service is not configured.');
-    return observeRieLogicalOperation("queryFsos360CustomerContext", scopeMetadata(args[0]), () => this.fsos360Query!.customerContext(...args));
+    return observeRieLogicalOperation("queryFsos360CustomerContext", scopeMetadata(args[0]), () => this.plannedOperation("queryFsos360CustomerContext", () => this.fsos360Query!.customerContext(...args)));
   }
 
   queryFsos360CustomerOptions(...args: Parameters<RieFsos360QueryService['customerOptions']>) {
     if (!this.fsos360Query) throw new Error('FSOS 360 query service is not configured.');
-    return observeRieLogicalOperation("queryFsos360CustomerOptions", scopeMetadata(args[0]), () => this.fsos360Query!.customerOptions(...args));
+    return observeRieLogicalOperation("queryFsos360CustomerOptions", scopeMetadata(args[0]), () => this.plannedOperation("queryFsos360CustomerOptions", () => this.fsos360Query!.customerOptions(...args)));
   }
 
   queryManagementLoadingRisk(query: RieManagementLoadingRiskQuery): Promise<RieManagementLoadingRiskRow> {
-    return observeRieLogicalOperation("queryManagementLoadingRisk", scopeMetadata(query), () => this.scalableQuery.queryManagementLoadingRisk(query));
+    return observeRieLogicalOperation("queryManagementLoadingRisk", scopeMetadata(query), () => this.plannedOperation("queryManagementLoadingRisk", () => this.scalableQuery.queryManagementLoadingRisk(query)));
   }
 
   queryManagementLostOpportunities(query: RieManagementLostOpportunitiesQuery): Promise<RieManagementLostOpportunitiesResult> {
-    return observeRieLogicalOperation("queryManagementLostOpportunities", scopeMetadata(query), () => this.scalableQuery.queryManagementLostOpportunities(query));
+    return observeRieLogicalOperation("queryManagementLostOpportunities", scopeMetadata(query), () => this.plannedOperation("queryManagementLostOpportunities", () => this.scalableQuery.queryManagementLostOpportunities(query)));
   }
 
   queryStalePurchases(query: RieStalePurchasesQuery): Promise<RieStalePurchaseRow[]> {
-    return observeRieLogicalOperation("queryStalePurchases", scopeMetadata(query), () => this.scalableQuery.queryStalePurchases(query));
+    return observeRieLogicalOperation("queryStalePurchases", scopeMetadata(query), () => this.plannedOperation("queryStalePurchases", () => this.scalableQuery.queryStalePurchases(query)));
   }
 
   readCanonicalEntity(query: RieScalableEntityRead): Promise<EntityQueryResult> {
-    return observeRieLogicalOperation("readCanonicalEntity", scopeMetadata(query), () => this.scalableQuery.readEntity(query));
+    return observeRieLogicalOperation("readCanonicalEntity", scopeMetadata(query), () => this.plannedOperation("readCanonicalEntity", () => this.scalableQuery.readEntity(query)));
   }
 
   /**
@@ -253,7 +267,7 @@ export class RieFacade {
     context: EntityQueryContext,
     options: { fromTime?: number; toTime?: number; aggregate?: boolean } = {},
   ): Promise<RieInvoiceSalesRow[]> {
-    return observeRieLogicalOperation("getInvoiceSalesRows", scopeMetadata(context), () => this.getInvoiceSalesRowsUnobserved(context, options));
+    return observeRieLogicalOperation("getInvoiceSalesRows", scopeMetadata(context), () => this.plannedOperation("getInvoiceSalesRows", () => this.getInvoiceSalesRowsUnobserved(context, options)));
   }
 
   private async getInvoiceSalesRowsUnobserved(
