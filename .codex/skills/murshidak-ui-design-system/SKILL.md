@@ -9,6 +9,12 @@ Before creating or substantially redesigning a Murshidak frontend screen, read [
 
 Treat that document and the components it cites as the source of truth. Reuse shared UI components and tokens where they fit instead of copying a visual approximation.
 
+## Approved visual-reference status
+
+- The current production Team Performance screen is the canonical **Dark Mode** visual reference for Murshidak screen migrations.
+- Light Mode is **PENDING VISUAL DESIGN/APPROVAL**. Preserve its existing behavior; do not infer a new Light Mode treatment from the Dark Mode reference unless explicitly requested.
+- For multi-screen visual migrations, use `.codex/skills/murshidak-ui-batch-migration/SKILL.md` after loading this design-system skill.
+
 ## Required decisions
 
 - Preserve the blue primary/secondary semantic palette, glass treatment, thin bright edges, semantic static glow, radius, typography, spacing, and visual density already in production.
