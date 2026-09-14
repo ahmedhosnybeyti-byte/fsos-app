@@ -189,16 +189,19 @@ function DecisionAnalyticsStudioWorkspace() {
   const isEmptyResult = data ? data.datasetsAvailable.invoices && data.kpis.sales === 0 && data.kpis.ordersCount === 0 && data.chart.length === 0 : false;
 
   return (
-    <div className="relative space-y-6">
+    <div className="relative isolate space-y-6">
+      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 opacity-70 dark:opacity-100" />
+      <div aria-hidden className="dashboard-starfield pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 hidden opacity-30 dark:block" />
 
-      <div className="rise-in flex flex-wrap items-center justify-between gap-4">
+      <div className="glass-hero rise-in flex flex-wrap items-center justify-between gap-4 bg-gradient-to-l from-primary/15 via-transparent to-ai/15 p-5 sm:p-7">
         <div className="flex items-center gap-4">
           <span className="crystal-badge hidden h-14 w-14 shrink-0 bg-blue-600/15 text-blue-700 drop-shadow-[0_0_24px_hsl(217_91%_60%/0.4)] dark:text-blue-400 sm:flex">
             <BarChart3 className="h-6 w-6" />
           </span>
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">{t("decisionAnalyticsStudio.title")}</h1>
-            <p className="text-muted-foreground">{t("decisionAnalyticsStudio.subtitle")}</p>
+            <p className="text-xs font-semibold tracking-[0.16em] text-primary/90">MURSHIDAK · DECISION INTELLIGENCE</p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">{t("decisionAnalyticsStudio.title")}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">{t("decisionAnalyticsStudio.subtitle")}</p>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">

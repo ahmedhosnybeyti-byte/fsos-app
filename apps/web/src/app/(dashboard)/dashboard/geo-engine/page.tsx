@@ -190,22 +190,25 @@ export default function GeoEnginePage() {
   const isPermissionDenied = queryResult.error instanceof ApiError && queryResult.error.status === 403;
 
   return (
-    <div className="relative space-y-3 sm:space-y-4 sm:space-y-6">
+    <div className="relative isolate space-y-3 sm:space-y-4 sm:space-y-6">
+      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 opacity-70 dark:opacity-100" />
+      <div aria-hidden className="dashboard-starfield pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 hidden opacity-30 dark:block" />
 
-      <div className="rise-in flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <div className="glass-hero rise-in flex flex-col items-stretch gap-3 bg-gradient-to-l from-primary/15 via-transparent to-ai/15 p-5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-7">
         <div className="flex items-center gap-2">
           <span className="crystal-badge h-11 w-11 bg-cyan-600/15 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-400">
             <Globe2 className="h-5 w-5" />
           </span>
           <div>
-            <h1 className="text-2xl font-semibold tracking-tight">{t("geoEngine.title")}</h1>
-            <p className="text-muted-foreground">{t("geoEngine.subtitle")}</p>
+            <p className="text-xs font-semibold tracking-[0.16em] text-primary/90">MURSHIDAK · GEO INTELLIGENCE</p>
+            <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">{t("geoEngine.title")}</h1>
+            <p className="mt-1 text-sm text-muted-foreground">{t("geoEngine.subtitle")}</p>
           </div>
         </div>
         <ExecutiveTools targetRef={workspaceRef} onReset={handleReset} />
       </div>
 
-      <div ref={workspaceRef} className="space-y-4 bg-background p-0 sm:space-y-6 sm:p-1">
+      <div ref={workspaceRef} className="space-y-4 bg-transparent p-0 sm:space-y-6 sm:p-1">
         <div className="glass-card rise-in flex items-start gap-2.5 rounded-lg border border-border p-3 text-sm text-muted-foreground">
           <Info className="mt-0.5 h-4 w-4 shrink-0" />
           <p>{t("geoEngine.phase3Notice")}</p>

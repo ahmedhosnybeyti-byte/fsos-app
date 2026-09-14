@@ -142,15 +142,19 @@ export default function CustomerSimilarityPage() {
   }, [asRouteResult, visibleGroups]);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-          <Users2 className="h-6 w-6" /> {t("customerSimilarity.title")}
-        </h1>
-        <p className="text-muted-foreground">{t("customerSimilarity.subtitle")}</p>
+    <div className="relative isolate space-y-6">
+      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 opacity-70 dark:opacity-100" />
+      <div aria-hidden className="dashboard-starfield pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 hidden opacity-30 dark:block" />
+      <div className="glass-hero rise-in flex items-center gap-4 bg-gradient-to-l from-primary/15 via-transparent to-ai/15 p-5 sm:p-7">
+        <span className="crystal-badge h-12 w-12 bg-primary/15 text-primary shadow-[0_0_28px_-8px_hsl(var(--primary)/0.7)]"><Users2 className="h-5 w-5" /></span>
+        <div>
+          <p className="text-xs font-semibold tracking-[0.16em] text-primary/90">MURSHIDAK · CUSTOMER INTELLIGENCE</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">{t("customerSimilarity.title")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t("customerSimilarity.subtitle")}</p>
+        </div>
       </div>
 
-      <Card>
+      <Card className="glass-card rise-in rise-d1 border-primary/15">
         <CardHeader>
           <CardTitle>{t("customerSimilarity.settingsCard")}</CardTitle>
         </CardHeader>

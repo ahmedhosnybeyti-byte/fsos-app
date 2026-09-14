@@ -135,15 +135,18 @@ export default function VisitEfficiencyPage() {
   if (locale === "en") return <LocalizedVisitEfficiencyPage t={t} scopeField={scopeField} setScopeField={setScopeField} selectedScopeValues={selectedScopeValues} setSelectedScopeValues={setSelectedScopeValues} scopeValues={scopeValuesQuery.data?.values ?? []} scopeLoading={scopeValuesQuery.isLoading} dateFrom={dateFrom} setDateFrom={setDateFrom} dateTo={dateTo} setDateTo={setDateTo} pending={queryMutation.isPending} onQuery={handleQuery} result={result} visibleReps={visibleReps} setVisibleReps={setVisibleReps} expandedReps={expandedReps} toggleExpanded={toggleExpanded} mapPoints={mapPoints} repNames={repNames} visitsByRep={visitsByRep} totals={totals} />;
 
   return (
-    <div className="relative space-y-6">
+    <div className="relative isolate space-y-6">
+      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 opacity-70 dark:opacity-100" />
+      <div aria-hidden className="dashboard-starfield pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 hidden opacity-30 dark:block" />
 
-      <div className="rise-in flex items-center gap-4">
+      <div className="glass-hero rise-in flex items-center gap-4 bg-gradient-to-l from-primary/15 via-transparent to-ai/15 p-5 sm:p-7">
         <span className="crystal-badge hidden h-14 w-14 shrink-0 bg-primary/15 text-primary drop-shadow-[0_0_24px_hsl(var(--primary)/0.4)] sm:flex">
           <Footprints className="h-6 w-6" />
         </span>
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">كفاءة الزيارات</h1>
-          <p className="text-muted-foreground">
+          <p className="text-xs font-semibold tracking-[0.16em] text-primary/90">MURSHIDAK · VISIT INTELLIGENCE</p>
+          <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">كفاءة الزيارات</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
             يقيس المسافة بين كل زيارة والتانية اللي بعدها في نفس يوم المندوب — قفزة كبيرة بين زيارتين معناها لفة غير منطقية جغرافيًا.
           </p>
         </div>
