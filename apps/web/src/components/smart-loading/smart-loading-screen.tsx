@@ -671,14 +671,15 @@ export function SmartLoadingScreen({
   }
 
   return (
-    <div dir={locale === "ar" ? "rtl" : "ltr"} className="relative space-y-6 pb-10 max-md:space-y-3" onClick={() => panel && setPanel(null)}>
-      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
-      <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
-      <header className="glass-hero rise-in relative p-6">
+    <div dir={locale === "ar" ? "rtl" : "ltr"} className="relative isolate space-y-6 pb-10 max-md:space-y-3" onClick={() => panel && setPanel(null)}>
+      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10 opacity-70 dark:opacity-100" />
+      <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-45 dark:block" />
+      <header className="glass-hero rise-in relative bg-gradient-to-l from-primary/15 via-transparent to-ai/15 p-5 sm:p-7">
         <div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" />
         <div className="relative flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold">
+          <p className="text-xs font-semibold tracking-[0.16em] text-primary/90">MURSHIDAK · LOADING INTELLIGENCE</p>
+          <h1 className="mt-1 flex items-center gap-2 text-2xl font-bold tracking-tight sm:text-3xl">
             <span className="crystal-badge h-11 w-11 bg-ai/15 text-ai drop-shadow-[0_0_20px_hsl(var(--ai)/0.4)]">
               <PackagePlus className="h-5 w-5" />
             </span>
@@ -1095,8 +1096,10 @@ export function SmartLoadingScreen({
 
 /** Management starts with dimensions and aggregate counts only. Selecting a rep enables the existing full session. */
 function ManagementHeadersOnly({ locale, targetDate, managerId, supervisorId, onManagementScopeChange }: { locale: "ar" | "en"; targetDate: string; managerId?: string; supervisorId?: string; onManagementScopeChange: (scope: ManagementScopeSelection) => void }) {
-  return <div dir={locale === "ar" ? "rtl" : "ltr"} className="space-y-6 pb-10">
-    <header className="glass-hero rise-in relative p-6"><h1 className="flex items-center gap-2 text-2xl font-semibold"><PackagePlus className="h-5 w-5" />Smart Loading</h1></header>
+  return <div dir={locale === "ar" ? "rtl" : "ltr"} className="relative isolate space-y-6 pb-10">
+    <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10 opacity-70 dark:opacity-100" />
+    <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-45 dark:block" />
+    <header className="glass-hero rise-in relative bg-gradient-to-l from-primary/15 via-transparent to-ai/15 p-5 sm:p-7"><div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" /><div className="relative"><p className="text-xs font-semibold tracking-[0.16em] text-primary/90">MURSHIDAK · LOADING INTELLIGENCE</p><h1 className="mt-1 flex items-center gap-2 text-2xl font-bold tracking-tight sm:text-3xl"><span className="crystal-badge h-11 w-11 bg-ai/15 text-ai shadow-[0_0_24px_-8px_hsl(var(--ai)/0.7)]"><PackagePlus className="h-5 w-5" /></span>Smart Loading</h1></div></header>
     <ManagementHierarchyFilters locale={locale} managementStockAlignmentPercent={null} onManagementScopeChange={onManagementScopeChange} managementScope={{ managerId, supervisorId }} />
     <div className="grid items-stretch gap-3 md:grid-cols-2">
       <ManagementLoadingRisk targetDate={targetDate} onSelectPerson={() => undefined} />
@@ -1107,7 +1110,10 @@ function ManagementHeadersOnly({ locale, targetDate, managerId, supervisorId, on
 
 /** Keep the selected hierarchy visible while its scoped analysis is loading. */
 function ManagementScopeLoading({ locale, managerId, supervisorId, salesRepId, onManagementScopeChange }: { locale: "ar" | "en"; managerId?: string; supervisorId?: string; salesRepId?: string; onManagementScopeChange: (scope: ManagementScopeSelection) => void }) {
-  return <div dir={locale === "ar" ? "rtl" : "ltr"} className="space-y-6 pb-10">
+  return <div dir={locale === "ar" ? "rtl" : "ltr"} className="relative isolate space-y-6 pb-10">
+    <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10 opacity-70 dark:opacity-100" />
+    <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-45 dark:block" />
+    <header className="glass-hero rise-in relative bg-gradient-to-l from-primary/15 via-transparent to-ai/15 p-5 sm:p-7"><div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" /><div className="relative"><p className="text-xs font-semibold tracking-[0.16em] text-primary/90">MURSHIDAK · LOADING INTELLIGENCE</p><h1 className="mt-1 flex items-center gap-2 text-2xl font-bold tracking-tight sm:text-3xl"><span className="crystal-badge h-11 w-11 bg-ai/15 text-ai shadow-[0_0_24px_-8px_hsl(var(--ai)/0.7)]"><PackagePlus className="h-5 w-5" /></span>Smart Loading</h1></div></header>
     <ManagementHierarchyFilters locale={locale} managementStockAlignmentPercent={null} onManagementScopeChange={onManagementScopeChange} managementScope={{ managerId, supervisorId, salesRepId }} />
     <div className="space-y-3">
       {[1, 2, 3].map((placeholder) => <Skeleton key={placeholder} className="h-32 w-full" />)}
