@@ -97,17 +97,28 @@ export default function TeamPerformancePage() {
   useEffect(() => { handleQuery(); }, []);
 
   return (
-    <div className="relative space-y-6">
+    <div className="relative isolate space-y-6">
+      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 opacity-70 dark:opacity-100" />
+      <div aria-hidden className="dashboard-starfield pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 hidden opacity-30 dark:block" />
 
-      <div className="rise-in flex items-center gap-4">
-        <span className="crystal-badge hidden h-14 w-14 shrink-0 bg-primary/15 text-primary drop-shadow-[0_0_24px_hsl(var(--primary)/0.4)] sm:flex">
-          <Users className="h-6 w-6" />
-        </span>
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{t("teamPerformance.title")}</h1>
-          <p className="text-muted-foreground">
-            {user?.role.code === "SUPERVISOR" ? t("teamPerformance.descriptionSupervisor") : t("teamPerformance.descriptionManager")}
-          </p>
+      <div className="glass-hero rise-in p-5 sm:p-7">
+        <div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" />
+        <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-4">
+            <span className="crystal-badge h-12 w-12 shrink-0 bg-primary/15 text-primary shadow-[0_0_28px_-8px_hsl(var(--primary)/0.7)] sm:h-14 sm:w-14">
+              <Users className="h-5 w-5 sm:h-6 sm:w-6" />
+            </span>
+            <div>
+              <p className="text-xs font-semibold tracking-[0.16em] text-primary/90">MURSHIDAK · PERFORMANCE INTELLIGENCE</p>
+              <h1 className="mt-1 text-2xl font-bold tracking-tight sm:text-3xl">{t("teamPerformance.title")}</h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {user?.role.code === "SUPERVISOR" ? t("teamPerformance.descriptionSupervisor") : t("teamPerformance.descriptionManager")}
+              </p>
+            </div>
+          </div>
+          <span className="w-fit rounded-full border border-primary/25 bg-primary/10 px-3 py-1.5 text-xs font-semibold text-primary shadow-[0_0_22px_-10px_hsl(var(--primary)/0.8)]">
+            {user?.company?.name ?? "Murshidak"}
+          </span>
         </div>
       </div>
 
@@ -191,7 +202,7 @@ function MultiSelectChecklist({ label, options, selected, onChange, summary, loc
   const selectVisible = () => onChange(allVisibleSelected ? selected.filter((id) => !visible.some((option) => option.id === id)) : Array.from(new Set([...selected, ...visible.map((option) => option.id)])));
   return <Label>{label}<DropdownMenu><DropdownMenuTrigger asChild><Button type="button" variant="outline" className="mt-2 w-full justify-between font-normal"><span className="truncate">{summary}</span><ChevronDown className="h-4 w-4 shrink-0" /></Button></DropdownMenuTrigger><DropdownMenuContent align="start" className="w-[min(22rem,calc(100vw-2rem))] space-y-2 p-3"><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={locale === "ar" ? "بحث..." : "Search..."} onKeyDown={(event) => event.stopPropagation()} /><div className="flex gap-2"><Button type="button" size="sm" variant="ghost" onClick={selectVisible}>{locale === "ar" ? "تحديد الكل" : "Select All"}</Button><Button type="button" size="sm" variant="ghost" onClick={() => onChange([])}>{locale === "ar" ? "مسح" : "Clear"}</Button></div><div className="max-h-56 space-y-1 overflow-y-auto">{visible.map((option) => <label key={option.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-secondary"><input type="checkbox" checked={selected.includes(option.id)} onChange={() => toggle(option.id)} />{option.name}</label>)}{visible.length === 0 && <p className="px-2 py-3 text-sm text-muted-foreground">{locale === "ar" ? "لا توجد نتائج" : "No results"}</p>}</div></DropdownMenuContent></DropdownMenu></Label>;
 }
-function TargetGrid({ title, targets, onSelect }: { title: string; targets: DashboardTarget[]; onSelect: (key: string) => void }) { return <section><h2 className="mb-3 flex items-center gap-2 text-xl font-semibold"><Target className="h-5 w-5 text-primary" />{title}</h2><div className="grid gap-4 xl:grid-cols-2">{targets.map((target) => <PerformanceTargetCard key={target.key} target={target} hint="اضغط لمعرفة سبب التقدم أو التأخر" onClick={() => onSelect(target.key)} />)}</div></section>; }
+function TargetGrid({ title, targets, onSelect }: { title: string; targets: DashboardTarget[]; onSelect: (key: string) => void }) { return <section className="rise-in rounded-2xl border border-primary/15 bg-card/30 p-4 shadow-[inset_0_1px_0_rgb(255_255_255_/_0.05)] backdrop-blur-sm sm:p-5"><div className="mb-4 flex items-center gap-3"><span className="crystal-badge h-9 w-9 bg-primary/15 text-primary"><Target className="h-4 w-4" /></span><h2 className="text-xl font-semibold">{title}</h2></div><div className="grid gap-4 xl:grid-cols-2">{targets.map((target) => <PerformanceTargetCard key={target.key} target={target} hint="اضغط لمعرفة سبب التقدم أو التأخر" onClick={() => onSelect(target.key)} />)}</div></section>; }
 function shortSignal(key: DiagnosticMetric, metrics: DashboardPerformance["metrics"]) { const n = metrics[key].growthPct; return n === null ? "البيانات المتاحة لا تكفي لتحديد إشارة موثوقة." : `${n >= 0 ? "تحسن" : "تراجع"} ${Math.abs(n).toFixed(1)}% — اضغط للتشخيص.`; }
 type DiagnosisEntity = { id: string; type: "scope" | "supervisor" | "rep"; name: string; currentPeriod: string; comparisonPeriod?: string };
 
