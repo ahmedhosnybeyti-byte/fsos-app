@@ -82,13 +82,13 @@ export default function VisitCopilotPreviewPage() {
 
   return (
     <main dir={locale === "ar" ? "rtl" : "ltr"} className="mx-auto max-w-3xl space-y-5 pb-8">
-      <header className="space-y-2 border-b border-border/60 pb-5">
+      <header className="space-y-2">
         <span className="inline-flex rounded-full bg-amber-500/15 px-3 py-1 text-xs font-medium text-amber-700 dark:text-amber-300">{t("visitCopilotPreview.preview")}</span>
         <h1 className="text-2xl font-bold tracking-tight">{t("visitCopilotPreview.title")}</h1>
         <p className="text-sm text-muted-foreground">{t("visitCopilotPreview.subtitle")}</p>
       </header>
 
-      <section className="glass-card flex flex-wrap items-end gap-3 p-4">
+      <section className="flex flex-wrap items-end gap-3 rounded-2xl border border-border/70 bg-card p-4">
         <div className="grid gap-1.5">
           <Label className="text-xs">{t("visitCopilotPreview.period")}</Label>
           <Select value={period} onValueChange={(value) => { setPeriod(value as VisitCopilotPeriod); resetVisitContext(); }}>
@@ -112,9 +112,9 @@ export default function VisitCopilotPreviewPage() {
             <span className="text-xs text-muted-foreground">{t("visitCopilotPreview.selectCustomer")}</span>
           </div>
           {planQuery.isLoading ? <div className="space-y-2"><Skeleton className="h-28" /><Skeleton className="h-28" /><Skeleton className="h-28" /></div> : planQuery.isError ? (
-            <p className="glass-card border-destructive/30 p-4 text-sm text-destructive">{planQuery.error instanceof ApiError ? planQuery.error.message : "تعذر تحميل خطة اليوم"}</p>
+            <p className="rounded-xl border border-destructive/30 p-4 text-sm text-destructive">{planQuery.error instanceof ApiError ? planQuery.error.message : "تعذر تحميل خطة اليوم"}</p>
           ) : customers.length === 0 ? (
-            <p className="glass-card p-4 text-sm text-muted-foreground">{t("visitCopilotPreview.noVisits")}</p>
+            <p className="rounded-xl border border-border/70 p-4 text-sm text-muted-foreground">{t("visitCopilotPreview.noVisits")}</p>
           ) : <div className="space-y-2">{customers.map((customer, index) => <VisitPlanCard key={customer.customerCode} customer={customer} index={index} onOpen={openVisit} />)}</div>}
         </section>
       ) : (
@@ -125,7 +125,7 @@ export default function VisitCopilotPreviewPage() {
           </div>
 
           {briefingQuery.isLoading ? <div className="space-y-3"><Skeleton className="h-40" /><Skeleton className="h-56" /></div> : briefingQuery.isError ? (
-            <p className="glass-card border-destructive/30 p-4 text-sm text-destructive">{briefingQuery.error instanceof ApiError ? briefingQuery.error.message : "تعذر تحميل ملخص الزيارة"}</p>
+            <p className="rounded-xl border border-destructive/30 p-4 text-sm text-destructive">{briefingQuery.error instanceof ApiError ? briefingQuery.error.message : "تعذر تحميل ملخص الزيارة"}</p>
           ) : briefingQuery.data && demoMeta ? <>
             <section className="rounded-2xl bg-primary p-5 text-primary-foreground" aria-labelledby="mission-title">
               <p className="mb-2 flex items-center gap-2 text-sm text-primary-foreground/80"><Target className="h-4 w-4" /> {t("visitCopilotPreview.mission")}</p>
@@ -138,13 +138,13 @@ export default function VisitCopilotPreviewPage() {
 
             <section className="space-y-3" aria-labelledby="recommendations-title">
               <h2 id="recommendations-title" className="flex items-center gap-2 text-sm font-semibold"><Sparkles className="h-4 w-4 text-primary" /> {t("visitCopilotPreview.recommendations")}</h2>
-              <div className="space-y-2">{briefingQuery.data.actions.slice(0, 3).map((action, index) => <div key={index} className="glass-card flex items-start gap-2 p-3 text-sm"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />{action}</div>)}</div>
+              <div className="space-y-2">{briefingQuery.data.actions.slice(0, 3).map((action, index) => <div key={index} className="flex items-start gap-2 rounded-xl border border-border/70 bg-card p-3 text-sm"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />{action}</div>)}</div>
             </section>
 
             <section className="space-y-3" aria-labelledby="geo-title">
               <div className="flex items-center justify-between gap-2"><h2 id="geo-title" className="flex items-center gap-2 text-sm font-semibold"><MapPin className="h-4 w-4 text-primary" /> {t("visitCopilotPreview.geoIntelligence")}</h2><span className="text-[11px] text-amber-600">{t("visitCopilotPreview.previewData")}</span></div>
               <p className="text-xs text-muted-foreground">{t("visitCopilotPreview.geoDescription")}</p>
-              <div className="space-y-2">{DEMO_GEO_OPPORTUNITIES.map((opportunity, index) => <div key={opportunity} className="glass-card p-3 text-sm"><span className="ms-2 font-semibold text-primary">{index + 1}.</span>{opportunity}</div>)}</div>
+              <div className="space-y-2">{DEMO_GEO_OPPORTUNITIES.map((opportunity, index) => <div key={opportunity} className="rounded-xl border border-border/70 bg-card p-3 text-sm"><span className="ml-2 font-semibold text-primary">{index + 1}.</span>{opportunity}</div>)}</div>
             </section>
 
             {!askAiOpen ? <Button size="lg" className="h-14 w-full text-base" onClick={() => setAskAiOpen(true)}><Bot className="h-5 w-5" /> {t("visitCopilotPreview.askAi")}</Button> : <AskAiPanel messages={chatMessages} isPending={chatMutation.isPending} onSend={sendChat} />}

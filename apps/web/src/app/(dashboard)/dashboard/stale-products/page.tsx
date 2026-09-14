@@ -29,15 +29,17 @@ export default function StaleProductsPage() {
   const selectedPlan = plans.find((plan) => plan.productCode === selectedProductCode) ?? null;
 
   return (
-    <main className="space-y-6">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border/60 pb-5">
-        <h1 className="text-2xl font-semibold tracking-tight">{t("smartLoading.staleProductsPlanTitle")}</h1>
-        <Button asChild variant="outline">
-          <Link href="/dashboard/smart-loading">{t("smartLoading.backToSmartLoading")}</Link>
-        </Button>
-      </header>
+    <main className="space-y-6 p-4 sm:p-6">
+      <h1 className="text-2xl font-semibold tracking-tight">
+        {t("smartLoading.staleProductsPlanTitle")}
+      </h1>
+      <Button asChild variant="outline">
+        <Link href="/dashboard/smart-loading">
+          {t("smartLoading.backToSmartLoading")}
+        </Link>
+      </Button>
       {session.isLoading && <p className="text-sm text-muted-foreground">{t("smartLoading.staleProductsLoading")}</p>}
-      {session.isError && <p className="glass-card border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{t("smartLoading.staleProductsError")}</p>}
+      {session.isError && <p className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">{t("smartLoading.staleProductsError")}</p>}
       {!session.isLoading && !session.isError && operationalTargetDate && (
         selectedPlan ? (
           <StaleDisposalPlan
