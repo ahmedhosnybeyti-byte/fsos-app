@@ -1,0 +1,4 @@
+interface:
+  display_name: "Murshidak UI Design System"
+  short_description: "Apply the verified Murshidak visual language"
+  default_prompt: "Use $murshidak-ui-design-system to build this Murshidak frontend screen consistently."
