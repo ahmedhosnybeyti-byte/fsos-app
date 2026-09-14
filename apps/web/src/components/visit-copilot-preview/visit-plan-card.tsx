@@ -11,7 +11,7 @@ export function VisitPlanCard({ customer, index, onOpen }: { customer: VisitCopi
   return (
     <Button
       variant="ghost"
-      className="h-auto w-full justify-start rounded-2xl border border-border/70 bg-card p-4 text-start shadow-sm hover:bg-secondary/60"
+      className="glass-card card-lift h-auto w-full justify-start p-4 text-start hover:bg-secondary/60"
       onClick={() => onOpen(customer.customerCode)}
     >
       <span className="min-w-0 flex-1 space-y-2">

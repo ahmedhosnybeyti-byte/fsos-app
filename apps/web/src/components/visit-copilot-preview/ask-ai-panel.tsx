@@ -23,7 +23,7 @@ export function AskAiPanel({
   };
 
   return (
-    <section className="rounded-2xl border border-primary/20 bg-primary/[0.04] p-4" aria-labelledby="ask-ai-title">
+    <section className="glass-card glow-ai border-primary/20 p-4" aria-labelledby="ask-ai-title">
       <h2 id="ask-ai-title" className="mb-3 flex items-center gap-2 text-sm font-semibold">
         <Bot className="h-4 w-4 text-primary" />
         اسأل الذكاء الاصطناعي

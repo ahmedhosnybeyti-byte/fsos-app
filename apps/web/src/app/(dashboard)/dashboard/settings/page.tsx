@@ -677,7 +677,7 @@ function DataSourcesTab() {
             <DialogHeader>
               <DialogTitle>{t("settings.addDataSourceDialogTitle")}</DialogTitle>
             </DialogHeader>
-            <form className="max-h-[70vh] space-y-4 overflow-y-auto pl-1" onSubmit={handleSubmit((values) => createMutation.mutate(values))}>
+            <form className="max-h-[70vh] space-y-4 overflow-y-auto ps-1" onSubmit={handleSubmit((values) => createMutation.mutate(values))}>
               <div className="space-y-2">
                 <Label htmlFor="dsName">{t("settings.dsNameLabel")}</Label>
                 <Input id="dsName" {...register("name")} />

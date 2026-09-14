@@ -17,7 +17,7 @@ export function QuickVisitBrief({ briefing }: { briefing: VisitCopilotBriefing }
         <BriefValue label="المبيعات" value={briefing.sales.total.toLocaleString()} />
         <BriefValue label="التحصيل" value={collection} compact />
         <BriefValue label="المرتجعات" value={briefing.returns.total.toLocaleString()} />
-        <div className="rounded-xl border border-border/70 bg-card p-3">
+        <div className="glass-card p-3">
           <p className="text-xs text-muted-foreground">اتجاه المبيعات</p>
           <p className={cn("mt-1 flex items-center gap-1 text-lg font-bold", trendUp ? "text-emerald-600" : "text-rose-600")}>
             {trendUp ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
@@ -26,7 +26,7 @@ export function QuickVisitBrief({ briefing }: { briefing: VisitCopilotBriefing }
         </div>
       </div>
       {briefing.topProducts.length > 0 && (
-        <div className="rounded-xl border border-border/70 bg-card p-3">
+        <div className="glass-card p-3">
           <p className="mb-2 text-xs text-muted-foreground">أفضل المنتجات</p>
           <div className="flex flex-wrap gap-1.5">
             {briefing.topProducts.slice(0, 3).map((product) => (
@@ -47,7 +47,7 @@ export function QuickVisitBrief({ briefing }: { briefing: VisitCopilotBriefing }
 
 function BriefValue({ label, value, compact }: { label: string; value: string; compact?: boolean }) {
   return (
-    <div className="rounded-xl border border-border/70 bg-card p-3">
+    <div className="glass-card p-3">
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className={cn("mt-1 font-bold", compact ? "text-sm" : "text-lg")}>{value}</p>
     </div>
