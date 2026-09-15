@@ -190,11 +190,12 @@ export default function GeoEnginePage() {
   const isPermissionDenied = queryResult.error instanceof ApiError && queryResult.error.status === 403;
 
   return (
-    <div className="relative isolate space-y-3 sm:space-y-4 sm:space-y-6">
+    <div className="relative isolate space-y-3 bg-slate-50/40 sm:space-y-4 sm:space-y-6 dark:bg-transparent">
+      <div aria-hidden className="pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-20 bg-[radial-gradient(900px_circle_at_15%_0%,rgba(147,197,253,.32),transparent_55%),radial-gradient(780px_circle_at_92%_8%,rgba(196,181,253,.25),transparent_52%),linear-gradient(180deg,#eff6ff_0%,#f8fafc_48%,#eef2ff_100%)] dark:hidden" />
       <div aria-hidden className="dashboard-cinematic-bg pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 opacity-70 dark:opacity-100" />
       <div aria-hidden className="dashboard-starfield pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 hidden opacity-30 dark:block" />
 
-      <div className="glass-hero rise-in flex flex-col items-stretch gap-3 bg-gradient-to-l from-primary/15 via-transparent to-ai/15 p-5 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-7">
+      <div className="glass-hero rise-in flex flex-col items-stretch gap-3 bg-[linear-gradient(115deg,rgba(255,255,255,.94),rgba(219,234,254,.92),rgba(237,233,254,.9))] p-5 dark:bg-gradient-to-l dark:from-primary/15 dark:via-transparent dark:to-ai/15 sm:flex-row sm:items-center sm:justify-between sm:gap-4 sm:p-7">
         <div className="flex items-center gap-2">
           <span className="crystal-badge h-11 w-11 bg-cyan-600/15 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-400">
             <Globe2 className="h-5 w-5" />

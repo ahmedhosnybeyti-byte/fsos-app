@@ -142,10 +142,11 @@ export default function CustomerSimilarityPage() {
   }, [asRouteResult, visibleGroups]);
 
   return (
-    <div className="relative isolate space-y-6">
+    <div className="relative isolate space-y-6 bg-slate-50/40 dark:bg-transparent">
+      <div aria-hidden className="pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-20 bg-[radial-gradient(900px_circle_at_15%_0%,rgba(147,197,253,.32),transparent_55%),radial-gradient(780px_circle_at_92%_8%,rgba(196,181,253,.25),transparent_52%),linear-gradient(180deg,#eff6ff_0%,#f8fafc_48%,#eef2ff_100%)] dark:hidden" />
       <div aria-hidden className="dashboard-cinematic-bg pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 opacity-70 dark:opacity-100" />
       <div aria-hidden className="dashboard-starfield pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 hidden opacity-30 dark:block" />
-      <div className="glass-hero rise-in flex items-center gap-4 bg-gradient-to-l from-primary/15 via-transparent to-ai/15 p-5 sm:p-7">
+      <div className="glass-hero rise-in flex items-center gap-4 bg-[linear-gradient(115deg,rgba(255,255,255,.94),rgba(219,234,254,.92),rgba(237,233,254,.9))] p-5 dark:bg-gradient-to-l dark:from-primary/15 dark:via-transparent dark:to-ai/15 sm:p-7">
         <span className="crystal-badge h-12 w-12 bg-primary/15 text-primary shadow-[0_0_28px_-8px_hsl(var(--primary)/0.7)]"><Users2 className="h-5 w-5" /></span>
         <div>
           <p className="text-xs font-semibold tracking-[0.16em] text-primary/90">MURSHIDAK · CUSTOMER INTELLIGENCE</p>
