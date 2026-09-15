@@ -12,7 +12,7 @@ Treat that document and the components it cites as the source of truth. Reuse sh
 ## Approved visual-reference status
 
 - The current production Team Performance screen is the canonical **Dark Mode** visual reference for Murshidak screen migrations.
-- Light Mode is **PENDING VISUAL DESIGN/APPROVAL**. Preserve its existing behavior; do not infer a new Light Mode treatment from the Dark Mode reference unless explicitly requested.
+- The approved Team Performance Light Mode reference image is the canonical **Light Mode** visual reference. Use a cool light-gray/pale-blue canvas, subtle blue/lavender atmosphere, softly tinted glass surfaces, refined borders/shadows, dark navy text, primary blue, controlled secondary purple, Cairo, and RTL-safe spacing.
 - For multi-screen visual migrations, use `.codex/skills/murshidak-ui-batch-migration/SKILL.md` after loading this design-system skill.
 
 ## Required decisions

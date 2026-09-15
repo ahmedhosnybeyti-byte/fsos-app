@@ -9,7 +9,7 @@ Use the shared primitives before writing one-off styling: `Card`, `Button`, `Inp
 ## Approved visual-reference status
 
 - **Dark Mode:** the current production Team Performance screen is the canonical visual reference for Murshidak screen migrations.
-- **Light Mode:** **PENDING VISUAL DESIGN/APPROVAL**. Preserve current Light Mode behavior; do not infer or introduce a new Light Mode design from the approved Dark Mode reference unless explicitly requested.
+- **Light Mode:** the approved Team Performance Light Mode reference image is canonical. Use a cool light-gray/pale-blue canvas rather than large flat-white fields; apply subtle blue/lavender atmospheric gradients, softly tinted glass/card surfaces, refined borders/shadows, dark navy text, the Murshidak blue primary accent, controlled purple secondary accent, Cairo, canonical spacing/radius, and RTL-safe behavior.
 - **Multi-screen migrations:** use `.codex/skills/murshidak-ui-batch-migration/SKILL.md` as the standard workflow, together with this design system.
 
 **Explicit tokens** are defined in `apps/web/src/app/globals.css:6-104` and exposed to Tailwind in `apps/web/tailwind.config.ts:13-70`. Values below are HSL triplets and are consumed as `hsl(var(--token))`.
@@ -86,5 +86,5 @@ Arabic/RTL is the default: `<html lang="ar" dir="rtl">`; switching locale update
 
 1. Start with the shared component or utility; do not duplicate glass, button, or form formulas.
 2. Give the page at most one hero; use semantic glow only when it communicates status, and only once per element.
-3. Verify the approved Dark Mode treatment, Arabic RTL and English LTR, keyboard focus, empty/error/loading, desktop, 767px, 480px, and 430px. Preserve current Light Mode behavior unless Light Mode work is explicitly requested and approved.
+3. Verify the approved Dark and Light Mode treatments, Arabic RTL and English LTR, keyboard focus, empty/error/loading, desktop, 767px, 480px, and 430px.
 4. Compare visual density with the dashboard home screen before calling the work complete. Any new visual language requires explicit approval.
