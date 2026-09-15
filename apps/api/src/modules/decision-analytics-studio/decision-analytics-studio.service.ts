@@ -360,6 +360,14 @@ export class DecisionAnalyticsStudioService {
   }
 
   async query(user: AuthenticatedUser, input: DecisionQueryInput): Promise<DecisionQueryResult> {
+    return this.rieFacade.runPlannedRequest({
+      name: "decision_analytics.query",
+      maxConcurrentOperations: 3,
+      maxOperations: 24,
+    }, () => this.queryUnplanned(user, input));
+  }
+
+  private async queryUnplanned(user: AuthenticatedUser, input: DecisionQueryInput): Promise<DecisionQueryResult> {
     const { fromTime, toTime, priorFromTime, priorToTime } = this.windowFor(input);
     const f = this.compileFilters(input);
     const ctx = this.rieContext(user);
@@ -797,6 +805,14 @@ export class DecisionAnalyticsStudioService {
   }
 
   async filterOptions(user: AuthenticatedUser, field: DecisionFilterField): Promise<DecisionFilterOptionsResult> {
+    return this.rieFacade.runPlannedRequest({
+      name: "decision_analytics.filter_options",
+      maxConcurrentOperations: 3,
+      maxOperations: 24,
+    }, () => this.filterOptionsUnplanned(user, field));
+  }
+
+  private async filterOptionsUnplanned(user: AuthenticatedUser, field: DecisionFilterField): Promise<DecisionFilterOptionsResult> {
     const ctx = this.rieContext(user);
 
     if (field === "branch") {
@@ -874,6 +890,14 @@ export class DecisionAnalyticsStudioService {
   }
 
   async table(user: AuthenticatedUser, input: DecisionTableQueryInput): Promise<DecisionTableResult> {
+    return this.rieFacade.runPlannedRequest({
+      name: "decision_analytics.table",
+      maxConcurrentOperations: 3,
+      maxOperations: 24,
+    }, () => this.tableUnplanned(user, input));
+  }
+
+  private async tableUnplanned(user: AuthenticatedUser, input: DecisionTableQueryInput): Promise<DecisionTableResult> {
     const { fromTime, toTime } = this.windowFor(input);
     const f = this.compileFilters(input);
     const ctx = this.rieContext(user);
