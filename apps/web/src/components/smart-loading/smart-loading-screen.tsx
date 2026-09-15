@@ -672,9 +672,9 @@ export function SmartLoadingScreen({
 
   return (
     <div dir={locale === "ar" ? "rtl" : "ltr"} className="relative isolate space-y-6 bg-slate-50/40 pb-10 max-md:space-y-3 dark:bg-transparent" onClick={() => panel && setPanel(null)}>
-      <div aria-hidden className="pointer-events-none fixed inset-0 -z-20 bg-[radial-gradient(900px_circle_at_15%_0%,rgba(147,197,253,.32),transparent_55%),radial-gradient(780px_circle_at_92%_8%,rgba(196,181,253,.25),transparent_52%),linear-gradient(180deg,#eff6ff_0%,#f8fafc_48%,#eef2ff_100%)] dark:hidden" />
-      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10 opacity-70 dark:opacity-100" />
-      <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-45 dark:block" />
+      <div aria-hidden className="pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-20 bg-[radial-gradient(900px_circle_at_15%_0%,rgba(147,197,253,.32),transparent_55%),radial-gradient(780px_circle_at_92%_8%,rgba(196,181,253,.25),transparent_52%),linear-gradient(180deg,#eff6ff_0%,#f8fafc_48%,#eef2ff_100%)] dark:hidden" />
+      <div aria-hidden className="dashboard-cinematic-bg pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 opacity-70 dark:opacity-100" />
+      <div aria-hidden className="dashboard-starfield pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 hidden opacity-45 dark:block" />
       <header className="glass-hero rise-in relative bg-[linear-gradient(115deg,rgba(255,255,255,.94),rgba(219,234,254,.92),rgba(237,233,254,.9))] p-5 dark:bg-gradient-to-l dark:from-primary/15 dark:via-transparent dark:to-ai/15 sm:p-7">
         <div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" />
         <div className="relative flex flex-wrap items-start justify-between gap-3">
@@ -1098,9 +1098,9 @@ export function SmartLoadingScreen({
 /** Management starts with dimensions and aggregate counts only. Selecting a rep enables the existing full session. */
 function ManagementHeadersOnly({ locale, targetDate, managerId, supervisorId, onManagementScopeChange }: { locale: "ar" | "en"; targetDate: string; managerId?: string; supervisorId?: string; onManagementScopeChange: (scope: ManagementScopeSelection) => void }) {
   return <div dir={locale === "ar" ? "rtl" : "ltr"} className="relative isolate space-y-6 bg-slate-50/40 pb-10 dark:bg-transparent">
-    <div aria-hidden className="pointer-events-none fixed inset-0 -z-20 bg-[radial-gradient(900px_circle_at_15%_0%,rgba(147,197,253,.32),transparent_55%),radial-gradient(780px_circle_at_92%_8%,rgba(196,181,253,.25),transparent_52%),linear-gradient(180deg,#eff6ff_0%,#f8fafc_48%,#eef2ff_100%)] dark:hidden" />
-    <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10 opacity-70 dark:opacity-100" />
-    <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-45 dark:block" />
+    <div aria-hidden className="pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-20 bg-[radial-gradient(900px_circle_at_15%_0%,rgba(147,197,253,.32),transparent_55%),radial-gradient(780px_circle_at_92%_8%,rgba(196,181,253,.25),transparent_52%),linear-gradient(180deg,#eff6ff_0%,#f8fafc_48%,#eef2ff_100%)] dark:hidden" />
+    <div aria-hidden className="dashboard-cinematic-bg pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 opacity-70 dark:opacity-100" />
+    <div aria-hidden className="dashboard-starfield pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 hidden opacity-45 dark:block" />
     <header className="glass-hero rise-in relative bg-[linear-gradient(115deg,rgba(255,255,255,.94),rgba(219,234,254,.92),rgba(237,233,254,.9))] p-5 dark:bg-gradient-to-l dark:from-primary/15 dark:via-transparent dark:to-ai/15 sm:p-7"><div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" /><div className="relative"><p className="text-xs font-semibold tracking-[0.16em] text-primary/90">MURSHIDAK · LOADING INTELLIGENCE</p><h1 className="mt-1 flex items-center gap-2 text-2xl font-bold tracking-tight sm:text-3xl"><span className="crystal-badge h-11 w-11 bg-ai/15 text-ai shadow-[0_0_24px_-8px_hsl(var(--ai)/0.7)]"><PackagePlus className="h-5 w-5" /></span>Smart Loading</h1></div></header>
     <ManagementHierarchyFilters locale={locale} managementStockAlignmentPercent={null} onManagementScopeChange={onManagementScopeChange} managementScope={{ managerId, supervisorId }} />
     <div className="grid items-stretch gap-3 md:grid-cols-2">
@@ -1113,9 +1113,9 @@ function ManagementHeadersOnly({ locale, targetDate, managerId, supervisorId, on
 /** Keep the selected hierarchy visible while its scoped analysis is loading. */
 function ManagementScopeLoading({ locale, managerId, supervisorId, salesRepId, onManagementScopeChange }: { locale: "ar" | "en"; managerId?: string; supervisorId?: string; salesRepId?: string; onManagementScopeChange: (scope: ManagementScopeSelection) => void }) {
   return <div dir={locale === "ar" ? "rtl" : "ltr"} className="relative isolate space-y-6 bg-slate-50/40 pb-10 dark:bg-transparent">
-    <div aria-hidden className="pointer-events-none fixed inset-0 -z-20 bg-[radial-gradient(900px_circle_at_15%_0%,rgba(147,197,253,.32),transparent_55%),radial-gradient(780px_circle_at_92%_8%,rgba(196,181,253,.25),transparent_52%),linear-gradient(180deg,#eff6ff_0%,#f8fafc_48%,#eef2ff_100%)] dark:hidden" />
-    <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10 opacity-70 dark:opacity-100" />
-    <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-45 dark:block" />
+    <div aria-hidden className="pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-20 bg-[radial-gradient(900px_circle_at_15%_0%,rgba(147,197,253,.32),transparent_55%),radial-gradient(780px_circle_at_92%_8%,rgba(196,181,253,.25),transparent_52%),linear-gradient(180deg,#eff6ff_0%,#f8fafc_48%,#eef2ff_100%)] dark:hidden" />
+    <div aria-hidden className="dashboard-cinematic-bg pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 opacity-70 dark:opacity-100" />
+    <div aria-hidden className="dashboard-starfield pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-10 hidden opacity-45 dark:block" />
     <header className="glass-hero rise-in relative bg-[linear-gradient(115deg,rgba(255,255,255,.94),rgba(219,234,254,.92),rgba(237,233,254,.9))] p-5 dark:bg-gradient-to-l dark:from-primary/15 dark:via-transparent dark:to-ai/15 sm:p-7"><div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" /><div className="relative"><p className="text-xs font-semibold tracking-[0.16em] text-primary/90">MURSHIDAK · LOADING INTELLIGENCE</p><h1 className="mt-1 flex items-center gap-2 text-2xl font-bold tracking-tight sm:text-3xl"><span className="crystal-badge h-11 w-11 bg-ai/15 text-ai shadow-[0_0_24px_-8px_hsl(var(--ai)/0.7)]"><PackagePlus className="h-5 w-5" /></span>Smart Loading</h1></div></header>
     <ManagementHierarchyFilters locale={locale} managementStockAlignmentPercent={null} onManagementScopeChange={onManagementScopeChange} managementScope={{ managerId, supervisorId, salesRepId }} />
     <div className="space-y-3">
