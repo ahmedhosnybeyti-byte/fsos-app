@@ -448,7 +448,8 @@ export class VisitCopilotService {
    * full employee hierarchy into Node. */
   async supervisedSalesReps(user: AuthenticatedUser) {
     if (user.roleCode !== "SUPERVISOR" || !user.companyId) throw new ForbiddenException();
-    const result = await this.rieFacade.queryCanonicalRecords({
+    return this.runRiePlan("visit_copilot.supervised_sales_reps", async () => {
+      const result = await this.rieFacade.queryCanonicalRecords({
       ...this.rieContext(user),
       entityName: "Routes",
       hierarchyRoute: { field: "RouteID" },
@@ -461,9 +462,10 @@ export class VisitCopilotService {
       groupBy: [{ field: "EmployeeID", source: "rep" }, { field: "EmployeeName", source: "rep" }],
       orderBy: [{ field: { field: "EmployeeName", source: "rep" }, direction: "asc" }],
       pagination: { limit: 500 },
+      });
+      if (result.page.hasMore) throw new BadRequestException("Visit Copilot hierarchy options exceed the safe response limit.");
+      return result.records.map((row) => ({ employeeCode: String(row.employeeCode ?? "").trim(), fullName: String(row.fullName ?? row.employeeCode ?? "").trim() })).filter((rep) => rep.employeeCode && rep.fullName);
     });
-    if (result.page.hasMore) throw new BadRequestException("Visit Copilot hierarchy options exceed the safe response limit.");
-    return result.records.map((row) => ({ employeeCode: String(row.employeeCode ?? "").trim(), fullName: String(row.fullName ?? row.employeeCode ?? "").trim() })).filter((rep) => rep.employeeCode && rep.fullName);
   }
 
   private async scopedActor(user: AuthenticatedUser, salesRepId?: string): Promise<AuthenticatedUser> {
@@ -548,6 +550,12 @@ export class VisitCopilotService {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
   }
 
+  /** Shares RIE hierarchy/version context and bounds only this request's
+   * existing PostgreSQL operations; it never retains fact rows. */
+  private runRiePlan<T>(name: string, execute: () => Promise<T>): Promise<T> {
+    return this.rieFacade.runPlannedRequest({ name, maxConcurrentOperations: 3, maxOperations: 24 }, execute);
+  }
+
   // Graceful degradation for every entity except Customers: unavailable or
   // erroring reads become a warning string + empty rows, never a 500.
   private async tryEntity(ctx: ReturnType<VisitCopilotService["rieContext"]>, entityName: string, arabicLabel: string, warnings: string[]): Promise<readonly EntityRecord[]> {
@@ -583,8 +591,10 @@ export class VisitCopilotService {
   // ------------------------------------------------------------------
 
   async dailyBrief(user: AuthenticatedUser, query: VisitCopilotDailyBriefQuery, salesRepUserId?: string): Promise<DailyBriefResult> {
-    user = await this.scopedActor(user, salesRepUserId);
-    return auditMemory("visit-copilot-daily-brief", () => this.buildDailyBrief(user, query), { companyId: user.companyId, userId: user.userId });
+    return this.runRiePlan("visit_copilot.daily_brief", async () => {
+      user = await this.scopedActor(user, salesRepUserId);
+      return auditMemory("visit-copilot-daily-brief", () => this.buildDailyBrief(user, query), { companyId: user.companyId, userId: user.userId });
+    });
   }
 
   private async buildDailyBrief(user: AuthenticatedUser, periodInput: PeriodInput): Promise<DailyBriefResult> {
@@ -796,6 +806,7 @@ export class VisitCopilotService {
   // ------------------------------------------------------------------
 
   async plan(user: AuthenticatedUser, body: VisitCopilotPlanRequest, salesRepUserId?: string) {
+    return this.runRiePlan("visit_copilot.plan", async () => {
     user = await this.scopedActor(user, salesRepUserId);
     const brief = await this.buildDailyBrief(user, body);
     let customers: DailyBriefCustomer[];
@@ -817,6 +828,7 @@ export class VisitCopilotService {
       estimatedDistanceKm: round2(distanceKm),
       estimatedDurationMin: round2((distanceKm / AVERAGE_SPEED_KMH) * 60 + MINUTES_PER_VISIT * customers.length),
     };
+    });
   }
 
   // Greedy nearest-neighbor chain (Haversine). Returns visiting order (as
@@ -869,8 +881,10 @@ export class VisitCopilotService {
   // ------------------------------------------------------------------
 
   async briefing(user: AuthenticatedUser, customerCode: string, query: VisitCopilotBriefingQuery, salesRepUserId?: string): Promise<CustomerBriefingResult> {
-    user = await this.scopedActor(user, salesRepUserId);
-    return auditMemory("customer-360", () => this.briefingMeasured(user, customerCode, query), { companyId: user.companyId, customerCode });
+    return this.runRiePlan("visit_copilot.briefing", async () => {
+      user = await this.scopedActor(user, salesRepUserId);
+      return auditMemory("customer-360", () => this.briefingMeasured(user, customerCode, query), { companyId: user.companyId, customerCode });
+    });
   }
 
   private async briefingMeasured(user: AuthenticatedUser, customerCode: string, query: VisitCopilotBriefingQuery): Promise<CustomerBriefingResult> {
@@ -1249,6 +1263,7 @@ export class VisitCopilotService {
   // ------------------------------------------------------------------
 
   async chat(user: AuthenticatedUser, body: VisitCopilotChatRequest, salesRepUserId?: string): Promise<VisitCopilotChatResult> {
+    return this.runRiePlan("visit_copilot.chat", async () => {
     user = await this.scopedActor(user, salesRepUserId);
     // ------------------------------------------------------------------
     // FDA Local Decision Layer — tried BEFORE any AI call ("Cheapest Path
@@ -1298,6 +1313,7 @@ export class VisitCopilotService {
     // prospectId switches the context to the prospect briefing.
     const briefing = await this.buildProspectBriefing(user, body.prospectId, body);
     return this.chatWithAi(briefing, body, {});
+    });
   }
 
   private async chatWithAi(
@@ -1630,6 +1646,7 @@ export class VisitCopilotService {
   }
 
   async daily360Summary(user: AuthenticatedUser, query: VisitCopilotDaily360SummaryQuery, salesRepId?: string): Promise<VisitCopilot360Summary> {
+    return this.runRiePlan("visit_copilot.daily_360_summary", async () => {
     user = await this.scopedActor(user, salesRepId);
     const warnings: string[] = [];
     const narrativeLocale = (query as VisitCopilotDaily360SummaryQuery & { locale?: "ar" | "en" }).locale ?? "ar";
@@ -1820,6 +1837,7 @@ export class VisitCopilotService {
       closingPhrase: narrative.closingPhrase,
       warnings: baseFacts.warnings,
     };
+    });
   }
 
   // Deterministic Arabic template — the mandatory fallback, and also what
@@ -2027,6 +2045,7 @@ export class VisitCopilotService {
   // ------------------------------------------------------------------
 
   async discovery(user: AuthenticatedUser, query: VisitCopilotDiscoveryQuery, salesRepUserId?: string): Promise<DiscoveryResult> {
+    return this.runRiePlan("visit_copilot.discovery", async () => {
     user = await this.scopedActor(user, salesRepUserId);
     const warnings: string[] = [];
     // The existing-customer layer must use the exact same daily route scope
@@ -2053,6 +2072,7 @@ export class VisitCopilotService {
       warnings.push("لا توجد قناة (Channel) محددة لعملائك — درجات تطابق القناة قد تكون أقل دقة.");
     }
     return { customers, prospects, repChannel: stats.repChannel, warnings };
+    });
   }
 
   // ------------------------------------------------------------------
@@ -2063,6 +2083,7 @@ export class VisitCopilotService {
   // ------------------------------------------------------------------
 
   async discoverySearch(user: AuthenticatedUser, body: VisitCopilotGoogleSearchRequest, salesRepUserId?: string): Promise<GoogleSearchResult> {
+    return this.runRiePlan("visit_copilot.discovery_search", async () => {
     user = await this.scopedActor(user, salesRepUserId);
     // A double tap / network retry reaches this service at most once while the
     // same request is still running; the quota reservation remains atomic for
@@ -2077,6 +2098,7 @@ export class VisitCopilotService {
     } finally {
       this.discoverySearchesInFlight.delete(key);
     }
+    });
   }
 
   private async discoverySearchImpl(user: AuthenticatedUser, body: VisitCopilotGoogleSearchRequest): Promise<GoogleSearchResult> {
@@ -2230,6 +2252,7 @@ export class VisitCopilotService {
   // ------------------------------------------------------------------
 
   async routeOpportunities(user: AuthenticatedUser, query: VisitCopilotDiscoveryQuery, salesRepUserId?: string): Promise<RouteOpportunitiesResult> {
+    return this.runRiePlan("visit_copilot.route_opportunities", async () => {
     user = await this.scopedActor(user, salesRepUserId);
     const warnings: string[] = [];
     const stats = await this.buildDiscoveryStats(user, query, warnings);
@@ -2259,6 +2282,7 @@ export class VisitCopilotService {
       disabled: nearby.length === 0,
       warnings,
     };
+    });
   }
 
   // ------------------------------------------------------------------
@@ -2266,8 +2290,10 @@ export class VisitCopilotService {
   // ------------------------------------------------------------------
 
   async prospectBriefing(user: AuthenticatedUser, prospectId: string, query: VisitCopilotBriefingQuery, salesRepUserId?: string): Promise<ProspectBriefingResult> {
-    user = await this.scopedActor(user, salesRepUserId);
-    return this.buildProspectBriefing(user, prospectId, query);
+    return this.runRiePlan("visit_copilot.prospect_briefing", async () => {
+      user = await this.scopedActor(user, salesRepUserId);
+      return this.buildProspectBriefing(user, prospectId, query);
+    });
   }
 
   // Same shape as buildBriefing so the briefing screen (and the chat
