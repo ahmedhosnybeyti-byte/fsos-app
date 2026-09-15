@@ -9,7 +9,6 @@ import {
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { retrieveScenarios } from "../assistant/data/scenario-retrieval.util";
 import { RieFacade } from "../rie/rie-facade.service";
-import { PrismaService } from "../../common/prisma";
 import type { RieScalableQueryResult } from "../rie/scalable-query.types";
 
 function toFiniteNumber(value: unknown): number | null {
@@ -55,7 +54,7 @@ interface RepAccumulator { routeIds: string[]; repName: string; repEmail: string
 // migrated screen.
 @Injectable()
 export class TeamPerformanceService {
-  constructor(private readonly rieFacade: RieFacade, private readonly prisma: PrismaService) {}
+  constructor(private readonly rieFacade: RieFacade) {}
 
   private rieContext(user: AuthenticatedUser) {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
@@ -104,12 +103,17 @@ export class TeamPerformanceService {
   }
 
   async query(user: AuthenticatedUser, input: TeamPerformanceRieQueryInput): Promise<TeamPerformanceResult> {
+    return this.rieFacade.runPlannedRequest({
+      name: "team_performance.query",
+      maxConcurrentOperations: 3,
+      maxOperations: 24,
+    }, () => this.queryUnplanned(user, input));
+  }
+
+  private async queryUnplanned(user: AuthenticatedUser, input: TeamPerformanceRieQueryInput): Promise<TeamPerformanceResult> {
     const ctx = this.rieContext(user);
     const hasPrior = !!(input.priorDateFrom && input.priorDateTo);
-    const [versions, activeVersionCounts] = await Promise.all([
-      this.prisma.rieDatasetVersion.findMany({ where: { companyId: ctx.companyId, entityName: { in: ["Routes", "Invoices", "Invoice Items", "Collections", "Returns"] }, isActive: true }, select: { entityName: true } }),
-      this.rieFacade.getActiveVersionCounts(ctx.companyId, ["Routes", "Invoices", "Invoice Items", "Collections", "Returns", "Targets", "Employees"]),
-    ]);
+    const activeVersionCounts = await this.rieFacade.getActiveVersionCounts(ctx.companyId, ["Routes", "Invoices", "Invoice Items", "Collections", "Returns", "Targets", "Employees"]);
     const [salesCurrent, collectionCurrent, returnsCurrent, salesSummary, targetsResult] = await Promise.all([
       hasPrior ? this.perRepComparisonMetric(ctx, "sales", { from: input.dateFrom, to: input.dateTo }, { from: input.priorDateFrom!, to: input.priorDateTo! }, input.routeIds, activeVersionCounts) : this.perRepMetric(ctx, "sales", input.dateFrom, input.dateTo, input.routeIds, activeVersionCounts),
       hasPrior ? this.perRepComparisonMetric(ctx, "collection", { from: input.dateFrom, to: input.dateTo }, { from: input.priorDateFrom!, to: input.priorDateTo! }, input.routeIds, activeVersionCounts) : this.perRepMetric(ctx, "collection", input.dateFrom, input.dateTo, input.routeIds, activeVersionCounts),
@@ -117,7 +121,7 @@ export class TeamPerformanceService {
       this.rieFacade.queryCanonicalRecords({ ...ctx, activeVersionCounts, entityName: "Invoice Items", projection: [], joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }], hierarchyRoute: { field: "RouteID", source: "invoice" }, scope: { date: { field: "InvoiceDate", source: "invoice", from: input.dateFrom, to: input.dateTo }, ...(input.routeIds?.length ? { route: { values: input.routeIds, source: "invoice" } } : {}) }, aggregates: [{ op: "countDistinct", field: "CustomerCode", source: "invoice", as: "customers" }, { op: "countDistinct", field: "InvoiceNo", as: "invoices" }, { op: "countDistinct", field: "ProductCode", as: "skus" }], pagination: { limit: 1 } }),
       this.rieFacade.queryCanonicalRecords({ ...ctx, activeVersionCounts, entityName: "Targets", projection: [], scope: { ...(input.routeIds?.length ? { route: { values: input.routeIds } } : {}), fields: [{ field: "Year", values: [String(new Date(input.dateFrom).getUTCFullYear())] }, { field: "Month", values: [String(new Date(input.dateFrom).getUTCMonth() + 1)] }] }, aggregates: [{ op: "sum", field: "SalesTarget", as: "SalesTarget" }, { op: "sum", field: "CollectionTarget", as: "CollectionTarget" }, { op: "sum", field: "ActiveCustomersTarget", as: "ActiveCustomersTarget" }, { op: "sum", field: "SKUDistributionTarget", as: "SKUDistributionTarget" }], pagination: { limit: 1 } }),
     ]);
-    const active = new Set(versions.map((version) => version.entityName));
+    const active = new Set([...activeVersionCounts].flatMap(([entityName, count]) => count > 0 ? [entityName] : []));
     if (!active.has("Routes")) throw new NotFoundException('بيانات "المسارات" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.');
     const salesAvailable = active.has("Invoices") && active.has("Invoice Items"), collectionAvailable = active.has("Collections"), returnsAvailable = active.has("Returns");
     const acc = new Map<string, RepAccumulator>();
