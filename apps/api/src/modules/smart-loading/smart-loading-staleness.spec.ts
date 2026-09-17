@@ -350,7 +350,7 @@ test("management session uses the unified bundle and never calls the three compa
   const session = await service.getSession({
     userId: "user-1", companyId: "company-1", email: "admin@example.com",
     roleCode: "COMPANY_ADMIN", permissions: [], mustChangePassword: false, orgUnitId: null,
-  }, "2099-01-01", 4);
+  }, "2099-01-01", 4, undefined, undefined, undefined, true);
 
   assert.equal(session.state, "ready");
   assert.equal(bundleCalls, 1);
@@ -359,6 +359,32 @@ test("management session uses the unified bundle and never calls the three compa
     assert.equal(session.managementStockAlignmentPercent, 100);
     assert.deepEqual(session.managementVehicleProducts, []);
   }
+});
+
+test("management initial session defers the stale bundle and lost-opportunity detection", async () => {
+  let bundleCalls = 0;
+  let lostOpportunityCalls = 0;
+  const facade = {
+    runPlannedRequest: <T>(_options: unknown, execute: () => Promise<T>) => execute(),
+    queryCanonicalRecords: async () => ({ records: [], page: { limit: 5_000, offset: 0, hasMore: false } }),
+    queryManagementSmartLoadingBundle: async () => { bundleCalls += 1; throw new Error("deferred bundle must not run"); },
+  };
+  const service = new SmartLoadingService(
+    facade as never,
+    { detect: async () => { lostOpportunityCalls += 1; throw new Error("deferred lost opportunities must not run"); } } as never,
+    {} as never,
+    {} as never,
+  );
+
+  const session = await service.getSession({
+    userId: "user-1", companyId: "company-1", email: "admin@example.com",
+    roleCode: "COMPANY_ADMIN", permissions: [], mustChangePassword: false, orgUnitId: null,
+  }, "2099-01-01", 4);
+
+  assert.equal(session.state, "ready");
+  assert.equal(bundleCalls, 0);
+  assert.equal(lostOpportunityCalls, 0);
+  if (session.state === "ready") assert.equal(session.deferredAnalysisLoaded, false);
 });
 
 test("Sales Rep session keeps the existing non-management path", async () => {

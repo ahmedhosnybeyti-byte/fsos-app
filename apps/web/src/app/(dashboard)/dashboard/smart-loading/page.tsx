@@ -20,13 +20,14 @@ export default function SmartLoadingPage() {
   const [salesRepId, setSalesRepId] = useState<string>();
   const [managerId, setManagerId] = useState<string>();
   const [supervisorId, setSupervisorId] = useState<string>();
+  const [includeDeferredAnalysis, setIncludeDeferredAnalysis] = useState(false);
   const managementView = ["COMPANY_ADMIN", "MANAGER", "SUPERVISOR"].includes(user?.role.code ?? "");
   // Management starts with headers only. Once a manager, supervisor, or rep
   // is selected, fetch the existing session scoped to that selection.
   const deferManagementDetails = managementView && !managerId && !supervisorId && !salesRepId;
   const session = useQuery({
-    queryKey: ["smart-loading", "session", targetDate, staleDaysThreshold, salesRepId, managerId, supervisorId],
-    queryFn: () => smartLoadingApi.getSession(targetDate, staleDaysThreshold, salesRepId, managerId, supervisorId),
+    queryKey: ["smart-loading", "session", targetDate, staleDaysThreshold, salesRepId, managerId, supervisorId, includeDeferredAnalysis],
+    queryFn: () => smartLoadingApi.getSession(targetDate, staleDaysThreshold, salesRepId, managerId, supervisorId, includeDeferredAnalysis),
     enabled: !deferManagementDetails,
     placeholderData: (previous) => previous,
     refetchOnWindowFocus: false,
@@ -36,18 +37,20 @@ export default function SmartLoadingPage() {
   return (
     <SmartLoadingScreen
       session={session.data}
-      isLoading={session.isLoading || (managementView && session.isFetching)}
+      isLoading={session.isLoading || session.isFetching}
       isError={session.isError}
       targetDate={targetDate}
-      onTargetDateChange={setTargetDate}
+      onTargetDateChange={(value) => { setIncludeDeferredAnalysis(false); setTargetDate(value); }}
       staleDaysThreshold={staleDaysThreshold}
-      onStaleDaysThresholdChange={setStaleDaysThreshold}
+      onStaleDaysThresholdChange={(value) => { setIncludeDeferredAnalysis(false); setStaleDaysThreshold(value); }}
       salesRepId={salesRepId}
       managerId={managerId}
       supervisorId={supervisorId}
       deferManagementDetails={deferManagementDetails}
-      onSalesRepChange={setSalesRepId}
+      onLoadDeferredAnalysis={() => setIncludeDeferredAnalysis(true)}
+      onSalesRepChange={(value) => { setIncludeDeferredAnalysis(false); setSalesRepId(value); }}
       onManagementScopeChange={({ managerId: nextManagerId, supervisorId: nextSupervisorId, salesRepId: nextSalesRepId }) => {
+        setIncludeDeferredAnalysis(false);
         setManagerId(nextManagerId);
         setSupervisorId(nextSupervisorId);
         setSalesRepId(nextSalesRepId);

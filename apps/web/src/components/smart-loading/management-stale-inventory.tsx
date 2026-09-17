@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CircleCheck } from "lucide-react";
+import { AlertTriangle, CircleCheck, LoaderCircle } from "lucide-react";
 import type { SmartLoadingManagementStaleRouteProduct } from "@/lib/types";
 import { Card, CardContent } from "@/components/ui/card";
 import { KpiCard } from "@/components/dashboard/kpi-card";
@@ -10,9 +10,12 @@ import { formatQuantity } from "@/lib/utils";
 type ManagementStaleInventoryProps = {
   cases: readonly SmartLoadingManagementStaleRouteProduct[];
   onSelectPerson: (person: { employeeId: string; employeeName: string }) => void;
+  isDeferred?: boolean;
+  isLoading?: boolean;
+  onLoad?: () => void;
 };
 
-export function ManagementStaleInventory({ cases, onSelectPerson }: ManagementStaleInventoryProps) {
+export function ManagementStaleInventory({ cases, onSelectPerson, isDeferred = false, isLoading = false, onLoad }: ManagementStaleInventoryProps) {
   const { locale, t } = useTranslation();
   const peopleById = new Map<string, { employeeId: string; employeeName: string; affectedRouteIds: Set<string> }>();
 
@@ -30,6 +33,8 @@ export function ManagementStaleInventory({ cases, onSelectPerson }: ManagementSt
     right.affectedRouteIds.size - left.affectedRouteIds.size
     || left.employeeName.localeCompare(right.employeeName),
   );
+
+  if (isDeferred) return <button type="button" className="w-full text-start" onClick={onLoad}><KpiCard icon={isLoading ? LoaderCircle : AlertTriangle} label={t("smartLoading.staleInventory")} value={isLoading ? "…" : (locale === "ar" ? "اضغط للعرض" : "Click to view")} caption={isLoading ? (locale === "ar" ? "جارٍ الحساب…" : "Calculating…") : (locale === "ar" ? "اضغط لحساب المخزون الراكد" : "Calculate on click")} glow="warning" /></button>;
 
   if (people.length === 0) {
     return (

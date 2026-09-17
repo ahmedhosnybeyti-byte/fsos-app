@@ -227,6 +227,7 @@ export const smartLoadingReadySessionSchema = z.object({
   asOfDate: z.string(),
   staleAsOfDate: z.string(),
   staleDaysThreshold: z.number().int().positive(),
+  deferredAnalysisLoaded: z.boolean().default(false),
   targetDate: z.string(),
   route: smartLoadingRouteSchema.nullable(),
   routeCustomers: z.array(smartLoadingRouteCustomerSchema),
