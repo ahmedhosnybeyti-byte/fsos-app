@@ -362,50 +362,50 @@
     border-color: rgb(255 255 255 / 0.16);
   }
 
-  /* Dashboard performance's approved Light Mode treatment: the page opts
-     in with .dashboard-light-performance, so this stronger card depth does
-     not leak into Team Performance or any other screen. */
-  .dashboard-light-performance .glass-card {
+  /* Approved Light Mode dashboard workspace. AppShell applies this scope to
+     every authenticated dashboard route, so current and future screens get
+     the same pale-blue atmosphere and illuminated glass primitives without
+     copying per-page CSS. Every selector is explicitly light-only: Dark Mode
+     retains its production values above unchanged. */
+  :root:not(.dark) .murshidak-light-workspace {
+    background:
+      radial-gradient(1100px circle at 12% -8%, rgb(191 219 254 / 0.58), transparent 51%),
+      radial-gradient(900px circle at 98% 9%, rgb(221 214 254 / 0.5), transparent 48%),
+      linear-gradient(160deg, #edf5ff 0%, #f7faff 48%, #eef2ff 100%);
+  }
+  :root:not(.dark) .murshidak-light-workspace .glass-panel {
+    background: rgb(255 255 255 / 0.62);
+    border-color: rgb(191 219 254 / 0.7);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 14px 34px -28px rgb(37 99 235 / 0.34);
+    backdrop-filter: blur(20px) saturate(135%);
+  }
+  :root:not(.dark) .murshidak-light-workspace :is(.glass-card, .glass-surface) {
     border-color: rgb(255 255 255 / 0.78);
     background: radial-gradient(circle at 88% 0%, rgb(196 181 253 / 0.3), transparent 52%), linear-gradient(145deg, rgb(255 255 255 / 0.72), rgb(239 246 255 / 0.46) 62%, rgb(219 234 254 / 0.5));
     backdrop-filter: blur(18px) saturate(135%);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.92), inset 0 -1px 0 rgb(147 197 253 / 0.16), 0 18px 38px -24px rgb(37 99 235 / 0.42);
-    isolation: isolate;
-    overflow: hidden;
     position: relative;
     transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1), border-color 160ms ease, box-shadow 160ms ease;
   }
-  .dashboard-light-performance .glass-card::before {
+  :root:not(.dark) .murshidak-light-workspace :is(.glass-card, .glass-surface)::before {
     content: "";
     pointer-events: none;
     position: absolute;
     inset: 0;
+    border-radius: inherit;
     background: radial-gradient(circle at 84% 8%, rgb(255 255 255 / 0.72), transparent 20%), linear-gradient(118deg, rgb(255 255 255 / 0.42) 0%, transparent 31%, rgb(255 255 255 / 0.1) 52%, transparent 72%);
     opacity: 0.78;
   }
-  .dashboard-light-performance .glass-card:hover {
+  :root:not(.dark) .murshidak-light-workspace .card-lift:is(.glass-card, .glass-surface):hover {
     border-color: rgb(255 255 255 / 0.94);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.98), inset 0 -1px 0 rgb(147 197 253 / 0.24), 0 24px 46px -25px rgb(37 99 235 / 0.52);
     transform: translateY(-3px);
   }
-  .dashboard-light-performance .glass-card:hover::before {
+  :root:not(.dark) .murshidak-light-workspace .card-lift:is(.glass-card, .glass-surface):hover::before {
     opacity: 1;
   }
-  .dashboard-light-performance button.glass-card:active {
+  :root:not(.dark) .murshidak-light-workspace button.card-lift:is(.glass-card, .glass-surface):active {
     transform: translateY(0) scale(0.985);
-  }
-  .dark .dashboard-light-performance .glass-card {
-    border-color: rgb(255 255 255 / 0.08);
-    background: rgb(255 255 255 / 0.045);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 2px 8px rgb(0 0 0 / 0.25), 0 16px 40px rgb(0 0 0 / 0.35);
-  }
-  .dark .dashboard-light-performance .glass-card::before {
-    display: none;
-  }
-  .dark .dashboard-light-performance .glass-card:hover {
-    border-color: rgb(255 255 255 / 0.16);
-    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 2px 8px rgb(0 0 0 / 0.25), 0 16px 40px rgb(0 0 0 / 0.35);
-    transform: none;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -418,9 +418,9 @@
       transition: none;
       transform: none;
     }
-    .dashboard-light-performance .glass-card,
-    .dashboard-light-performance .glass-card:hover,
-    .dashboard-light-performance button.glass-card:active {
+    :root:not(.dark) .murshidak-light-workspace :is(.glass-card, .glass-surface),
+    :root:not(.dark) .murshidak-light-workspace .card-lift:is(.glass-card, .glass-surface):hover,
+    :root:not(.dark) .murshidak-light-workspace button.card-lift:is(.glass-card, .glass-surface):active {
       transition: none;
       transform: none;
     }

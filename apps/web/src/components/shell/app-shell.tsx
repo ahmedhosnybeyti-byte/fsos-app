@@ -61,7 +61,7 @@ export function AppShell({
     // per the CSS spec, so the sidebar renders on the correct side with
     // zero JSX reordering here. Spacing/border utilities use Tailwind's
     // logical-property variants (border-e/-s, ps-/pe-) so they flip too.
-    <div className="relative flex min-h-[100dvh] bg-app-gradient">
+    <div className="murshidak-light-workspace relative flex min-h-[100dvh] bg-app-gradient">
       <div aria-hidden className="dashboard-cinematic-bg pointer-events-none fixed inset-0 -z-10" />
       <div aria-hidden className="dashboard-starfield pointer-events-none fixed inset-0 -z-10 hidden opacity-60 dark:block" />
       <aside className="glass-panel hidden w-64 shrink-0 flex-col border-e border-border md:flex">
@@ -109,7 +109,7 @@ export function AppShell({
             البيانات" was actually reporting — every dashboard page with a
             wide table was affected, not just Visit Efficiency/Team
             Performance. */}
-        <main className="min-w-0 flex-1 overflow-y-auto p-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:p-6 sm:pb-24 md:p-8 md:pb-8">{children}</main>
+        <main className="murshidak-light-content min-w-0 flex-1 overflow-y-auto p-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] sm:p-6 sm:pb-24 md:p-8 md:pb-8">{children}</main>
         <MobileBottomNav navItems={navItems} pathname={pathname} onMore={() => setMobileNavOpen((value) => !value)} />
       </div>
     </div>

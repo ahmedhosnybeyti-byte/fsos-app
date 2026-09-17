@@ -13,6 +13,7 @@ Treat that document and the components it cites as the source of truth. Reuse sh
 
 - The current production Team Performance screen is the canonical **Dark Mode** visual reference for Murshidak screen migrations.
 - The approved Team Performance Light Mode reference image is the canonical **Light Mode** visual reference. Use a cool light-gray/pale-blue canvas, subtle blue/lavender atmosphere, softly tinted glass surfaces, refined borders/shadows, dark navy text, primary blue, controlled secondary purple, Cairo, and RTL-safe spacing.
+- Every authenticated dashboard route inherits the approved Light Mode workspace from `AppShell` (`murshidak-light-workspace`). New dashboard pages must use the existing `glass-card`/`glass-surface` and, when warranted, one `glass-hero`, rather than adding opaque local panel formulas. This shared treatment is Light Mode only; Dark Mode keeps its canonical production treatment.
 - For multi-screen visual migrations, use `.codex/skills/murshidak-ui-batch-migration/SKILL.md` after loading this design-system skill.
 
 ## Required decisions

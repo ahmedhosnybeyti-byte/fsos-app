@@ -12,6 +12,12 @@ Use the shared primitives before writing one-off styling: `Card`, `Button`, `Inp
 - **Light Mode:** the approved Team Performance Light Mode reference image is canonical. Use a cool light-gray/pale-blue canvas rather than large flat-white fields; apply subtle blue/lavender atmospheric gradients, softly tinted glass/card surfaces, refined borders/shadows, dark navy text, the Murshidak blue primary accent, controlled purple secondary accent, Cairo, canonical spacing/radius, and RTL-safe behavior.
 - **Multi-screen migrations:** use `.codex/skills/murshidak-ui-batch-migration/SKILL.md` as the standard workflow, together with this design system.
 
+## Dashboard Light Mode workspace standard
+
+`AppShell` applies `murshidak-light-workspace` to every authenticated dashboard route. In Light Mode it provides the approved cool pale-blue canvas, restrained blue/lavender atmosphere, translucent illuminated panels, and reflective glass cards; the selectors are explicitly excluded from Dark Mode so the canonical production Dark Mode treatment remains intact. This is the default for current and future dashboard pages, not a page-specific dashboard-home effect.
+
+New dashboard pages should use the existing `glass-card` / `glass-surface` for ordinary content and at most one `glass-hero` for the primary element. Do not add opaque local card backgrounds that compete with the shared workspace. Add `card-lift` only to genuinely interactive cards; it preserves the approved gentle hover/press feedback and reduced-motion behavior.
+
 **Explicit tokens** are defined in `apps/web/src/app/globals.css:6-104` and exposed to Tailwind in `apps/web/tailwind.config.ts:13-70`. Values below are HSL triplets and are consumed as `hsl(var(--token))`.
 
 ## Palette and surfaces (explicit)

@@ -1,6 +1,6 @@
 ---
 name: murshidak-ui-batch-migration
-description: Apply the approved Murshidak Dark Mode visual DNA consistently to multiple existing frontend screens without changing functionality.
+description: Apply approved Murshidak Dark or Light Mode visual DNA consistently to multiple existing frontend screens without changing functionality.
 ---
 
 # Murshidak UI Batch Migration
@@ -14,15 +14,15 @@ Before every large migration:
 1. Verify the authoritative `origin/master`; do not use a backup, stale local branch, or unverified checkout.
 2. Load `.codex/skills/murshidak-ui-design-system/SKILL.md` and its canonical design documentation.
 3. Create a clean isolated worktree from the verified remote commit.
-4. Treat the current production Team Performance screen as the canonical **Dark Mode** visual reference.
+4. Treat the current production Team Performance screen as the canonical **Dark Mode** visual reference. Treat the approved Team Performance Light Mode reference image as the canonical **Light Mode** visual reference.
 
-Light Mode is **PENDING VISUAL DESIGN/APPROVAL**. Do not infer or introduce a new Light Mode from the Dark Mode reference. Preserve existing Light Mode behavior unless the user explicitly requests Light Mode work.
+For Light Mode work, use the shared `AppShell` workspace treatment first: `murshidak-light-workspace` gives every authenticated dashboard route the approved pale-blue/lavender atmosphere and illuminated glass primitives. New dashboard pages inherit it automatically when they use existing `glass-card`/`glass-surface` and, where justified, a single `glass-hero`. Do not infer a new Light Mode language.
 
 ## Screen mapping and implementation
 
 Map every requested production route to its exact App Router page file. Inspect each page individually before editing; account for its existing header, actions, maps, charts, filters, states, and responsive layout.
 
-Apply the approved visual pattern with existing primitives first:
+Apply the approved visual pattern with existing primitives first. Choose the requested canonical mode:
 
 - cinematic dark workspace, using `dashboard-cinematic-bg` and `dashboard-starfield` only where appropriate;
 - one `glass-hero` as the primary hero surface;
@@ -30,7 +30,9 @@ Apply the approved visual pattern with existing primitives first:
 - `glass-card` for ordinary content surfaces;
 - Arabic-first, RTL-safe logical layout utilities and controls.
 
-Use targeted visual patches per page. Never use blind mass search/replace. Reuse existing shared primitives rather than creating a parallel design language.
+For Light Mode, retain the shared cool light-gray/pale-blue canvas, subtle blue/lavender atmosphere, softly tinted and reflective glass surfaces, refined borders/shadows, dark navy text, Murshidak blue primary accent, and controlled purple secondary accent. Do not change Dark Mode while migrating Light Mode, or vice versa.
+
+Inspect each page and use targeted visual patches for any bespoke composition that does not use the shared primitives. Never use blind mass search/replace. Reuse existing shared primitives rather than creating a parallel design language.
 
 ## Non-negotiable scope
 
