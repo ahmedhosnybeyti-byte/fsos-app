@@ -87,7 +87,8 @@ export default function DashboardOverviewPage() {
   const featuredKpi: "subscription" | "trial" | "files" = isBlocked ? "subscription" : trialDaysLeft !== null && trialDaysLeft <= 5 ? "trial" : "files";
 
   return (
-    <div className="relative space-y-4 sm:space-y-6">
+    <div className="relative isolate space-y-4 bg-slate-50/40 sm:space-y-6 dark:bg-transparent">
+      <div aria-hidden className="pointer-events-none absolute -inset-x-8 -top-12 -bottom-16 -z-20 bg-[radial-gradient(900px_circle_at_15%_0%,rgba(147,197,253,.32),transparent_55%),radial-gradient(780px_circle_at_92%_8%,rgba(196,181,253,.25),transparent_52%),linear-gradient(180deg,#eff6ff_0%,#f8fafc_48%,#eef2ff_100%)] dark:hidden" />
       {/* Constitution §4.1 Cinematic Background — follow-up: fixed to the
           viewport (not just a band behind the Hero) so it reads as a real
           backdrop while scrolling, not a static strip. Still page-scoped
@@ -102,7 +103,7 @@ export default function DashboardOverviewPage() {
           the right-hand whitespace reads as considered negative space
           around a "hero," not an empty gap — no new content/data (kept
           intentionally out of scope; see the redesign follow-up thread). * /}
-      <div className="glass-hero rise-in flex flex-col gap-4 p-4 sm:gap-6 sm:p-7 sm:flex-row sm:items-center sm:justify-between md:p-10">
+      <div className="glass-hero rise-in flex flex-col gap-4 bg-[linear-gradient(115deg,rgba(255,255,255,.94),rgba(219,234,254,.92),rgba(237,233,254,.9))] p-4 dark:bg-gradient-to-br dark:from-white/[0.09] dark:via-white/[0.045] dark:to-white/[0.01] sm:gap-6 sm:p-7 sm:flex-row sm:items-center sm:justify-between md:p-10">
         <div aria-hidden className="hero-aurora pointer-events-none absolute inset-0" />
         <Zap
           aria-hidden
