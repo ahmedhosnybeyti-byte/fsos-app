@@ -3,6 +3,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { Map as LeafletMap } from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { addOperationalBasemap } from "@/lib/operational-basemap";
 
 // Geo Intelligence Engine — shared Leaflet lifecycle primitive (Phase 1,
 // "المحرك الموحد"). Every existing map component in this app (heatmap-map
@@ -66,15 +67,7 @@ export const GeoMapCanvas = forwardRef<GeoMapCanvasHandle, GeoMapCanvasProps>(fu
       if (cancelled || !containerRef.current || mapRef.current) return;
 
       const map = L.map(containerRef.current).setView(defaultCenter, defaultZoom);
-      // Same CartoDB Positron basemap as every existing map component in
-      // this app — no API key, no rate-limiting issue at this traffic
-      // volume (see heatmap-map.tsx's comment on why raw OSM tiles were
-      // dropped).
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-        attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
-        subdomains: "abcd",
-        maxZoom: 20,
-      }).addTo(map);
+      addOperationalBasemap(L, map);
 
       leafletRef.current = L;
       mapRef.current = map;

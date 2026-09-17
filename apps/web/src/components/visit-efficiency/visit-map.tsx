@@ -7,6 +7,7 @@ import type { Map as LeafletMap, CircleMarker } from "leaflet";
 // imported inside useEffect since its module top-level code touches
 // `window`.
 import "leaflet/dist/leaflet.css";
+import { addOperationalBasemap } from "@/lib/operational-basemap";
 import { GROUP_COLORS } from "@/components/route-planning/route-split-map";
 import type { VisitEfficiencyPoint } from "@/lib/types";
 
@@ -45,13 +46,7 @@ export function VisitMap({
       if (cancelled || !containerRef.current || mapRef.current) return;
 
       const map = L.map(containerRef.current).setView([21.6, 39.19], 10);
-      // See heatmap-map.tsx for why this isn't the raw OSM tile server —
-      // same rate-limiting issue, same fix, applied consistently.
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-        attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
-        subdomains: "abcd",
-        maxZoom: 20,
-      }).addTo(map);
+      addOperationalBasemap(L, map);
       mapRef.current = map;
     })();
 

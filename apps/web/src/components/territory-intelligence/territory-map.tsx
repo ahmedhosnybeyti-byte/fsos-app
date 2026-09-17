@@ -6,6 +6,7 @@ import type { HeatLayer, Layer, Map as LeafletMap, PathOptions } from "leaflet";
 // The Leaflet JS itself is only ever imported inside useEffect — same
 // SSR-safety pattern as heatmap-map.tsx.
 import "leaflet/dist/leaflet.css";
+import { addOperationalBasemap } from "@/lib/operational-basemap";
 import type { TerritorySummaryItem } from "@/lib/types";
 import { useTranslation } from "@/components/translation-provider";
 import { normalizeTerritoryName, type BoundaryFeatureIndex } from "./boundary-registry";
@@ -311,13 +312,7 @@ export function TerritoryMap({
       if (cancelled || !containerRef.current || mapRef.current) return;
 
       const map = L.map(containerRef.current).setView([21.6, 39.19], 7);
-      // Same CartoDB Positron basemap as heatmap-map.tsx (no API key, no
-      // rate-limiting issue like the raw OSM tile server has at this volume).
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-        attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
-        subdomains: "abcd",
-        maxZoom: 20,
-      }).addTo(map);
+      addOperationalBasemap(L, map);
       mapRef.current = map;
       setMapReady(true);
     })();

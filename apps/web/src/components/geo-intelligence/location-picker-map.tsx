@@ -6,6 +6,7 @@ import type { Map as LeafletMap, Marker } from "leaflet";
 // The Leaflet JS itself is only ever imported inside useEffect — same
 // SSR-safety reasoning as route-split-map.tsx / heatmap-map.tsx.
 import "leaflet/dist/leaflet.css";
+import { addOperationalBasemap } from "@/lib/operational-basemap";
 
 // Single-marker click-to-place map for Step 1's "pin on the map" location
 // method. Deliberately minimal — no clustering, no heat layer, just one
@@ -65,13 +66,7 @@ export function LocationPickerMap({
       const startLat = lat ?? 21.6;
       const startLon = lon ?? 39.19;
       const map = L.map(containerRef.current).setView([startLat, startLon], lat !== null ? 14 : 10);
-      // See heatmap-map.tsx for why this isn't the raw OSM tile server —
-      // same rate-limiting issue, same fix, applied consistently.
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-        attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
-        subdomains: "abcd",
-        maxZoom: 20,
-      }).addTo(map);
+      addOperationalBasemap(L, map);
 
       map.on("click", (e: { latlng: { lat: number; lng: number } }) => {
         onPickRef.current(e.latlng.lat, e.latlng.lng);

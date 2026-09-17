@@ -6,6 +6,7 @@ import type { Map as LeafletMap, CircleMarker, Marker } from "leaflet";
 // The Leaflet JS itself is only ever imported inside useEffect — same
 // SSR-safety reasoning as route-split-map.tsx / heatmap-map.tsx.
 import "leaflet/dist/leaflet.css";
+import { addOperationalBasemap } from "@/lib/operational-basemap";
 import type { GeoIntelligenceResolvedCustomer } from "@/lib/types";
 
 // Real map-pin silhouette (teardrop + white dot), not a plain circle — same
@@ -73,13 +74,7 @@ export function ResolvedCustomersMap({
 
       if (!mapRef.current) {
         const map = L.map(containerRef.current).setView([newCustomerLocation.lat, newCustomerLocation.lon], 13);
-        // See heatmap-map.tsx for why this isn't the raw OSM tile server —
-        // same rate-limiting issue, same fix, applied consistently.
-        L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-          attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
-          subdomains: "abcd",
-          maxZoom: 20,
-        }).addTo(map);
+        addOperationalBasemap(L, map);
         mapRef.current = map;
       }
       const map = mapRef.current;

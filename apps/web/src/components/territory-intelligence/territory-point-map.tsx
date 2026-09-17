@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CircleMarker, HeatLayer, Layer, Map as LeafletMap } from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { addOperationalBasemap } from "@/lib/operational-basemap";
 import { Spinner } from "@/components/ui/spinner";
 import { useTranslation } from "@/components/translation-provider";
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
@@ -249,11 +250,7 @@ export function TerritoryPointMap({ nodes, mode, selectedNodeId, onSelectNode, i
       const L = (await import("leaflet")).default;
       if (cancelled || !containerRef.current || mapRef.current) return;
       const map = L.map(containerRef.current).setView([21.6, 39.19], 7);
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-        attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
-        subdomains: "abcd",
-        maxZoom: 20,
-      }).addTo(map);
+      addOperationalBasemap(L, map);
       map.on("zoomend", () => setZoomTick((n) => n + 1));
       mapRef.current = map;
       setMapReady(true);

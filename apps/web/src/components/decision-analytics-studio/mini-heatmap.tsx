@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Map as LeafletMap, CircleMarker, HeatLayer, Layer } from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { addOperationalBasemap } from "@/lib/operational-basemap";
 import type { DecisionHeatmapTerritory } from "@/lib/types";
 import { useTranslation } from "@/components/translation-provider";
 import { heatGradientObject, radiusForZoom, colorForRatio } from "@/components/geo-engine/color-scale";
@@ -100,11 +101,7 @@ export function MiniHeatmap({
       const L = (await import("leaflet")).default;
       if (cancelled || !containerRef.current || mapRef.current) return;
       const map = L.map(containerRef.current).setView([21.6, 39.19], 6);
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-        attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
-        subdomains: "abcd",
-        maxZoom: 20,
-      }).addTo(map);
+      addOperationalBasemap(L, map);
       map.on("zoomend", () => setZoomTick((n) => n + 1));
       mapRef.current = map;
       setMapReady(true);

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import type { Map as LeafletMap, CircleMarker } from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { addOperationalBasemap } from "@/lib/operational-basemap";
 import { useTranslation } from "@/components/translation-provider";
 import type { VisitCopilotDiscoveryCustomer, VisitCopilotProspect, VisitCopilotProspectStatus } from "@/lib/types";
 import { GoogleDiscoveryMap } from "@/components/visit-copilot/google-discovery-map";
@@ -60,13 +61,7 @@ function LegacyDiscoveryMap({
 
       if (!mapRef.current) {
         const map = L.map(containerRef.current).setView([21.6, 39.19], 10);
-        // See heatmap-map.tsx for why this isn't the raw OSM tile server —
-        // same rate-limiting issue, same fix, applied consistently.
-        L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-          attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
-          subdomains: "abcd",
-          maxZoom: 20,
-        }).addTo(map);
+        addOperationalBasemap(L, map);
         mapRef.current = map;
       }
       const map = mapRef.current;

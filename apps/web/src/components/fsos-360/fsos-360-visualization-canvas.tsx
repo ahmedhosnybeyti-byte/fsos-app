@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { Map as LeafletMap, CircleMarker } from "leaflet";
 import "leaflet/dist/leaflet.css";
+import { addOperationalBasemap } from "@/lib/operational-basemap";
 import { Bar, BarChart, CartesianGrid, Cell, Legend, Line, LineChart, ResponsiveContainer, Tooltip, Treemap, XAxis, YAxis } from "recharts";
 import { HeatmapMap } from "@/components/heatmap/heatmap-map";
 import type { Fsos360VisualizationData } from "@/lib/types";
@@ -11,7 +12,7 @@ const COLORS = ["#2563eb", "#0f766e", "#c2410c", "#7c3aed", "#be123c", "#0891b2"
 
 function GeoPointsMap({ data }: { data: Extract<Fsos360VisualizationData, { kind: "geo-points" }> }) {
   const ref = useRef<HTMLDivElement>(null); const map = useRef<LeafletMap | null>(null); const markers = useRef<CircleMarker[]>([]);
-  useEffect(() => { if (!ref.current || map.current) return; let cancelled = false; (async () => { const L = (await import("leaflet")).default; if (cancelled || !ref.current) return; const instance = L.map(ref.current).setView([21.6, 39.19], 9); L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", { attribution: "? OpenStreetMap ? CARTO", subdomains: "abcd", maxZoom: 20 }).addTo(instance); map.current = instance; })(); return () => { cancelled = true; map.current?.remove(); map.current = null; }; }, []);
+  useEffect(() => { if (!ref.current || map.current) return; let cancelled = false; (async () => { const L = (await import("leaflet")).default; if (cancelled || !ref.current) return; const instance = L.map(ref.current).setView([21.6, 39.19], 9); addOperationalBasemap(L, instance); map.current = instance; })(); return () => { cancelled = true; map.current?.remove(); map.current = null; }; }, []);
   useEffect(() => { if (!map.current) return; let cancelled = false; (async () => { const L = (await import("leaflet")).default; if (cancelled || !map.current) return; markers.current.forEach((item) => item.remove()); markers.current = []; const max = Math.max(...data.points.map((point) => point.value), 1); const bounds: [number, number][] = []; data.points.forEach((point) => { const marker = L.circleMarker([point.latitude, point.longitude], { radius: Math.max(5, Math.min(18, 5 + (point.value / max) * 13)), color: "#ffffff", weight: 1.5, fillColor: "#2563eb", fillOpacity: 0.78 }).bindPopup(`<b>${point.customerName}</b>`).addTo(map.current!); markers.current.push(marker); bounds.push([point.latitude, point.longitude]); }); if (bounds.length) map.current.fitBounds(bounds, { padding: [28, 28] }); })(); return () => { cancelled = true; }; }, [data]);
   return <div ref={ref} className="h-[420px] w-full rounded-lg border border-border" />;
 }

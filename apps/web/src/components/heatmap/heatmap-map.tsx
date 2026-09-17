@@ -7,6 +7,7 @@ import type { Layer, Map as LeafletMap, HeatLayer } from "leaflet";
 // useEffect — same SSR-safety reasoning as route-split-map.tsx.
 import "leaflet/dist/leaflet.css";
 import { colorForRatio, heatGradientObject, radiusForZoom } from "@/components/geo-engine/color-scale";
+import { addOperationalBasemap } from "@/lib/operational-basemap";
 import type { HeatmapPoint } from "@/lib/types";
 
 // 2026-07-21 — multi-layer support (Task #251, product request): the user
@@ -126,19 +127,7 @@ export function HeatmapMap({
       if (cancelled || !containerRef.current || mapRef.current) return;
 
       const map = L.map(containerRef.current).setView([21.6, 39.19], 10);
-      // 2026-07-21: the raw OSM tile server (tile.openstreetmap.org)
-      // aggressively rate-limits non-humanitarian apps per its own tile
-      // usage policy — under real dev/demo traffic this showed up as large
-      // blank/solid-color patches on the map where tiles silently failed to
-      // load, while nearby tiles (that happened to still be cached) loaded
-      // fine. CartoDB's free Positron basemap has no such restriction for
-      // this volume of traffic and needs no API key — same tiles the
-      // reference static export already used successfully.
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png", {
-        attribution: "&copy; OpenStreetMap contributors &copy; CARTO",
-        subdomains: "abcd",
-        maxZoom: 20,
-      }).addTo(map);
+      addOperationalBasemap(L, map);
       mapRef.current = map;
       setMapReady(true);
     })();
