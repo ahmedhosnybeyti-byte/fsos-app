@@ -362,6 +362,34 @@
     border-color: rgb(255 255 255 / 0.16);
   }
 
+  /* Dashboard performance's approved Light Mode treatment: the page opts
+     in with .dashboard-light-performance, so this stronger card depth does
+     not leak into Team Performance or any other screen. */
+  .dashboard-light-performance .glass-card {
+    border-color: rgb(191 219 254 / 0.8);
+    background: linear-gradient(145deg, rgb(255 255 255 / 0.94), rgb(239 246 255 / 0.84) 64%, rgb(245 243 255 / 0.82));
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.88), 0 16px 34px -22px rgb(37 99 235 / 0.36);
+    transition: transform 160ms cubic-bezier(0.16, 1, 0.3, 1), border-color 160ms ease, box-shadow 160ms ease;
+  }
+  .dashboard-light-performance .glass-card:hover {
+    border-color: rgb(96 165 250 / 0.78);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.95), 0 22px 42px -24px rgb(37 99 235 / 0.46);
+    transform: translateY(-3px);
+  }
+  .dashboard-light-performance button.glass-card:active {
+    transform: translateY(0) scale(0.985);
+  }
+  .dark .dashboard-light-performance .glass-card {
+    border-color: rgb(255 255 255 / 0.08);
+    background: rgb(255 255 255 / 0.045);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 2px 8px rgb(0 0 0 / 0.25), 0 16px 40px rgb(0 0 0 / 0.35);
+  }
+  .dark .dashboard-light-performance .glass-card:hover {
+    border-color: rgb(255 255 255 / 0.16);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 2px 8px rgb(0 0 0 / 0.25), 0 16px 40px rgb(0 0 0 / 0.35);
+    transform: none;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .rise-in {
       animation: none;
@@ -369,6 +397,12 @@
     .card-lift,
     .card-lift:hover,
     .card-lift:active {
+      transition: none;
+      transform: none;
+    }
+    .dashboard-light-performance .glass-card,
+    .dashboard-light-performance .glass-card:hover,
+    .dashboard-light-performance button.glass-card:active {
       transition: none;
       transform: none;
     }
