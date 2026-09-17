@@ -85,7 +85,6 @@ export function SmartLoadingScreen({
   managerId,
   supervisorId,
   deferManagementDetails = false,
-  onLoadDeferredAnalysis,
   onSalesRepChange,
   onManagementScopeChange,
 }: {
@@ -101,7 +100,6 @@ export function SmartLoadingScreen({
   managerId?: string;
   supervisorId?: string;
   deferManagementDetails?: boolean;
-  onLoadDeferredAnalysis: () => void;
   onSalesRepChange: (value: string | undefined) => void;
   onManagementScopeChange: (scope: ManagementScopeSelection) => void;
 }) {
@@ -699,19 +697,15 @@ export function SmartLoadingScreen({
         </div>
         <div className="flex flex-wrap gap-2">
           {!managementView && <>
-          <Button variant="outline" onClick={onLoadDeferredAnalysis}>
-            <PackagePlus className="h-4 w-4" />
-            {session.deferredAnalysisLoaded ? t("smartLoading.staleProductsPage") : (locale === "ar" ? "اضغط لعرض المخزون الراكد" : "Click to view stale inventory")}
-          </Button>
-          {session.deferredAnalysisLoaded && <Button asChild variant="outline">
+          <Button asChild variant="outline">
             <Link href={`/dashboard/stale-products?targetDate=${targetDate}&staleDaysThreshold=${staleDaysThreshold}${salesRepId ? `&salesRepId=${encodeURIComponent(salesRepId)}` : ""}`}>
               <PackagePlus className="h-4 w-4" />
               {t("smartLoading.staleProductsPage")}
             </Link>
-          </Button>}
-          <Button variant="outline" onClick={() => { if (!session.deferredAnalysisLoaded) { onLoadDeferredAnalysis(); return; } setLostOpportunitiesOpen(true); setLostOpportunityWarning(null); }}>
+          </Button>
+          <Button variant="outline" onClick={() => { setLostOpportunitiesOpen(true); setLostOpportunityWarning(null); }}>
             <AlertTriangle className="h-4 w-4 text-amber-600" />
-            {session.deferredAnalysisLoaded ? `${t("smartLoading.lostOpportunities")} (${formatQuantity(lostOpportunityGroups.reduce((sum, category) => sum + category.products.reduce((productSum, product) => productSum + product.customers.length, 0), 0), locale)})` : (locale === "ar" ? "اضغط لحساب الفرص الضائعة" : "Click to calculate lost opportunities")}
+            {t("smartLoading.lostOpportunities")} ({formatQuantity(lostOpportunityGroups.reduce((sum, category) => sum + category.products.reduce((productSum, product) => productSum + product.customers.length, 0), 0), locale)})
           </Button>
           <div className="relative">
             <Button variant="outline" onClick={() => void (isSessionClosed ? exportExcel() : closeAndExport())}><Download className="h-4 w-4" />{isSessionClosed ? (locale === "ar" ? "تنزيل ملف المستودع" : "Download warehouse file") : (locale === "ar" ? "إغلاق وتصدير التحميل" : "Close and export loading")}</Button>
@@ -767,9 +761,6 @@ export function SmartLoadingScreen({
           />
           <ManagementStaleInventory
             cases={session.managementStaleRouteProducts ?? []}
-            isDeferred={!session.deferredAnalysisLoaded}
-            isLoading={isLoading}
-            onLoad={() => { setManagementContext("stale-inventory"); onLoadDeferredAnalysis(); }}
             onSelectPerson={(person) => {
               const scope = user?.role.code === "COMPANY_ADMIN"
                 ? { managerId: person.employeeId, managerName: person.employeeName }
@@ -782,8 +773,6 @@ export function SmartLoadingScreen({
           <ManagementLostOpportunitiesCard
             targetDate={targetDate}
             scope={{ managerId, supervisorId, salesRepId }}
-            enabled={managementContext === "lost-opportunities"}
-            onLoad={() => setManagementContext("lost-opportunities")}
             onSelectPerson={(person) => {
               const scope = user?.role.code === "COMPANY_ADMIN"
                 ? { managerId: person.employeeId, managerName: person.employeeName }
@@ -813,7 +802,7 @@ export function SmartLoadingScreen({
         confirmedProductCode={confirmedProductCode}
         confirmedQuantity={confirmedQuantity}
         onPriorityClick={() => setPanel("priority")}
-        onStaleClick={() => { if (!session.deferredAnalysisLoaded) { onLoadDeferredAnalysis(); return; } setPanel("stale"); }}
+        onStaleClick={() => setPanel("stale")}
         onFromDateChange={(value) => { setFromDate(value); setHasUnappliedChanges(true); }}
         onToDateChange={(value) => { setToDate(value); setHasUnappliedChanges(true); }}
         onVisitsPerWeekChange={(value) => { setVisitsPerWeek(value); setHasUnappliedChanges(true); }}

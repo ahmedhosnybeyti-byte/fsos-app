@@ -369,15 +369,15 @@ export class SmartLoadingService {
     return result.records.map((row) => String(row.routeId ?? "").trim()).filter(Boolean);
   }
 
-  async getSession(user: AuthenticatedUser, requestedTargetDate?: string, staleDaysThreshold = DEFAULT_SMART_LOADING_STALE_DAYS, salesRepId?: string, managerId?: string, supervisorId?: string, includeDeferredAnalysis = false): Promise<SmartLoadingSession> {
+  async getSession(user: AuthenticatedUser, requestedTargetDate?: string, staleDaysThreshold = DEFAULT_SMART_LOADING_STALE_DAYS, salesRepId?: string, managerId?: string, supervisorId?: string): Promise<SmartLoadingSession> {
     return this.rieFacade.runPlannedRequest({
       name: "smart_loading.session",
       maxConcurrentOperations: 3,
       maxOperations: 24,
-    }, () => this.getSessionUnplanned(user, requestedTargetDate, staleDaysThreshold, salesRepId, managerId, supervisorId, includeDeferredAnalysis));
+    }, () => this.getSessionUnplanned(user, requestedTargetDate, staleDaysThreshold, salesRepId, managerId, supervisorId));
   }
 
-  private async getSessionUnplanned(user: AuthenticatedUser, requestedTargetDate?: string, staleDaysThreshold = DEFAULT_SMART_LOADING_STALE_DAYS, salesRepId?: string, managerId?: string, supervisorId?: string, includeDeferredAnalysis = false): Promise<SmartLoadingSession> {
+  private async getSessionUnplanned(user: AuthenticatedUser, requestedTargetDate?: string, staleDaysThreshold = DEFAULT_SMART_LOADING_STALE_DAYS, salesRepId?: string, managerId?: string, supervisorId?: string): Promise<SmartLoadingSession> {
     if (!user.companyId) throw new ForbiddenException();
     const timingStartedAt = performance.now();
     const stageTimingsMs: Record<string, number> = {};
@@ -474,13 +474,13 @@ export class SmartLoadingService {
     // Management keeps Route × Product inside RIE/PostgreSQL and receives
     // only the established Product-grain result. Sales Rep remains unchanged.
     const [activeVehicleRouteRows, inventoryRows, managementBundle] = await Promise.all([
-      useManagementStaleGrain && includeDeferredAnalysis
+      useManagementStaleGrain
         ? timedManagementStage("queryManagementActiveVehicleRoutes", () => this.rieFacade.queryManagementActiveVehicleRoutes({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso }))
         : timed("active-vehicle-routes", () => bounded("active-vehicle-routes", withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "RouteID", as: "routeId" }], groupBy: [{ field: "RouteID" }], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
-      useManagementStaleGrain && includeDeferredAnalysis
+      useManagementStaleGrain
         ? Promise.resolve([])
         : timed("latest-inventory", () => bounded("latest-inventory", withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "ProductCode", as: "productCode" }], latestPer: { partitionBy: { field: "RouteID" }, orderBy: { field: "ReportDate" } }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { date: { field: "ReportDate", to: targetDateIso } } }))),
-      useManagementStaleGrain && includeDeferredAnalysis
+      useManagementStaleGrain
         ? timedManagementStage("queryManagementSmartLoadingBundle", () => this.rieFacade.queryManagementSmartLoadingBundle({ ...ctx, routeIds: scopedRouteIds, targetDate: targetDateIso, staleDaysThreshold, salesFrom: isoDay(windowStartMs), salesTo: isoDay(nowMs), customerCodes: [...nextRouteCustomers.keys()] }))
         : Promise.resolve(null),
     ]);
@@ -503,7 +503,7 @@ export class SmartLoadingService {
     const vehicleStockAvailable = activeVehicleRouteIds.size > 0;
     const invoiceJoin = [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }] as const;
     const salesScope = { route: { values: [...activeVehicleRouteIds], source: "invoice" }, routeFallback: { primary: { field: "RouteID" }, fallback: { field: "RouteID", source: "invoice" }, values: [...activeVehicleRouteIds] }, date: { field: "InvoiceDate", source: "invoice", to: targetDateIso } } as const;
-    const lastSaleRows = !useManagementStaleGrain && includeDeferredAnalysis && activeVehicleRouteIds.size ? await timed("sales-last-sale-aggregation", () => bounded("sales-last-sale-aggregation", { ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "maxText", field: "InvoiceDate", source: "invoice", as: "lastSaleDate" }], scope: salesScope, driveBaseFromScopedJoins: true })) : [];
+    const lastSaleRows = !useManagementStaleGrain && activeVehicleRouteIds.size ? await timed("sales-last-sale-aggregation", () => bounded("sales-last-sale-aggregation", { ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "maxText", field: "InvoiceDate", source: "invoice", as: "lastSaleDate" }], scope: salesScope, driveBaseFromScopedJoins: true })) : [];
     const lastSaleMsByProduct = new Map<string, number>();
     for (const row of lastSaleRows) {
       const productCode = normalizedProductCode(row.productCode);
@@ -519,10 +519,10 @@ export class SmartLoadingService {
         if (productCode && lastSaleMs !== null) lastSaleMsByProduct.set(productCode, lastSaleMs);
       }
     }
-    const staleCodes = !includeDeferredAnalysis ? [] : useManagementStaleGrain
+    const staleCodes = useManagementStaleGrain
       ? managementStaleRows.filter((row) => row.isStale).map((row) => normalizedProductCode(row.productCode)).filter(Boolean)
       : [...vehicleStockByProduct.entries()].filter(([code, stock]) => isStaleVehicleInventory(stock, lastSaleMsByProduct.get(code) ?? null, staleAsOfDate, staleDaysThreshold)).map(([code]) => code);
-    const staleCount = !includeDeferredAnalysis ? 0 : useManagementStaleGrain
+    const staleCount = useManagementStaleGrain
       ? managementStaleRouteProductCount(managementStaleRows)
       : staleCodes.length;
     const purchaseRows = staleCodes.length ? await timed("stale-purchases", () => this.rieFacade.queryStalePurchases({ ...ctx, routeIds: [...activeVehicleRouteIds], productCodes: staleCodes, targetDate: targetDateIso })) : [];
@@ -557,7 +557,7 @@ export class SmartLoadingService {
         };
       }).filter((product) => !!product.productCode)
       : null;
-    const managementStaleRouteProducts = useManagementStaleGrain && includeDeferredAnalysis
+    const managementStaleRouteProducts = useManagementStaleGrain
       ? await timed("management-stale-route-people", async () => {
         const staleRouteProducts = managementStaleRouteProductCases(managementStaleRows)
           .filter((routeProduct) => routeProduct.productCode && routeProduct.lastSaleDate !== null);
@@ -616,9 +616,7 @@ export class SmartLoadingService {
     const customerPurchasesByProduct = new Map<string, Map<string, { totalQuantity: number; purchaseFrequency: number; lastPurchaseMs: number }>>();
     const customerNamesByCode = new Map<string, string>();
     for (const row of purchaseRows) for (const purchase of row.customers ?? []) { const productCode = normalizedProductCode(row.productCode), customerCode = String(purchase.customerCode ?? "").trim(), lastPurchaseMs = toEpochMs(purchase.lastPurchaseDate); if (!productCode || !customerCode || lastPurchaseMs === null || (toFiniteNumber(purchase.totalQuantity) ?? 0) <= 0) continue; const byCustomer = customerPurchasesByProduct.get(productCode) ?? new Map(); byCustomer.set(customerCode, { totalQuantity: toFiniteNumber(purchase.totalQuantity) ?? 0, purchaseFrequency: toFiniteNumber(purchase.purchaseFrequency) ?? 0, lastPurchaseMs }); customerPurchasesByProduct.set(productCode, byCustomer); customerNamesByCode.set(customerCode, String(purchase.customerName ?? customerCode).trim() || customerCode); }
-    const lostOpportunityResult = includeDeferredAnalysis && !useManagementStaleGrain
-      ? await timed("lost-opportunities", () => this.lostOpportunityService.detect({ ...ctx, selectedDate: targetDateIso, customerCodes: [...nextRouteCustomers.keys()], customerNames: nextRouteCustomers }))
-      : { status: "no-lost-opportunities" as const, opportunities: [] };
+    const lostOpportunityResult = await timed("lost-opportunities", () => this.lostOpportunityService.detect({ ...ctx, selectedDate: targetDateIso, customerCodes: [...nextRouteCustomers.keys()], customerNames: nextRouteCustomers }));
     const lostOpportunityRouteIds = [...new Set(lostOpportunityResult.opportunities.map((opportunity) => normalizedRouteId(routeCustomersByCode.get(opportunity.customerCode)?.routeId)).filter(Boolean))];
     const lostOpportunityProductCodes = [...new Set(lostOpportunityResult.opportunities.map((opportunity) => normalizedProductCode(opportunity.productCode)).filter(Boolean))];
     const lostOpportunityStockRows = lostOpportunityRouteIds.length && lostOpportunityProductCodes.length
@@ -731,7 +729,6 @@ export class SmartLoadingService {
       asOfDate: targetDateIso,
       staleAsOfDate: isoDay(staleAsOfDate.getTime()),
       staleDaysThreshold,
-      deferredAnalysisLoaded: includeDeferredAnalysis,
       targetDate: targetDateIso,
       route: nextRouteCustomers.size > 0 ? { targetDate: targetDateIso, customerCount: nextRouteCustomers.size } : null,
       routeCustomers: [...routeCustomersByCode.values()].sort((a, b) => (a.visitSequence ?? Number.MAX_SAFE_INTEGER) - (b.visitSequence ?? Number.MAX_SAFE_INTEGER) || a.customerName.localeCompare(b.customerName, "ar")),

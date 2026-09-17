@@ -15,28 +15,26 @@ const PAGE_SIZE = 100;
 
 type ManagementScope = { managerId?: string; supervisorId?: string; salesRepId?: string };
 
-function useManagementLostOpportunities(targetDate: string, scope: ManagementScope, offset = 0, limit = PAGE_SIZE, enabled = true) {
+function useManagementLostOpportunities(targetDate: string, scope: ManagementScope, offset = 0, limit = PAGE_SIZE) {
   return useQuery({
     queryKey: ["smart-loading", "management-risks", "lost-opportunities", targetDate, scope.managerId, scope.supervisorId, scope.salesRepId, limit, offset],
     queryFn: () => smartLoadingApi.getManagementLostOpportunities(targetDate, scope, limit, offset),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
     refetchOnReconnect: false,
-    enabled,
   });
 }
 
-export function ManagementLostOpportunitiesCard({ targetDate, scope, onSelectPerson, enabled = false, onLoad }: { targetDate: string; scope: ManagementScope; onSelectPerson: (person: { employeeId: string; employeeName: string }) => void; enabled?: boolean; onLoad?: () => void }) {
+export function ManagementLostOpportunitiesCard({ targetDate, scope, onSelectPerson }: { targetDate: string; scope: ManagementScope; onSelectPerson: (person: { employeeId: string; employeeName: string }) => void }) {
   const { locale, t } = useTranslation();
   const [isPopoverOpen, setPopoverOpen] = useState(false);
   // The card needs counts only; details remain behind the explicit table/rep selection.
-  const query = useManagementLostOpportunities(targetDate, scope, 0, PAGE_SIZE, enabled);
+  const query = useManagementLostOpportunities(targetDate, scope, 0, 1);
   const label = (key: string, fallback: string) => {
     const translated = t(key as never);
     return translated === key ? fallback : translated;
   };
 
-  if (!enabled) return <button type="button" className="w-full text-start" onClick={onLoad}><KpiCard icon={PackageX} label={label("smartLoading.lostOpportunities", "Lost opportunities")} value={locale === "ar" ? "اضغط للحساب" : "Click to calculate"} caption={locale === "ar" ? "لن يتم تحميل التحليل تلقائياً" : "Analysis loads on click"} glow="warning" /></button>;
   if (query.isLoading) return <Skeleton className="h-full min-h-36 w-full" />;
   if (query.isError) return <Card className="glass-card h-full min-h-36 w-full border-destructive/30 bg-destructive/10"><CardContent className="flex min-h-36 items-center p-4 text-sm text-destructive">{label("smartLoading.lostOpportunitiesLoadError", "Could not load lost opportunities.")}</CardContent></Card>;
 
