@@ -2,6 +2,14 @@
 
 This is durable engineering history. A **RESOLVED** item is historical evidence, not a permanent assumption. It may be reopened only when new measurements prove a regression; cite that new evidence before changing the previous design.
 
+## Operational Leaflet basemap API-key watermark
+
+- **Symptom:** Operational maps displayed a repeated `API KEY REQUIRED` watermark across their tile surface.
+- **Root cause:** Eleven Leaflet components independently used Carto's unauthenticated raster endpoint, which can return an API-key-required image tile.
+- **Fix:** Centralized the operational basemap in `operational-basemap.ts` and moved every affected Leaflet map to Esri's keyless Light Gray Canvas endpoint with the provider's required attribution retained.
+- **Commit/deployed:** `6ecb4fd`.
+- **Regression-prevention rule:** Do not introduce direct tile-provider URLs in map components. Use the shared operational-basemap helper, and only change providers after confirming production credentials and required attribution.
+
 ## Mixed-load RIE bottleneck
 
 - **Symptom/evidence:** A 100 Sales Rep concurrent test passed 100%. A heavy 100-user Mixed test achieved about 13.79% success, with about 200 timeouts, p95 around 30 seconds, and RIE queue wait around 29 seconds.
