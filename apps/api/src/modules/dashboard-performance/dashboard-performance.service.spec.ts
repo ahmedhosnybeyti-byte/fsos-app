@@ -36,3 +36,29 @@ test("keeps the full target month calendar for Sales and Collection pacing", asy
     assert.notEqual(target.runRateForecast, null);
   }
 });
+
+test("preserves period-level distinct dashboard metrics after removing redundant daily distincts", async () => {
+  const calendar = Array.from({ length: 28 }, (_, day) => ({ calendarDate: new Date(Date.UTC(2026, 7, day + 1)), workingDay: true }));
+  const currentDate = new Date(Date.UTC(2026, 7, 1)).toISOString();
+  const rie = {
+    queryCanonicalRecords: async (query: RieScalableQuery) => {
+      if (query.entityName === "Invoice Items" && query.groupBy?.length) {
+        // These daily distincts were previously computed, then overwritten below.
+        return resultPage([{ date: currentDate, sales: 280, invoices: 999, customers: 999, skus: 999 }]);
+      }
+      if (query.entityName === "Invoice Items") return resultPage([{ invoices: 2, customers: 3, skus: 4 }]);
+      if (query.entityName === "Collections") return resultPage([{ date: currentDate, collections: 140 }]);
+      if (query.entityName === "Targets") return resultPage([{ SalesTarget: 2_800, CollectionTarget: 1_400 }]);
+      return resultPage([]);
+    },
+  };
+  const prisma = { salesCalendar: { findMany: async () => calendar } };
+  const service = new DashboardPerformanceService(rie as any, prisma as any);
+
+  const result = await service.get({ companyId: "company", userId: "user", email: "rep@example.com", roleCode: "SALES_REP" } as any, "previous-month", undefined, "2026-08-01", "2026-08-07");
+
+  // distinctFor() remains the final source of these response values, as before.
+  assert.equal(result.metrics.invoices.current, 2);
+  assert.equal(result.metrics.customers.current, 3);
+  assert.equal(result.metrics.skus.current, 4);
+});

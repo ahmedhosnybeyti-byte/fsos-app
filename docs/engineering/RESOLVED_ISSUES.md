@@ -16,6 +16,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Root cause/evidence:** The constrained RIE queue was the visible bottleneck under mixed load. Raising RIE concurrency from 20 to 30 did not solve it and substantially increased PostgreSQL CPU/RAM.
 - **Regression-prevention rule:** Do **not** treat increasing RIE concurrency as the default solution. Identify and measure the real bottleneck first.
 
+## Dashboard Performance — redundant daily distinct aggregation
+
+- **Symptom/evidence:** At 150 VU, `GET /dashboard-performance` accumulated 349,497ms of RIE queue wait and 57 client timeouts.
+- **Root cause:** The daily `Invoice Items` aggregation calculated three `COUNT(DISTINCT)` values which were subsequently replaced by period-level `distinctFor()` results.
+- **Fix:** Remove only the unused daily distinct aggregates; retain `distinctFor()` as the final source of invoice, customer, and SKU distinct values.
+- **Commit:** `codex/dashboard-remove-redundant-distinct`.
+- **Regression-prevention rule:** Do not compute daily distinct values when the response always overwrites them with period-level distinct values.
+
 ## Management Smart Loading — repeated loading-risk calculation
 
 - **Symptom/evidence:** The Company Admin management loading-risk endpoint was the first mixed-load failure at 50 VU (8 timeouts in 21 requests, p95 about 30 seconds), while it rebuilt the same scoped Van Inventory, Invoices, Invoice Items, Routes, Employees, and Products analysis for every open.
