@@ -202,6 +202,24 @@ test("scalable query keeps the latest snapshot per visible route before aggregat
   assert.match(sql, /FROM base_latest base/);
 });
 
+test("conditional date aggregates keep current and prior values in one scoped RIE query", async () => {
+  let captured: { strings?: readonly string[] } | undefined;
+  const service = new RieScalableQueryService({ $queryRaw: async (query: typeof captured) => { captured = query; return [{ currentValue: 120, priorValue: 100 }]; } } as never, { resolveAllowedRouteIds: async () => new Set(["R-1"]) } as never);
+  const result = await service.query({
+    companyId: "company-1", requestingUser: { roleCode: "MANAGER", email: "manager@example.com" }, entityName: "Collections", projection: [],
+    scope: { date: { field: "CollectionDate", from: "2026-07-01", to: "2026-08-31" } },
+    aggregates: [
+      { op: "sum", field: "Amount", as: "currentValue", filterDate: { field: "CollectionDate", from: "2026-08-01", to: "2026-08-31" } },
+      { op: "sum", field: "Amount", as: "priorValue", filterDate: { field: "CollectionDate", from: "2026-07-01", to: "2026-07-31" } },
+    ], pagination: { limit: 1 },
+  });
+  assert.deepEqual(result.records, [{ currentValue: 120, priorValue: 100 }]);
+  const sql = captured?.strings?.join(" ") ?? "";
+  assert.match(sql, /"currentValue"/);
+  assert.match(sql, /"priorValue"/);
+  assert.match(sql, /FILTER \(WHERE/);
+});
+
 test("geo product intelligence keeps invoice joins, exclusions, grouping and limits in PostgreSQL", async () => {
   let captured: { strings?: readonly string[] } | undefined;
   const service = new RieScalableQueryService({ $queryRaw: async (query: typeof captured) => { captured = query; return [{ sku: "P-1", name: "Product", category: null, totalQty: 2, totalValue: 20, customerCount: 1, totalRowsConsidered: 4, targetProductCount: 1 }]; } } as never, { resolveAllowedRouteIds: async () => null } as never);

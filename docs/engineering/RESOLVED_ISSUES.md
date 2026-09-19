@@ -8,6 +8,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Root cause/evidence:** The constrained RIE queue was the visible bottleneck under mixed load. Raising RIE concurrency from 20 to 30 did not solve it and substantially increased PostgreSQL CPU/RAM.
 - **Regression-prevention rule:** Do **not** treat increasing RIE concurrency as the default solution. Identify and measure the real bottleneck first.
 
+## Team Performance current/prior metric fan-out
+
+- **Symptom/evidence:** A comparison request launched eight RIE queries (six per-metric current/prior reads plus sales summary and targets), contributing to queue waits and request timeouts under 150 VU.
+- **Root cause:** Sales, collections, and returns each repeated the same scoped fact/join work in separate current and prior queries.
+- **Fix:** Use one scoped RIE query per metric with PostgreSQL conditional date aggregates for current and prior values; sales summary and targets remain unchanged.
+- **Commit:** `268d73f`.
+- **Regression-prevention rule:** When a Team Performance metric needs two periods at the same grouping grain, return both values from one scoped RIE aggregate query.
+
 ## Smart Loading — `queryManagementStockAlignment`
 
 - **Symptom:** Slow/heavy query execution and materialization pressure.
