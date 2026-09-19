@@ -22,18 +22,31 @@ export class SmartLoadingManagementCacheService {
 
   async getOrCompute<T>(input: ManagementRiskSnapshotInput, compute: () => Promise<T>): Promise<{ value: T; hit: boolean }> {
     const key = this.snapshotKey(input);
-    const existing = await this.prisma.smartLoadingManagementLoadingRiskSnapshot.findUnique({ where: { companyId_targetDate_salesFrom_salesTo_personLevel_scopeKey: key }, select: { result: true } });
+    // A rolling deployment can briefly run this code before its migration has
+    // reached every replica. Preserve the existing RIE path in that case;
+    // cache availability must never become an endpoint availability risk.
+    let existing: { result: unknown } | null = null;
+    try {
+      existing = await this.prisma.smartLoadingManagementLoadingRiskSnapshot.findUnique({ where: { companyId_targetDate_salesFrom_salesTo_personLevel_scopeKey: key }, select: { result: true } });
+    } catch {
+      return { value: await compute(), hit: false };
+    }
     if (existing) return { value: existing.result as T, hit: true };
 
     const active = this.inFlight.get(this.inFlightKey(key));
     if (active) return { value: await active as T, hit: true };
 
     const created = compute().then(async (value) => {
-      await this.prisma.smartLoadingManagementLoadingRiskSnapshot.upsert({
-        where: { companyId_targetDate_salesFrom_salesTo_personLevel_scopeKey: key },
-        create: { ...key, scopeIsCompanyWide: input.routeIds === null, routeIds: this.normalizedRouteIds(input.routeIds), result: value as Prisma.InputJsonValue },
-        update: { result: value as Prisma.InputJsonValue, scopeIsCompanyWide: input.routeIds === null, routeIds: this.normalizedRouteIds(input.routeIds) },
-      });
+      try {
+        await this.prisma.smartLoadingManagementLoadingRiskSnapshot.upsert({
+          where: { companyId_targetDate_salesFrom_salesTo_personLevel_scopeKey: key },
+          create: { ...key, scopeIsCompanyWide: input.routeIds === null, routeIds: this.normalizedRouteIds(input.routeIds), result: value as Prisma.InputJsonValue },
+          update: { result: value as Prisma.InputJsonValue, scopeIsCompanyWide: input.routeIds === null, routeIds: this.normalizedRouteIds(input.routeIds) },
+        });
+      } catch {
+        // The calculated response is still authoritative; a failed cache
+        // write must not alter the established user-visible behavior.
+      }
       return value;
     }).finally(() => this.inFlight.delete(this.inFlightKey(key)));
     this.inFlight.set(this.inFlightKey(key), created);

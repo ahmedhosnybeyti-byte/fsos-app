@@ -35,3 +35,10 @@ test("Van Inventory invalidation targets overlapping route snapshots plus compan
   await service.invalidateForCanonicalChange({ smartLoadingManagementLoadingRiskSnapshot: { deleteMany: async (query: unknown) => { deleted = query; } } } as never, "company-a", "Van Inventory", ["route-a"], true);
   assert.deepEqual(deleted, { where: { companyId: "company-a", OR: [{ scopeIsCompanyWide: true }, { routeIds: { hasSome: ["route-a"] } }] } });
 });
+
+test("cache storage failure falls back to the unchanged calculation", async () => {
+  const service = new SmartLoadingManagementCacheService({ smartLoadingManagementLoadingRiskSnapshot: { findUnique: async () => { throw new Error("relation missing during deploy"); } } } as never);
+  const result = await service.getOrCompute(input, async () => ({ affectedPersonCount: 3 }));
+  assert.equal(result.hit, false);
+  assert.deepEqual(result.value, { affectedPersonCount: 3 });
+});
