@@ -18,6 +18,7 @@ import type { ImportTemplate, ValidationReport } from "../import-validation/impo
 import { SubscriptionsService } from "../subscriptions/subscriptions.service";
 import { PlatformSettingsService } from "../platform-settings/platform-settings.service";
 import { UserActivityService } from "../user-activity/user-activity.service";
+import { SmartLoadingManagementCacheService } from "../smart-loading-management-cache/smart-loading-management-cache.service";
 import { serializeExcelParse } from "../../common/excel-parse-queue";
 
 const SALES_CALENDAR_ENTITY = "Sales Calendar";
@@ -271,6 +272,7 @@ export class FilesService {
     private readonly subscriptionsService: SubscriptionsService,
     private readonly platformSettingsService: PlatformSettingsService,
     private readonly userActivity: UserActivityService,
+    private readonly smartLoadingManagementCache: SmartLoadingManagementCacheService,
   ) {}
 
   private validateUpload(file: Express.Multer.File, maxUploadSizeMb: number) {
@@ -793,17 +795,36 @@ export class FilesService {
           return [Prisma.sql`(${randomUUID()}, ${companyId}, ${fileId}, ${entityName}, ${parts.join("␟")}, ${JSON.stringify(row)}::jsonb, CURRENT_TIMESTAMP)`];
         });
       if (values.length === 0) continue;
-      await this.prisma.$executeRaw(Prisma.sql`
-        INSERT INTO "rie_canonical_entity_rows"
-          ("id", "company_id", "source_file_id", "entity_name", "entity_key", "data", "updated_at")
-        VALUES ${Prisma.join(values)}
-        ON CONFLICT ("company_id", "entity_name", "entity_key")
-        DO UPDATE SET
-          "data" = EXCLUDED."data",
-          "source_file_id" = EXCLUDED."source_file_id",
-          "updated_at" = CURRENT_TIMESTAMP
-        WHERE "rie_canonical_entity_rows"."data" IS DISTINCT FROM EXCLUDED."data"
-      `);
+      await this.prisma.$transaction(async (tx) => {
+        // RETURNING emits only inserted/changed rows. This keeps cache
+        // invalidation tied to a real canonical change, never a re-upload of
+        // identical data.
+        const changed = await tx.$queryRaw<Array<{ routeId: string | null }>>(Prisma.sql`
+          WITH changed AS (
+            INSERT INTO "rie_canonical_entity_rows"
+              ("id", "company_id", "source_file_id", "entity_name", "entity_key", "data", "updated_at")
+            VALUES ${Prisma.join(values)}
+            ON CONFLICT ("company_id", "entity_name", "entity_key")
+            DO UPDATE SET
+              "data" = EXCLUDED."data",
+              "source_file_id" = EXCLUDED."source_file_id",
+              "updated_at" = CURRENT_TIMESTAMP
+            WHERE "rie_canonical_entity_rows"."data" IS DISTINCT FROM EXCLUDED."data"
+            RETURNING "data"
+          )
+          SELECT DISTINCT NULLIF(BTRIM(COALESCE("data"->>'RouteID', '')), '') AS "routeId"
+          FROM changed
+        `);
+        if (changed.length > 0) {
+          await this.smartLoadingManagementCache.invalidateForCanonicalChange(
+            tx,
+            companyId,
+            entityName,
+            changed.flatMap(({ routeId }) => routeId ? [routeId] : []),
+            entityName === "Van Inventory" && changed.every(({ routeId }) => !!routeId),
+          );
+        }
+      });
     }
   }
 

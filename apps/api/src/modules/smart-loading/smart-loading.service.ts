@@ -3,6 +3,7 @@ import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingHierarchyOptions, ty
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
 import { CanonicalHierarchyResolverService } from "../rie/canonical-hierarchy-resolver.service";
+import { SmartLoadingManagementCacheService } from "../smart-loading-management-cache/smart-loading-management-cache.service";
 import { PrismaService } from "../../common/prisma";
 import { LostOpportunityService } from "../lost-opportunity/lost-opportunity.service";
 import { selectRoutePriorityProducts } from "./smart-loading-priority";
@@ -219,7 +220,7 @@ function isDateInWindow(date: string, from: string, to: string): boolean {
 export class SmartLoadingService {
   private readonly logger = new Logger(SmartLoadingService.name);
 
-  constructor(private readonly rieFacade: RieFacade, private readonly lostOpportunityService: LostOpportunityService, private readonly prisma: PrismaService, private readonly hierarchyResolver: CanonicalHierarchyResolverService) {}
+  constructor(private readonly rieFacade: RieFacade, private readonly lostOpportunityService: LostOpportunityService, private readonly prisma: PrismaService, private readonly hierarchyResolver: CanonicalHierarchyResolverService, private readonly managementCache: SmartLoadingManagementCacheService) {}
 
   private rieContext(user: AuthenticatedUser) {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
@@ -233,16 +234,28 @@ export class SmartLoadingService {
     const salesFrom = query.salesFrom ?? isoDay(Date.UTC(new Date(`${salesTo}T00:00:00.000Z`).getUTCFullYear(), new Date(`${salesTo}T00:00:00.000Z`).getUTCMonth() - MONTHS_LOOKBACK, new Date(`${salesTo}T00:00:00.000Z`).getUTCDate()));
     if (salesFrom > salesTo) throw new BadRequestException("salesFrom must not be after salesTo.");
     const personLevel = user.roleCode === "COMPANY_ADMIN" ? "manager" : user.roleCode === "MANAGER" ? "supervisor" : "sales_rep";
-    const result = await this.rieFacade.queryManagementLoadingRisk({ ...this.rieContext(user), targetDate, salesFrom, salesTo, personLevel });
+    // Resolve permissions before both cache lookup and fallback execution. The
+    // same scope remains enforced by RIE when a snapshot is first computed.
+    const allowedRouteIds = await this.hierarchyResolver.resolveAllowedRouteIds(user.companyId, { roleCode: user.roleCode, email: user.email });
+    const { value: response, hit } = await this.managementCache.getOrCompute({
+      companyId: user.companyId,
+      targetDate,
+      salesFrom,
+      salesTo,
+      personLevel,
+      routeIds: allowedRouteIds === null ? null : [...allowedRouteIds],
+    }, async () => {
+      const result = await this.rieFacade.queryManagementLoadingRisk({ ...this.rieContext(user), targetDate, salesFrom, salesTo, personLevel });
+      return { targetDate, salesFrom, salesTo, affectedPersonCount: result.people.length, people: result.people };
+    });
     this.logger.log(JSON.stringify({
-      event: "smart_loading_management_loading_risk_scope",
+      event: "smart_loading_management_loading_risk_snapshot",
       currentUser: user.email,
       role: user.roleCode,
-      directReportsCount: result.debug?.directReportsCount ?? 0,
-      routeCount: result.debug?.routeCount ?? 0,
-      loadingRiskRowsBeforeAggregation: result.debug?.loadingRiskRowsBeforeAggregation ?? 0,
+      cacheHit: hit,
+      routeScope: allowedRouteIds === null ? "company-wide" : allowedRouteIds.size,
     }));
-    return { targetDate, salesFrom, salesTo, affectedPersonCount: result.people.length, people: result.people };
+    return response;
   }
 
   /** Management-only view of the existing Smart Loading lost-opportunity rule. */

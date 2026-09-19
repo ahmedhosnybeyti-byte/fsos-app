@@ -260,6 +260,7 @@ model Company {
   rieDatasetVersions RieDatasetVersion[]
   rieEntityRows RieEntityRow[]
   rieCanonicalEntityRows RieCanonicalEntityRow[]
+  smartLoadingManagementLoadingRiskSnapshots SmartLoadingManagementLoadingRiskSnapshot[]
 
   @@map("companies")
 }
@@ -1034,6 +1035,31 @@ model RieCanonicalEntityRow {
   @@unique([companyId, entityName, entityKey])
   @@index([companyId, entityName])
   @@map("rie_canonical_entity_rows")
+}
+
+// Prepared, permission-scoped read model for the management Smart Loading
+// risk card. It contains the existing endpoint response only; source facts
+// remain in the canonical RIE tables.
+model SmartLoadingManagementLoadingRiskSnapshot {
+  id                 String   @id @default(cuid())
+  companyId          String   @map("company_id")
+  targetDate         String   @map("target_date")
+  salesFrom          String   @map("sales_from")
+  salesTo            String   @map("sales_to")
+  personLevel        String   @map("person_level")
+  scopeKey           String   @map("scope_key")
+  scopeIsCompanyWide Boolean  @default(false) @map("scope_is_company_wide")
+  routeIds           String[] @default([]) @map("route_ids")
+  result             Json
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, targetDate, salesFrom, salesTo, personLevel, scopeKey])
+  @@index([companyId, scopeIsCompanyWide], map: "smart_loading_risk_snapshots_company_scope_idx")
+  @@index([routeIds], type: Gin, map: "smart_loading_risk_snapshots_route_ids_idx")
+  @@map("smart_loading_management_loading_risk_snapshots")
 }
 
 enum ProspectStatus {

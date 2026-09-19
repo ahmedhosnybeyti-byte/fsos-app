@@ -345,6 +345,7 @@ test("management session uses the unified bundle and never calls the three compa
     { detect: async () => ({ status: "no-customers", opportunities: [] }) } as never,
     {} as never,
     {} as never,
+    {} as never,
   );
 
   const session = await service.getSession({
@@ -361,6 +362,24 @@ test("management session uses the unified bundle and never calls the three compa
   }
 });
 
+test("management loading risk reads a permission-scoped prepared result without changing its response", async () => {
+  let snapshotInput: unknown;
+  let queryInput: unknown;
+  const service = new SmartLoadingService(
+    { queryManagementLoadingRisk: async (input: unknown) => { queryInput = input; return { people: [{ employeeId: "supervisor-1" }] }; } } as never,
+    {} as never,
+    {} as never,
+    { resolveAllowedRouteIds: async () => new Set(["route-b", "route-a"]) } as never,
+    { getOrCompute: async (input: unknown, compute: () => Promise<unknown>) => { snapshotInput = input; return { value: await compute(), hit: false }; } } as never,
+  );
+  const result = await service.getManagementLoadingRisk({ companyId: "company-1", email: "manager@example.com", roleCode: "MANAGER" } as never, { targetDate: "2099-01-01" });
+
+  assert.deepEqual((snapshotInput as { routeIds: string[] }).routeIds.sort(), ["route-a", "route-b"]);
+  assert.equal((queryInput as { personLevel: string }).personLevel, "supervisor");
+  assert.equal(result.affectedPersonCount, 1);
+  assert.deepEqual(result.people, [{ employeeId: "supervisor-1" }]);
+});
+
 test("Sales Rep session keeps the existing non-management path", async () => {
   let genericCalls = 0;
   const facade = {
@@ -375,6 +394,7 @@ test("Sales Rep session keeps the existing non-management path", async () => {
   const service = new SmartLoadingService(
     facade as never,
     { detect: async () => ({ status: "no-customers", opportunities: [] }) } as never,
+    {} as never,
     {} as never,
     {} as never,
   );

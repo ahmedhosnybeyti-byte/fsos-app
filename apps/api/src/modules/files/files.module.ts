@@ -9,9 +9,10 @@ import { ImportValidationModule } from "../import-validation/import-validation.m
 import { SubscriptionsModule } from "../subscriptions/subscriptions.module";
 import { PlatformSettingsModule } from "../platform-settings/platform-settings.module";
 import { UserActivityModule } from "../user-activity/user-activity.module";
+import { SmartLoadingManagementCacheModule } from "../smart-loading-management-cache/smart-loading-management-cache.module";
 
 @Module({
-  imports: [AuditLogModule, ImportValidationModule, SubscriptionsModule, PlatformSettingsModule, UserActivityModule],
+  imports: [AuditLogModule, ImportValidationModule, SubscriptionsModule, PlatformSettingsModule, UserActivityModule, SmartLoadingManagementCacheModule],
   providers: [
     FilesService,
     DatasetClassifierService,
