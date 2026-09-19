@@ -16,6 +16,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Root cause/evidence:** The constrained RIE queue was the visible bottleneck under mixed load. Raising RIE concurrency from 20 to 30 did not solve it and substantially increased PostgreSQL CPU/RAM.
 - **Regression-prevention rule:** Do **not** treat increasing RIE concurrency as the default solution. Identify and measure the real bottleneck first.
 
+## Management Smart Loading — repeated loading-risk calculation
+
+- **Symptom/evidence:** The Company Admin management loading-risk endpoint was the first mixed-load failure at 50 VU (8 timeouts in 21 requests, p95 about 30 seconds), while it rebuilt the same scoped Van Inventory, Invoices, Invoice Items, Routes, Employees, and Products analysis for every open.
+- **Root cause:** No prepared read model existed for an unchanged management scope; the Route × Product calculation and JSON rollup always re-ran in PostgreSQL/RIE.
+- **Fix:** Persist the exact prepared endpoint result by company, date window, management aggregation level, and permission-derived route scope. Validate scope before every read; on cache miss run the unchanged RIE calculation and store it. Canonical changes invalidate only overlapping Van Inventory route scopes when known, and conservatively invalidate that company for other dependent sources.
+- **Commit:** `df47353646d0d65512cc5c62705a1ed95d10dd9d`.
+- **Regression-prevention rule:** Never serve a management snapshot before resolving the caller's current hierarchy scope, and invalidate it in the same transaction as a real dependent canonical-row change.
+
 ## RIE request-level acquisition and fan-out
 
 - **Symptom/evidence:** A production Smart Loading session performed 16 logical RIE operations, 29 PostgreSQL operations, 34 hierarchy-resolution calls, and 15 active-version resolutions in one action (Phase 0 telemetry, 2026-09-13).
