@@ -60,5 +60,5 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 
 - **Symptom/evidence:** `GET /smart-loading/session` repeatedly aggregated `MAX(InvoiceDate)` over `Invoice Items → Invoices` for every request, contributing to RIE queue waits and 30-second client timeouts under mixed load.
 - **Fix:** Persist only Route × Product last-sale inputs keyed by company, route, target date, and an active-source freshness signature. Resolve hierarchy scope live; use a snapshot only when every visible route is covered and the signature matches, otherwise retain the existing PostgreSQL aggregate and populate the input snapshot.
-- **Commit:** Pending commit for this change.
+- **Commit:** `fa0c32e`.
 - **Regression-prevention rule:** Never cache a final Smart Loading session. Keep threshold evaluation, Stale, Lost Opportunities final stock filtering, user scope, and response assembly live; a missing or stale input snapshot must fall back to PostgreSQL.
