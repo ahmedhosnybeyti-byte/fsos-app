@@ -1062,6 +1062,8 @@ model SmartLoadingManagementLoadingRiskSnapshot {
   @@index([companyId, scopeIsCompanyWide], map: "smart_loading_risk_snapshots_company_scope_idx")
   @@index([routeIds], type: Gin, map: "smart_loading_risk_snapshots_route_ids_idx")
   @@map("smart_loading_management_loading_risk_snapshots")
+}
+
 // Prepared Route × Product input only.  The Smart Loading response, threshold
 // evaluation, authorization, and final route-scope rollup remain live.
 model SmartLoadingLastSaleSnapshot {
