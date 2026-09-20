@@ -268,6 +268,8 @@ model Company {
   rieDatasetVersions RieDatasetVersion[]
   rieEntityRows RieEntityRow[]
   rieCanonicalEntityRows RieCanonicalEntityRow[]
+  smartLoadingLastSaleSnapshots SmartLoadingLastSaleSnapshot[]
+  smartLoadingLastSaleSnapshotRoutes SmartLoadingLastSaleSnapshotRoute[]
 
   @@map("companies")
 }
@@ -1078,6 +1080,39 @@ model RieCanonicalEntityRow {
   @@unique([companyId, entityName, entityKey])
   @@index([companyId, entityName])
   @@map("rie_canonical_entity_rows")
+}
+
+// Prepared Route × Product input only.  The Smart Loading response, threshold
+// evaluation, authorization, and final route-scope rollup remain live.
+model SmartLoadingLastSaleSnapshot {
+  id              String   @id @default(cuid())
+  companyId       String   @map("company_id")
+  routeId         String   @map("route_id")
+  productCode     String   @map("product_code")
+  targetDate      String   @map("target_date")
+  activeVersion   String   @map("active_version")
+  lastSaleDate    String?  @map("last_sale_date")
+  createdAt       DateTime @default(now()) @map("created_at")
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, routeId, productCode, targetDate, activeVersion])
+  @@index([companyId, routeId, targetDate, activeVersion])
+  @@map("smart_loading_last_sale_snapshots")
+}
+
+// Coverage makes an empty Route × Product result distinguishable from a miss.
+model SmartLoadingLastSaleSnapshotRoute {
+  id            String   @id @default(cuid())
+  companyId     String   @map("company_id")
+  routeId       String   @map("route_id")
+  targetDate    String   @map("target_date")
+  activeVersion String   @map("active_version")
+  createdAt     DateTime @default(now()) @map("created_at")
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, routeId, targetDate, activeVersion])
+  @@index([companyId, targetDate, activeVersion])
+  @@map("smart_loading_last_sale_snapshot_routes")
 }
 
 enum ProspectStatus {

@@ -1,4 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger } from "@nestjs/common";
+import { createHash } from "node:crypto";
 import { DEFAULT_SMART_LOADING_STALE_DAYS, type SmartLoadingHierarchyOptions, type SmartLoadingManagementLoadingRiskQuery, type SmartLoadingManagementLoadingRiskResponse, type SmartLoadingManagementLostOpportunitiesQuery, type SmartLoadingManagementLostOpportunitiesResponse, type SmartLoadingManagementVehicleProduct, type SmartLoadingPriorityProduct, type SmartLoadingProduct, type SmartLoadingSession, type SmartLoadingRecalculateInput, type SmartLoadingRecalculateResult } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
@@ -119,6 +120,15 @@ export function normalizedProductCode(value: unknown): string {
   return String(value ?? "").trim().toLowerCase();
 }
 
+export function lastSaleMsByProductFromRouteRows(rows: readonly Record<string, unknown>[]): Map<string, number> {
+  const result = new Map<string, number>();
+  for (const row of rows) {
+    const code = normalizedProductCode(row.productCode), ms = toEpochMs(row.lastSaleDate);
+    if (code && ms !== null && ms > (result.get(code) ?? Number.NEGATIVE_INFINITY)) result.set(code, ms);
+  }
+  return result;
+}
+
 /** A Sales Rep needs loading only when the route's current stock cannot cover the suggested quantity. */
 export function needsLostOpportunityLoading(suggestedQuantity: number, currentVehicleStock: number): boolean {
   return suggestedQuantity > currentVehicleStock;
@@ -223,6 +233,38 @@ export class SmartLoadingService {
 
   private rieContext(user: AuthenticatedUser) {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
+  }
+
+  // Metadata-only freshness token. It includes the active RIE versions and
+  // the newest canonical mutation for every source that can alter this input.
+  // A mismatch is always a cache miss; stale rows are never served.
+  private async lastSaleSnapshotVersion(companyId: string): Promise<string> {
+    const entities = ["Invoices", "Invoice Items", "Van Inventory", "Routes", "Employees"];
+    const [versions, latest] = await Promise.all([
+      this.prisma.rieDatasetVersion.findMany({ where: { companyId, entityName: { in: entities }, isActive: true }, select: { entityName: true, id: true, updatedAt: true }, orderBy: [{ entityName: "asc" }, { id: "asc" }] }),
+      this.prisma.rieCanonicalEntityRow.findFirst({ where: { companyId, entityName: { in: entities } }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } }),
+    ]);
+    return createHash("sha256").update(JSON.stringify({ versions, latest: latest?.updatedAt.toISOString() ?? null })).digest("hex");
+  }
+
+  private async readLastSaleSnapshot(companyId: string, routeIds: ReadonlySet<string>, targetDate: string, activeVersion: string): Promise<Map<string, number> | null> {
+    if (routeIds.size === 0) return new Map();
+    const routes = [...routeIds];
+    const coverage = await this.prisma.smartLoadingLastSaleSnapshotRoute.findMany({ where: { companyId, routeId: { in: routes }, targetDate, activeVersion }, select: { routeId: true } });
+    if (new Set(coverage.map((row) => normalizedRouteId(row.routeId))).size !== routes.length) return null;
+    const rows = await this.prisma.smartLoadingLastSaleSnapshot.findMany({ where: { companyId, routeId: { in: routes }, targetDate, activeVersion }, select: { productCode: true, lastSaleDate: true } });
+    return lastSaleMsByProductFromRouteRows(rows);
+  }
+
+  private async storeLastSaleSnapshot(companyId: string, routeIds: ReadonlySet<string>, targetDate: string, activeVersion: string, rows: readonly Record<string, unknown>[]): Promise<void> {
+    const routes = [...routeIds];
+    await this.prisma.$transaction([
+      this.prisma.smartLoadingLastSaleSnapshotRoute.createMany({ data: routes.map((routeId) => ({ companyId, routeId, targetDate, activeVersion })), skipDuplicates: true }),
+      this.prisma.smartLoadingLastSaleSnapshot.createMany({ data: rows.flatMap((row) => {
+        const routeId = normalizedRouteId(row.routeId), productCode = normalizedProductCode(row.productCode), lastSaleDate = typeof row.lastSaleDate === "string" ? row.lastSaleDate : null;
+        return routeId && productCode ? [{ companyId, routeId, productCode, targetDate, activeVersion, lastSaleDate }] : [];
+      }), skipDuplicates: true }),
+    ]);
   }
 
   /** Management-only: Expected Demand > current Vehicle Stock (actual loaded quantity). */
@@ -506,14 +548,19 @@ export class SmartLoadingService {
     const vehicleStockAvailable = activeVehicleRouteIds.size > 0;
     const invoiceJoin = [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }] as const;
     const salesScope = { route: { values: [...activeVehicleRouteIds], source: "invoice" }, routeFallback: { primary: { field: "RouteID" }, fallback: { field: "RouteID", source: "invoice" }, values: [...activeVehicleRouteIds] }, date: { field: "InvoiceDate", source: "invoice", to: targetDateIso } } as const;
-    const lastSaleRows = !useManagementStaleGrain && activeVehicleRouteIds.size ? await timed("sales-last-sale-aggregation", () => bounded("sales-last-sale-aggregation", { ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "maxText", field: "InvoiceDate", source: "invoice", as: "lastSaleDate" }], scope: salesScope, driveBaseFromScopedJoins: true })) : [];
-    const lastSaleMsByProduct = new Map<string, number>();
-    for (const row of lastSaleRows) {
-      const productCode = normalizedProductCode(row.productCode);
-      const lastSaleMs = toEpochMs(row.lastSaleDate);
-      if (productCode && lastSaleMs !== null && lastSaleMs > (lastSaleMsByProduct.get(productCode) ?? Number.NEGATIVE_INFINITY)) {
-        lastSaleMsByProduct.set(productCode, lastSaleMs);
-      }
+    const lastSaleSnapshotVersion = !useManagementStaleGrain && activeVehicleRouteIds.size ? await this.lastSaleSnapshotVersion(ctx.companyId) : null;
+    const snapshotLastSaleMsByProduct = lastSaleSnapshotVersion
+      ? await this.readLastSaleSnapshot(ctx.companyId, activeVehicleRouteIds, targetDateIso, lastSaleSnapshotVersion)
+      : null;
+    // Fallback remains the established PostgreSQL aggregate. It now returns
+    // Route × Product inputs so subsequent requests can compose the same
+    // product-level MAX from scoped snapshot rows.
+    const lastSaleRows = snapshotLastSaleMsByProduct === null && !useManagementStaleGrain && activeVehicleRouteIds.size
+      ? await timed("sales-last-sale-aggregation", () => bounded("sales-last-sale-aggregation", { ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }, { field: "RouteID", source: "invoice", as: "routeId" }], joins: invoiceJoin, hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }, { field: "RouteID", source: "invoice" }], aggregates: [{ op: "maxText", field: "InvoiceDate", source: "invoice", as: "lastSaleDate" }], scope: salesScope, driveBaseFromScopedJoins: true }))
+      : [];
+    const lastSaleMsByProduct = snapshotLastSaleMsByProduct ?? lastSaleMsByProductFromRouteRows(lastSaleRows);
+    if (lastSaleSnapshotVersion && snapshotLastSaleMsByProduct === null) {
+      await this.storeLastSaleSnapshot(ctx.companyId, activeVehicleRouteIds, targetDateIso, lastSaleSnapshotVersion, lastSaleRows);
     }
     if (useManagementStaleGrain) {
       for (const row of managementStaleRows) {
