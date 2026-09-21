@@ -46,7 +46,14 @@ test("Team Performance current/prior metric query preserves per-rep parity with 
     { routeIds: ["R-2"], repEmail: "rep-2@example.com", repName: "Rep Two", supervisorEmail: "manager@example.com", supervisorName: "Manager", sales: 80, salesPrior: 90, collection: 40, collectionPrior: 45, returns: 2, returnsPrior: 3 },
   ]);
   assert.equal(queries.length, 5);
-  for (const query of queries.filter((query) => (query.projection as unknown[]).length > 0)) {
+  const metricQueries = queries.filter((query) => (query.projection as unknown[]).length > 0);
+  assert.equal(metricQueries[0]?.entityName, "Invoice Items");
+  assert.equal(metricQueries[0]?.preferHashedScopedSemiJoin, true);
+  assert.equal(metricQueries[1]?.entityName, "Collections");
+  assert.equal(metricQueries[1]?.preferHashedScopedSemiJoin, undefined);
+  assert.equal(metricQueries[2]?.entityName, "Returns");
+  assert.equal(metricQueries[2]?.preferHashedScopedSemiJoin, undefined);
+  for (const query of metricQueries) {
     assert.equal(query.companyId, user.companyId);
     assert.deepEqual(query.requestingUser, { roleCode: user.roleCode, email: user.email });
     const aggregates = query.aggregates as Array<{ as: string; filterDate?: { from: string; to: string } }>;
