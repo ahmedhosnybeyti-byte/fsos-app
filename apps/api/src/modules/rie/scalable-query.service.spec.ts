@@ -286,6 +286,12 @@ test("management lost opportunities keeps both covered and uncovered rows and re
   assert.match(sql, /ROUND\(net\.baseline_net_quantity \/ 3\.0\) > 0/);
   assert.match(sql, /route_product_opportunities AS MATERIALIZED/);
   assert.match(sql, /opportunity\."opportunityQuantity" > COALESCE\(stock\.current_stock, 0\)/);
+  assert.match(sql, /scoped_invoice_numbers AS MATERIALIZED/);
+  assert.match(sql, /scoped_return_numbers AS MATERIALIZED/);
+  assert.match(sql, /INNER JOIN scoped_invoice_numbers scoped_invoice/);
+  assert.match(sql, /INNER JOIN scoped_return_numbers scoped_return/);
+  assert.match(sql, /item_source\."data" ->> 'InvoiceNo'.*AS invoice_no/);
+  assert.match(sql, /return_item_source\."data" ->> 'ReturnNo'.*AS return_no/);
   assert.match(sql, /ORDER BY gap DESC, "opportunityQuantity" DESC/);
   assert.match(sql, /LIMIT .* OFFSET/);
   assert.ok(captured?.values?.includes("r-1"));

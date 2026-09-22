@@ -961,10 +961,53 @@ export class RieScalableQueryService {
       ? [Prisma.sql`${normalizedField({ field: "VisitDay", source: "customer_source" })} IN (${Prisma.join(visitDays)})${routeScope({ field: "RouteID", source: "customer_source" })}`]
       : [Prisma.sql`FALSE`];
     const customerCte = activeEntityRowsCte(input.companyId, "Customers", "customer", customerPredicates, [], []);
-    const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} >= ${baselineFrom} AND ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${recentTo}${routeScope({ field: "RouteID", source: "invoice_source" })}`], [], []);
-    const itemCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], []);
-    const returnsCte = activeEntityRowsCte(input.companyId, "Returns", "returned", [Prisma.sql`${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} >= ${baselineFrom} AND ${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} <= ${recentTo}${routeScope({ field: "RouteID", source: "returned_source" })}`], [], []);
-    const returnItemsCte = activeEntityRowsCte(input.companyId, "Return Items", "return_item", [], [], []);
+    const invoiceProjection = Prisma.sql`
+      ${normalizedField({ field: "RouteID", source: "invoice_source" })} AS route_id,
+      ${normalizedField({ field: "CustomerCode", source: "invoice_source" })} AS customer_code,
+      ${normalizedField({ field: "InvoiceNo", source: "invoice_source" })} AS invoice_no,
+      ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} AS invoice_date,
+      ${normalizedField({ field: "InvoiceStatus", source: "invoice_source" })} AS invoice_status
+    `;
+    const itemProjection = Prisma.sql`
+      ${normalizedField({ field: "InvoiceNo", source: "item_source" })} AS invoice_no,
+      ${normalizedField({ field: "ProductCode", source: "item_source" })} AS product_code,
+      ${numericField(textField({ field: "Quantity", source: "item_source" }))} AS quantity
+    `;
+    const returnProjection = Prisma.sql`
+      ${normalizedField({ field: "RouteID", source: "returned_source" })} AS route_id,
+      ${normalizedField({ field: "CustomerCode", source: "returned_source" })} AS customer_code,
+      ${normalizedField({ field: "ReturnNo", source: "returned_source" })} AS return_no,
+      ${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} AS return_date,
+      ${normalizedField({ field: "Status", source: "returned_source" })} AS return_status
+    `;
+    const returnItemProjection = Prisma.sql`
+      ${normalizedField({ field: "ReturnNo", source: "return_item_source" })} AS return_no,
+      ${normalizedField({ field: "ProductCode", source: "return_item_source" })} AS product_code,
+      ${numericField(textField({ field: "Quantity", source: "return_item_source" }))} AS quantity
+    `;
+    const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} >= ${baselineFrom} AND ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${recentTo}${routeScope({ field: "RouteID", source: "invoice_source" })}`], [], [], false, [], invoiceProjection);
+    const scopedInvoiceNumbersCte = Prisma.sql`scoped_invoice_numbers AS MATERIALIZED (
+      SELECT DISTINCT invoice.invoice_no
+      FROM invoice_active invoice
+      WHERE invoice.invoice_no <> ''
+    )`;
+    // InvoiceNo is part of the Invoice Items business key. Restricting item
+    // candidates to the already company/date/route-scoped headers before
+    // newest-wins preserves the join result while avoiding unrelated facts.
+    const itemCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], false, [
+      Prisma.sql`INNER JOIN scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`,
+    ], itemProjection);
+    const returnsCte = activeEntityRowsCte(input.companyId, "Returns", "returned", [Prisma.sql`${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} >= ${baselineFrom} AND ${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} <= ${recentTo}${routeScope({ field: "RouteID", source: "returned_source" })}`], [], [], false, [], returnProjection);
+    const scopedReturnNumbersCte = Prisma.sql`scoped_return_numbers AS MATERIALIZED (
+      SELECT DISTINCT returned.return_no
+      FROM returned_active returned
+      WHERE returned.return_no <> ''
+    )`;
+    // ReturnNo is part of the Return Items business key, so this applies the
+    // same parity-safe pre-newest-wins narrowing as Invoice Items.
+    const returnItemsCte = activeEntityRowsCte(input.companyId, "Return Items", "return_item", [], [], [], false, [
+      Prisma.sql`INNER JOIN scoped_return_numbers scoped_return ON ${normalizedField({ field: "ReturnNo", source: "return_item_source" })} = scoped_return.return_no`,
+    ], returnItemProjection);
     const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [Prisma.sql`${dateText(textField({ field: "ReportDate", source: "inventory_source" }))} <= ${targetDate}${routeScope({ field: "RouteID", source: "inventory_source" })}`], [], []);
     const routesCte = activeEntityRowsCte(input.companyId, "Routes", "route", routePredicates, [], []);
     const repCte = activeEntityRowsCte(input.companyId, "Employees", "rep", [], [], []);
@@ -973,22 +1016,22 @@ export class RieScalableQueryService {
     const productCte = activeEntityRowsCte(input.companyId, "Products", "product", [], [], []);
     const customerCode = normalizedField({ field: "CustomerCode", source: "customer" });
     const customerRoute = normalizedField({ field: "RouteID", source: "customer" });
-    const invoiceCustomer = normalizedField({ field: "CustomerCode", source: "invoice" });
-    const invoiceRoute = normalizedField({ field: "RouteID", source: "invoice" });
-    const invoiceNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
-    const invoiceDate = dateText(textField({ field: "InvoiceDate", source: "invoice" }));
-    const invoiceStatus = normalizedField({ field: "InvoiceStatus", source: "invoice" });
-    const itemInvoiceNo = normalizedField({ field: "InvoiceNo", source: "item" });
-    const itemProduct = normalizedField({ field: "ProductCode", source: "item" });
-    const itemQuantity = numericField(textField({ field: "Quantity", source: "item" }));
-    const returnCustomer = normalizedField({ field: "CustomerCode", source: "returned" });
-    const returnRoute = normalizedField({ field: "RouteID", source: "returned" });
-    const returnNo = normalizedField({ field: "ReturnNo", source: "returned" });
-    const returnDate = dateText(textField({ field: "ReturnDate", source: "returned" }));
-    const returnStatus = normalizedField({ field: "Status", source: "returned" });
-    const returnItemNo = normalizedField({ field: "ReturnNo", source: "return_item" });
-    const returnItemProduct = normalizedField({ field: "ProductCode", source: "return_item" });
-    const returnItemQuantity = numericField(textField({ field: "Quantity", source: "return_item" }));
+    const invoiceCustomer = Prisma.raw("invoice.customer_code");
+    const invoiceRoute = Prisma.raw("invoice.route_id");
+    const invoiceNo = Prisma.raw("invoice.invoice_no");
+    const invoiceDate = Prisma.raw("invoice.invoice_date");
+    const invoiceStatus = Prisma.raw("invoice.invoice_status");
+    const itemInvoiceNo = Prisma.raw("item.invoice_no");
+    const itemProduct = Prisma.raw("item.product_code");
+    const itemQuantity = Prisma.raw("item.quantity");
+    const returnCustomer = Prisma.raw("returned.customer_code");
+    const returnRoute = Prisma.raw("returned.route_id");
+    const returnNo = Prisma.raw("returned.return_no");
+    const returnDate = Prisma.raw("returned.return_date");
+    const returnStatus = Prisma.raw("returned.return_status");
+    const returnItemNo = Prisma.raw("return_item.return_no");
+    const returnItemProduct = Prisma.raw("return_item.product_code");
+    const returnItemQuantity = Prisma.raw("return_item.quantity");
     const inventoryRoute = normalizedField({ field: "RouteID", source: "inventory" });
     const inventoryProduct = normalizedField({ field: "ProductCode", source: "inventory" });
     const inventoryQuantity = numericField(textField({ field: "Quantity", source: "inventory" }));
@@ -1013,7 +1056,7 @@ export class RieScalableQueryService {
       rows: RieManagementLostOpportunityRow[];
       topPeople: RieManagementLostOpportunitiesResult["topPeople"];
     }>>(Prisma.sql`
-      WITH ${customerCte}, ${invoiceCte}, ${itemCte}, ${returnsCte}, ${returnItemsCte}, ${inventoryCte}, ${routesCte}, ${repCte}, ${supervisorCte}, ${managerCte}, ${productCte},
+      WITH ${customerCte}, ${invoiceCte}, ${scopedInvoiceNumbersCte}, ${itemCte}, ${returnsCte}, ${scopedReturnNumbersCte}, ${returnItemsCte}, ${inventoryCte}, ${routesCte}, ${repCte}, ${supervisorCte}, ${managerCte}, ${productCte},
       scheduled_customers AS MATERIALIZED (
         SELECT DISTINCT ON (${customerCode}) ${customerCode} customer_code, ${customerRoute} route_id,
           COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "CustomerName", source: "customer" })}, '')), ''), ${customerCode}) customer_name
