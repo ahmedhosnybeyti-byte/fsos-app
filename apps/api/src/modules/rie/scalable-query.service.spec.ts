@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 import { RieScalableQueryService } from "./scalable-query.service";
 import { runWithRieRequestContext, setRieTelemetryTestSink } from "../../common/observability/rie-observability";
+import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 
 const scalableQueryInput = () => ({
   companyId: "company-1",
@@ -16,12 +17,6 @@ const deferred = <T>() => {
   const promise = new Promise<T>((done) => { resolve = done; });
   return { promise, resolve };
 };
-
-type InternalSemaphoreService = {
-  runExpensiveQuery<T>(operation: string, execute: () => Promise<T>, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<T>;
-};
-
-const internalSemaphore = (service: RieScalableQueryService) => service as unknown as InternalSemaphoreService;
 
 test("process-wide RIE semaphore limits expensive raw queries to 20 and resumes queued requests", async () => {
   let active = 0;
@@ -64,40 +59,40 @@ test("process-wide RIE semaphore releases permits after raw-query errors", async
 });
 
 test("cancelled and timed-out RIE queue waiters never execute and do not leak permits", async () => {
-  const service = internalSemaphore(new RieScalableQueryService({ $queryRaw: async () => [] } as never, { resolveAllowedRouteIds: async () => null } as never));
+  const coordinator = new RieExecutionCoordinatorService();
   const releases = Array.from({ length: 20 }, () => deferred<void>());
-  const holders = releases.map((release) => service.runExpensiveQuery("hold", () => release.promise));
+  const holders = releases.map((release, index) => coordinator.runRequest(`holder-${index}`, () => coordinator.execute("hold", () => release.promise)));
   await delay(0);
 
   let cancelledExecuted = false;
   const controller = new AbortController();
-  const cancelled = service.runExpensiveQuery("cancelled", async () => { cancelledExecuted = true; }, { signal: controller.signal });
+  const cancelled = coordinator.runRequest("cancelled", () => coordinator.execute("cancelled", async () => { cancelledExecuted = true; }, { signal: controller.signal }));
   controller.abort();
-  await assert.rejects(() => cancelled, { name: "RieQueryQueueCancelledError" });
+  await assert.rejects(() => cancelled, { name: "RieExecutionQueueCancelledError" });
 
   let timedOutExecuted = false;
   await assert.rejects(
-    () => service.runExpensiveQuery("timed-out", async () => { timedOutExecuted = true; }, { timeoutMs: 5 }),
-    { name: "RieQueryQueueTimeoutError" },
+    () => coordinator.runRequest("timed-out", () => coordinator.execute("timed-out", async () => { timedOutExecuted = true; }, { timeoutMs: 5 })),
+    { name: "RieExecutionQueueTimeoutError" },
   );
 
   releases.forEach(({ resolve }) => resolve());
   await Promise.all(holders);
   let postCancellationExecuted = false;
-  await service.runExpensiveQuery("post-cancellation", async () => { postCancellationExecuted = true; });
+  await coordinator.runRequest("post-cancellation", () => coordinator.execute("post-cancellation", async () => { postCancellationExecuted = true; }));
   assert.equal(cancelledExecuted, false);
   assert.equal(timedOutExecuted, false);
   assert.equal(postCancellationExecuted, true);
 });
 
 test("default RIE queue timeout permits a waiter held beyond the former 10-second limit", async () => {
-  const service = internalSemaphore(new RieScalableQueryService({ $queryRaw: async () => [] } as never, { resolveAllowedRouteIds: async () => null } as never));
+  const coordinator = new RieExecutionCoordinatorService();
   const releases = Array.from({ length: 20 }, () => deferred<void>());
-  const holders = releases.map((release) => service.runExpensiveQuery("hold", () => release.promise));
+  const holders = releases.map((release, index) => coordinator.runRequest(`long-holder-${index}`, () => coordinator.execute("hold", () => release.promise)));
   await delay(0);
 
   let executed = false;
-  const queued = service.runExpensiveQuery("default-timeout", async () => { executed = true; });
+  const queued = coordinator.runRequest("default-timeout", () => coordinator.execute("default-timeout", async () => { executed = true; }));
   const releaseTimer = setTimeout(() => releases.forEach(({ resolve }) => resolve()), 10_100);
   try {
     await queued;
@@ -110,12 +105,12 @@ test("default RIE queue timeout permits a waiter held beyond the former 10-secon
 });
 
 test("process-wide RIE semaphore and business work are fail-open when telemetry throws", async () => {
-  const service = internalSemaphore(new RieScalableQueryService({ $queryRaw: async () => [] } as never, { resolveAllowedRouteIds: async () => null } as never));
+  const coordinator = new RieExecutionCoordinatorService();
   const restore = setRieTelemetryTestSink(() => { throw new Error("expected telemetry failure"); });
   try {
     let executed = false;
     await runWithRieRequestContext({ traceId: "telemetry-failure", feature: "test", action: "test", routeTemplate: "/test" }, () =>
-      service.runExpensiveQuery("logging-error", async () => { executed = true; }),
+      coordinator.execute("logging-error", async () => { executed = true; }),
     );
     assert.equal(executed, true);
   } finally {

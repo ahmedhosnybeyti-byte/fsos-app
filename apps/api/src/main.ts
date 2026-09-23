@@ -14,11 +14,13 @@ import { redactRequestTraceUrl } from "./common/security/redact-request-trace-ur
 import { API_VERSION_PREFIX } from "@field-sales-os/schemas";
 import { DrainingService, rejectNewWorkWhileDraining } from "./common/runtime/draining.service";
 import { classifyRieHttpAction, completeRieRequest, markRieRequestCancelled, runWithRieRequestContext } from "./common/observability/rie-observability";
+import { RieExecutionCoordinatorService } from "./modules/rie/rie-execution-coordinator.service";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, { cors: false });
   const config = app.get(AppConfigService).values;
   const draining = app.get(DrainingService);
+  const rieExecutionCoordinator = app.get(RieExecutionCoordinatorService);
 
   // Mark draining before Nest begins closing its HTTP server. The middleware
   // below rejects work arriving on existing keep-alive connections while
@@ -57,7 +59,7 @@ async function bootstrap() {
   app.use((req: import("express").Request, res: import("express").Response, next: () => void) => {
     const traceId = randomUUID();
     const action = classifyRieHttpAction(req.method, req.path);
-    runWithRieRequestContext({ traceId, ...action }, () => {
+    runWithRieRequestContext({ traceId, ...action }, () => rieExecutionCoordinator.runRequest(traceId, () => {
       (req as import("express").Request & { requestId?: string; traceId?: string }).requestId = traceId;
       (req as import("express").Request & { requestId?: string; traceId?: string }).traceId = traceId;
       res.setHeader("X-Request-Id", traceId);
@@ -92,7 +94,7 @@ async function bootstrap() {
       res.once("close", finalize);
 
       next();
-    });
+    }));
   });
 
   // "health" is excluded so Railway's healthcheck / uptime monitoring can

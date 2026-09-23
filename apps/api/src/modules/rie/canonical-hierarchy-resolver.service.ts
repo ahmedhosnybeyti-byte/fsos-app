@@ -4,6 +4,7 @@ import { normalizeHeader, type DatasetRow, type HierarchyFilterUser } from "../f
 import { ENTITY_DATASET_TYPE_MAP } from "./excel-entity-provider.mapping";
 import { observeHierarchyResolution } from "../../common/observability/rie-observability";
 import { RieRequestPlannerService } from "./rie-request-planner.service";
+import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 
 // Routes and Employees are read from the active PostgreSQL RIE
 // materialization.  Excel is ingestion-only: hierarchy resolution must never
@@ -63,16 +64,21 @@ const ROUTE_ASSIGNMENT_COLUMNS = ["SalesRepID", "SupervisorID", "ManagerID"] as 
 export class CanonicalHierarchyResolverService {
   private readonly rawCache = new Map<string, HierarchyRawCacheEntry>();
 
-  constructor(private readonly prisma: PrismaService, private readonly requestPlanner?: RieRequestPlannerService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly requestPlanner?: RieRequestPlannerService,
+    private readonly executionCoordinator: RieExecutionCoordinatorService = new RieExecutionCoordinatorService(),
+  ) {}
 
   // Returns the set of Route IDs (lowercased/trimmed) this user may see, or
   // null if the role isn't route-scoped (caller treats null as "no
   // route-based restriction applies" — see applyHierarchyFilter).
   async resolveAllowedRouteIds(companyId: string, user: HierarchyFilterUser): Promise<Set<string> | null> {
     const resolve = () => observeHierarchyResolution({ companyId, roleCode: user.roleCode, hasHierarchy: true }, () => this.resolveAllowedRouteIdsInternal(companyId, user));
-    return this.requestPlanner
+    const plannedResolve = () => this.requestPlanner
       ? this.requestPlanner.resolveHierarchy(companyId, user.roleCode, user.email, resolve)
       : resolve();
+    return this.executionCoordinator.resolveHierarchy(companyId, user.roleCode, user.email, plannedResolve);
   }
 
   private async resolveAllowedRouteIdsInternal(companyId: string, user: HierarchyFilterUser): Promise<Set<string> | null> {
@@ -84,8 +90,8 @@ export class CanonicalHierarchyResolverService {
     // used for every other scoped role. This remains fail-closed: an absent or
     // unmatched employee/route mapping still grants no data.
     if (user.roleCode === "SALES_REP") {
-      const identity = await this.prisma.user.findFirst({ where: { companyId, email: user.email.trim().toLowerCase() }, select: { id: true } });
-      const assignment = identity ? await this.prisma.userRouteAssignment.findFirst({ where: { companyId, userId: identity.id, endedAt: null }, select: { routeId: true } }) : null;
+      const identity = await this.postgres("hierarchy.user", () => this.prisma.user.findFirst({ where: { companyId, email: user.email.trim().toLowerCase() }, select: { id: true } }));
+      const assignment = identity ? await this.postgres("hierarchy.userRouteAssignment", () => this.prisma.userRouteAssignment.findFirst({ where: { companyId, userId: identity.id, endedAt: null }, select: { routeId: true } })) : null;
       if (assignment) return new Set([assignment.routeId.trim().toLowerCase()]);
 
       const [routes, employees] = await Promise.all([this.fetchRawEntityRows("Routes", companyId), this.fetchRawEntityRows("Employees", companyId)]);
@@ -215,7 +221,7 @@ export class CanonicalHierarchyResolverService {
     const mapping = ENTITY_DATASET_TYPE_MAP[entityName];
     if (!mapping) return null;
 
-    const allFiles = await this.prisma.file.findMany({ where: { companyId, isActive: true, status: "READY", datasetTypeConfirmed: true }, select: { id: true, datasetType: true }, orderBy: { createdAt: "desc" } });
+    const allFiles = await this.postgres("hierarchy.files", () => this.prisma.file.findMany({ where: { companyId, isActive: true, status: "READY", datasetTypeConfirmed: true }, select: { id: true, datasetType: true }, orderBy: { createdAt: "desc" } }));
 
     const matchingFiles = allFiles.filter((f: { datasetType: string }) => f.datasetType === mapping.datasetType);
     if (matchingFiles.length === 0) return null;
@@ -259,10 +265,10 @@ export class CanonicalHierarchyResolverService {
   }
 
   private async readMaterializedEntityRows(entityName: string, companyId: string, fileIds: string[]): Promise<{ rows: DatasetRow[]; headers: string[] } | null> {
-    const versions = await this.prisma.rieDatasetVersion.findMany({ where: { companyId, entityName, isActive: true, sourceFileId: { in: fileIds } }, select: { id: true, sourceFileId: true } });
+    const versions = await this.postgres("hierarchy.datasetVersions", () => this.prisma.rieDatasetVersion.findMany({ where: { companyId, entityName, isActive: true, sourceFileId: { in: fileIds } }, select: { id: true, sourceFileId: true } }));
     if (versions.length !== fileIds.length) return null;
     const versionByFile = new Map(versions.map((version) => [version.sourceFileId, version.id]));
-    const sourceRows = await this.prisma.rieEntityRow.findMany({ where: { companyId, entityName, datasetVersionId: { in: versions.map((version) => version.id) } }, select: { datasetVersionId: true, entityKey: true, data: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] });
+    const sourceRows = await this.postgres("hierarchy.entityRows", () => this.prisma.rieEntityRow.findMany({ where: { companyId, entityName, datasetVersionId: { in: versions.map((version) => version.id) } }, select: { datasetVersionId: true, entityKey: true, data: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] }));
     const rowsByVersion = new Map<string, DatasetRow[]>();
     for (const row of sourceRows) rowsByVersion.set(row.datasetVersionId, [...(rowsByVersion.get(row.datasetVersionId) ?? []), row.data as DatasetRow]);
     const rows: DatasetRow[] = [];
@@ -279,6 +285,10 @@ export class CanonicalHierarchyResolverService {
     }
     const headers = rows.length ? Object.keys(rows[0] as object) : [];
     return { rows, headers };
+  }
+
+  private postgres<T>(operation: string, execute: () => Promise<T>): Promise<T> {
+    return this.executionCoordinator.execute(operation, execute);
   }
 }
 

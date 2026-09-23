@@ -205,7 +205,7 @@ test("management stock alignment keeps Route A's shortage despite Route B's surp
   assert.match(statement!.strings.join("?"), /category_alignment/);
 });
 
-test("management Smart Loading bundle shares scoped foundations and acquires one expensive permit", async () => {
+test("management Smart Loading bundle shares scoped foundations and admits each PostgreSQL execution", async () => {
   const expected = {
     routeProductStaleness: [{
       productCode: "sku-a", quantity: 17, lastSaleDate: "2026-08-01", isStale: true,
@@ -253,8 +253,8 @@ test("management Smart Loading bundle shares scoped foundations and acquires one
   }
 
   assert.deepEqual(result, expected);
-  assert.equal(rawQueryCount, 2, "metadata and bundle SQL should execute under the same permit");
-  assert.deepEqual(acquiredOperations, ["queryManagementSmartLoadingBundle"]);
+  assert.equal(rawQueryCount, 2, "metadata and bundle SQL should both execute");
+  assert.deepEqual(acquiredOperations, ["activeVersionCounts.sql", "queryManagementSmartLoadingBundle.sql"]);
   const sql = statement?.strings?.join("?") ?? "";
   assert.match(sql, /stock_by_route_product AS MATERIALIZED/);
   assert.equal((sql.match(/stock_by_route_product AS MATERIALIZED/g) ?? []).length, 1);
@@ -276,7 +276,7 @@ test("management Smart Loading bundle shares scoped foundations and acquires one
   assert.ok(statement?.values?.includes("2026-08-10"));
 });
 
-test("management heavy Promise section acquires exactly two RIE permits", async () => {
+test("management heavy Promise section admits metadata and fact SQL at the actual execution boundary", async () => {
   const acquiredOperations: string[] = [];
   const query = new RieScalableQueryService({
     $queryRaw: async (sql: { strings?: readonly string[] }) => {
@@ -318,7 +318,12 @@ test("management heavy Promise section acquires exactly two RIE permits", async 
     restore();
   }
 
-  assert.deepEqual(acquiredOperations.sort(), ["queryManagementActiveVehicleRoutes", "queryManagementSmartLoadingBundle"]);
+  assert.deepEqual(acquiredOperations.sort(), [
+    "activeVersionCounts.sql",
+    "activeVersionCounts.sql",
+    "queryManagementActiveVehicleRoutes.sql",
+    "queryManagementSmartLoadingBundle.sql",
+  ]);
 });
 
 test("management session uses the unified bundle and never calls the three compatibility methods", async () => {

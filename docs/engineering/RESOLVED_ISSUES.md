@@ -40,6 +40,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Commit:** `3224a36987328765d583cd6d612e40b858a92a5c`.
 - **Regression-prevention rule:** Migrate a feature through `RieFacade.runPlannedRequest()` before adding concurrent RIE work. Never place fact rows in the planner cache, bypass PostgreSQL scoping, or raise the global RIE semaphore as a substitute for a request budget.
 
+## RIE authoritative PostgreSQL execution coordination
+
+- **Symptom/evidence:** The process-wide RIE limit was 20, but admission was operation-scoped and incomplete. One HTTP request could submit 3–6 or more PostgreSQL executions concurrently, while direct FSOS 360, nested metadata, pagination, and several Prisma-backed RIE reads did not all share the same authoritative boundary.
+- **Root cause:** The semaphore lived in one query service and wrapped selected high-level operations. It could therefore be acquired before metadata/SQL construction and held through Node work, while other RIE PostgreSQL paths bypassed it entirely.
+- **Fix:** Add one process-wide `RieExecutionCoordinatorService`. Every RIE-owned PostgreSQL execution now passes through its exact execution boundary; the global limit remains 20, each HTTP request has a one-execution serial gate and a 24-execution budget, nested calls are re-entrant, and SQL preparation/result processing remain outside the global lease. Request-local hierarchy and active-version lookups use single-flight reuse.
+- **Commit:** This local commit (`codex/rie-execution-coordinator`).
+- **Regression-prevention rule:** Never call PostgreSQL from an RIE path outside the coordinator. Build SQL before admission, release the lease as soon as Prisma retrieval settles, count pagination and metadata as executions, and do not wrap hierarchy resolution, result shaping, or response composition in a PostgreSQL permit. Keep the process limit at 20 unless separate measured evidence justifies another change.
+
 ## Smart Loading — `queryManagementStockAlignment`
 
 - **Symptom:** Slow/heavy query execution and materialization pressure.
@@ -64,9 +72,9 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 
 - **Symptom/evidence:** One management session independently ran route/product staleness, stock alignment, and vehicle products. Those three results consumed four expensive permits because staleness also acquired one for active-version metadata. The surrounding active-route read added another expected acquisition (and, in the generic implementation, one additional logged metadata acquisition).
 - **Root cause:** The three operations rebuilt the same scoped Van Inventory foundation, while stock alignment and vehicle products also rebuilt the same fixed-window Invoice/Invoice Item sales aggregate.
-- **Fix:** A management-only bundle now resolves route permission once, obtains active-version metadata through an ungated helper while holding one outer permit, shares latest inventory/stock and fixed-window sales CTEs, and retains a separate through-target-date sales branch for staleness. The management active-route read is likewise coordinated under one permit. PostgreSQL still owns newest-wins resolution, filtering, joins, Route × Product aggregation, and compact JSON result construction.
+- **Fix:** A management-only bundle resolves route permission once, shares latest inventory/stock and fixed-window sales CTEs, and retains a separate through-target-date sales branch for staleness. The bundle remains one fact SQL execution; active-version metadata is separately admitted at its actual PostgreSQL boundary by the systemic RIE coordinator. PostgreSQL still owns newest-wins resolution, filtering, joins, Route × Product aggregation, and compact JSON result construction.
 - **Commit:** `c4f6e44`.
-- **Regression-prevention rule:** Keep the three Smart Loading management calculations behind one bundle permit; never call the public gated active-version helper from inside a held permit, merge the distinct staleness/window horizons, or move Route × Product facts into Node.
+- **Regression-prevention rule:** Keep the three Smart Loading management calculations in one bundle SQL, but do not hold its permit across metadata resolution or SQL construction. Never merge the distinct staleness/window horizons or move Route × Product facts into Node.
 
 ## Decision Analytics Studio — duplicate Visits scan
 

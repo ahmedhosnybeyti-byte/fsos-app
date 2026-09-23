@@ -6,6 +6,7 @@ import {
   recordRieRequestPlanOperation,
   recordRieRequestPlanStarted,
 } from "../../common/observability/rie-observability";
+import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 
 /**
  * A deliberately small, request-scoped orchestration layer for RIE.
@@ -61,6 +62,8 @@ const DEFAULT_MAX_OPERATIONS = 24;
 
 @Injectable()
 export class RieRequestPlannerService {
+  constructor(private readonly executionCoordinator: RieExecutionCoordinatorService = new RieExecutionCoordinatorService()) {}
+
   runPlan<T>(options: RieRequestPlanOptions, execute: () => Promise<T>): Promise<T> {
     // Nested consumers join the same action budget rather than silently
     // creating a second request plan with a separate fan-out allowance.
@@ -71,7 +74,7 @@ export class RieRequestPlannerService {
     if (!Number.isInteger(maxOperations) || maxOperations < 1) throw new Error("RIE request plan requires a positive operation budget.");
     const plan = new RequestPlan(options.name, maxConcurrentOperations, maxOperations);
     recordRieRequestPlanStarted(options.name, maxConcurrentOperations, maxOperations);
-    return storage.run(plan, execute);
+    return this.executionCoordinator.runWithBudget(options.name, maxOperations, () => storage.run(plan, execute));
   }
 
   execute<T>(operation: string, execute: () => Promise<T>): Promise<T> {

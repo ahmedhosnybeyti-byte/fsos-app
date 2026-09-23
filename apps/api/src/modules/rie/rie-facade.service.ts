@@ -22,6 +22,7 @@ import type { Fsos360ResolvedContext } from "../decision-analytics-studio/fsos-3
 import type { RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRieLogicalOperation, observeRiePostgres, recordActiveVersionResolution, scopeMetadata } from "../../common/observability/rie-observability";
 import { RieRequestPlannerService, type RieRequestPlanOptions } from "./rie-request-planner.service";
+import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 
 /**
  * The smallest sales grain used by analytics: an invoice line, or the same
@@ -79,6 +80,7 @@ export class RieFacade {
     private readonly scalableQuery: RieScalableQueryService,
     private readonly fsos360Query?: RieFsos360QueryService,
     private readonly requestPlanner?: RieRequestPlannerService,
+    private readonly executionCoordinator: RieExecutionCoordinatorService = new RieExecutionCoordinatorService(),
   ) {}
 
   /**
@@ -275,14 +277,14 @@ export class RieFacade {
     options: { fromTime?: number; toTime?: number; aggregate?: boolean },
   ): Promise<RieInvoiceSalesRow[]> {
     const companyId = context.companyId;
-    const files = await this.filesService.listConfirmedActiveForCompany(companyId);
+    const files = await this.postgres("getInvoiceSalesRows.files", () => this.filesService.listConfirmedActiveForCompany(companyId));
     const invoiceFiles = files.filter((file) => file.datasetType === ENTITY_DATASET_TYPE_MAP.Invoices!.datasetType);
     const itemFiles = files.filter((file) => file.datasetType === ENTITY_DATASET_TYPE_MAP["Invoice Items"]!.datasetType);
     if (invoiceFiles.length === 0 || itemFiles.length === 0) return [];
-    const activeVersions = await this.prisma.rieDatasetVersion.findMany({
+    const activeVersions = await this.postgres("getInvoiceSalesRows.versions", () => this.prisma.rieDatasetVersion.findMany({
       where: { companyId, entityName: { in: ["Invoices", "Invoice Items"] }, isActive: true, sourceFileId: { in: [...invoiceFiles, ...itemFiles].map((file) => file.id) } },
       select: { entityName: true, sourceFileId: true },
-    });
+    }));
     recordActiveVersionResolution(2, activeVersions.length);
     const versionKey = new Set(activeVersions.map((version) => `${version.entityName}:${version.sourceFileId}`));
     if (invoiceFiles.some((file) => !versionKey.has(`Invoices:${file.id}`)) || itemFiles.some((file) => !versionKey.has(`Invoice Items:${file.id}`))) return [];
@@ -305,7 +307,7 @@ export class RieFacade {
       ? Prisma.sql`0`
       : Prisma.sql`COALESCE(NULLIF(BTRIM(item."data" ->> 'LineNo'), '')::double precision, 0)`;
     const groupBy = options.aggregate ? Prisma.sql`1, 3, 4, 5` : Prisma.sql`1, 2, 3, 4, 5`;
-    const rows = await observeRiePostgres("getInvoiceSalesRows.sql", fingerprintRieQueryShape({ kind: "specialized", operation: "getInvoiceSalesRows", aggregate: Boolean(options.aggregate), hasFrom: options.fromTime !== undefined, hasTo: options.toTime !== undefined }), "direct", () => this.prisma.$queryRaw<Array<{ invoiceNo: string; lineNo: number; time: Date | null; customerCode: string; productCode: string; amount: number }>>(Prisma.sql`
+    const statement = Prisma.sql`
       WITH selected_invoice_files("source_file_id", precedence) AS (VALUES ${Prisma.join(invoiceFileValues)}),
       invoice_rows AS (
         SELECT r."data", selected_invoice_files.precedence
@@ -335,7 +337,8 @@ export class RieFacade {
         ${routeFilter("inv")} ${routeFilter("item")}
         ${dates.length ? Prisma.sql`AND ${Prisma.join(dates, ' AND ')}` : Prisma.empty}
       GROUP BY ${groupBy}
-    `));
+    `;
+    const rows = await this.executionCoordinator.execute("getInvoiceSalesRows.sql", () => observeRiePostgres("getInvoiceSalesRows.sql", fingerprintRieQueryShape({ kind: "specialized", operation: "getInvoiceSalesRows", aggregate: Boolean(options.aggregate), hasFrom: options.fromTime !== undefined, hasTo: options.toTime !== undefined }), "semaphore", () => this.prisma.$queryRaw<Array<{ invoiceNo: string; lineNo: number; time: Date | null; customerCode: string; productCode: string; amount: number }>>(statement)));
     return rows.map((row) => ({ ...row, lineNo: Number(row.lineNo), time: row.time ? row.time.getTime() : null, amount: Number(row.amount) }));
   }
 
@@ -344,11 +347,11 @@ export class RieFacade {
   }
 
   private async hasInvoiceSalesSourcesUnobserved(context: EntityQueryContext): Promise<boolean> {
-    const files = await this.filesService.listConfirmedActiveForCompany(context.companyId);
+    const files = await this.postgres("hasInvoiceSalesSources.files", () => this.filesService.listConfirmedActiveForCompany(context.companyId));
     const invoiceFiles = files.filter((file) => file.datasetType === ENTITY_DATASET_TYPE_MAP.Invoices!.datasetType);
     const itemFiles = files.filter((file) => file.datasetType === ENTITY_DATASET_TYPE_MAP["Invoice Items"]!.datasetType);
     if (invoiceFiles.length === 0 || itemFiles.length === 0) return false;
-    const versions = await this.prisma.rieDatasetVersion.findMany({ where: { companyId: context.companyId, entityName: { in: ["Invoices", "Invoice Items"] }, isActive: true, sourceFileId: { in: [...invoiceFiles, ...itemFiles].map((file) => file.id) } }, select: { entityName: true, sourceFileId: true } });
+    const versions = await this.postgres("hasInvoiceSalesSources.versions", () => this.prisma.rieDatasetVersion.findMany({ where: { companyId: context.companyId, entityName: { in: ["Invoices", "Invoice Items"] }, isActive: true, sourceFileId: { in: [...invoiceFiles, ...itemFiles].map((file) => file.id) } }, select: { entityName: true, sourceFileId: true } }));
     recordActiveVersionResolution(2, versions.length);
     const active = new Set(versions.map((version) => `${version.entityName}:${version.sourceFileId}`));
     return invoiceFiles.every((file) => active.has(`Invoices:${file.id}`)) && itemFiles.every((file) => active.has(`Invoice Items:${file.id}`));
@@ -360,7 +363,7 @@ export class RieFacade {
   }
 
   private async hasCanonicalEntitySourcesUnobserved(context: EntityQueryContext, entityNames: readonly string[]): Promise<boolean> {
-    const files = await this.filesService.listConfirmedActiveForCompany(context.companyId);
+    const files = await this.postgres("hasCanonicalEntitySources.files", () => this.filesService.listConfirmedActiveForCompany(context.companyId));
     const expected = entityNames.flatMap((entityName) => {
       const mapping = ENTITY_DATASET_TYPE_MAP[entityName];
       return mapping?.datasetType ? [{ entityName, datasetType: mapping.datasetType }] : [];
@@ -368,13 +371,17 @@ export class RieFacade {
     if (expected.length !== entityNames.length) return false;
     const fileIds = files.filter((file) => expected.some((item) => item.datasetType === file.datasetType)).map((file) => file.id);
     if (!fileIds.length) return false;
-    const versions = await this.prisma.rieDatasetVersion.findMany({ where: { companyId: context.companyId, entityName: { in: [...entityNames] }, isActive: true, sourceFileId: { in: fileIds } }, select: { entityName: true, sourceFileId: true } });
+    const versions = await this.postgres("hasCanonicalEntitySources.versions", () => this.prisma.rieDatasetVersion.findMany({ where: { companyId: context.companyId, entityName: { in: [...entityNames] }, isActive: true, sourceFileId: { in: fileIds } }, select: { entityName: true, sourceFileId: true } }));
     recordActiveVersionResolution(entityNames.length, versions.length);
     const active = new Set(versions.map((version) => `${version.entityName}:${version.sourceFileId}`));
     return expected.every(({ entityName, datasetType }) => {
       const entityFiles = files.filter((file) => file.datasetType === datasetType);
       return entityFiles.length > 0 && entityFiles.every((file) => active.has(`${entityName}:${file.id}`));
     });
+  }
+
+  private postgres<T>(operation: string, execute: () => Promise<T>): Promise<T> {
+    return this.executionCoordinator.execute(operation, execute);
   }
 
   // ------------------------------------------------------------------

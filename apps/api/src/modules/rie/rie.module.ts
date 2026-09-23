@@ -11,6 +11,7 @@ import { RieFacade } from "./rie-facade.service";
 import { RieScalableQueryService } from "./scalable-query.service";
 import { RieFsos360QueryService } from "./fsos-360-query.service";
 import { RieRequestPlannerService } from "./rie-request-planner.service";
+import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 
 // RIE module — Relationship Intelligence Engine.
 //
@@ -41,6 +42,7 @@ import { RieRequestPlannerService } from "./rie-request-planner.service";
     NavigationEngineService,
     QueryExecutionEngineService,
     BusinessRulesEngineService,
+    RieExecutionCoordinatorService,
     RieRequestPlannerService,
     RieScalableQueryService,
     RieFsos360QueryService,
@@ -57,6 +59,7 @@ import { RieRequestPlannerService } from "./rie-request-planner.service";
     NavigationEngineService,
     QueryExecutionEngineService,
     BusinessRulesEngineService,
+    RieExecutionCoordinatorService,
     RieScalableQueryService,
     // RieFacade is the recommended surface for future consuming Engines —
     // the other exports remain available for callers that need

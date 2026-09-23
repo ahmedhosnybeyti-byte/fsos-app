@@ -15,6 +15,7 @@ import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { IMPORT_TEMPLATES } from "../import-validation/import-templates.data";
 import { serializeExcelParse } from "../../common/excel-parse-queue";
+import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 
 // Official primary key per Canonical Entity, straight from the Import
 // Templates — powers the incremental-update merge in getRecords: when a
@@ -183,6 +184,7 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
     private readonly filesService: FilesService,
     private readonly hierarchyResolver: CanonicalHierarchyResolverService,
     private readonly prisma: PrismaService,
+    private readonly executionCoordinator: RieExecutionCoordinatorService = new RieExecutionCoordinatorService(),
   ) {}
 
   async isAvailable(entityName: string, companyId: string): Promise<boolean> {
@@ -191,14 +193,14 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
     // an uploaded File — see class doc comment. Availability is simply
     // "does this company have any rows there".
     if (entityName === SALES_CALENDAR_ENTITY) {
-      const count = await this.prisma.salesCalendar.count({ where: { companyId } });
+      const count = await this.postgres("entityProvider.salesCalendar.count", () => this.prisma.salesCalendar.count({ where: { companyId } }));
       return count > 0;
     }
 
     if (!isEntityMapped(entityName)) return false;
     const mapping = ENTITY_DATASET_TYPE_MAP[entityName];
     if (!mapping) return false;
-    const files = await this.filesService.listConfirmedActiveForCompany(companyId);
+    const files = await this.postgres("entityProvider.files.available", () => this.filesService.listConfirmedActiveForCompany(companyId));
     return files.some((f: { datasetType: string }) => f.datasetType === mapping.datasetType);
   }
 
@@ -227,7 +229,7 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
 
     let allFiles;
     try {
-      allFiles = await this.filesService.listConfirmedActiveForCompany(options.companyId);
+      allFiles = await this.postgres("entityProvider.files.records", () => this.filesService.listConfirmedActiveForCompany(options.companyId));
     } catch (err) {
       this.logger.error(`Failed to list files for company ${options.companyId}: ${(err as Error).message}`);
       return {
@@ -343,7 +345,7 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
     matchingFiles: { id: string }[],
     warnings: string[],
   ): Promise<EntityQueryResult> {
-    const versions = await this.prisma.rieDatasetVersion.findMany({
+    const versions = await this.postgres("entityProvider.materialized.versions", () => this.prisma.rieDatasetVersion.findMany({
       where: {
         companyId: options.companyId,
         entityName,
@@ -351,7 +353,7 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
         sourceFileId: { in: matchingFiles.map((file) => file.id) },
       },
       select: { id: true, sourceFileId: true },
-    });
+    }));
     const versionByFileId = new Map(versions.map((version) => [version.sourceFileId, version]));
     if (versionByFileId.size !== matchingFiles.length) {
       return {
@@ -401,7 +403,7 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       }
     }
     const whereClause = clauses.length ? Prisma.sql`AND ${Prisma.join(clauses, " AND ")}` : Prisma.empty;
-    const rows = await this.prisma.$queryRaw<Array<{ data: DatasetRow }>>(Prisma.sql`
+    const rows = await this.postgresRaw<Array<{ data: DatasetRow }>>("entityProvider.materialized.rows", () => Prisma.sql`
       WITH selected_files("source_file_id", precedence) AS (VALUES ${Prisma.join(selectedFiles)}),
       active_versions AS (
         SELECT v.id, selected_files.precedence
@@ -436,16 +438,16 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
     excelRows: DatasetRow[];
   }): Promise<void> {
     const { companyId, matchingFileIds, headers, routeAllowedValues, filters, limit, excelRows } = params;
-    const versions = await this.prisma.rieDatasetVersion.findMany({
+    const versions = await this.postgres("entityProvider.customersShadow.versions", () => this.prisma.rieDatasetVersion.findMany({
       where: { companyId, entityName: "Customers", isActive: true, sourceFileId: { in: matchingFileIds } },
       select: { id: true, sourceFileId: true },
-    });
+    }));
     const shadowRowsByVersionId = new Map<string, DatasetRow[]>();
-    const versionRows = await this.prisma.rieEntityRow.findMany({
+    const versionRows = await this.postgres("entityProvider.customersShadow.rows", () => this.prisma.rieEntityRow.findMany({
       where: { datasetVersionId: { in: versions.map((version) => version.id) } },
       select: { datasetVersionId: true, data: true },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    });
+    }));
     for (const row of versionRows) {
       const rows = shadowRowsByVersionId.get(row.datasetVersionId) ?? [];
       rows.push(row.data as DatasetRow);
@@ -487,15 +489,15 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
     excelRows: DatasetRow[];
   }): Promise<void> {
     const { entityName, companyId, matchingFileIds, headers, routeAllowedValues, filters, limit, excelRows } = params;
-    const versions = await this.prisma.rieDatasetVersion.findMany({
+    const versions = await this.postgres("entityProvider.invoiceShadow.versions", () => this.prisma.rieDatasetVersion.findMany({
       where: { companyId, entityName, isActive: true, sourceFileId: { in: matchingFileIds } },
       select: { id: true, sourceFileId: true },
-    });
-    const rows = await this.prisma.rieEntityRow.findMany({
+    }));
+    const rows = await this.postgres("entityProvider.invoiceShadow.rows", () => this.prisma.rieEntityRow.findMany({
       where: { datasetVersionId: { in: versions.map((version) => version.id) } },
       select: { datasetVersionId: true, data: true },
       orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    });
+    }));
     const rowsByVersion = new Map<string, DatasetRow[]>();
     for (const row of rows) rowsByVersion.set(row.datasetVersionId, [...(rowsByVersion.get(row.datasetVersionId) ?? []), row.data as DatasetRow]);
     const versionByFile = new Map(versions.map((version) => [version.sourceFileId, version]));
@@ -523,7 +525,7 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       && stableRows(excelRows) === stableRows(filtered);
     this.logger.log(`[${entityName}ShadowRead] ${pass ? "PASS" : "FAIL"}`);
     if (entityName === "Invoice Items") {
-      const invoices = await this.prisma.rieEntityRow.findMany({ where: { companyId, entityName: "Invoices", datasetVersion: { isActive: true } }, select: { entityKey: true } });
+      const invoices = await this.postgres("entityProvider.invoiceShadow.invoiceKeys", () => this.prisma.rieEntityRow.findMany({ where: { companyId, entityName: "Invoices", datasetVersion: { isActive: true } }, select: { entityKey: true } }));
       const invoiceKeys = new Set(invoices.map((invoice) => invoice.entityKey));
       this.logger.log(`[InvoiceRelationShadowRead] ${filtered.every((row) => invoiceKeys.has(String(row.InvoiceNo ?? "").trim())) ? "PASS" : "FAIL"}`);
     }
@@ -708,7 +710,7 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
 
     let rawRows;
     try {
-      rawRows = await this.prisma.salesCalendar.findMany({ where: { companyId: options.companyId } });
+      rawRows = await this.postgres("entityProvider.salesCalendar.rows", () => this.prisma.salesCalendar.findMany({ where: { companyId: options.companyId } }));
     } catch (err) {
       this.logger.error(`Failed to read Sales Calendar for company ${options.companyId}: ${(err as Error).message}`);
       return {
@@ -772,6 +774,14 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       fields: headers,
       warnings,
     };
+  }
+
+  private postgres<T>(operation: string, execute: () => Promise<T>): Promise<T> {
+    return this.executionCoordinator.execute(operation, execute);
+  }
+
+  private postgresRaw<T>(operation: string, prepare: () => Prisma.Sql): Promise<T> {
+    return this.executionCoordinator.executePrepared(operation, prepare, (statement) => this.prisma.$queryRaw<T>(statement));
   }
 }
 

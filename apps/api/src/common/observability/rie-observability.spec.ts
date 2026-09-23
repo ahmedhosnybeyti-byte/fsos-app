@@ -87,7 +87,7 @@ test("trace connects facade, hierarchy, semaphore and PostgreSQL with accurate c
   }
 });
 
-test("FSOS360 direct SQL is visible without acquiring the RIE semaphore", async () => {
+test("FSOS360 SQL is visible through the RIE execution coordinator", async () => {
   const events: Event[] = [];
   const restore = setRieTelemetryTestSink((event) => events.push({ ...event }), 1);
   try {
@@ -106,9 +106,9 @@ test("FSOS360 direct SQL is visible without acquiring the RIE semaphore", async 
     assert.ok(summary);
     assert.equal(summary.rieLogicalOperationCount, 1);
     assert.equal(summary.sqlOperationCount, 1);
-    assert.equal(summary.directSqlOperationCount, 1);
-    assert.equal(summary.semaphoreAcquisitionCount, 0);
-    assert.ok(events.some((event) => event.layer === "postgres" && event.operation === "fsos360.customerContext.sql" && event.governance === "direct"));
+    assert.equal(summary.directSqlOperationCount, 0);
+    assert.equal(summary.semaphoreAcquisitionCount, 1);
+    assert.ok(events.some((event) => event.layer === "postgres" && event.operation === "fsos360.customerContext.sql" && event.governance === "semaphore"));
     const serialized = JSON.stringify(events);
     assert.equal(serialized.includes("company-fsos-secret"), false);
     assert.equal(serialized.includes("customer-fsos-secret"), false);
