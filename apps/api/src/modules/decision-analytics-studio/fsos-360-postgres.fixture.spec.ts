@@ -15,13 +15,17 @@ export async function createPostgresFixture(context: Fsos360ResolvedContext, all
   await db.exec(`CREATE TABLE files(id text PRIMARY KEY, company_id text, created_at timestamptz, is_active boolean, status text, dataset_type_confirmed boolean);
     CREATE TABLE rie_dataset_versions(id text PRIMARY KEY, company_id text, entity_name text, source_file_id text, is_active boolean);
     CREATE TABLE rie_entity_rows(id text PRIMARY KEY, company_id text, entity_name text, dataset_version_id text, entity_key text, data jsonb, created_at timestamptz);
+    CREATE TABLE rie_canonical_entity_rows(id text PRIMARY KEY, company_id text, source_file_id text, entity_name text, entity_key text, precedence bigint, data jsonb, created_at timestamptz, updated_at timestamptz);
     CREATE INDEX ON rie_entity_rows(dataset_version_id);
+    CREATE INDEX ON rie_canonical_entity_rows(company_id, entity_name);
     CREATE INDEX ON rie_dataset_versions(company_id, entity_name, is_active);`);
   const upload = async (id: string, entity: string, rows: readonly Record<string, unknown>[], date = '2026-01-01', company = 'company-1', active = true, ready = true) => {
     await db.query(`INSERT INTO files VALUES ($1, $2, $3, $4, $5, true)`, [id, company, date, active, ready ? 'READY' : 'PROCESSING']);
     await db.query(`INSERT INTO rie_dataset_versions VALUES ($1, $2, $3, $1, true)`, [id, company, entity]);
     await db.query(`INSERT INTO rie_entity_rows SELECT $1 || '-' || n, $2, $3, $1, $1 || '-' || n, data,
       '2026-01-01'::timestamptz + n * interval '1 millisecond' FROM jsonb_array_elements($4::jsonb) WITH ORDINALITY r(data, n)`, [id, company, entity, JSON.stringify(rows)]);
+    await db.query(`INSERT INTO rie_canonical_entity_rows SELECT $1 || '-' || n, $2, $1, $3, $1 || '-' || n, 1, data,
+      '2026-01-01'::timestamptz + n * interval '1 millisecond', now() FROM jsonb_array_elements($4::jsonb) WITH ORDINALITY r(data, n)`, [id, company, entity, JSON.stringify(rows)]);
   };
   const datasets = { ...context.datasets,
     Customers: { records: [...context.customers.values()].map(c => ({ CustomerCode: c.code, CustomerName: c.name, City: c.city, BranchID: c.branchId, RouteID: c.routeId, Latitude: c.latitude, Longitude: c.longitude })) },

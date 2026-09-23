@@ -48,6 +48,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Commit:** This local commit (`codex/rie-execution-coordinator`).
 - **Regression-prevention rule:** Never call PostgreSQL from an RIE path outside the coordinator. Build SQL before admission, release the lease as soon as Prisma retrieval settles, count pagination and metadata as executions, and do not wrap hierarchy resolution, result shaping, or response composition in a PostgreSQL permit. Keep the process limit at 20 unless separate measured evidence justifies another change.
 
+## RIE canonical current-state reads
+
+- **Symptom/evidence:** The shared RIE active-row CTE was used by about 43 call sites and rebuilt newest-upload-wins at request time. Multi-version reads scanned active history, extracted JSONB business keys, ran precedence windows, and rejoined source rows before route/date/screen scope; direct invoice-sales, hierarchy, and entity-provider reads also consulted historical rows.
+- **Root cause:** `rie_canonical_entity_rows` existed, but its row-by-row upsert collapsed duplicate keys, skipped blank keys, and was not reconciled on replace/deactivate, so it could not safely replace the runtime historical merge.
+- **Fix:** Make immutable dataset versions the ingestion history and transactionally publish the exact current projection when file/version lifecycle changes. The projection preserves precedence, same-version duplicates, blank/null keys, partial-upload fallback, READY/active eligibility, and company isolation. All RIE record reads now scope `rie_canonical_entity_rows` directly; the historical merge remains only as a PostgreSQL parity oracle in tests.
+- **Commit:** This local commit.
+- **Regression-prevention rule:** Never reconstruct canonical newest-wins from `rie_dataset_versions`/`rie_entity_rows` in an RIE request. Materialize every accepted canonical upload first, publish current-state only at the READY/lifecycle boundary under the company/entity advisory lock, and prove any lifecycle change against the historical parity oracle before altering the read model.
+
 ## Smart Loading — `queryManagementStockAlignment`
 
 - **Symptom:** Slow/heavy query execution and materialization pressure.

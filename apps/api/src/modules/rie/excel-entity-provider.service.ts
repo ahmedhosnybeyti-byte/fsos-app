@@ -81,32 +81,6 @@ function boolToYesNo(value: boolean | null): string | null {
   return value ? "Yes" : "No";
 }
 
-function stableRows(rows: readonly unknown[]): string {
-  const serialize = (value: unknown): string => {
-    if (value instanceof Date) return JSON.stringify(value.toISOString());
-    if (typeof value === "number") return JSON.stringify(Number(value.toPrecision(15)));
-    if (Array.isArray(value)) return `[${value.map(serialize).join(",")}]`;
-    if (value !== null && typeof value === "object") {
-      return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${serialize((value as Record<string, unknown>)[key])}`).join(",")}}`;
-    }
-    return JSON.stringify(value);
-  };
-  return rows.map(serialize).sort().join("\n");
-}
-
-// Phase 2 verifies the customer fields defined by the import contract. This
-// ignores worksheet-only empty-cell representation while retaining every
-// business field served to Customers consumers.
-const CUSTOMERS_BASIC_FIELDS = [
-  "CustomerCode", "CustomerName", "RouteID", "VisitDay", "VisitSequence",
-  "Channel", "CustomerClass", "CustomerType", "Address", "City",
-  "Latitude", "Longitude", "Phone", "CommercialRegistration", "TaxNumber",
-  "PaymentTerms", "CreditLimit", "DefaultPriceListCode", "Status", "BranchID",
-] as const;
-
-function basicCustomerRows(rows: readonly DatasetRow[]): Record<string, unknown>[] {
-  return rows.map((row) => Object.fromEntries(CUSTOMERS_BASIC_FIELDS.map((field) => [field, row[field] ?? null])));
-}
 // ------------------------------------------------------------------
 // Parsed-dataset cache (2026-07-20, memory-explosion fix).
 //
@@ -307,21 +281,6 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       mergedRows = mergedRows.slice(0, options.limit);
     }
 
-    // Phase 2: Customers remains Excel-served. This detached verification
-    // reads the same active source files from the Postgres shadow and applies
-    // the already-resolved hierarchy scope, filters, and limit. It never
-    // affects this response or any consumer-facing read path.
-    if (entityName === "Customers") {
-      void this.compareCustomersShadow({
-        companyId: options.companyId,
-        matchingFileIds: matchingFiles.map((file) => file.id),
-        headers,
-        routeAllowedValues,
-        filters: options.filters,
-        limit: options.limit,
-        excelRows: mergedRows,
-      }).catch(() => this.logger.log("[CustomersShadowRead] FAIL"));
-    }
     return {
       entityName,
       available: true,
@@ -366,7 +325,6 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       };
     }
 
-    const primaryKey = ENTITY_PRIMARY_KEY.get(entityName)!;
     const template = IMPORT_TEMPLATES.find((candidate) => candidate.entity === entityName);
     const headers = template?.fields.map((field) => field.name) ?? [];
     const fieldByNormalizedName = new Map(headers.map((field) => [normalizeHeader(field), field]));
@@ -374,10 +332,7 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       ? await this.hierarchyResolver.resolveAllowedRouteIds(options.companyId, options.requestingUser)
       : null;
 
-    const selectedFiles = matchingFiles.map((file, precedence) => Prisma.sql`(${file.id}, ${precedence})`);
     const cell = (alias: string, field: string) => Prisma.sql`LOWER(BTRIM(COALESCE(${Prisma.raw(alias)}."data" ->> ${field}, '')))`;
-    const keyIsBlank = (alias: string) => Prisma.join(primaryKey.map((field) => Prisma.sql`BTRIM(COALESCE(${Prisma.raw(alias)}."data" ->> ${field}, '')) = ''`), " OR ");
-    const sameKey = Prisma.join(primaryKey.map((field) => Prisma.sql`${cell("r", field)} = ${cell("newer", field)}`), " AND ");
     const clauses: Prisma.Sql[] = [];
     const routeField = fieldByNormalizedName.get(normalizeHeader("RouteID"));
     if (routeAllowedValues && routeField) {
@@ -404,18 +359,14 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
     }
     const whereClause = clauses.length ? Prisma.sql`AND ${Prisma.join(clauses, " AND ")}` : Prisma.empty;
     const rows = await this.postgresRaw<Array<{ data: DatasetRow }>>("entityProvider.materialized.rows", () => Prisma.sql`
-      WITH selected_files("source_file_id", precedence) AS (VALUES ${Prisma.join(selectedFiles)}),
-      active_versions AS (
-        SELECT v.id, selected_files.precedence
-        FROM "rie_dataset_versions" v JOIN selected_files ON selected_files."source_file_id" = v."source_file_id"
-        WHERE v."company_id" = ${options.companyId} AND v."entity_name" = ${entityName} AND v."is_active" = TRUE
-      )
-      SELECT r."data" FROM "rie_entity_rows" r JOIN active_versions active ON active.id = r."dataset_version_id"
-      WHERE (${keyIsBlank("r")} OR NOT EXISTS (
-        SELECT 1 FROM "rie_entity_rows" newer JOIN active_versions newer_active ON newer_active.id = newer."dataset_version_id"
-        WHERE newer_active.precedence < active.precedence AND NOT (${keyIsBlank("newer")}) AND ${sameKey}
-      )) ${whereClause}
-      ORDER BY active.precedence ASC, r."created_at" ASC, r.id ASC
+      SELECT r."data"
+      FROM "rie_canonical_entity_rows" r
+      INNER JOIN "files" source_file ON source_file.id = r."source_file_id"
+      WHERE r."company_id" = ${options.companyId}
+        AND r."entity_name" = ${entityName}
+        AND r."source_file_id" IN (${Prisma.join(matchingFiles.map((file) => file.id))})
+        ${whereClause}
+      ORDER BY source_file."created_at" DESC, r."created_at" ASC, r.id ASC
       LIMIT ${options.limit ?? 2147483647}
     `);
 
@@ -426,109 +377,6 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       fields: headers,
       warnings,
     };
-  }
-
-  private async compareCustomersShadow(params: {
-    companyId: string;
-    matchingFileIds: string[];
-    headers: string[];
-    routeAllowedValues: Set<string> | null;
-    filters: readonly EntityFieldFilter[] | undefined;
-    limit: number | undefined;
-    excelRows: DatasetRow[];
-  }): Promise<void> {
-    const { companyId, matchingFileIds, headers, routeAllowedValues, filters, limit, excelRows } = params;
-    const versions = await this.postgres("entityProvider.customersShadow.versions", () => this.prisma.rieDatasetVersion.findMany({
-      where: { companyId, entityName: "Customers", isActive: true, sourceFileId: { in: matchingFileIds } },
-      select: { id: true, sourceFileId: true },
-    }));
-    const shadowRowsByVersionId = new Map<string, DatasetRow[]>();
-    const versionRows = await this.postgres("entityProvider.customersShadow.rows", () => this.prisma.rieEntityRow.findMany({
-      where: { datasetVersionId: { in: versions.map((version) => version.id) } },
-      select: { datasetVersionId: true, data: true },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    }));
-    for (const row of versionRows) {
-      const rows = shadowRowsByVersionId.get(row.datasetVersionId) ?? [];
-      rows.push(row.data as DatasetRow);
-      shadowRowsByVersionId.set(row.datasetVersionId, rows);
-    }
-    const versionByFileId = new Map(versions.map((version) => [version.sourceFileId, version]));
-    const shadowRows: DatasetRow[] = [];
-    const seenCustomerCodes = new Set<string>();
-    for (const fileId of matchingFileIds) {
-      const version = versionByFileId.get(fileId);
-      if (!version) { this.logger.log("[CustomersShadowRead] FAIL"); return; }
-      const fileCodes = new Set<string>();
-      const fileRows = shadowRowsByVersionId.get(version.id) ?? [];
-      for (const row of fileRows) {
-        const code = String(row.CustomerCode ?? "").trim().toLowerCase();
-        if (!code || seenCustomerCodes.has(code)) continue;
-        fileCodes.add(code);
-        shadowRows.push(row);
-      }
-      for (const code of fileCodes) seenCustomerCodes.add(code);
-    }
-    let filteredShadowRows = applyHierarchyFilter(shadowRows, headers, routeAllowedValues);
-    if (filters?.length) filteredShadowRows = filteredShadowRows.filter((row) => filters.every((filter) => matchesEntityFilter(row, headers, filter)));
-    if (limit && filteredShadowRows.length > limit) filteredShadowRows = filteredShadowRows.slice(0, limit);
-    const sameCount = excelRows.length === filteredShadowRows.length;
-    const sameCodes = stableRows(excelRows.map((row) => String(row.CustomerCode ?? "").trim()).sort()) === stableRows(filteredShadowRows.map((row) => String(row.CustomerCode ?? "").trim()).sort());
-    const sameData = stableRows(basicCustomerRows(excelRows)) === stableRows(basicCustomerRows(filteredShadowRows));
-    this.logger.log(`[CustomersShadowRead] ${sameCount && sameCodes && sameData ? "PASS" : "FAIL"}`);
-  }
-
-  private async compareInvoiceShadow(params: {
-    entityName: "Invoices" | "Invoice Items";
-    companyId: string;
-    matchingFileIds: string[];
-    headers: string[];
-    routeAllowedValues: Set<string> | null;
-    filters: readonly EntityFieldFilter[] | undefined;
-    limit: number | undefined;
-    excelRows: DatasetRow[];
-  }): Promise<void> {
-    const { entityName, companyId, matchingFileIds, headers, routeAllowedValues, filters, limit, excelRows } = params;
-    const versions = await this.postgres("entityProvider.invoiceShadow.versions", () => this.prisma.rieDatasetVersion.findMany({
-      where: { companyId, entityName, isActive: true, sourceFileId: { in: matchingFileIds } },
-      select: { id: true, sourceFileId: true },
-    }));
-    const rows = await this.postgres("entityProvider.invoiceShadow.rows", () => this.prisma.rieEntityRow.findMany({
-      where: { datasetVersionId: { in: versions.map((version) => version.id) } },
-      select: { datasetVersionId: true, data: true },
-      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
-    }));
-    const rowsByVersion = new Map<string, DatasetRow[]>();
-    for (const row of rows) rowsByVersion.set(row.datasetVersionId, [...(rowsByVersion.get(row.datasetVersionId) ?? []), row.data as DatasetRow]);
-    const versionByFile = new Map(versions.map((version) => [version.sourceFileId, version]));
-    const primaryKey = entityName === "Invoices" ? ["InvoiceNo"] : ["InvoiceNo", "LineNo"];
-    const shadowRows: DatasetRow[] = [];
-    const seenKeys = new Set<string>();
-    for (const fileId of matchingFileIds) {
-      const version = versionByFile.get(fileId);
-      if (!version) return this.logger.log(`[${entityName}ShadowRead] FAIL`);
-      const fileKeys = new Set<string>();
-      for (const row of rowsByVersion.get(version.id) ?? []) {
-        const key = primaryKey.map((column) => String(row[column] ?? "").trim()).join("␟").toLowerCase();
-        if (key && seenKeys.has(key)) continue;
-        if (key) fileKeys.add(key);
-        shadowRows.push(row);
-      }
-      for (const key of fileKeys) seenKeys.add(key);
-    }
-    let filtered = applyHierarchyFilter(shadowRows, headers, routeAllowedValues);
-    if (filters?.length) filtered = filtered.filter((row) => filters.every((filter) => matchesEntityFilter(row, headers, filter)));
-    if (limit && filtered.length > limit) filtered = filtered.slice(0, limit);
-    const keyOf = (row: DatasetRow) => primaryKey.map((column) => String(row[column] ?? "").trim()).join("␟");
-    const pass = excelRows.length === filtered.length
-      && stableRows(excelRows.map(keyOf)) === stableRows(filtered.map(keyOf))
-      && stableRows(excelRows) === stableRows(filtered);
-    this.logger.log(`[${entityName}ShadowRead] ${pass ? "PASS" : "FAIL"}`);
-    if (entityName === "Invoice Items") {
-      const invoices = await this.postgres("entityProvider.invoiceShadow.invoiceKeys", () => this.prisma.rieEntityRow.findMany({ where: { companyId, entityName: "Invoices", datasetVersion: { isActive: true } }, select: { entityKey: true } }));
-      const invoiceKeys = new Set(invoices.map((invoice) => invoice.entityKey));
-      this.logger.log(`[InvoiceRelationShadowRead] ${filtered.every((row) => invoiceKeys.has(String(row.InvoiceNo ?? "").trim())) ? "PASS" : "FAIL"}`);
-    }
   }
 
   // Returns the cached parsed-and-merged dataset for (companyId, entityName)

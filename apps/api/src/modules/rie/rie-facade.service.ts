@@ -277,23 +277,9 @@ export class RieFacade {
     options: { fromTime?: number; toTime?: number; aggregate?: boolean },
   ): Promise<RieInvoiceSalesRow[]> {
     const companyId = context.companyId;
-    const files = await this.postgres("getInvoiceSalesRows.files", () => this.filesService.listConfirmedActiveForCompany(companyId));
-    const invoiceFiles = files.filter((file) => file.datasetType === ENTITY_DATASET_TYPE_MAP.Invoices!.datasetType);
-    const itemFiles = files.filter((file) => file.datasetType === ENTITY_DATASET_TYPE_MAP["Invoice Items"]!.datasetType);
-    if (invoiceFiles.length === 0 || itemFiles.length === 0) return [];
-    const activeVersions = await this.postgres("getInvoiceSalesRows.versions", () => this.prisma.rieDatasetVersion.findMany({
-      where: { companyId, entityName: { in: ["Invoices", "Invoice Items"] }, isActive: true, sourceFileId: { in: [...invoiceFiles, ...itemFiles].map((file) => file.id) } },
-      select: { entityName: true, sourceFileId: true },
-    }));
-    recordActiveVersionResolution(2, activeVersions.length);
-    const versionKey = new Set(activeVersions.map((version) => `${version.entityName}:${version.sourceFileId}`));
-    if (invoiceFiles.some((file) => !versionKey.has(`Invoices:${file.id}`)) || itemFiles.some((file) => !versionKey.has(`Invoice Items:${file.id}`))) return [];
-
     const allowedRoutes = context.requestingUser
       ? await this.hierarchyResolver.resolveAllowedRouteIds(companyId, context.requestingUser)
       : null;
-    const invoiceFileValues = invoiceFiles.map((file, precedence) => Prisma.sql`(${file.id}, ${precedence})`);
-    const itemFileValues = itemFiles.map((file, precedence) => Prisma.sql`(${file.id}, ${precedence})`);
     const routeFilter = (alias: string) => !allowedRoutes
       ? Prisma.empty
       : allowedRoutes.size === 0
@@ -308,34 +294,25 @@ export class RieFacade {
       : Prisma.sql`COALESCE(NULLIF(BTRIM(item."data" ->> 'LineNo'), '')::double precision, 0)`;
     const groupBy = options.aggregate ? Prisma.sql`1, 3, 4, 5` : Prisma.sql`1, 2, 3, 4, 5`;
     const statement = Prisma.sql`
-      WITH selected_invoice_files("source_file_id", precedence) AS (VALUES ${Prisma.join(invoiceFileValues)}),
-      invoice_rows AS (
-        SELECT r."data", selected_invoice_files.precedence
-        FROM "rie_entity_rows" r
-        JOIN "rie_dataset_versions" v ON v.id = r."dataset_version_id"
-        JOIN selected_invoice_files ON selected_invoice_files."source_file_id" = v."source_file_id"
-        WHERE v."company_id" = ${companyId} AND v."entity_name" = 'Invoices' AND v."is_active" = TRUE
-      ), invoices AS (
-        SELECT "data" FROM (SELECT invoice_rows.*, MIN(precedence) OVER (PARTITION BY LOWER(BTRIM(COALESCE("data" ->> 'InvoiceNo', '')))) AS newest FROM invoice_rows) dedup
-        WHERE BTRIM(COALESCE("data" ->> 'InvoiceNo', '')) = '' OR precedence = newest
-      ), selected_item_files("source_file_id", precedence) AS (VALUES ${Prisma.join(itemFileValues)}),
-      item_rows AS (
-        SELECT r."data", selected_item_files.precedence
-        FROM "rie_entity_rows" r
-        JOIN "rie_dataset_versions" v ON v.id = r."dataset_version_id"
-        JOIN selected_item_files ON selected_item_files."source_file_id" = v."source_file_id"
-        WHERE v."company_id" = ${companyId} AND v."entity_name" = 'Invoice Items' AND v."is_active" = TRUE
-      ), items AS (
-        SELECT "data" FROM (SELECT item_rows.*, MIN(precedence) OVER (PARTITION BY LOWER(BTRIM(COALESCE("data" ->> 'InvoiceNo', ''))), LOWER(BTRIM(COALESCE("data" ->> 'LineNo', '')))) AS newest FROM item_rows) dedup
-        WHERE BTRIM(COALESCE("data" ->> 'InvoiceNo', '')) = '' OR BTRIM(COALESCE("data" ->> 'LineNo', '')) = '' OR precedence = newest
+      WITH invoices AS MATERIALIZED (
+        SELECT inv."data"
+        FROM "rie_canonical_entity_rows" inv
+        WHERE inv."company_id" = ${companyId} AND inv."entity_name" = 'Invoices'
+          AND BTRIM(COALESCE(inv."data" ->> 'InvoiceNo', '')) <> ''
+          AND BTRIM(COALESCE(inv."data" ->> 'CustomerCode', '')) <> ''
+          ${routeFilter("inv")}
+          ${dates.length ? Prisma.sql`AND ${Prisma.join(dates, ' AND ')}` : Prisma.empty}
+      ), items AS MATERIALIZED (
+        SELECT item."data"
+        FROM "rie_canonical_entity_rows" item
+        WHERE item."company_id" = ${companyId} AND item."entity_name" = 'Invoice Items'
+          ${routeFilter("item")}
       )
       SELECT BTRIM(inv."data" ->> 'InvoiceNo') AS "invoiceNo", ${lineNo} AS "lineNo",
              (inv."data" ->> 'InvoiceDate')::timestamptz AS "time", BTRIM(inv."data" ->> 'CustomerCode') AS "customerCode", BTRIM(item."data" ->> 'ProductCode') AS "productCode",
              SUM(COALESCE(NULLIF(REPLACE(BTRIM(item."data" ->> 'LineTotal'), ',', ''), '')::double precision, 0)) AS "amount"
       FROM invoices inv JOIN items item ON BTRIM(item."data" ->> 'InvoiceNo') = BTRIM(inv."data" ->> 'InvoiceNo')
-      WHERE BTRIM(inv."data" ->> 'InvoiceNo') <> '' AND BTRIM(inv."data" ->> 'CustomerCode') <> ''
-        ${routeFilter("inv")} ${routeFilter("item")}
-        ${dates.length ? Prisma.sql`AND ${Prisma.join(dates, ' AND ')}` : Prisma.empty}
+      WHERE TRUE
       GROUP BY ${groupBy}
     `;
     const rows = await this.executionCoordinator.execute("getInvoiceSalesRows.sql", () => observeRiePostgres("getInvoiceSalesRows.sql", fingerprintRieQueryShape({ kind: "specialized", operation: "getInvoiceSalesRows", aggregate: Boolean(options.aggregate), hasFrom: options.fromTime !== undefined, hasTo: options.toTime !== undefined }), "semaphore", () => this.prisma.$queryRaw<Array<{ invoiceNo: string; lineNo: number; time: Date | null; customerCode: string; productCode: string; amount: number }>>(statement)));

@@ -45,7 +45,7 @@ export interface RieScalableQuery extends EntityQueryContext {
   hierarchyRoute?: RieQueryField;
   groupBy?: readonly RieQueryField[];
   aggregates?: readonly RieQueryAggregation[];
-  /** Applied after company, active-version and hierarchy scopes, before aggregation. */
+  /** Applied after company/current-state and hierarchy scopes, before aggregation. */
   latestPer?: RieLatestPerScope;
   scope?: RieScalableQueryScope;
   pagination?: RieQueryPagination;
@@ -63,7 +63,7 @@ export interface RieScalableQuery extends EntityQueryContext {
   orderBy?: readonly RieQueryOrder[];
   /** Adds COUNT(*) OVER () to the already scoped relation for a paged result. */
   totalCountAs?: string;
-  /** Internal request-scoped active-version metadata, obtained through RIE once. */
+  /** Legacy internal availability metadata; current-state SQL does not branch on it. */
   activeVersionCounts?: ReadonlyMap<string, number>;
   /**
    * Compiles scoped joins as an uncorrelated membership test.  This preserves

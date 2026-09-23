@@ -36,7 +36,7 @@ test("process-wide RIE semaphore limits expensive raw queries to 20 and resumes 
   const results = await Promise.all(Array.from({ length: 34 }, () => service.query(scalableQueryInput())));
 
   assert.equal(results.length, 34);
-  assert.equal(executions, 68); // active-version metadata + final RIE query per request
+  assert.equal(executions, 34); // current-state makes each request one PostgreSQL execution
   assert.ok(maximumActive <= 20, `expected at most 20 active raw queries, got ${maximumActive}`);
   assert.equal(active, 0);
 });
@@ -125,23 +125,15 @@ test("scalable query sends scoped joins, grouping, aggregation, and pagination t
   assert.equal(result.records.length, 1);
   assert.equal(result.page.hasMore, true);
   const sql = captured?.strings?.join(" ") ?? "";
-  assert.ok(sql.includes('"rie_entity_rows"'));
+  assert.ok(sql.includes('"rie_canonical_entity_rows"'));
   assert.ok(sql.includes('AS MATERIALIZED'));
   assert.ok(sql.includes('base_active'));
   assert.ok(sql.includes('invoice_active'));
-  assert.match(sql, /base_candidates AS NOT MATERIALIZED/);
-  assert.match(sql, /invoice_candidates AS NOT MATERIALIZED/);
-  assert.match(sql, /MIN\(candidate_version\.precedence\) OVER/);
-  assert.match(sql, /base_source\.id AS "row_id"/);
-  assert.match(sql, /INNER JOIN "rie_entity_rows" base_source ON base_source\.id = base_candidate\."row_id"/);
-  // The multi-version window carries identity, precedence, and normalized
-  // business keys only; JSONB must be fetched only after the winner is known.
-  const baseCandidates = sql.slice(sql.indexOf("base_candidates AS NOT MATERIALIZED"), sql.indexOf("base_active AS MATERIALIZED"));
-  assert.doesNotMatch(baseCandidates, /base_source\.\*/);
-  assert.doesNotMatch(baseCandidates, /SELECT\s+base_source\."data"/);
-  assert.doesNotMatch(sql, /NOT EXISTS/);
-  assert.ok(sql.includes('base_version."is_active" = TRUE'));
-  assert.ok(sql.includes('invoice_version."is_active" = TRUE'));
+  assert.doesNotMatch(sql, /rie_entity_rows|rie_dataset_versions|base_candidates|invoice_candidates/);
+  assert.doesNotMatch(sql, /ROW_NUMBER\(\) OVER|MIN\(candidate_version\.precedence\) OVER/);
+  assert.doesNotMatch(sql, /SELECT\s+(base|invoice)_source\.\*/);
+  assert.match(sql, /base_source\."company_id"/);
+  assert.match(sql, /invoice_source\."company_id"/);
   assert.ok(captured?.values?.includes("company-1"));
   assert.ok(captured?.values?.includes("rt-1"));
 });
@@ -214,11 +206,10 @@ test("geo product intelligence keeps invoice joins, exclusions, grouping and lim
   assert.match(sql, /LIMIT/);
 });
 
-test("single active version uses the direct scoped query without newest-wins windowing", async () => {
+test("canonical current-state always uses the direct scoped query without newest-wins windowing", async () => {
   let captured: { strings?: readonly string[] } | undefined;
   const service = new RieScalableQueryService({
     $queryRaw: async (query: { strings?: readonly string[] }) => {
-      if ((query.strings?.join(" ") ?? "").includes('COUNT(*) AS "versionCount"')) return [{ entityName: "Visits", versionCount: 1 }];
       captured = query;
       return [];
     },

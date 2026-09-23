@@ -1,5 +1,5 @@
 import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException, Inject } from "@nestjs/common";
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { extname } from "node:path";
 import * as argon2 from "argon2";
 import * as XLSX from "xlsx";
@@ -24,9 +24,6 @@ import { serializeExcelParse } from "../../common/excel-parse-queue";
 const SALES_CALENDAR_ENTITY = "Sales Calendar";
 const EMPLOYEES_ENTITY = "Employees";
 const PROSPECTS_ENTITY = "Prospects";
-const CUSTOMERS_ENTITY = "Customers";
-const INVOICES_ENTITY = "Invoices";
-const INVOICE_ITEMS_ENTITY = "Invoice Items";
 const POSTGRES_WRITE_BATCH_SIZE = 500;
 
 // Sheet Role text -> platform RoleCode, for automatic account provisioning
@@ -606,11 +603,11 @@ export class FilesService {
       try {
         const metadata = buildParsedMetadata(allSheetNames, this.classifier.enrichSheetRows(sheet, rows));
 
-        // Every accepted canonical entity is ingested incrementally into its
-        // PostgreSQL-backed canonical row store. The comparison is made by
-        // PostgreSQL on the approved template primary key; no previous upload
-        // is read into application memory.
-        await this.ingestCanonicalEntity({
+        // Every accepted canonical entity is materialized as immutable version
+        // history. PostgreSQL's lifecycle triggers publish the exact
+        // newest-wins projection to rie_canonical_entity_rows only when this
+        // file becomes READY below.
+        await this.materializeEntityShadow({
           companyId,
           fileId: fileRecord.id,
           entityName: datasetType,
@@ -618,26 +615,8 @@ export class FilesService {
           rows,
         });
 
-        // Phase 1 RIE Scale: materialize Customers into Postgres as a shadow
-        // only. The active RIE provider remains Excel; this write is kept
-        // entirely outside every read path and API contract.
-        if (datasetType === CUSTOMERS_ENTITY) {
-          await this.materializeCustomersShadow({ companyId, fileId: fileRecord.id, rows });
-        }
-        if (datasetType === INVOICES_ENTITY) {
-          await this.materializeInvoicesShadow({ companyId, fileId: fileRecord.id, rows });
-        }
-        if (datasetType === INVOICE_ITEMS_ENTITY) {
-          await this.materializeInvoiceItemsShadow({ companyId, fileId: fileRecord.id, rows });
-        }
-
-        const updated = await this.prisma.file.update({
-          where: { id: fileRecord.id },
-          data: { status: "READY", parsedMetadata: metadata as unknown as Prisma.InputJsonValue },
-        });
-
         if (datasetType === SALES_CALENDAR_ENTITY) {
-          await this.ingestSalesCalendar({ companyId, fileId: updated.id, headers: sheet.headers, rows });
+          await this.ingestSalesCalendar({ companyId, fileId: fileRecord.id, headers: sheet.headers, rows });
         }
         if (datasetType === EMPLOYEES_ENTITY) {
           provisioning = await this.provisionEmployeeAccounts({ companyId, uploadedByUserId, headers: sheet.headers, rows });
@@ -651,7 +630,7 @@ export class FilesService {
           await this.provisionEmployeeRecords({ companyId, headers: sheet.headers, rows });
         }
         if (datasetType === PROSPECTS_ENTITY) {
-          await this.ingestProspects({ companyId, fileId: updated.id, headers: sheet.headers, rows });
+          await this.ingestProspects({ companyId, fileId: fileRecord.id, headers: sheet.headers, rows });
         }
 
         await this.auditLogService.record({
@@ -665,6 +644,18 @@ export class FilesService {
           // explicitly picked — the audit trail the target-company picker
           // feature requires (uploaded by / target company / time).
           metadata: { datasetType, confidence: Math.round(match.score * 100), fileName: file.originalname, batchId, ...(viaSuperAdmin ? { viaSuperAdmin: true } : {}) },
+        });
+
+        // READY is the publication boundary. The database trigger refreshes
+        // current-state in this same transaction, and dependent snapshots are
+        // invalidated before either change becomes visible.
+        const updated = await this.prisma.$transaction(async (tx) => {
+          const readyFile = await tx.file.update({
+            where: { id: fileRecord.id },
+            data: { status: "READY", parsedMetadata: metadata as unknown as Prisma.InputJsonValue },
+          });
+          await this.smartLoadingManagementCache.invalidateForCanonicalChange(tx, companyId, datasetType);
+          return readyFile;
         });
 
         accepted.push(updated);
@@ -691,40 +682,17 @@ export class FilesService {
     };
   }
 
-  /**
-   * Stores an exact JSON copy of the validated Customers rows. The version
-   * becomes ACTIVE only after row-count, CustomerCode keys, and row payloads
-   * match the Excel parse. This method is deliberately write-only.
-   */
-  private async materializeCustomersShadow(params: {
-    companyId: string;
-    fileId: string;
-    rows: Record<string, unknown>[];
-  }): Promise<void> {
-    return this.materializeEntityShadow({ ...params, entityName: CUSTOMERS_ENTITY, keyColumns: ["CustomerCode"], timeoutMs: 30_000 });
-  }
-
-  private async materializeInvoicesShadow(params: { companyId: string; fileId: string; rows: Record<string, unknown>[] }): Promise<void> {
-    return this.materializeEntityShadow({ ...params, entityName: INVOICES_ENTITY, keyColumns: ["InvoiceNo"] });
-  }
-
-  private async materializeInvoiceItemsShadow(params: { companyId: string; fileId: string; rows: Record<string, unknown>[] }): Promise<void> {
-    return this.materializeEntityShadow({ ...params, entityName: INVOICE_ITEMS_ENTITY, keyColumns: ["InvoiceNo", "LineNo"], allowDuplicateKeys: true });
-  }
-
-  /** Write-only shadow materialization for the two invoice datasets. */
+  /** Immutable version materialization for every canonical upload. */
   private async materializeEntityShadow(params: {
     companyId: string;
     fileId: string;
     entityName: string;
     keyColumns: readonly string[];
-    allowDuplicateKeys?: boolean;
     timeoutMs?: number;
     rows: Record<string, unknown>[];
   }): Promise<void> {
-    const { companyId, fileId, entityName, keyColumns, allowDuplicateKeys = false, timeoutMs = 600_000, rows } = params;
+    const { companyId, fileId, entityName, keyColumns, timeoutMs = 600_000, rows } = params;
     const occurrences = new Map<string, number>();
-    const seenKeys = new Set<string>();
 
     await this.prisma.$transaction(async (tx) => {
       const version = await tx.rieDatasetVersion.create({
@@ -735,16 +703,18 @@ export class FilesService {
         const batch = rows.slice(start, start + POSTGRES_WRITE_BATCH_SIZE);
         const expectedByKey = new Map<string, string>();
         const data: Prisma.RieEntityRowCreateManyInput[] = [];
-        for (const row of batch) {
+        for (const [batchIndex, row] of batch.entries()) {
           const key = keyColumns.map((column) => String(row[column] ?? "").trim()).join("␟");
-          if (!key || key.split("␟").some((part) => !part)) {
-            throw new Error(`${entityName} shadow materialization requires ${keyColumns.join(", ")} on every row.`);
-          }
-          if (!allowDuplicateKeys && seenKeys.has(key)) throw new Error(`${entityName} shadow materialization requires unique canonical keys.`);
-          seenKeys.add(key);
+          const keyIsBlank = !key || key.split("␟").some((part) => !part);
           const occurrence = occurrences.get(key) ?? 0;
           occurrences.set(key, occurrence + 1);
-          const entityKey = occurrence === 0 ? key : `${key}␟${occurrence}`;
+          // The historical RIE merge retains every blank-key row and every
+          // same-version duplicate. Storage identity therefore cannot collapse
+          // either case; business-key precedence is applied only by PostgreSQL
+          // when publishing canonical current-state.
+          const entityKey = keyIsBlank
+            ? `__rie_blank__␟${start + batchIndex}`
+            : occurrence === 0 ? key : `${key}␟${occurrence}`;
           expectedByKey.set(entityKey, stableJson(row));
           data.push({ companyId, datasetVersionId: version.id, entityName, entityKey, data: row as Prisma.InputJsonValue });
         }
@@ -763,69 +733,6 @@ export class FilesService {
         data: { status: "ACTIVE", isActive: true, rowCount: rows.length, materializedAt: new Date(), activatedAt: new Date() },
       });
     }, { timeout: timeoutMs });
-  }
-
-  /**
-   * Incremental canonical ingestion for every validated entity template.
-   *
-   * PostgreSQL owns both existence and payload comparison. The conflict key
-   * is the template's approved primary key; `IS DISTINCT FROM` means an
-   * identical JSON payload executes neither an UPDATE nor an updated_at /
-   * source-file change. Historical rows are never selected into Node.js.
-   */
-  private async ingestCanonicalEntity(params: {
-    companyId: string;
-    fileId: string;
-    entityName: string;
-    keyColumns: readonly string[];
-    rows: Record<string, unknown>[];
-  }): Promise<void> {
-    const { companyId, fileId, entityName, keyColumns, rows } = params;
-
-    // Primary-key columns are guaranteed by the approved template. A blank
-    // value cannot identify a record, so preserve the existing tolerant row
-    // ingestion behavior by skipping just that row rather than rejecting an
-    // already accepted sheet.
-    for (let start = 0; start < rows.length; start += POSTGRES_WRITE_BATCH_SIZE) {
-      const values = rows
-        .slice(start, start + POSTGRES_WRITE_BATCH_SIZE)
-        .flatMap((row) => {
-          const parts = keyColumns.map((column) => String(row[column] ?? "").trim());
-          if (parts.some((part) => !part)) return [];
-          return [Prisma.sql`(${randomUUID()}, ${companyId}, ${fileId}, ${entityName}, ${parts.join("␟")}, ${JSON.stringify(row)}::jsonb, CURRENT_TIMESTAMP)`];
-        });
-      if (values.length === 0) continue;
-      await this.prisma.$transaction(async (tx) => {
-        // RETURNING emits only inserted/changed rows. This keeps cache
-        // invalidation tied to a real canonical change, never a re-upload of
-        // identical data.
-        const changed = await tx.$queryRaw<Array<{ routeId: string | null }>>(Prisma.sql`
-          WITH changed AS (
-            INSERT INTO "rie_canonical_entity_rows"
-              ("id", "company_id", "source_file_id", "entity_name", "entity_key", "data", "updated_at")
-            VALUES ${Prisma.join(values)}
-            ON CONFLICT ("company_id", "entity_name", "entity_key")
-            DO UPDATE SET
-              "data" = EXCLUDED."data",
-              "source_file_id" = EXCLUDED."source_file_id",
-              "updated_at" = CURRENT_TIMESTAMP
-            WHERE "rie_canonical_entity_rows"."data" IS DISTINCT FROM EXCLUDED."data"
-            RETURNING "data"
-          )
-          SELECT DISTINCT NULLIF(BTRIM(COALESCE("data"->>'RouteID', '')), '') AS "routeId"
-          FROM changed
-        `);
-        if (changed.length > 0) {
-          await this.smartLoadingManagementCache.invalidateForCanonicalChange(
-            tx,
-            companyId,
-            entityName,
-            changed.flatMap(({ routeId }) => routeId ? [routeId] : []),
-            entityName === "Van Inventory" && changed.every(({ routeId }) => !!routeId),
-          );
-        }
-      });
-    }
   }
 
   // Automatic Employee Account Provisioning (2026-07-19) — runs once per
@@ -1230,7 +1137,10 @@ export class FilesService {
       }
     }
 
-    await this.prisma.file.update({ where: { id: oldFileId }, data: { isActive: false } });
+    await this.prisma.$transaction(async (tx) => {
+      await tx.file.update({ where: { id: oldFileId }, data: { isActive: false } });
+      await this.smartLoadingManagementCache.invalidateForCanonicalChange(tx, companyId, oldFile.datasetType);
+    });
 
     // Cleanup — the bug the user flagged: replacing a file used to leave
     // two kinds of garbage behind forever. Fix both here, best-effort (a
@@ -1303,7 +1213,11 @@ export class FilesService {
   async deactivate(id: string, companyId: string) {
     const file = await this.prisma.file.findUnique({ where: { id } });
     if (!file || file.companyId !== companyId) throw new NotFoundException("File not found");
-    const updated = await this.prisma.file.update({ where: { id }, data: { isActive: false } });
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const inactiveFile = await tx.file.update({ where: { id }, data: { isActive: false } });
+      await this.smartLoadingManagementCache.invalidateForCanonicalChange(tx, companyId, file.datasetType);
+      return inactiveFile;
+    });
 
     // 2026-07-26 — same gap replaceFile() had (see comment there): deleting
     // a file used to leave its materialized rows (Sales Calendar, Prospects)

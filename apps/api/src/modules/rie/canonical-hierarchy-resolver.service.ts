@@ -267,22 +267,12 @@ export class CanonicalHierarchyResolverService {
   private async readMaterializedEntityRows(entityName: string, companyId: string, fileIds: string[]): Promise<{ rows: DatasetRow[]; headers: string[] } | null> {
     const versions = await this.postgres("hierarchy.datasetVersions", () => this.prisma.rieDatasetVersion.findMany({ where: { companyId, entityName, isActive: true, sourceFileId: { in: fileIds } }, select: { id: true, sourceFileId: true } }));
     if (versions.length !== fileIds.length) return null;
-    const versionByFile = new Map(versions.map((version) => [version.sourceFileId, version.id]));
-    const sourceRows = await this.postgres("hierarchy.entityRows", () => this.prisma.rieEntityRow.findMany({ where: { companyId, entityName, datasetVersionId: { in: versions.map((version) => version.id) } }, select: { datasetVersionId: true, entityKey: true, data: true }, orderBy: [{ createdAt: "asc" }, { id: "asc" }] }));
-    const rowsByVersion = new Map<string, DatasetRow[]>();
-    for (const row of sourceRows) rowsByVersion.set(row.datasetVersionId, [...(rowsByVersion.get(row.datasetVersionId) ?? []), row.data as DatasetRow]);
-    const rows: DatasetRow[] = [];
-    const seenKeys = new Set<string>();
-    for (const fileId of fileIds) {
-      const versionId = versionByFile.get(fileId);
-      if (!versionId) return null;
-      for (const row of rowsByVersion.get(versionId) ?? []) {
-        const key = entityName === "Routes" ? String(row.RouteID ?? "").trim().toLowerCase() : String(row.EmployeeID ?? "").trim().toLowerCase();
-        if (key && seenKeys.has(key)) continue;
-        if (key) seenKeys.add(key);
-        rows.push(row);
-      }
-    }
+    const sourceRows = await this.postgres("hierarchy.currentRows", () => this.prisma.rieCanonicalEntityRow.findMany({
+      where: { companyId, entityName, sourceFileId: { in: fileIds } },
+      select: { data: true },
+      orderBy: [{ sourceFile: { createdAt: "desc" } }, { createdAt: "asc" }, { id: "asc" }],
+    }));
+    const rows = sourceRows.map((row) => row.data as DatasetRow);
     const headers = rows.length ? Object.keys(rows[0] as object) : [];
     return { rows, headers };
   }

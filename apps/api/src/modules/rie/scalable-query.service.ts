@@ -3,7 +3,6 @@ import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { RieRequestPlannerService } from "./rie-request-planner.service";
-import { IMPORT_TEMPLATES } from "../import-validation/import-templates.data";
 import type { EntityRecord, EntityQueryResult } from "./entity-provider.interface";
 import type { RieDateScope, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoProductQuery, RieGeoProductRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRiePostgres, recordActiveVersionResolution } from "../../common/observability/rie-observability";
@@ -93,10 +92,9 @@ export class RieScalableQueryService {
     const select = [...projection, ...(input.aggregates ?? []).map(aggregateSql), ...(input.totalCountAs ? [Prisma.sql`COUNT(*) OVER () AS ${quoted(input.totalCountAs)}`] : [])];
     const predicates = await this.scopePredicates(input, aliases);
     const page = normalizePagination(input.pagination, input.internalAggregate === true, input.unboundedFinalResult === true);
-    // A derived table may be flattened by PostgreSQL, which lets historical
-    // versions re-enter a fact join.  Materialized CTEs form the required
-    // execution barrier: only rows belonging to active versions can reach a
-    // join (especially the Invoice Items -> Invoices fact join).
+    // Materialized CTEs keep each company/screen-scoped current-state relation
+    // bounded before it reaches later fact joins (especially Invoice Items ->
+    // Invoices).
     const activeRows = [{ entityName: input.entityName, alias: "base" }, ...joins.map(({ entityName, alias }) => ({ entityName, alias }))];
     const ctePredicates = new Map(await Promise.all(activeRows.map(async ({ alias }) => [alias, await this.scopePredicates(input, aliases, alias)] as const)));
     // A scoped joined entity (for example, Invoices by date) must be produced
@@ -131,8 +129,7 @@ export class RieScalableQueryService {
     const baseDrivenByScopedJoins = canCollapseScopedJoins || driveBaseFromScopedJoins;
     const baseSemiJoins = baseDrivenByScopedJoins ? [] : scopedSemiJoinsFor("base", joins, scopedJoinAliases, input.preferHashedScopedSemiJoin);
     const baseSourceJoins = baseDrivenByScopedJoins ? joins.map(scopedJoin) : [];
-    const activeVersionCounts = input.activeVersionCounts ?? await this.getActiveVersionCounts(input.companyId, [...new Set(activeRows.map(({ entityName }) => entityName))]);
-    const ctes = orderedActiveRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias, ctePredicates.get(alias) ?? [], alias === "base" ? baseSemiJoins : scopedSemiJoinsFor(alias, joins, scopedJoinAliases), alias === "base" ? baseSourceJoins : [], activeVersionCounts.get(entityName) === 1));
+    const ctes = orderedActiveRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias, ctePredicates.get(alias) ?? [], alias === "base" ? baseSemiJoins : scopedSemiJoinsFor(alias, joins, scopedJoinAliases), alias === "base" ? baseSourceJoins : []));
     if (input.latestPer) ctes.push(latestPerCte(input.latestPer));
     const baseReference = input.latestPer ? Prisma.sql`base_latest base` : activeEntityRowsReference("base");
     const joinSql = (canCollapseScopedJoins ? [] : joins).map((join) => {
@@ -308,23 +305,21 @@ export class RieScalableQueryService {
     const inventoryProjection = Prisma.sql`${normalizedField({ field: "RouteID", source: "inventory_source" })} AS route_id, NULLIF(BTRIM(COALESCE(${inventoryDate}, '')), '') AS report_date, ${normalizedField({ field: "ProductCode", source: "inventory_source" })} AS product_code, ${numericField(textField({ field: "Quantity", source: "inventory_source" }))} AS quantity`;
     const invoiceProjection = Prisma.sql`${normalizedField({ field: "InvoiceNo", source: "invoice_source" })} AS invoice_no, ${normalizedField({ field: "RouteID", source: "invoice_source" })} AS route_id, ${dateText(invoiceDate)} AS invoice_date`;
     const itemProjection = Prisma.sql`${normalizedField({ field: "InvoiceNo", source: "item_source" })} AS invoice_no, ${normalizedField({ field: "RouteID", source: "item_source" })} AS route_id, ${normalizedField({ field: "ProductCode", source: "item_source" })} AS product_code`;
-    const activeVersionCounts = await this.getActiveVersionCounts(input.companyId, ["Van Inventory", "Invoices", "Invoice Items"]);
     const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [
       Prisma.sql`${dateText(inventoryDate)} <= ${targetDate}${routeScope(inventoryRoute)}`,
-    ], [], [], activeVersionCounts.get("Van Inventory") === 1, [], inventoryProjection);
+    ], [], [], false, [], inventoryProjection);
     const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [
       Prisma.sql`${dateText(invoiceDate)} <= ${targetDate}${routeScope(invoiceRoute)}`,
-    ], [], [], activeVersionCounts.get("Invoices") === 1, [], invoiceProjection);
+    ], [], [], false, [], invoiceProjection);
     const scopedInvoiceNo = Prisma.raw('invoice.invoice_no');
     const scopedInvoiceNumbersCte = Prisma.sql`scoped_invoice_numbers AS MATERIALIZED (
       SELECT DISTINCT ${scopedInvoiceNo} AS invoice_no
       FROM invoice_active invoice
       WHERE ${scopedInvoiceNo} <> ''
     )`;
-    // InvoiceNo is part of the Invoice Items business key. Restricting rows
-    // to the already-scoped invoice keys before newest-version resolution is
-    // therefore parity-safe and lets PostgreSQL use the InvoiceNo index.
-    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], activeVersionCounts.get("Invoice Items") === 1, [
+    // Restrict current Invoice Items to already-scoped invoice keys before the
+    // wider join so PostgreSQL can use the InvoiceNo index.
+    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], false, [
       Prisma.sql`INNER JOIN scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`,
     ], itemProjection);
     const inventoryRouteText = Prisma.raw('inventory.route_id');
@@ -493,10 +488,9 @@ export class RieScalableQueryService {
         ? Prisma.sql` AND ${normalizedField({ field: "RouteID", source: "inventory_source" })} IN (${Prisma.join(effectiveRoutes)})`
         : Prisma.sql` AND FALSE`;
 
-    const activeVersionCounts = await this.resolveActiveVersionCounts(input.companyId, ["Van Inventory"], (missingEntityNames) => this.queryActiveVersionCountsUngated(input.companyId, missingEntityNames));
     const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [
       Prisma.sql`${dateText(textField({ field: "ReportDate", source: "inventory_source" }))} <= ${targetDate}${routeScope}`,
-    ], [], [], activeVersionCounts.get("Van Inventory") === 1, [], Prisma.sql`
+    ], [], [], false, [], Prisma.sql`
       ${normalizedField({ field: "RouteID", source: "inventory_source" })} AS route_id,
       NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory_source" })}, '')), '') AS report_date
     `);
@@ -538,9 +532,6 @@ export class RieScalableQueryService {
         ? Prisma.sql` AND ${normalizedField(field)} IN (${Prisma.join(effectiveRoutes)})`
         : Prisma.sql` AND FALSE`;
 
-      // Metadata and the heavy fact query are admitted separately so neither
-      // SQL construction nor result shaping holds a PostgreSQL permit.
-      const activeVersionCounts = await this.resolveActiveVersionCounts(input.companyId, ["Van Inventory", "Invoices", "Invoice Items", "Products"], (missingEntityNames) => this.queryActiveVersionCountsUngated(input.companyId, missingEntityNames));
       const inventoryProjection = Prisma.sql`
         ${normalizedField({ field: "RouteID", source: "inventory_source" })} AS route_id,
         NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory_source" })}, '')), '') AS report_date,
@@ -574,30 +565,30 @@ export class RieScalableQueryService {
       `;
       const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [
         Prisma.sql`${dateText(textField({ field: "ReportDate", source: "inventory_source" }))} <= ${targetDate}${routeScope({ field: "RouteID", source: "inventory_source" })}`,
-      ], [], [], activeVersionCounts.get("Van Inventory") === 1, [], inventoryProjection);
+      ], [], [], false, [], inventoryProjection);
       const staleInvoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "stale_invoice", [
         Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "stale_invoice_source" }))} <= ${targetDate}${routeScope({ field: "RouteID", source: "stale_invoice_source" })}`,
-      ], [], [], activeVersionCounts.get("Invoices") === 1, [], staleInvoiceProjection);
+      ], [], [], false, [], staleInvoiceProjection);
       const staleScopedInvoiceNumbersCte = Prisma.sql`stale_scoped_invoice_numbers AS MATERIALIZED (
         SELECT DISTINCT stale_invoice.invoice_no
         FROM stale_invoice_active stale_invoice
         WHERE stale_invoice.invoice_no <> ''
       )`;
-      const staleItemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "stale_item", [], [], [], activeVersionCounts.get("Invoice Items") === 1, [
+      const staleItemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "stale_item", [], [], [], false, [
         Prisma.sql`INNER JOIN stale_scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "stale_item_source" })} = scoped_invoice.invoice_no`,
       ], staleItemProjection);
       const windowInvoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "window_invoice", [
         Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "window_invoice_source" }))} >= ${salesFrom} AND ${dateText(textField({ field: "InvoiceDate", source: "window_invoice_source" }))} <= ${salesTo}${routeScope({ field: "RouteID", source: "window_invoice_source" })}${customerCodes.length ? Prisma.sql` AND ${normalizedField({ field: "CustomerCode", source: "window_invoice_source" })} IN (${Prisma.join(customerCodes)})` : Prisma.sql` AND FALSE`}`,
-      ], [], [], activeVersionCounts.get("Invoices") === 1, [], windowInvoiceProjection);
+      ], [], [], false, [], windowInvoiceProjection);
       const windowScopedInvoiceNumbersCte = Prisma.sql`window_scoped_invoice_numbers AS MATERIALIZED (
         SELECT DISTINCT window_invoice.invoice_no
         FROM window_invoice_active window_invoice
         WHERE window_invoice.invoice_no <> ''
       )`;
-      const windowItemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "window_item", [], [], [], activeVersionCounts.get("Invoice Items") === 1, [
+      const windowItemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "window_item", [], [], [], false, [
         Prisma.sql`INNER JOIN window_scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "window_item_source" })} = scoped_invoice.invoice_no`,
       ], windowItemProjection);
-      const productCte = activeEntityRowsCte(input.companyId, "Products", "product", [], [], [], activeVersionCounts.get("Products") === 1, [
+      const productCte = activeEntityRowsCte(input.companyId, "Products", "product", [], [], [], false, [
         Prisma.sql`INNER JOIN relevant_product_keys relevant_product ON ${normalizedField({ field: "ProductCode", source: "product_source" })} = relevant_product.product_code`,
       ], productProjection);
 
@@ -888,9 +879,8 @@ export class RieScalableQueryService {
       FROM invoice_active invoice
       WHERE invoice.invoice_no <> ''
     )`;
-    // InvoiceNo is part of the Invoice Items business key. Restricting item
-    // candidates to the already company/date/route-scoped headers before
-    // newest-wins preserves the join result while avoiding unrelated facts.
+    // Restrict current item rows to the already company/date/route-scoped
+    // headers before the wider join, avoiding unrelated facts.
     const itemCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], false, [
       Prisma.sql`INNER JOIN scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`,
     ], itemProjection);
@@ -900,8 +890,7 @@ export class RieScalableQueryService {
       FROM returned_active returned
       WHERE returned.return_no <> ''
     )`;
-    // ReturnNo is part of the Return Items business key, so this applies the
-    // same parity-safe pre-newest-wins narrowing as Invoice Items.
+    // Apply the same parity-safe early current-state narrowing to Return Items.
     const returnItemsCte = activeEntityRowsCte(input.companyId, "Return Items", "return_item", [], [], [], false, [
       Prisma.sql`INNER JOIN scoped_return_numbers scoped_return ON ${normalizedField({ field: "ReturnNo", source: "return_item_source" })} = scoped_return.return_no`,
     ], returnItemProjection);
@@ -1113,9 +1102,8 @@ export class RieScalableQueryService {
         ? Prisma.sql` AND ${normalizedField(field)} IN (${Prisma.join(effectiveRoutes)})`
         : Prisma.sql` AND FALSE`;
     const customerCodes = [...new Set(input.customerCodes.map((code) => code.trim().toLowerCase()).filter(Boolean))];
-    // Keep only the fields needed downstream in materialized CTEs.  The
-    // newest-wins decision remains inside activeEntityRowsCte, before these
-    // screen predicates are evaluated.
+    // Keep only the fields needed downstream in materialized CTEs. Newest-wins
+    // was resolved at ingestion; these predicates see canonical current rows.
     const inventoryProjection = Prisma.sql`
       ${normalizedField({ field: "RouteID", source: "inventory_source" })} AS route_id,
       NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory_source" })}, '')), '') AS report_date,
@@ -1148,10 +1136,8 @@ export class RieScalableQueryService {
       FROM invoice_active invoice
       WHERE invoice.invoice_no <> ''
     )`;
-    // InvoiceNo is part of the Invoice Items business key. Restricting item
-    // candidates to the already company/route/date/customer-scoped headers
-    // before newest-wins resolution is parity-safe and avoids materializing
-    // unrelated item JSON rows.
+    // Restrict current item rows to already company/route/date/customer-scoped
+    // headers before the wider join to avoid unrelated JSON payloads.
     const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], false, [
       Prisma.sql`INNER JOIN scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`,
     ], itemProjection);
@@ -1381,79 +1367,22 @@ function scalableQueryFingerprintShape(input: RieScalableQuery): Record<string, 
   };
 }
 
-export function activeEntityRowsCte(companyId: string, entityName: string, alias: string, predicates: readonly Prisma.Sql[], semiJoins: readonly Prisma.Sql[], sourceJoins: readonly Prisma.Sql[], singleActiveVersion = false, preMergeSourceJoins: readonly Prisma.Sql[] = [], projection?: Prisma.Sql): Prisma.Sql {
+export function activeEntityRowsCte(companyId: string, entityName: string, alias: string, predicates: readonly Prisma.Sql[], semiJoins: readonly Prisma.Sql[], sourceJoins: readonly Prisma.Sql[], _singleActiveVersion = false, preMergeSourceJoins: readonly Prisma.Sql[] = [], projection?: Prisma.Sql): Prisma.Sql {
   const cte = `${alias}_active`;
   const rowAlias = `${alias}_source`;
-  const versionAlias = `${alias}_version`;
-  // A caller may materialize a purpose-built, scalar-only record.  The
-  // newest-wins decision above it still sees the canonical keys unchanged;
-  // this only prevents otherwise-unused JSONB payloads from entering a
-  // temp-file-backed CTE.
-  const selected = projection ?? Prisma.sql`${Prisma.raw(rowAlias)}.*`;
-  if (singleActiveVersion) {
-    // With one eligible version there can be no cross-upload collision, so
-    // avoid the newest-wins window and preserve the direct scoped SQL shape.
-    return Prisma.sql`${Prisma.raw(cte)} AS MATERIALIZED (
-      SELECT ${selected}
-      FROM "rie_dataset_versions" ${Prisma.raw(versionAlias)}
-      INNER JOIN "files" source_file ON source_file.id = ${Prisma.raw(versionAlias)}."source_file_id"
-      INNER JOIN "rie_entity_rows" ${Prisma.raw(rowAlias)} ON ${Prisma.raw(rowAlias)}."dataset_version_id" = ${Prisma.raw(versionAlias)}.id
-      ${preMergeSourceJoins.length ? Prisma.join(preMergeSourceJoins, " ") : Prisma.empty}
-      ${sourceJoins.length ? Prisma.join(sourceJoins, " ") : Prisma.empty}
-      WHERE ${Prisma.raw(versionAlias)}."company_id" = ${companyId} AND ${Prisma.raw(versionAlias)}."entity_name" = ${entityName} AND ${Prisma.raw(versionAlias)}."is_active" = TRUE
-        AND source_file."company_id" = ${companyId} AND source_file."is_active" = TRUE
-        AND source_file.status = 'READY' AND source_file."dataset_type_confirmed" = TRUE
-        AND ${Prisma.raw(rowAlias)}."company_id" = ${companyId} AND ${Prisma.raw(rowAlias)}."entity_name" = ${entityName}
-        ${predicates.length ? Prisma.sql`AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty}
-        ${semiJoins.length ? Prisma.sql`AND ${Prisma.join(semiJoins, " AND ")}` : Prisma.empty}
-    )`;
-  }
-  const primaryKey = IMPORT_TEMPLATES.find((template) => template.entity === entityName)?.primaryKey;
-  if (!primaryKey?.length) throw new Error(`RIE scalable query requires a canonical primary key for "${entityName}".`);
-  for (const field of primaryKey) assertIdentifier(field, "primary key");
-  const partitionByKey = Prisma.join(primaryKey.map((field) => normalizedField({ source: rowAlias, field })), ", ");
-  const candidateAlias = `${alias}_candidate`;
-  // The newest-wins window needs only its business key and row identity.
-  // In particular, keep `data` out of this sort/window stage: it is the
-  // potentially large JSONB payload that made concurrent multi-version
-  // merges spill their materialized working set to PostgreSQL temp files.
-  const narrowKeys = primaryKey.map((field, index) => Prisma.sql`${normalizedField({ source: rowAlias, field })} AS ${quoted(`key_${index}`)}`);
-  const keyIsBlank = Prisma.join(primaryKey.map((_, index) => Prisma.sql`${Prisma.raw(candidateAlias)}.${quoted(`key_${index}`)} = ''`), " OR ");
-
-  // Match the entity provider's newest-upload-wins merge by the template's
-  // business key, not entity_key (invoice-line storage keys may have an
-  // occurrence suffix). Keep unmatched history and existing within-file
-  // multiplicity/blank-key semantics. The window is deliberately evaluated
-  // before screen/hierarchy/date scopes: filtering first could resurrect an
-  // old Pending record after it became Closed.  MIN(precedence), rather than
-  // ROW_NUMBER(), retains all same-key rows within the newest upload.
-  // This is a set-based aggregate over the active rows; do not replace it
-  // with a correlated newest-row lookup, which produces a per-row SubPlan.
-  return Prisma.sql`${Prisma.raw(`${alias}_versions`)} AS MATERIALIZED (
-    SELECT ${Prisma.raw(versionAlias)}.id,
-      ROW_NUMBER() OVER (ORDER BY source_file."created_at" DESC, source_file.id DESC) AS precedence
-    FROM "rie_dataset_versions" ${Prisma.raw(versionAlias)}
-    INNER JOIN "files" source_file ON source_file.id = ${Prisma.raw(versionAlias)}."source_file_id"
-    WHERE ${Prisma.raw(versionAlias)}."company_id" = ${companyId} AND ${Prisma.raw(versionAlias)}."entity_name" = ${entityName} AND ${Prisma.raw(versionAlias)}."is_active" = TRUE
-      AND source_file."company_id" = ${companyId} AND source_file."is_active" = TRUE
-      AND source_file.status = 'READY' AND source_file."dataset_type_confirmed" = TRUE
-  ), ${Prisma.raw(`${alias}_candidates`)} AS NOT MATERIALIZED (
-    SELECT ${Prisma.raw(rowAlias)}.id AS "row_id", ${Prisma.raw(rowAlias)}."dataset_version_id", ${Prisma.raw(rowAlias)}."entity_key", candidate_version.precedence,
-      ${Prisma.join(narrowKeys)},
-      MIN(candidate_version.precedence) OVER (
-        PARTITION BY ${partitionByKey}
-      ) AS newest_precedence
-    FROM ${Prisma.raw(`${alias}_versions`)} candidate_version
-    INNER JOIN "rie_entity_rows" ${Prisma.raw(rowAlias)} ON ${Prisma.raw(rowAlias)}."dataset_version_id" = candidate_version.id
-    ${preMergeSourceJoins.length ? Prisma.join(preMergeSourceJoins, " ") : Prisma.empty}
-    WHERE ${Prisma.raw(rowAlias)}."company_id" = ${companyId} AND ${Prisma.raw(rowAlias)}."entity_name" = ${entityName}
-  ), ${Prisma.raw(cte)} AS MATERIALIZED (
+  // A caller may materialize a purpose-built scalar projection so unused
+  // JSONB payloads never enter downstream joins/aggregations.
+  const selected = projection ?? Prisma.sql`${Prisma.raw(rowAlias)}.id, ${Prisma.raw(rowAlias)}."entity_key", ${Prisma.raw(rowAlias)}.precedence, ${Prisma.raw(rowAlias)}."data", ${Prisma.raw(rowAlias)}."created_at"`;
+  // newest-wins has already been resolved atomically during ingestion/file
+  // lifecycle changes. Company and screen scopes therefore apply on the
+  // current-only relation before its JSON payload can reach later work.
+  return Prisma.sql`${Prisma.raw(cte)} AS MATERIALIZED (
     SELECT ${selected}
-    FROM ${Prisma.raw(`${alias}_candidates`)} ${Prisma.raw(candidateAlias)}
-    INNER JOIN "rie_entity_rows" ${Prisma.raw(rowAlias)} ON ${Prisma.raw(rowAlias)}.id = ${Prisma.raw(candidateAlias)}."row_id"
+    FROM "rie_canonical_entity_rows" ${Prisma.raw(rowAlias)}
+    ${preMergeSourceJoins.length ? Prisma.join(preMergeSourceJoins, " ") : Prisma.empty}
     ${sourceJoins.length ? Prisma.join(sourceJoins, " ") : Prisma.empty}
-    WHERE TRUE
-      AND (${keyIsBlank} OR ${Prisma.raw(candidateAlias)}.precedence = ${Prisma.raw(candidateAlias)}.newest_precedence)
+    WHERE ${Prisma.raw(rowAlias)}."company_id" = ${companyId}
+      AND ${Prisma.raw(rowAlias)}."entity_name" = ${entityName}
       ${predicates.length ? Prisma.sql`AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty}
       ${semiJoins.length ? Prisma.sql`AND ${Prisma.join(semiJoins, " AND ")}` : Prisma.empty}
   )`;

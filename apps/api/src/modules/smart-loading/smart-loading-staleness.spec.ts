@@ -125,17 +125,10 @@ test("route-product staleness uses direct CTEs and preserves its single-version 
   assert.doesNotMatch(sql, /SELECT item_source\.\*/);
 });
 
-test("route-product staleness keeps newest-wins CTEs when any entity has multiple active versions", async () => {
+test("route-product staleness reads current-state directly regardless of historical version count", async () => {
   let statement: { strings?: readonly string[] } | undefined;
   const query = new RieScalableQueryService(
     { $queryRaw: async (sql: { strings?: readonly string[] }) => {
-      if (sql.strings?.join(" ").includes('COUNT(*) AS "versionCount"')) {
-        return [
-          { entityName: "Van Inventory", versionCount: 2 },
-          { entityName: "Invoices", versionCount: 1 },
-          { entityName: "Invoice Items", versionCount: 3 },
-        ];
-      }
       statement = sql;
       return [];
     } } as never,
@@ -145,9 +138,8 @@ test("route-product staleness keeps newest-wins CTEs when any entity has multipl
   await query.queryRouteProductStaleness({ companyId: "company-1", targetDate: "2026-08-10", staleDaysThreshold: 4 });
 
   const sql = statement?.strings?.join(" ") ?? "";
-  assert.match(sql, /inventory_candidates/);
-  assert.doesNotMatch(sql, /invoice_candidates/);
-  assert.match(sql, /item_candidates/);
+  assert.doesNotMatch(sql, /inventory_candidates|invoice_candidates|item_candidates|rie_dataset_versions|rie_entity_rows/);
+  assert.match(sql, /rie_canonical_entity_rows/);
   assert.doesNotMatch(sql, /SELECT inventory_source\.\*/);
   assert.doesNotMatch(sql, /SELECT invoice_source\.\*/);
   assert.doesNotMatch(sql, /SELECT item_source\.\*/);
@@ -221,14 +213,6 @@ test("management Smart Loading bundle shares scoped foundations and admits each 
   const query = new RieScalableQueryService({
     $queryRaw: async (sql: { strings?: readonly string[]; values?: readonly unknown[] }) => {
       rawQueryCount += 1;
-      if ((sql.strings?.join(" ") ?? "").includes('COUNT(*) AS "versionCount"')) {
-        return [
-          { entityName: "Van Inventory", versionCount: 1 },
-          { entityName: "Invoices", versionCount: 2 },
-          { entityName: "Invoice Items", versionCount: 2 },
-          { entityName: "Products", versionCount: 1 },
-        ];
-      }
       statement = sql;
       return [expected];
     },
@@ -253,19 +237,16 @@ test("management Smart Loading bundle shares scoped foundations and admits each 
   }
 
   assert.deepEqual(result, expected);
-  assert.equal(rawQueryCount, 2, "metadata and bundle SQL should both execute");
-  assert.deepEqual(acquiredOperations, ["activeVersionCounts.sql", "queryManagementSmartLoadingBundle.sql"]);
+  assert.equal(rawQueryCount, 1, "the bundle reads canonical current-state without version metadata");
+  assert.deepEqual(acquiredOperations, ["queryManagementSmartLoadingBundle.sql"]);
   const sql = statement?.strings?.join("?") ?? "";
   assert.match(sql, /stock_by_route_product AS MATERIALIZED/);
   assert.equal((sql.match(/stock_by_route_product AS MATERIALIZED/g) ?? []).length, 1);
   assert.match(sql, /stale_scoped_invoice_numbers AS MATERIALIZED/);
   assert.match(sql, /window_scoped_invoice_numbers AS MATERIALIZED/);
   assert.match(sql, /window_sales_by_route_product AS MATERIALIZED/);
-  assert.match(sql, /stale_invoice_candidates/);
-  assert.match(sql, /window_invoice_candidates/);
-  assert.match(sql, /stale_item_candidates/);
-  assert.match(sql, /window_item_candidates/);
-  assert.doesNotMatch(sql, /inventory_candidates|product_candidates/);
+  assert.doesNotMatch(sql, /_candidates|rie_dataset_versions|rie_entity_rows/);
+  assert.match(sql, /rie_canonical_entity_rows/);
   assert.doesNotMatch(sql, /SELECT\s+\w+_source\.\*/);
   assert.doesNotMatch(sql, /CROSS JOIN/);
   assert.ok(statement?.values?.includes("route-a"));
@@ -276,19 +257,11 @@ test("management Smart Loading bundle shares scoped foundations and admits each 
   assert.ok(statement?.values?.includes("2026-08-10"));
 });
 
-test("management heavy Promise section admits metadata and fact SQL at the actual execution boundary", async () => {
+test("management heavy Promise section admits only current-state fact SQL at the execution boundary", async () => {
   const acquiredOperations: string[] = [];
   const query = new RieScalableQueryService({
     $queryRaw: async (sql: { strings?: readonly string[] }) => {
       const text = sql.strings?.join(" ") ?? "";
-      if (text.includes('COUNT(*) AS "versionCount"')) {
-        return [
-          { entityName: "Van Inventory", versionCount: 1 },
-          { entityName: "Invoices", versionCount: 1 },
-          { entityName: "Invoice Items", versionCount: 1 },
-          { entityName: "Products", versionCount: 1 },
-        ];
-      }
       if (text.includes('AS "latestReportDate"')) return [{ routeId: "route-a", latestReportDate: "2026-08-10" }];
       return [{
         routeProductStaleness: [],
@@ -319,8 +292,6 @@ test("management heavy Promise section admits metadata and fact SQL at the actua
   }
 
   assert.deepEqual(acquiredOperations.sort(), [
-    "activeVersionCounts.sql",
-    "activeVersionCounts.sql",
     "queryManagementActiveVehicleRoutes.sql",
     "queryManagementSmartLoadingBundle.sql",
   ]);

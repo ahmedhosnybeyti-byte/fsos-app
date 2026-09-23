@@ -1,5 +1,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import type { Prisma } from "@field-sales-os/database";
 import { RieScalableQueryService } from "./scalable-query.service";
 
@@ -36,6 +38,15 @@ test("scalable RIE incremental merge in PostgreSQL", {
       entity_key text NOT NULL, data jsonb NOT NULL, created_at timestamptz DEFAULT now(),
       UNIQUE(dataset_version_id, entity_key)
     );
+    CREATE TEMP TABLE rie_canonical_entity_rows (
+      id text PRIMARY KEY, company_id text NOT NULL, source_file_id text,
+      entity_name text NOT NULL, entity_key text NOT NULL, data jsonb NOT NULL,
+      created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE UNIQUE INDEX rie_canonical_entity_rows_company_id_entity_name_entity_key_key
+      ON rie_canonical_entity_rows(company_id, entity_name, entity_key);
+    CREATE INDEX rie_canonical_entity_rows_company_id_entity_name_idx
+      ON rie_canonical_entity_rows(company_id, entity_name);
     CREATE INDEX ON rie_dataset_versions(company_id, entity_name, is_active);
     CREATE INDEX ON rie_entity_rows(dataset_version_id, (LOWER(BTRIM(COALESCE(data ->> 'InvoiceNo', '')))));
   `);
@@ -90,6 +101,61 @@ test("scalable RIE incremental merge in PostgreSQL", {
     { key: "P-1", data: { ProductCode: "P-1", ProductName: "Product 1", Category: "Food" } },
   ]);
 
+  await upload("blank-invoices-old", "Invoices", "2026-06-01", [
+    { key: "blank-old", data: { InvoiceNo: "", InvoiceStatus: "Blank old", TotalAmount: 1 } },
+    { key: "null-old", data: { InvoiceNo: null, InvoiceStatus: "Null old", TotalAmount: 2 } },
+  ]);
+  await upload("blank-invoices-new", "Invoices", "2026-08-02", [
+    { key: "blank-new", data: { InvoiceNo: "", InvoiceStatus: "Blank new", TotalAmount: 3 } },
+  ]);
+
+  // Execute the real cutover migration. Historical newest-wins remains only
+  // as the reference oracle below; every service query after this point reads
+  // rie_canonical_entity_rows.
+  const migration = readFileSync(resolve(process.cwd(), "packages/database/prisma/migrations/20260923020000_rie_canonical_current_state/migration.sql"), "utf8");
+  await db.exec(migration);
+
+  const oldNewestWins = async (company: string, entity: string, keys: readonly string[]) => {
+    const normalized = keys.map((key) => `LOWER(BTRIM(COALESCE(source_row.data ->> '${key}', '')))`);
+    const keyProjection = normalized.map((expression, index) => `${expression} AS key_${index}`).join(", ");
+    const blank = keys.map((_, index) => `candidate.key_${index} = ''`).join(" OR ");
+    const rows = await db.query(`
+      WITH versions AS MATERIALIZED (
+        SELECT version.id, ROW_NUMBER() OVER (ORDER BY source_file.created_at DESC, source_file.id DESC) precedence
+        FROM rie_dataset_versions version
+        JOIN files source_file ON source_file.id = version.source_file_id
+        WHERE version.company_id = $1 AND version.entity_name = $2 AND version.is_active = TRUE
+          AND source_file.company_id = $1 AND source_file.is_active = TRUE
+          AND source_file.status = 'READY' AND source_file.dataset_type_confirmed = TRUE
+      ), candidates AS (
+        SELECT source_row.id, source_row.entity_key, source_row.data, version.precedence, ${keyProjection},
+          MIN(version.precedence) OVER (PARTITION BY ${normalized.join(", ")}) newest
+        FROM versions version JOIN rie_entity_rows source_row ON source_row.dataset_version_id = version.id
+        WHERE source_row.company_id = $1 AND source_row.entity_name = $2
+      )
+      SELECT id, entity_key, precedence, data FROM candidates candidate
+      WHERE (${blank}) OR precedence = newest
+      ORDER BY id
+    `, [company, entity]);
+    return rows.rows;
+  };
+  const currentRows = async (company: string, entity: string) => (await db.query(
+    "SELECT id, entity_key, precedence, data FROM rie_canonical_entity_rows WHERE company_id = $1 AND entity_name = $2 ORDER BY id",
+    [company, entity],
+  )).rows;
+  const assertParity = async (company: string, entity: string, keys: readonly string[]) => {
+    assert.deepEqual(await currentRows(company, entity), await oldNewestWins(company, entity, keys));
+  };
+
+  await t.test("cutover current-state exactly matches the old newest-wins reference", async () => {
+    await assertParity("company-1", "Invoices", ["InvoiceNo"]);
+    await assertParity("company-1", "Invoice Items", ["InvoiceNo", "LineNo"]);
+    await assertParity("company-1", "Visits", ["VisitID"]);
+    await assertParity("company-2", "Invoices", ["InvoiceNo"]);
+    const blankRows = (await currentRows("company-1", "Invoices")).filter((row) => !String((row.data as Record<string, unknown>).InvoiceNo ?? "").trim());
+    assert.equal(blankRows.length, 3);
+  });
+
   let lastQuery: Prisma.Sql | undefined;
   const service = new RieScalableQueryService({
     $queryRaw: async (sql: Prisma.Sql) => {
@@ -118,7 +184,7 @@ test("scalable RIE incremental merge in PostgreSQL", {
   });
   await t.test("duplicate business record is counted once and sums use its latest value", async () => {
     const result = await service.query({ ...invoices, projection: [], aggregates: [{ op: "count", as: "count" }, { op: "sum", field: "TotalAmount", as: "total" }] });
-    assert.deepEqual(result.records, [{ count: 2, total: 175 }]);
+    assert.deepEqual(result.records, [{ count: 5, total: 181 }]);
     assert.equal(result.page.hasMore, false);
   });
   await t.test("status, date and hierarchy filters cannot resurrect an older matching record", async () => {
@@ -146,6 +212,51 @@ test("scalable RIE incremental merge in PostgreSQL", {
       assert.deepEqual(result.records, [{ count: expected }]);
     }
   });
+  await t.test("file deactivation and reactivation atomically restore and reapply newest-wins", async () => {
+    await db.query("UPDATE files SET is_active = false WHERE id = 'new-invoices'");
+    await assertParity("company-1", "Invoices", ["InvoiceNo"]);
+    const fallback = await service.query({ ...invoices, scope: { fields: [{ field: "InvoiceNo", values: ["INV-1"] }] } });
+    assert.deepEqual(fallback.records, [{ InvoiceNo: "INV-1", InvoiceStatus: "Pending" }]);
+
+    await db.query("UPDATE files SET is_active = true WHERE id = 'new-invoices'");
+    await assertParity("company-1", "Invoices", ["InvoiceNo"]);
+    assert.deepEqual((await service.query({ ...invoices, scope: { fields: [{ field: "InvoiceNo", values: ["INV-1"] }] } })).records, [{ InvoiceNo: " inv-1 ", InvoiceStatus: "Closed" }]);
+  });
+  await t.test("dataset-version activation state refreshes current-state without a fallback read", async () => {
+    await db.query("UPDATE rie_dataset_versions SET is_active = false WHERE id = 'new-invoices'");
+    await assertParity("company-1", "Invoices", ["InvoiceNo"]);
+    await db.query("UPDATE rie_dataset_versions SET is_active = true WHERE id = 'new-invoices'");
+    await assertParity("company-1", "Invoices", ["InvoiceNo"]);
+  });
+  await t.test("replacement publishes only at READY and deactivation falls back atomically", async () => {
+    await db.query("INSERT INTO files VALUES ('replacement-invoices', 'company-1', '2026-09-10', true, 'PROCESSING', true)");
+    await db.query("INSERT INTO rie_dataset_versions VALUES ('replacement-invoices', 'company-1', 'Invoices', 'replacement-invoices', false)");
+    await db.query("INSERT INTO rie_entity_rows (id, company_id, entity_name, dataset_version_id, entity_key, data) VALUES ('replacement-invoices-0', 'company-1', 'Invoices', 'replacement-invoices', 'INV-1', '{\"InvoiceNo\":\"INV-1\",\"InvoiceStatus\":\"Replacement\",\"InvoiceDate\":\"2026-09-10\",\"CustomerCode\":\"C-1\",\"RouteID\":\"NEW\",\"TotalAmount\":150}'::jsonb)");
+    await db.query("UPDATE rie_dataset_versions SET is_active = true WHERE id = 'replacement-invoices'");
+    await assertParity("company-1", "Invoices", ["InvoiceNo"]);
+    assert.equal((await service.query({ ...invoices, scope: { fields: [{ field: "InvoiceNo", values: ["INV-1"] }] } })).records[0]?.InvoiceStatus, "Closed");
+
+    await db.query("UPDATE files SET status = 'READY' WHERE id = 'replacement-invoices'");
+    await assertParity("company-1", "Invoices", ["InvoiceNo"]);
+    assert.equal((await service.query({ ...invoices, scope: { fields: [{ field: "InvoiceNo", values: ["INV-1"] }] } })).records[0]?.InvoiceStatus, "Replacement");
+
+    await db.query("UPDATE files SET is_active = false WHERE id = 'replacement-invoices'");
+    await assertParity("company-1", "Invoices", ["InvoiceNo"]);
+    assert.equal((await service.query({ ...invoices, scope: { fields: [{ field: "InvoiceNo", values: ["INV-1"] }] } })).records[0]?.InvoiceStatus, "Closed");
+  });
+  await t.test("same-version duplicate business keys remain current", async () => {
+    await db.query("INSERT INTO files VALUES ('duplicate-returns', 'company-1', '2026-09-11', true, 'PROCESSING', true)");
+    await db.query("INSERT INTO rie_dataset_versions VALUES ('duplicate-returns', 'company-1', 'Returns', 'duplicate-returns', false)");
+    await db.query(`
+      INSERT INTO rie_entity_rows (id, company_id, entity_name, dataset_version_id, entity_key, data) VALUES
+        ('duplicate-return-1', 'company-1', 'Returns', 'duplicate-returns', 'RET-1', '{"ReturnNo":"RET-1","RouteID":"R-1","TotalAmount":10}'::jsonb),
+        ('duplicate-return-2', 'company-1', 'Returns', 'duplicate-returns', 'RET-1␟1', '{"ReturnNo":" ret-1 ","RouteID":"R-1","TotalAmount":20}'::jsonb)
+    `);
+    await db.query("UPDATE rie_dataset_versions SET is_active = true WHERE id = 'duplicate-returns'");
+    await db.query("UPDATE files SET status = 'READY' WHERE id = 'duplicate-returns'");
+    await assertParity("company-1", "Returns", ["ReturnNo"]);
+    assert.equal((await currentRows("company-1", "Returns")).length, 2);
+  });
   await t.test("single-upload data retains parity and SQL returns a bounded result", async () => {
     const result = await service.query({ ...invoices, scope: { fields: [{ field: "InvoiceNo", values: ["HIST"] }] }, pagination: { limit: 1 } });
     assert.deepEqual(result.records, [{ InvoiceNo: "HIST", InvoiceStatus: "Historical" }]);
@@ -154,7 +265,8 @@ test("scalable RIE incremental merge in PostgreSQL", {
     const root = plan.Plan as Record<string, unknown>;
     const allNodes = (node: Record<string, unknown>): Record<string, unknown>[] => [node, ...((node.Plans ?? []) as Record<string, unknown>[]).flatMap(allNodes)];
     const nodes = allNodes(root);
-    assert.ok(nodes.some((node) => node["Node Type"] === "WindowAgg"));
+    assert.ok(nodes.every((node) => node["Node Type"] !== "WindowAgg"));
+    assert.doesNotMatch(lastQuery!.text, /rie_dataset_versions|rie_entity_rows|ROW_NUMBER\(\) OVER|newest_precedence/);
     assert.ok(nodes.every((node) => node["Parent Relationship"] !== "SubPlan"));
     assert.ok(nodes.every((node) => !(node["Node Type"] === "Nested Loop" && (node.Plans as Record<string, unknown>[] | undefined)?.some((child) => child["Node Type"] === "Seq Scan" && Number(child["Actual Loops"] ?? 0) > 1))));
     const scanned = (node: Record<string, unknown>): number =>
@@ -235,6 +347,7 @@ test("scalable RIE incremental merge in PostgreSQL", {
         SELECT '${slug}-new-' || series, 'company-1', '${entity}', 'perf-${slug}-new', '${prefix}-' || series, jsonb_build_object('${key}', '${prefix}-' || series, '${date}', '2026-08-01', 'RouteID', 'R-' || (series % 5), 'Amount', 2, 'TotalAmount', 2)
         FROM generate_series(1, 5000) series
       `);
+      await db.query("SELECT rie_refresh_canonical_current_state($1, $2)", ["company-1", entity]);
     }
 
     for (const { entity } of entities) {
@@ -248,7 +361,8 @@ test("scalable RIE incremental merge in PostgreSQL", {
       const plan = (explained.rows[0]!["QUERY PLAN"] as Array<Record<string, unknown>>)[0]!;
       const allNodes = (node: Record<string, unknown>): Record<string, unknown>[] => [node, ...((node.Plans ?? []) as Record<string, unknown>[]).flatMap(allNodes)];
       const nodes = allNodes(plan.Plan as Record<string, unknown>);
-      assert.ok(nodes.some((node) => node["Node Type"] === "WindowAgg"));
+      assert.ok(nodes.every((node) => node["Node Type"] !== "WindowAgg"));
+      assert.doesNotMatch(lastQuery!.text, /rie_dataset_versions|rie_entity_rows|ROW_NUMBER\(\) OVER|newest_precedence/);
       assert.ok(nodes.every((node) => node["Parent Relationship"] !== "SubPlan"));
       assert.ok(nodes.every((node) => !(node["Node Type"] === "Nested Loop" && (node.Plans as Record<string, unknown>[] | undefined)?.some((child) => child["Node Type"] === "Seq Scan" && Number(child["Actual Loops"] ?? 0) > 1))));
       t.diagnostic(`${entity} 20k history rows (5k newer overlaps): executionMs=${plan["Execution Time"]}`);
@@ -270,6 +384,7 @@ test("scalable RIE incremental merge in PostgreSQL", {
         SELECT '${slug}-' || series, 'company-single', '${entity}', '${slug}', '${prefix}-' || series, jsonb_build_object('${key}', '${prefix}-' || series, '${date}', '2026-08-01', 'RouteID', 'R-' || (series % 5), 'Amount', 1, 'TotalAmount', 1)
         FROM generate_series(1, 20000) series
       `);
+      await db.query("SELECT rie_refresh_canonical_current_state($1, $2)", ["company-single", entity]);
     }
 
     for (const { entity } of entities) {
