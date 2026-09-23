@@ -3,8 +3,8 @@ import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { RieRequestPlannerService } from "./rie-request-planner.service";
-import type { EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoProductQuery, RieGeoProductRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
+import type { EntityQueryContext, EntityRecord, EntityQueryResult } from "./entity-provider.interface";
+import type { RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRiePostgres, recordActiveVersionResolution } from "../../common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 
@@ -164,6 +164,145 @@ export class RieScalableQueryService {
    * nearest/manual set is selected in PostgreSQL; Node receives at most the
    * requested neighbors plus manual selections.
    */
+  async queryGeoCustomerDirectory(input: RieGeoCustomerDirectoryQuery): Promise<RieGeoCustomerDirectoryRow[]> {
+    return (await this.queryGeoCustomerDirectoryResult(input, "queryGeoCustomerDirectory")).customers;
+  }
+
+  async queryGeoExpansionCustomers(input: RieGeoCustomerDirectoryQuery): Promise<RieGeoExpansionCustomersResult> {
+    return this.queryGeoCustomerDirectoryResult(input, "queryGeoExpansionCustomers");
+  }
+
+  private async queryGeoCustomerDirectoryResult(
+    input: RieGeoCustomerDirectoryQuery,
+    operation: "queryGeoCustomerDirectory" | "queryGeoExpansionCustomers",
+  ): Promise<RieGeoExpansionCustomersResult> {
+    if (!input.companyId?.trim()) throw new Error("RIE Geo customer directory requires companyId.");
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const predicates = allowedRoutes === null
+      ? []
+      : allowedRoutes.size
+        ? [Prisma.sql`${normalizedField({ field: "RouteID", source: "customer_source" })} IN (${Prisma.join([...allowedRoutes])})`]
+        : [Prisma.sql`FALSE`];
+    if (input.exactScope) {
+      assertIdentifier(input.exactScope.field, "Geo scope field");
+      predicates.push(input.exactScope.values.length
+        ? Prisma.sql`COALESCE(${textField({ field: input.exactScope.field, source: "customer_source" })}, '') IN (${Prisma.join([...input.exactScope.values])})`
+        : Prisma.sql`FALSE`);
+    }
+    const customerCode = textField({ field: "CustomerCode", source: "customer_source" });
+    const customerName = textField({ field: "CustomerName", source: "customer_source" });
+    const latitude = geoFiniteNumberField(textField({ field: "Latitude", source: "customer_source" }));
+    const longitude = geoFiniteNumberField(textField({ field: "Longitude", source: "customer_source" }));
+    const customerProjection = Prisma.sql`
+      customer_source.id AS source_row_id,
+      customer_source.precedence,
+      customer_source."created_at",
+      BTRIM(COALESCE(${customerCode}, '')) AS customer_id,
+      COALESCE(${customerName}, BTRIM(COALESCE(${customerCode}, ''))) AS customer_name,
+      ${latitude} AS latitude,
+      ${longitude} AS longitude
+    `;
+    const customers = activeEntityRowsCte(input.companyId, "Customers", "customer", predicates, [], [], false, [], customerProjection);
+    const search = input.search?.trim().toLowerCase();
+    const rows = await this.postgres<Array<{ id: string | null; name: string | null; lat: number | null; lon: number | null; matchedScopeRows: number }>>(`${operation}.sql`, {
+      kind: "specialized",
+      operation,
+      hasSearch: Boolean(search),
+      hasExactScope: Boolean(input.exactScope),
+    }, () => Prisma.sql`
+      WITH ${customers}, valid AS MATERIALIZED (
+        SELECT customer_id AS id, customer_name AS name, latitude AS lat, longitude AS lon,
+          precedence AS source_precedence, "created_at" AS source_created_at, source_row_id,
+          ROW_NUMBER() OVER (
+            PARTITION BY customer_id
+            ORDER BY precedence ASC, "created_at" ASC, source_row_id ASC
+          ) AS row_number
+        FROM customer_active
+        WHERE customer_id <> ''
+          AND latitude BETWEEN -90 AND 90
+          AND longitude BETWEEN -180 AND 180
+          AND NOT (latitude = 0 AND longitude = 0)
+      ), selected AS MATERIALIZED (
+        SELECT id, name, lat, lon, source_precedence, source_created_at, source_row_id
+        FROM valid
+        WHERE row_number = 1
+          ${search ? Prisma.sql`AND (LOWER(name) LIKE ${`%${search}%`} OR LOWER(id) LIKE ${`%${search}%`})` : Prisma.empty}
+      ), scope_summary AS MATERIALIZED (
+        SELECT COUNT(*)::double precision AS matched_scope_rows
+        FROM customer_active
+      )
+      SELECT selected.id, selected.name, selected.lat, selected.lon,
+        scope_summary.matched_scope_rows AS "matchedScopeRows"
+      FROM scope_summary
+      LEFT JOIN selected ON TRUE
+      ORDER BY selected.source_precedence ASC NULLS LAST,
+        selected.source_created_at ASC NULLS LAST,
+        selected.source_row_id ASC NULLS LAST
+    `);
+    return {
+      customers: rows.flatMap((row) => row.id === null || row.name === null || row.lat === null || row.lon === null
+        ? []
+        : [{ id: row.id, name: row.name, lat: Number(row.lat), lon: Number(row.lon) }]),
+      matchedScopeRows: Number(rows[0]?.matchedScopeRows ?? 0),
+    };
+  }
+
+  /** Geo expansion's Invoice Items -> Invoices sum, reduced to one row per customer in PostgreSQL. */
+  async queryGeoCustomerSales(input: EntityQueryContext): Promise<RieGeoCustomerSalesRow[]> {
+    if (!input.companyId?.trim()) throw new Error("RIE Geo customer sales requires companyId.");
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const scoped = (source: string): Prisma.Sql[] => allowedRoutes === null
+      ? []
+      : allowedRoutes.size
+        ? [Prisma.sql`${normalizedField({ field: "RouteID", source })} IN (${Prisma.join([...allowedRoutes])})`]
+        : [Prisma.sql`FALSE`];
+    const invoiceProjection = Prisma.sql`
+      invoice_source.id,
+      invoice_source.precedence,
+      invoice_source."created_at",
+      BTRIM(COALESCE(${textField({ field: "InvoiceNo", source: "invoice_source" })}, '')) AS invoice_no,
+      BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "invoice_source" })}, '')) AS customer_code
+    `;
+    const itemTotal = textField({ field: "LineTotal", source: "item_source" });
+    const itemProjection = Prisma.sql`
+      BTRIM(COALESCE(${textField({ field: "InvoiceNo", source: "item_source" })}, '')) AS invoice_no,
+      CASE
+        WHEN BTRIM(COALESCE(${itemTotal}, '')) ~ '^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$'
+        THEN BTRIM(COALESCE(${itemTotal}, ''))::double precision
+        ELSE 0::double precision
+      END AS amount
+    `;
+    const invoices = activeEntityRowsCte(input.companyId, "Invoices", "invoice", scoped("invoice_source"), [], [], false, [], invoiceProjection);
+    const items = activeEntityRowsCte(input.companyId, "Invoice Items", "item", scoped("item_source"), [], [], false, [], itemProjection);
+    const rows = await this.postgres<RieGeoCustomerSalesRow[]>("queryGeoCustomerSales.sql", {
+      kind: "specialized",
+      operation: "queryGeoCustomerSales",
+    }, () => Prisma.sql`
+      WITH ${invoices}, ${items}, invoice_lookup AS MATERIALIZED (
+        SELECT invoice_no, customer_code
+        FROM (
+          SELECT invoice_no, customer_code,
+            ROW_NUMBER() OVER (
+              PARTITION BY invoice_no
+              ORDER BY precedence DESC, "created_at" DESC, id DESC
+            ) AS row_number
+          FROM invoice_active
+          WHERE invoice_no <> '' AND customer_code <> ''
+        ) ranked
+        WHERE row_number = 1
+      )
+      SELECT invoice.customer_code AS "customerCode", SUM(item.amount)::double precision AS total
+      FROM item_active item
+      INNER JOIN invoice_lookup invoice ON item.invoice_no = invoice.invoice_no
+      GROUP BY invoice.customer_code
+    `);
+    return rows.map((row) => ({ customerCode: row.customerCode, total: Number(row.total) }));
+  }
+
   async queryGeoCustomerSelection(input: RieGeoCustomerSelectionQuery): Promise<RieGeoCustomerSelectionRow[]> {
     const allowedRoutes = input.requestingUser ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser) : null;
     const route = !allowedRoutes ? [] : allowedRoutes.size === 0
@@ -1524,6 +1663,8 @@ function aggregateSql(aggregate: RieQueryAggregation): Prisma.Sql {
   return Prisma.sql`${Prisma.raw({ sum: "SUM", avg: "AVG", min: "MIN", max: "MAX" }[aggregate.op])}(${numeric})${rowFilter} AS ${alias}`;
 }
 function numericField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`; }
+/** Geo's legacy coercion accepted signed decimals and exponent notation. */
+function geoFiniteNumberField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`; }
 /** Matches RIE date filtering while making the route-stale subtraction safe. */
 function dateText(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN ${field} ~ '^\\d{4}-\\d{2}-\\d{2}' THEN LEFT(${field}, 10) ELSE NULL END`; }
 // Field names are validated identifiers.  Keep them as SQL literals rather

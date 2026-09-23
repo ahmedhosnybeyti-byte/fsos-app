@@ -85,6 +85,16 @@ export class GeoIntelligenceService {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
   }
 
+  private async requireSources(
+    context: ReturnType<GeoIntelligenceService["rieContext"]>,
+    entityNames: readonly string[],
+    arabicLabel: string,
+  ): Promise<void> {
+    if (!(await this.rieFacade.hasCanonicalEntitySources(context, entityNames))) {
+      throw new NotFoundException(`بيانات "${arabicLabel}" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.`);
+    }
+  }
+
   // Dedupes rows down to one {id, name, lat, lon} per customer — the first
   // row with a sane coordinate for that id wins. Shared by both the
   // customers-search endpoint and analyze()'s resolution step.
@@ -218,13 +228,9 @@ export class GeoIntelligenceService {
   // Comparison-scoped twin) — kept as its own method per this screen's own
   // endpoint rather than merged, so each stays free to diverge later.
   async listCustomers(user: AuthenticatedUser, input: GeoIntelligenceCustomersQueryInput): Promise<GeoIntelligenceCustomersResult> {
-    const customersResult = await this.rieFacade.getEntityRecords("Customers", this.rieContext(user));
-    this.assertEntityAvailable(customersResult, "Customers");
-
-    const { byId } = this.buildCustomerIndex(customersResult.records as SheetRow[], "CustomerCode", "CustomerName", "Latitude", "Longitude");
-    let list = Array.from(byId.values());
-    const q = input.search?.trim().toLowerCase();
-    if (q) list = list.filter((c) => c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q));
+    const ctx = this.rieContext(user);
+    await this.requireSources(ctx, ["Customers"], "Customers");
+    const list = await this.scalableQuery.queryGeoCustomerDirectory({ ...ctx, search: input.search });
     return { customers: list.sort((a, b) => a.name.localeCompare(b.name)) };
   }
 
@@ -261,13 +267,9 @@ export class GeoIntelligenceService {
   // RIE-backed replacement for the "search & pick target customer" step,
   // scoped to Customer Comparison's own endpoint.
   async listCustomersViaRie(user: AuthenticatedUser, input: GeoIntelligenceCompareCustomersQueryInput): Promise<GeoIntelligenceCustomersResult> {
-    const customersResult = await this.rieFacade.getEntityRecords("Customers", this.rieContext(user));
-    this.assertEntityAvailable(customersResult, "Customers");
-
-    const { byId } = this.buildCustomerIndex(customersResult.records as SheetRow[], "CustomerCode", "CustomerName", "Latitude", "Longitude");
-    let list = Array.from(byId.values());
-    const q = input.search?.trim().toLowerCase();
-    if (q) list = list.filter((c) => c.name.toLowerCase().includes(q) || c.id.toLowerCase().includes(q));
+    const ctx = this.rieContext(user);
+    await this.requireSources(ctx, ["Customers"], "Customers");
+    const list = await this.scalableQuery.queryGeoCustomerDirectory({ ...ctx, search: input.search });
     return { customers: list.sort((a, b) => a.name.localeCompare(b.name)) };
   }
 
@@ -320,43 +322,25 @@ export class GeoIntelligenceService {
   // CustomerCode, summed by LineTotal. Same join shape as Migrations #3/#4
   // (REL-CU-002/REL-IN-003 in the Relationship Registry).
   private async computeSalesByCustomer(ctx: ReturnType<GeoIntelligenceService["rieContext"]>): Promise<Map<string, number>> {
-    const [invoicesResult, itemsResult] = await Promise.all([
-      this.rieFacade.getEntityRecords("Invoices", ctx),
-      this.rieFacade.getEntityRecords("Invoice Items", ctx),
-    ]);
-    this.assertEntityAvailable(invoicesResult, "الفواتير");
-    this.assertEntityAvailable(itemsResult, "أصناف الفاتورة");
-
-    const invoiceCustomer = new Map<string, string>();
-    for (const inv of invoicesResult.records) {
-      const no = String(inv.InvoiceNo ?? "").trim();
-      const cust = String(inv.CustomerCode ?? "").trim();
-      if (no && cust) invoiceCustomer.set(no, cust);
-    }
-
-    const salesById = new Map<string, number>();
-    for (const item of itemsResult.records) {
-      const invoiceNo = String(item.InvoiceNo ?? "").trim();
-      const customerCode = invoiceCustomer.get(invoiceNo);
-      if (!customerCode) continue;
-      const amount = toFiniteNumber(item.LineTotal) ?? 0;
-      salesById.set(customerCode, (salesById.get(customerCode) ?? 0) + amount);
-    }
-    return salesById;
+    await this.requireSources(ctx, ["Invoices", "Invoice Items"], "الفواتير وأصنافها");
+    const rows = await this.scalableQuery.queryGeoCustomerSales(ctx);
+    return new Map(rows.flatMap((row) => {
+      const customerCode = row.customerCode.trim();
+      return customerCode ? [[customerCode, row.total] as const] : [];
+    }));
   }
 
   async expansion(user: AuthenticatedUser, input: GeoIntelligenceExpansionInput): Promise<GeoIntelligenceExpansionResult> {
     const ctx = this.rieContext(user);
-    const customersResult = await this.rieFacade.getEntityRecords("Customers", ctx);
-    this.assertEntityAvailable(customersResult, "العملاء");
-
-    let scoped = customersResult.records;
-    if (input.scopeField && input.scopeValues && input.scopeValues.length > 0) {
-      const scopeSet = new Set(input.scopeValues);
-      scoped = scoped.filter((row) => scopeSet.has(String(row[input.scopeField!] ?? "")));
-      if (scoped.length === 0) {
-        throw new BadRequestException(`لا توجد بيانات مطابقة لـ ${input.scopeField} ضمن [${input.scopeValues.join(", ")}]`);
-      }
+    await this.requireSources(ctx, ["Customers"], "العملاء");
+    const scopedCustomers = await this.scalableQuery.queryGeoExpansionCustomers({
+      ...ctx,
+      ...(input.scopeField && input.scopeValues?.length
+        ? { exactScope: { field: input.scopeField, values: input.scopeValues } }
+        : {}),
+    });
+    if (input.scopeField && input.scopeValues?.length && scopedCustomers.matchedScopeRows === 0) {
+      throw new BadRequestException(`لا توجد بيانات مطابقة لـ ${input.scopeField} ضمن [${input.scopeValues.join(", ")}]`);
     }
 
     const salesById = await this.computeSalesByCustomer(ctx);
@@ -365,15 +349,9 @@ export class GeoIntelligenceService {
     // coordinate.
     const valueById = new Map<string, number>();
     const coordById = new Map<string, { lat: number; lon: number }>();
-    for (const row of scoped) {
-      const id = String(row.CustomerCode ?? "").trim();
-      if (!id) continue;
-      valueById.set(id, salesById.get(id) ?? 0);
-      if (!coordById.has(id)) {
-        const lat = toFiniteNumber(row.Latitude);
-        const lon = toFiniteNumber(row.Longitude);
-        if (lat !== null && lon !== null && isSaneCoordinate(lat, lon)) coordById.set(id, { lat, lon });
-      }
+    for (const customer of scopedCustomers.customers) {
+      valueById.set(customer.id, salesById.get(customer.id) ?? 0);
+      coordById.set(customer.id, { lat: customer.lat, lon: customer.lon });
     }
 
     const customers = Array.from(coordById.entries()).map(([id, c]) => ({ id, lat: c.lat, lon: c.lon, value: valueById.get(id) ?? 0 }));
@@ -466,13 +444,17 @@ export class GeoIntelligenceService {
   // endpoints. Does NOT touch GET /route-planning/distinct-values, which
   // this screen used before its own migration turn.
   async expansionScopeValues(user: AuthenticatedUser, scopeField: GeoIntelligenceScopeField): Promise<GeoIntelligenceValuesResult> {
-    const customersResult = await this.rieFacade.getEntityRecords("Customers", this.rieContext(user));
-    this.assertEntityAvailable(customersResult, "العملاء");
-    const values = new Set<string>();
-    for (const row of customersResult.records) {
-      const v = String(row[scopeField] ?? "").trim();
-      if (v) values.add(v);
-    }
+    const ctx = this.rieContext(user);
+    await this.requireSources(ctx, ["Customers"], "العملاء");
+    const result = await this.rieFacade.queryCanonicalRecords({
+      ...ctx,
+      entityName: "Customers",
+      projection: [{ field: scopeField, as: "value" }],
+      groupBy: [{ field: scopeField }],
+      orderBy: [{ field: { field: scopeField }, direction: "asc" }],
+      unboundedFinalResult: true,
+    });
+    const values = new Set(result.records.map((row) => String(row.value ?? "").trim()).filter(Boolean));
     return { values: Array.from(values).sort((a, b) => a.localeCompare(b)) };
   }
 

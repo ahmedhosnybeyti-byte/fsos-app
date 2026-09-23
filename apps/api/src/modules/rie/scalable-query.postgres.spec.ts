@@ -165,6 +165,125 @@ test("scalable RIE incremental merge in PostgreSQL", {
   } as never, { resolveAllowedRouteIds: async () => new Set(["old"]) } as never);
   const invoices = { companyId: "company-1", entityName: "Invoices", projection: [{ field: "InvoiceNo" }, { field: "InvoiceStatus" }], pagination: { limit: 10 } };
 
+  await t.test("Geo directory and expansion sales preserve the legacy Node results with scoped scalar SQL", async () => {
+    await upload("geo-customers", "Customers", "2026-09-01", [
+      { key: "C-1", data: { CustomerCode: " C-1 ", CustomerName: "Bad first", Latitude: "0", Longitude: "0", RouteID: "R-1", City: "North" } },
+      { key: "C-1␟1", data: { CustomerCode: "C-1", CustomerName: "Valid One", Latitude: "2.47e1", Longitude: "+46.70", RouteID: "R-1", City: "North" } },
+      { key: "C-2", data: { CustomerCode: "C-2", CustomerName: "Second", Latitude: 24.8, Longitude: 46.8, RouteID: "R-1", City: " North " } },
+      { key: "C-3", data: { CustomerCode: "C-3", CustomerName: "Outside hierarchy", Latitude: 24.9, Longitude: 46.9, RouteID: "R-2", City: "North" } },
+      { key: "C-4", data: { CustomerCode: "C-4", CustomerName: "Alpha", Latitude: 25, Longitude: 47, RouteID: "R-1", City: "north" } },
+      { key: "C-4␟1", data: { CustomerCode: "C-4", CustomerName: "Needle on later duplicate", Latitude: 26, Longitude: 48, RouteID: "R-1", City: "north" } },
+      { key: "C-5", data: { CustomerCode: "C-5", CustomerName: "Invalid only", Latitude: 91, Longitude: 46, RouteID: "R-1", City: "Invalid" } },
+      { key: "blank", data: { CustomerCode: "", CustomerName: "Blank", Latitude: 24, Longitude: 46, RouteID: "R-1", City: "North" } },
+    ], "geo-company");
+    await upload("geo-invoices", "Invoices", "2026-09-01", [
+      { key: "INV-A", data: { InvoiceNo: "INV-A", CustomerCode: "C-1", RouteID: "R-1" } },
+      { key: "INV-A␟1", data: { InvoiceNo: " INV-A ", CustomerCode: " C-2 ", RouteID: "R-1" } },
+      { key: "INV-B", data: { InvoiceNo: "INV-B", CustomerCode: "C-1", RouteID: "R-1" } },
+      { key: "CASE", data: { InvoiceNo: "CASE", CustomerCode: "C-4", RouteID: "R-1" } },
+      { key: "INV-X", data: { InvoiceNo: "INV-X", CustomerCode: "C-9", RouteID: "R-2" } },
+    ], "geo-company");
+    await upload("geo-items", "Invoice Items", "2026-09-01", [
+      { key: "INV-A␟1", data: { InvoiceNo: "INV-A", LineNo: 1, LineTotal: "10", RouteID: "R-1" } },
+      { key: "INV-B␟1", data: { InvoiceNo: " INV-B ", LineNo: 1, LineTotal: "2e1", RouteID: "R-1" } },
+      { key: "INV-B␟2", data: { InvoiceNo: "INV-B", LineNo: 2, LineTotal: "not-a-number", RouteID: "R-1" } },
+      { key: "case␟1", data: { InvoiceNo: "case", LineNo: 1, LineTotal: 40, RouteID: "R-1" } },
+      { key: "INV-X␟1", data: { InvoiceNo: "INV-X", LineNo: 1, LineTotal: 999, RouteID: "R-2" } },
+    ], "geo-company");
+    await upload("geo-other-customers", "Customers", "2026-09-01", [
+      { key: "C-OTHER", data: { CustomerCode: "C-OTHER", CustomerName: "Other company", Latitude: 24, Longitude: 46, RouteID: "R-1", City: "North" } },
+    ], "geo-other");
+    await upload("geo-other-invoices", "Invoices", "2026-09-01", [
+      { key: "INV-A", data: { InvoiceNo: "INV-A", CustomerCode: "C-OTHER", RouteID: "R-1" } },
+    ], "geo-other");
+    await upload("geo-other-items", "Invoice Items", "2026-09-01", [
+      { key: "INV-A␟1", data: { InvoiceNo: "INV-A", LineNo: 1, LineTotal: 777, RouteID: "R-1" } },
+    ], "geo-other");
+    for (const company of ["geo-company", "geo-other"]) {
+      for (const entity of ["Customers", "Invoices", "Invoice Items"]) {
+        await db.query("SELECT rie_refresh_canonical_current_state($1, $2)", [company, entity]);
+      }
+    }
+
+    const geoService = new RieScalableQueryService({
+      $queryRaw: async (sql: Prisma.Sql) => {
+        lastQuery = sql;
+        return (await db.query(sql.text, sql.values)).rows;
+      },
+    } as never, { resolveAllowedRouteIds: async () => new Set(["r-1"]) } as never);
+    const legacyRows = async (entity: string) => (await db.query(`
+      SELECT row.data
+      FROM rie_canonical_entity_rows row
+      INNER JOIN files source_file ON source_file.id = row.source_file_id
+      WHERE row.company_id = 'geo-company' AND row.entity_name = $1
+        AND LOWER(BTRIM(COALESCE(row.data ->> 'RouteID', ''))) = 'r-1'
+      ORDER BY source_file.created_at DESC, row.created_at ASC, row.id ASC
+    `, [entity])).rows.map((row) => row.data as Record<string, unknown>);
+    const finite = (value: unknown): number | null => {
+      if (typeof value === "number") return Number.isFinite(value) ? value : null;
+      if (typeof value === "string" && value.trim() !== "") {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      return null;
+    };
+    const customers = await legacyRows("Customers");
+    const legacyDirectory = new Map<string, { id: string; name: string; lat: number; lon: number }>();
+    for (const row of customers) {
+      const id = String(row.CustomerCode ?? "").trim();
+      const lat = finite(row.Latitude);
+      const lon = finite(row.Longitude);
+      if (!id || lat === null || lon === null || lat < -90 || lat > 90 || lon < -180 || lon > 180 || (lat === 0 && lon === 0)) continue;
+      if (!legacyDirectory.has(id)) legacyDirectory.set(id, { id, name: String(row.CustomerName ?? id), lat, lon });
+    }
+    const directory = await geoService.queryGeoCustomerDirectory({
+      companyId: "geo-company", requestingUser: { roleCode: "SALES_REP", email: "rep@example.test" },
+    });
+    assert.deepEqual(directory, [...legacyDirectory.values()]);
+    assert.deepEqual(await geoService.queryGeoCustomerDirectory({
+      companyId: "geo-company", requestingUser: { roleCode: "SALES_REP", email: "rep@example.test" }, search: "needle",
+    }), []);
+    assert.doesNotMatch(lastQuery!.text, /rie_dataset_versions|rie_entity_rows|customer_source\.\*/);
+    assert.match(lastQuery!.text, /customer_source\."company_id"/);
+    assert.match(lastQuery!.text, /customer_source\."data" ->> 'RouteID'/);
+
+    const invoiceCustomer = new Map<string, string>();
+    for (const row of await legacyRows("Invoices")) {
+      const invoiceNo = String(row.InvoiceNo ?? "").trim();
+      const customerCode = String(row.CustomerCode ?? "").trim();
+      if (invoiceNo && customerCode) invoiceCustomer.set(invoiceNo, customerCode);
+    }
+    const legacySales = new Map<string, number>();
+    for (const row of await legacyRows("Invoice Items")) {
+      const customerCode = invoiceCustomer.get(String(row.InvoiceNo ?? "").trim());
+      if (!customerCode) continue;
+      legacySales.set(customerCode, (legacySales.get(customerCode) ?? 0) + (finite(row.LineTotal) ?? 0));
+    }
+    const sales = await geoService.queryGeoCustomerSales({
+      companyId: "geo-company", requestingUser: { roleCode: "SALES_REP", email: "rep@example.test" },
+    });
+    assert.deepEqual(new Map(sales.map((row) => [row.customerCode, row.total])), legacySales);
+    assert.doesNotMatch(lastQuery!.text, /rie_dataset_versions|rie_entity_rows|invoice_source\.\*|item_source\.\*/);
+    assert.match(lastQuery!.text, /GROUP BY invoice\.customer_code/);
+
+    const exactScope = await geoService.queryGeoExpansionCustomers({
+      companyId: "geo-company",
+      requestingUser: { roleCode: "SALES_REP", email: "rep@example.test" },
+      exactScope: { field: "City", values: ["North"] },
+    });
+    assert.equal(exactScope.matchedScopeRows, 3);
+    assert.deepEqual(exactScope.customers, [{ id: "C-1", name: "Valid One", lat: 24.7, lon: 46.7 }]);
+    assert.doesNotMatch(lastQuery!.text, /base_source\.\*|rie_dataset_versions|rie_entity_rows/);
+
+    const invalidScope = await geoService.queryGeoExpansionCustomers({
+      companyId: "geo-company",
+      requestingUser: { roleCode: "SALES_REP", email: "rep@example.test" },
+      exactScope: { field: "City", values: ["Invalid"] },
+    });
+    assert.equal(invalidScope.matchedScopeRows, 1);
+    assert.deepEqual(invalidScope.customers, []);
+  });
+
   await t.test("newer matching record wins regardless of insertion order, key casing or whitespace", async () => {
     const result = await service.query({ ...invoices, scope: { fields: [{ field: "InvoiceNo", values: ["INV-1"] }] } });
     assert.deepEqual(result.records, [{ InvoiceNo: " inv-1 ", InvoiceStatus: "Closed" }]);

@@ -99,6 +99,16 @@ export interface RieGeoCustomerSelectionRow {
   source: "target" | "auto" | "manual";
   excludedBadCoordinates: number;
 }
+/** Final customer directory rows for Geo Intelligence search/pickers. */
+export interface RieGeoCustomerDirectoryQuery extends EntityQueryContext {
+  search?: string;
+  /** Geo expansion preserves its legacy case-sensitive, untrimmed Set membership. */
+  exactScope?: { field: string; values: readonly string[] };
+}
+export interface RieGeoCustomerDirectoryRow { id: string; name: string; lat: number; lon: number; }
+export interface RieGeoExpansionCustomersResult { customers: RieGeoCustomerDirectoryRow[]; matchedScopeRows: number; }
+/** Customer-grain expansion input; the Invoice Items join never leaves PostgreSQL. */
+export interface RieGeoCustomerSalesRow { customerCode: string; total: number; }
 export interface RieGeoProductQuery extends EntityQueryContext {
   customerIds: readonly string[];
   topProductsLimit: number;

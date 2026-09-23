@@ -56,6 +56,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Commit:** This local commit.
 - **Regression-prevention rule:** Never reconstruct canonical newest-wins from `rie_dataset_versions`/`rie_entity_rows` in an RIE request. Materialize every accepted canonical upload first, publish current-state only at the READY/lifecycle boundary under the company/entity advisory lock, and prove any lifecycle change against the historical parity oracle before altering the read model.
 
+## Geo Intelligence — full canonical entity materialization
+
+- **Symptom/evidence:** Geo customer pickers, expansion analysis, and expansion scope values loaded complete Customers datasets; expansion also loaded complete Invoices and Invoice Items datasets and joined/aggregated them in Node.
+- **Root cause:** Geo still used the legacy `getEntityRecords()` facade even though its outputs need only valid customer coordinates, distinct scope values, and customer-grain sales totals.
+- **Fix:** Read canonical current-state through Geo-scoped scalar SQL. PostgreSQL now applies company/hierarchy/screen scope first, selects the first valid coordinate per customer with legacy ordering, preserves exact expansion-scope matching, joins Invoice Items to the legacy-equivalent winning Invoice header, and returns only customer-grain totals. PostgreSQL parity fixtures compare these results to the old ordered Node algorithms, including duplicates, invalid coordinates, hierarchy scope, and company isolation.
+- **Commit:** This local commit.
+- **Regression-prevention rule:** Geo Intelligence must not call `getEntityRecords()` or page to the end of Customers, Invoices, or Invoice Items. Keep Geo facts scoped and aggregated in PostgreSQL, project only fields used by the response, and preserve old duplicate/order/null semantics with PostgreSQL parity fixtures.
+
 ## Smart Loading — `queryManagementStockAlignment`
 
 - **Symptom:** Slow/heavy query execution and materialization pressure.
