@@ -109,6 +109,30 @@ export interface RieGeoCustomerDirectoryRow { id: string; name: string; lat: num
 export interface RieGeoExpansionCustomersResult { customers: RieGeoCustomerDirectoryRow[]; matchedScopeRows: number; }
 /** Customer-grain expansion input; the Invoice Items join never leaves PostgreSQL. */
 export interface RieGeoCustomerSalesRow { customerCode: string; total: number; }
+export interface RieHeatmapCustomerPointsQuery extends EntityQueryContext {
+  scopeField?: "RouteID" | "City" | "CustomerClass" | "Channel";
+  scopeValues?: readonly string[];
+  limit: number;
+}
+export interface RieHeatmapCustomerPointRow { id: string; label: string; lat: number | null; lon: number | null; totalRows: number; }
+export interface RieHeatmapEntityTotalsQuery extends EntityQueryContext {
+  entityName: "Collections" | "Returns";
+  dateField: "CollectionDate" | "ReturnDate";
+  amountField: "Amount" | "TotalAmount";
+  fromTime?: number;
+  toTime?: number;
+  customerCodes?: readonly string[];
+}
+export interface RieHeatmapSalesQuery extends EntityQueryContext {
+  mode: "sales" | "lostSales" | "opportunity";
+  categoryValue?: string;
+  fromTime?: number;
+  toTime?: number;
+  priorFromTime?: number;
+  priorToTime?: number;
+  customerCodes?: readonly string[];
+}
+export interface RieHeatmapValueRow { customerCode: string; total: number; }
 export interface RieGeoProductQuery extends EntityQueryContext {
   customerIds: readonly string[];
   topProductsLimit: number;

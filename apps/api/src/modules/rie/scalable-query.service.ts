@@ -4,7 +4,7 @@ import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { RieRequestPlannerService } from "./rie-request-planner.service";
 import type { EntityQueryContext, EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
+import type { RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRiePostgres, recordActiveVersionResolution } from "../../common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 
@@ -299,6 +299,208 @@ export class RieScalableQueryService {
       FROM item_active item
       INNER JOIN invoice_lookup invoice ON item.invoice_no = invoice.invoice_no
       GROUP BY invoice.customer_code
+    `);
+    return rows.map((row) => ({ customerCode: row.customerCode, total: Number(row.total) }));
+  }
+
+  async queryHeatmapCustomerPoints(input: RieHeatmapCustomerPointsQuery): Promise<RieHeatmapCustomerPointRow[]> {
+    if (!input.companyId?.trim()) throw new Error("RIE Heatmap customer points require companyId.");
+    if (!Number.isInteger(input.limit) || input.limit < 1) throw new Error("RIE Heatmap customer limit must be positive.");
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const predicates: Prisma.Sql[] = allowedRoutes === null
+      ? []
+      : allowedRoutes.size
+        ? [Prisma.sql`${normalizedField({ field: "RouteID", source: "customer_source" })} IN (${Prisma.join([...allowedRoutes])})`]
+        : [Prisma.sql`FALSE`];
+    if (input.scopeField && input.scopeValues?.length) {
+      assertIdentifier(input.scopeField, "Heatmap scope field");
+      const scope = textField({ field: input.scopeField, source: "customer_source" });
+      predicates.push(input.scopeField === "City"
+        ? Prisma.sql`BTRIM(COALESCE(${scope}, '')) IN (${Prisma.join([...input.scopeValues])})`
+        : Prisma.sql`COALESCE(${scope}, '') IN (${Prisma.join([...input.scopeValues])})`);
+      if (input.scopeField === "City") predicates.push(Prisma.sql`BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "customer_source" })}, '')) <> ''`);
+    }
+    const customerCode = textField({ field: "CustomerCode", source: "customer_source" });
+    const projection = Prisma.sql`
+      customer_source.id AS source_row_id,
+      customer_source.precedence AS source_precedence,
+      customer_source."created_at" AS source_created_at,
+      BTRIM(COALESCE(${customerCode}, '')) AS id,
+      COALESCE(${textField({ field: "CustomerName", source: "customer_source" })}, BTRIM(COALESCE(${customerCode}, ''))) AS label,
+      ${geoFiniteNumberField(textField({ field: "Latitude", source: "customer_source" }))} AS lat,
+      ${geoFiniteNumberField(textField({ field: "Longitude", source: "customer_source" }))} AS lon
+    `;
+    const customers = activeEntityRowsCte(input.companyId, "Customers", "customer", predicates, [], [], false, [], projection);
+    const rows = await this.postgres<RieHeatmapCustomerPointRow[]>("queryHeatmapCustomerPoints.sql", {
+      kind: "specialized", operation: "queryHeatmapCustomerPoints", scopeField: input.scopeField ?? null,
+    }, () => Prisma.sql`
+      WITH ${customers}
+      SELECT id, label, lat, lon, COUNT(*) OVER ()::double precision AS "totalRows"
+      FROM customer_active
+      ORDER BY source_precedence ASC, source_created_at ASC, source_row_id ASC
+      LIMIT ${input.limit + 1}
+    `);
+    return rows.map((row) => ({ ...row, lat: row.lat === null ? null : Number(row.lat), lon: row.lon === null ? null : Number(row.lon), totalRows: Number(row.totalRows) }));
+  }
+
+  async queryHeatmapEntityTotals(input: RieHeatmapEntityTotalsQuery): Promise<RieHeatmapValueRow[]> {
+    if (!input.companyId?.trim()) throw new Error("RIE Heatmap entity totals require companyId.");
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const predicates: Prisma.Sql[] = allowedRoutes === null
+      ? []
+      : allowedRoutes.size
+        ? [Prisma.sql`${normalizedField({ field: "RouteID", source: "metric_source" })} IN (${Prisma.join([...allowedRoutes])})`]
+        : [Prisma.sql`FALSE`];
+    const timestamp = heatmapEpochField(textField({ field: input.dateField, source: "metric_source" }));
+    if (input.fromTime !== undefined) predicates.push(Prisma.sql`${timestamp} >= ${input.fromTime}`);
+    if (input.toTime !== undefined) predicates.push(Prisma.sql`${timestamp} <= ${input.toTime}`);
+    const customer = Prisma.sql`BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "metric_source" })}, ''))`;
+    if (input.customerCodes) predicates.push(input.customerCodes.length
+      ? Prisma.sql`${customer} IN (${Prisma.join([...input.customerCodes])})`
+      : Prisma.sql`FALSE`);
+    predicates.push(Prisma.sql`${customer} <> ''`);
+    const projection = Prisma.sql`
+      ${customer} AS customer_code,
+      COALESCE(${geoFiniteNumberField(textField({ field: input.amountField, source: "metric_source" }))}, 0::double precision) AS amount
+    `;
+    const metric = activeEntityRowsCte(input.companyId, input.entityName, "metric", predicates, [], [], false, [], projection);
+    const rows = await this.postgres<RieHeatmapValueRow[]>("queryHeatmapEntityTotals.sql", {
+      kind: "specialized", operation: "queryHeatmapEntityTotals", entityName: input.entityName,
+    }, () => Prisma.sql`
+      WITH ${metric}
+      SELECT customer_code AS "customerCode", SUM(amount)::double precision AS total
+      FROM metric_active
+      GROUP BY customer_code
+    `);
+    return rows.map((row) => ({ customerCode: row.customerCode, total: Number(row.total) }));
+  }
+
+  async queryHeatmapSales(input: RieHeatmapSalesQuery): Promise<RieHeatmapValueRow[]> {
+    if (!input.companyId?.trim()) throw new Error("RIE Heatmap sales require companyId.");
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const routePredicates = (source: "invoice_source" | "item_source"): Prisma.Sql[] => allowedRoutes === null
+      ? []
+      : allowedRoutes.size
+        ? [Prisma.sql`${normalizedField({ field: "RouteID", source })} IN (${Prisma.join([...allowedRoutes])})`]
+        : [Prisma.sql`FALSE`];
+    const invoiceNo = Prisma.sql`BTRIM(COALESCE(${textField({ field: "InvoiceNo", source: "invoice_source" })}, ''))`;
+    const customerCode = Prisma.sql`BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "invoice_source" })}, ''))`;
+    const invoiceTime = heatmapEpochField(textField({ field: "InvoiceDate", source: "invoice_source" }));
+    const invoicePredicates = routePredicates("invoice_source");
+    invoicePredicates.push(Prisma.sql`${customerCode} <> ''`);
+    if (input.mode === "sales" && input.customerCodes) invoicePredicates.push(input.customerCodes.length
+      ? Prisma.sql`${customerCode} IN (${Prisma.join([...input.customerCodes])})`
+      : Prisma.sql`FALSE`);
+    if (input.mode === "sales") {
+      if (input.fromTime !== undefined) invoicePredicates.push(Prisma.sql`${invoiceTime} >= ${input.fromTime}`);
+      if (input.toTime !== undefined) invoicePredicates.push(Prisma.sql`${invoiceTime} <= ${input.toTime}`);
+    }
+    const invoiceProjection = Prisma.sql`
+      invoice_source.id AS source_row_id,
+      invoice_source.precedence AS source_precedence,
+      invoice_source."created_at" AS source_created_at,
+      ${invoiceNo} AS invoice_no,
+      ${customerCode} AS customer_code,
+      ${invoiceTime} AS invoice_time
+    `;
+    const itemProjection = Prisma.sql`
+      BTRIM(COALESCE(${textField({ field: "InvoiceNo", source: "item_source" })}, '')) AS invoice_no,
+      BTRIM(COALESCE(${textField({ field: "ProductCode", source: "item_source" })}, '')) AS product_code,
+      COALESCE(${geoFiniteNumberField(textField({ field: "LineTotal", source: "item_source" }))}, 0::double precision) AS amount
+    `;
+    const invoices = activeEntityRowsCte(input.companyId, "Invoices", "invoice", invoicePredicates, [], [], false, [], invoiceProjection);
+    const items = activeEntityRowsCte(input.companyId, "Invoice Items", "item", routePredicates("item_source"), [], [], false, [], itemProjection);
+    const productCode = Prisma.sql`BTRIM(COALESCE(${textField({ field: "ProductCode", source: "product_source" })}, ''))`;
+    const productProjection = Prisma.sql`
+      product_source.id AS source_row_id,
+      product_source.precedence AS source_precedence,
+      product_source."created_at" AS source_created_at,
+      ${productCode} AS product_code,
+      COALESCE(${textField({ field: "Category", source: "product_source" })}, '') AS category
+    `;
+    const products = input.categoryValue
+      ? activeEntityRowsCte(input.companyId, "Products", "product", [], [], [], false, [], productProjection)
+      : null;
+    const ctes: Prisma.Sql[] = [invoices, items];
+    if (products) ctes.push(products);
+
+    if (input.mode === "sales") {
+      const rows = await this.postgres<RieHeatmapValueRow[]>("queryHeatmapSales.sql", {
+        kind: "specialized", operation: "queryHeatmapSales", mode: input.mode, hasCategory: Boolean(input.categoryValue),
+      }, () => Prisma.sql`
+        WITH ${Prisma.join(ctes, ", ")}
+        SELECT invoice.customer_code AS "customerCode", SUM(item.amount)::double precision AS total
+        FROM invoice_active invoice
+        INNER JOIN item_active item ON item.invoice_no = invoice.invoice_no
+        ${input.categoryValue ? Prisma.sql`INNER JOIN product_active product ON product.product_code = item.product_code` : Prisma.empty}
+        WHERE TRUE ${input.categoryValue ? Prisma.sql`AND product.category = ${input.categoryValue}` : Prisma.empty}
+        GROUP BY invoice.customer_code
+      `);
+      return rows.map((row) => ({ customerCode: row.customerCode, total: Number(row.total) }));
+    }
+
+    const rows = await this.postgres<RieHeatmapValueRow[]>("queryHeatmapSales.sql", {
+      kind: "specialized", operation: "queryHeatmapSales", mode: input.mode, hasCategory: Boolean(input.categoryValue),
+    }, () => Prisma.sql`
+      WITH ${Prisma.join(ctes, ", ")}, invoice_lookup AS MATERIALIZED (
+        SELECT invoice_no, customer_code, invoice_time
+        FROM (
+          SELECT invoice_no, customer_code, invoice_time,
+            ROW_NUMBER() OVER (PARTITION BY invoice_no ORDER BY source_precedence DESC, source_created_at DESC, source_row_id DESC) AS row_number
+          FROM invoice_active
+          WHERE invoice_no <> ''
+        ) ranked
+        WHERE row_number = 1
+      )
+      ${input.categoryValue ? Prisma.sql`, product_lookup AS MATERIALIZED (
+        SELECT product_code, category
+        FROM (
+          SELECT product_code, category,
+            ROW_NUMBER() OVER (PARTITION BY product_code ORDER BY source_precedence DESC, source_created_at DESC, source_row_id DESC) AS row_number
+          FROM product_active
+          WHERE product_code <> ''
+        ) ranked
+        WHERE row_number = 1
+      )` : Prisma.empty}, joined AS MATERIALIZED (
+        SELECT invoice.customer_code, invoice.invoice_time, item.product_code, item.amount
+        FROM item_active item
+        INNER JOIN invoice_lookup invoice ON invoice.invoice_no = item.invoice_no
+        ${input.categoryValue ? Prisma.sql`INNER JOIN product_lookup product ON product.product_code = item.product_code` : Prisma.empty}
+        WHERE (invoice.invoice_time BETWEEN ${input.priorFromTime!} AND ${input.priorToTime!}
+          OR invoice.invoice_time BETWEEN ${input.fromTime!} AND ${input.toTime!})
+          ${input.customerCodes ? input.customerCodes.length
+            ? Prisma.sql`AND invoice.customer_code IN (${Prisma.join([...input.customerCodes])})`
+            : Prisma.sql`AND FALSE` : Prisma.empty}
+          ${input.categoryValue ? Prisma.sql`AND product.category = ${input.categoryValue}` : Prisma.empty}
+      )
+      ${input.mode === "lostSales" ? Prisma.sql`, by_customer_product AS MATERIALIZED (
+        SELECT customer_code, product_code,
+          SUM(amount) FILTER (WHERE invoice_time BETWEEN ${input.priorFromTime!} AND ${input.priorToTime!})::double precision AS prior_value,
+          COUNT(*) FILTER (WHERE invoice_time BETWEEN ${input.fromTime!} AND ${input.toTime!}) AS recent_count
+        FROM joined
+        WHERE customer_code <> '' AND product_code <> ''
+        GROUP BY customer_code, product_code
+      )
+      SELECT customer_code AS "customerCode", SUM(prior_value)::double precision AS total
+      FROM by_customer_product
+      WHERE prior_value IS NOT NULL AND recent_count = 0
+      GROUP BY customer_code` : Prisma.sql`, by_customer AS MATERIALIZED (
+        SELECT customer_code,
+          SUM(amount) FILTER (WHERE invoice_time BETWEEN ${input.priorFromTime!} AND ${input.priorToTime!})::double precision AS prior_total,
+          COALESCE(SUM(amount) FILTER (WHERE invoice_time BETWEEN ${input.fromTime!} AND ${input.toTime!}), 0)::double precision AS recent_total
+        FROM joined
+        WHERE customer_code <> ''
+        GROUP BY customer_code
+      )
+      SELECT customer_code AS "customerCode", (prior_total - recent_total)::double precision AS total
+      FROM by_customer
+      WHERE prior_total IS NOT NULL AND prior_total - recent_total > 0`}
     `);
     return rows.map((row) => ({ customerCode: row.customerCode, total: Number(row.total) }));
   }
@@ -1665,6 +1867,7 @@ function aggregateSql(aggregate: RieQueryAggregation): Prisma.Sql {
 function numericField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`; }
 /** Geo's legacy coercion accepted signed decimals and exponent notation. */
 function geoFiniteNumberField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`; }
+function heatmapEpochField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN EXTRACT(EPOCH FROM BTRIM(${field})::timestamptz) * 1000 ELSE NULL END`; }
 /** Matches RIE date filtering while making the route-stale subtraction safe. */
 function dateText(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN ${field} ~ '^\\d{4}-\\d{2}-\\d{2}' THEN LEFT(${field}, 10) ELSE NULL END`; }
 // Field names are validated identifiers.  Keep them as SQL literals rather

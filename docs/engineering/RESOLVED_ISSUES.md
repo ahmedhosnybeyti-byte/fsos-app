@@ -64,6 +64,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Commit:** This local commit.
 - **Regression-prevention rule:** Geo Intelligence must not call `getEntityRecords()` or page to the end of Customers, Invoices, or Invoice Items. Keep Geo facts scoped and aggregated in PostgreSQL, project only fields used by the response, and preserve old duplicate/order/null semantics with PostgreSQL parity fixtures.
 
+## Heatmap — full canonical entity materialization
+
+- **Symptom/evidence:** Heatmap materialized complete Customers, Collections, Returns, Invoices, Invoice Items, and optional Products entities for several metrics; lost-sales and opportunity joins/window comparisons ran in Node, while older optimized branches still reconstructed historical newest-wins directly.
+- **Root cause:** Metric-specific code mixed legacy full RIE reads with screen-owned historical SQL instead of using one current-state, scalar, set-based boundary.
+- **Fix:** Heatmap now reads bounded customer projections and grouped scope/category values, aggregates Collections/Returns at customer grain, and performs sales/category joins plus lost-sales/opportunity window logic in PostgreSQL over canonical current-state. A count window preserves the exact 5,000-customer error without returning all matching rows.
+- **Commit:** This local commit.
+- **Regression-prevention rule:** Heatmap must not use `getEntityRecords()`, historical RIE tables, or entity-wide pagination. Preserve duplicate Invoice/Product Map semantics separately from direct sales-join multiplicity, and verify both against the PostgreSQL parity fixture.
+
 ## Smart Loading — `queryManagementStockAlignment`
 
 - **Symptom:** Slow/heavy query execution and materialization pressure.

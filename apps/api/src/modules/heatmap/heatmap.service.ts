@@ -12,13 +12,10 @@ import {
   type HeatmapScopeField,
   type HeatmapValuesResult,
 } from "@field-sales-os/schemas";
-import { Prisma } from "@field-sales-os/database";
 import { AppConfigService } from "../../common/config/app-config.service";
-import { PrismaService } from "../../common/prisma";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
-import { CanonicalHierarchyResolverService } from "../rie/canonical-hierarchy-resolver.service";
 import { RieFacade } from "../rie/rie-facade.service";
-import type { EntityQueryResult } from "../rie/entity-provider.interface";
+import { RieScalableQueryService } from "../rie/scalable-query.service";
 
 // Migration #3 (ADR-001 / RIE Migration Plan, 2026-07-17) — this service no
 // longer reads uploaded files or manually-mapped columns. Customers/
@@ -28,44 +25,14 @@ import type { EntityQueryResult } from "../rie/entity-provider.interface";
 // underlying rows get sourced changed (RIE reads + in-memory joins instead
 // of arbitrary mapped-column files).
 
-// Same small helpers as every other map module — duplicated deliberately
-// (see customer-similarity.service.ts's comment on why: keeps each
-// dashboard feature module self-contained and safe to touch in parallel
-// sessions).
-function toFiniteNumber(value: unknown): number | null {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "string" && value.trim() !== "") {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
 // Same guard as Route Planning — see route-planning.service.ts for the
 // real-data rationale (garbage 0,0 rows etc.).
 function isSaneCoordinate(lat: number, lon: number): boolean {
   return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180 && !(lat === 0 && lon === 0);
 }
 
-function toEpochMs(value: unknown): number | null {
-  if (value instanceof Date) return value.getTime();
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() !== "") {
-    const t = Date.parse(value);
-    return Number.isNaN(t) ? null : t;
-  }
-  return null;
-}
-
 const ANTHROPIC_MODEL = "claude-haiku-4-5-20251001";
 const MAX_CUSTOMERS_PER_REQUEST = 5000;
-
-interface SalesJoinedRow {
-  customerCode: string;
-  productCode: string;
-  amount: number;
-  time: number | null;
-}
 
 interface HeatmapCustomerPoint {
   id: string;
@@ -84,82 +51,21 @@ export class HeatmapService {
   constructor(
     private readonly rieFacade: RieFacade,
     private readonly appConfig: AppConfigService,
-    private readonly prisma: PrismaService,
-    private readonly hierarchyResolver: CanonicalHierarchyResolverService,
+    private readonly scalableQuery: RieScalableQueryService,
   ) {}
 
   private rieContext(user: AuthenticatedUser) {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
   }
 
-  private assertAvailable(result: EntityQueryResult, arabicLabel: string): void {
-    if (!result.available) {
+  private async requireSources(
+    context: ReturnType<HeatmapService["rieContext"]>,
+    entityNames: readonly string[],
+    arabicLabel: string,
+  ): Promise<void> {
+    if (!(await this.rieFacade.hasCanonicalEntitySources(context, entityNames))) {
       throw new NotFoundException(`بيانات "${arabicLabel}" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.`);
     }
-  }
-
-  // Invoice Items joined to Invoices for CustomerCode + InvoiceDate, plus an
-  // optional Products join for category filtering — the exact join shape
-  // Migration #1 (Customer Comparison) and Migration #2 (Customer
-  // Similarity) both use (REL-CU-002/REL-IN-003 in the Relationship
-  // Registry). Shared here by the "sales" branch of computeAggregateValues
-  // and by computeLostSalesValues/computeOpportunityValues, which both need
-  // the same joined rows just aggregated differently.
-  private async loadSalesJoinedRows(ctx: ReturnType<HeatmapService["rieContext"]>, categoryValue?: string): Promise<SalesJoinedRow[]> {
-    const [invoicesResult, itemsResult, productsResult] = await Promise.all([
-      this.rieFacade.getEntityRecords("Invoices", ctx),
-      this.rieFacade.getEntityRecords("Invoice Items", ctx),
-      categoryValue ? this.rieFacade.getEntityRecords("Products", ctx) : Promise.resolve(null),
-    ]);
-    this.assertAvailable(invoicesResult, "الفواتير");
-    this.assertAvailable(itemsResult, "أصناف الفاتورة");
-
-    const invoiceMeta = new Map<string, { customerCode: string; time: number | null }>();
-    for (const inv of invoicesResult.records) {
-      const no = String(inv.InvoiceNo ?? "").trim();
-      const cust = String(inv.CustomerCode ?? "").trim();
-      if (no && cust) invoiceMeta.set(no, { customerCode: cust, time: toEpochMs(inv.InvoiceDate) });
-    }
-
-    let productCategory: Map<string, string> | null = null;
-    if (categoryValue && productsResult) {
-      this.assertAvailable(productsResult, "المنتجات");
-      productCategory = new Map();
-      for (const p of productsResult.records) {
-        const code = String(p.ProductCode ?? "").trim();
-        if (code) productCategory.set(code, String(p.Category ?? ""));
-      }
-    }
-
-    const rows: SalesJoinedRow[] = [];
-    for (const item of itemsResult.records) {
-      const invoiceNo = String(item.InvoiceNo ?? "").trim();
-      const meta = invoiceMeta.get(invoiceNo);
-      if (!meta) continue; // item's invoice not found — dropped, same as Migration #1's join
-      const productCode = String(item.ProductCode ?? "").trim();
-      if (productCategory && productCategory.get(productCode) !== categoryValue) continue;
-      rows.push({ customerCode: meta.customerCode, productCode, amount: toFiniteNumber(item.LineTotal) ?? 0, time: meta.time });
-    }
-    return rows;
-  }
-
-  private async activeMaterializedFileIds(companyId: string, entityName: string, arabicLabel: string): Promise<string[]> {
-    const files = await this.prisma.file.findMany({
-      where: { companyId, datasetType: entityName, isActive: true, status: "READY", datasetTypeConfirmed: true },
-      orderBy: { createdAt: "desc" },
-      select: { id: true },
-    });
-    if (files.length === 0) {
-      throw new NotFoundException(`بيانات "${arabicLabel}" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.`);
-    }
-    const versions = await this.prisma.rieDatasetVersion.findMany({
-      where: { companyId, entityName, isActive: true, sourceFileId: { in: files.map((file) => file.id) } },
-      select: { sourceFileId: true },
-    });
-    if (versions.length !== files.length) {
-      throw new NotFoundException(`بيانات "${arabicLabel}" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.`);
-    }
-    return files.map((file) => file.id);
   }
 
   // Sales heat maps only need totals per customer. Keep the exact RIE
@@ -192,127 +98,18 @@ export class HeatmapService {
     dateTo?: string,
     customerCodes?: readonly string[],
   ): Promise<Map<string, number>> {
-    const [invoiceFileIds, itemFileIds, productFileIds] = await Promise.all([
-      this.activeMaterializedFileIds(user.companyId!, "Invoices", "الفواتير"),
-      this.activeMaterializedFileIds(user.companyId!, "Invoice Items", "أصناف الفاتورة"),
-      categoryValue ? this.activeMaterializedFileIds(user.companyId!, "Products", "المنتجات") : Promise.resolve(null),
-    ]);
-    const allowedRoutes = await this.hierarchyResolver.resolveAllowedRouteIds(user.companyId!, {
-      roleCode: user.roleCode,
-      email: user.email,
-    });
-    const invoiceFiles = invoiceFileIds.map((id, precedence) => Prisma.sql`(${id}, ${precedence})`);
-    const itemFiles = itemFileIds.map((id, precedence) => Prisma.sql`(${id}, ${precedence})`);
-    const productFiles = productFileIds?.map((id, precedence) => Prisma.sql`(${id}, ${precedence})`) ?? [];
-    const routeValues = allowedRoutes ? [...allowedRoutes] : [];
-    const routeFilter = (alias: "inv" | "item") => allowedRoutes === null
-      ? Prisma.empty
-      : routeValues.length === 0
-        ? Prisma.sql`AND FALSE`
-        : Prisma.sql`AND LOWER(BTRIM(COALESCE(${Prisma.raw(alias)}."data" ->> 'RouteID', ''))) IN (${Prisma.join(routeValues)})`;
     const fromTime = dateFrom ? Date.parse(dateFrom) : null;
     const toTime = dateTo ? Date.parse(dateTo) : null;
-    const invoiceTime = Prisma.sql`CASE WHEN inv."data" ->> 'InvoiceDate' ~ '^\\d{4}-\\d{2}-\\d{2}' THEN EXTRACT(EPOCH FROM (inv."data" ->> 'InvoiceDate')::timestamptz) * 1000 ELSE NULL END`;
-    const dateFilters: Prisma.Sql[] = [];
-    if (fromTime !== null && Number.isFinite(fromTime)) dateFilters.push(Prisma.sql`${invoiceTime} >= ${fromTime}`);
-    if (toTime !== null && Number.isFinite(toTime)) dateFilters.push(Prisma.sql`${invoiceTime} <= ${toTime}`);
-    const dateFilter = dateFilters.length ? Prisma.sql`AND ${Prisma.join(dateFilters, " AND ")}` : Prisma.empty;
-    const customerFilter = customerCodes
-      ? customerCodes.length === 0
-        ? Prisma.sql`AND FALSE`
-        : Prisma.sql`AND BTRIM(COALESCE(inv."data" ->> 'CustomerCode', '')) IN (${Prisma.join(customerCodes)})`
-      : Prisma.empty;
-    const categoryJoin = categoryValue
-      ? Prisma.sql`JOIN products product ON BTRIM(COALESCE(product."data" ->> 'ProductCode', '')) = BTRIM(COALESCE(item."data" ->> 'ProductCode', ''))`
-      : Prisma.empty;
-    const categoryFilter = categoryValue ? Prisma.sql`AND COALESCE(product."data" ->> 'Category', '') = ${categoryValue}` : Prisma.empty;
-    const invoiceDedup = invoiceFileIds.length === 1
-      ? Prisma.sql`SELECT * FROM invoice_rows`
-      : Prisma.sql`
-          SELECT "data", precedence FROM (
-            SELECT inv.*, MIN(inv.precedence) OVER (PARTITION BY LOWER(BTRIM(COALESCE(inv."data" ->> 'InvoiceNo', '')))) AS newest_precedence
-            FROM invoice_rows inv WHERE BTRIM(COALESCE(inv."data" ->> 'InvoiceNo', '')) <> ''
-          ) deduped WHERE precedence = newest_precedence
-          UNION ALL
-          SELECT "data", precedence FROM invoice_rows WHERE BTRIM(COALESCE("data" ->> 'InvoiceNo', '')) = ''`;
-    const itemDedup = itemFileIds.length === 1
-      ? Prisma.sql`SELECT * FROM item_rows`
-      : Prisma.sql`
-          SELECT "data", precedence FROM (
-            SELECT item.*, MIN(item.precedence) OVER (PARTITION BY LOWER(BTRIM(COALESCE(item."data" ->> 'InvoiceNo', ''))), LOWER(BTRIM(COALESCE(item."data" ->> 'LineNo', '')))) AS newest_precedence
-            FROM item_rows item
-            WHERE BTRIM(COALESCE(item."data" ->> 'InvoiceNo', '')) <> '' AND BTRIM(COALESCE(item."data" ->> 'LineNo', '')) <> ''
-          ) deduped WHERE precedence = newest_precedence
-          UNION ALL
-          SELECT "data", precedence FROM item_rows
-          WHERE BTRIM(COALESCE("data" ->> 'InvoiceNo', '')) = '' OR BTRIM(COALESCE("data" ->> 'LineNo', '')) = ''`;
-    const productDedup = productFileIds?.length === 1
-      ? Prisma.sql`SELECT * FROM product_rows`
-      : Prisma.sql`
-          SELECT "data", precedence FROM (
-            SELECT product.*, MIN(product.precedence) OVER (PARTITION BY LOWER(BTRIM(COALESCE(product."data" ->> 'ProductCode', '')))) AS newest_precedence
-            FROM product_rows product WHERE BTRIM(COALESCE(product."data" ->> 'ProductCode', '')) <> ''
-          ) deduped WHERE precedence = newest_precedence
-          UNION ALL
-          SELECT "data", precedence FROM product_rows WHERE BTRIM(COALESCE("data" ->> 'ProductCode', '')) = ''`;
-
-    const totals = await this.prisma.$queryRaw<Array<{ customerCode: string; total: number }>>(Prisma.sql`
-      WITH selected_invoice_files("source_file_id", precedence) AS (VALUES ${Prisma.join(invoiceFiles)}),
-      invoice_versions AS (
-        SELECT v.id, selected_invoice_files.precedence
-        FROM "rie_dataset_versions" v JOIN selected_invoice_files ON selected_invoice_files."source_file_id" = v."source_file_id"
-        WHERE v."company_id" = ${user.companyId!} AND v."entity_name" = 'Invoices' AND v."is_active" = TRUE
-      ),
-      invoice_rows AS (
-        SELECT r."data", active.precedence FROM "rie_entity_rows" r JOIN invoice_versions active ON active.id = r."dataset_version_id"
-      ),
-      invoices AS (
-        ${invoiceDedup}
-      ),
-      selected_item_files("source_file_id", precedence) AS (VALUES ${Prisma.join(itemFiles)}),
-      item_versions AS (
-        SELECT v.id, selected_item_files.precedence
-        FROM "rie_dataset_versions" v JOIN selected_item_files ON selected_item_files."source_file_id" = v."source_file_id"
-        WHERE v."company_id" = ${user.companyId!} AND v."entity_name" = 'Invoice Items' AND v."is_active" = TRUE
-      ),
-      item_rows AS (
-        SELECT r."data", active.precedence FROM "rie_entity_rows" r JOIN item_versions active ON active.id = r."dataset_version_id"
-      ),
-      items AS (
-        ${itemDedup}
-      )
-      , filtered_invoices AS MATERIALIZED (
-        SELECT inv.* FROM invoices inv
-        WHERE BTRIM(COALESCE(inv."data" ->> 'CustomerCode', '')) <> ''
-        ${routeFilter("inv")}
-        ${customerFilter}
-        ${dateFilter}
-      ), filtered_items AS MATERIALIZED (
-        SELECT item.* FROM items item
-        WHERE TRUE ${routeFilter("item")}
-      )
-      ${categoryValue ? Prisma.sql`, selected_product_files("source_file_id", precedence) AS (VALUES ${Prisma.join(productFiles)}),
-      product_versions AS (
-        SELECT v.id, selected_product_files.precedence
-        FROM "rie_dataset_versions" v JOIN selected_product_files ON selected_product_files."source_file_id" = v."source_file_id"
-        WHERE v."company_id" = ${user.companyId!} AND v."entity_name" = 'Products' AND v."is_active" = TRUE
-      ),
-      product_rows AS (
-        SELECT r."data", active.precedence FROM "rie_entity_rows" r JOIN product_versions active ON active.id = r."dataset_version_id"
-      ),
-      products AS (
-        ${productDedup}
-      )` : Prisma.empty}
-      SELECT BTRIM(COALESCE(inv."data" ->> 'CustomerCode', '')) AS "customerCode",
-        SUM(CASE WHEN BTRIM(COALESCE(item."data" ->> 'LineTotal', '')) ~ '^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$'
-          THEN BTRIM(item."data" ->> 'LineTotal')::double precision ELSE 0 END) AS total
-      FROM filtered_invoices inv
-      JOIN filtered_items item ON BTRIM(COALESCE(item."data" ->> 'InvoiceNo', '')) = BTRIM(COALESCE(inv."data" ->> 'InvoiceNo', ''))
-      ${categoryJoin}
-      WHERE TRUE
-      ${categoryFilter}
-      GROUP BY BTRIM(COALESCE(inv."data" ->> 'CustomerCode', ''))
-    `);
+    const ctx = this.rieContext(user);
+    await this.requireSources(ctx, categoryValue ? ["Invoices", "Invoice Items", "Products"] : ["Invoices", "Invoice Items"], categoryValue ? "الفواتير وأصنافها والمنتجات" : "الفواتير وأصنافها");
+    const totals = await this.scalableQuery.queryHeatmapSales({
+      ...ctx,
+      mode: "sales",
+      categoryValue,
+      ...(fromTime !== null && Number.isFinite(fromTime) ? { fromTime } : {}),
+      ...(toTime !== null && Number.isFinite(toTime) ? { toTime } : {}),
+      customerCodes,
+    });
     return new Map(totals.map((row) => [row.customerCode, Number(row.total)]));
   }
 
@@ -331,105 +128,35 @@ export class HeatmapService {
     const ctx = this.rieContext(user);
     const fromTime = dateFrom ? Date.parse(dateFrom) : null;
     const toTime = dateTo ? Date.parse(dateTo) : null;
-    const inWindow = (t: number | null) => {
-      if (fromTime === null && toTime === null) return true;
-      if (t === null) return false;
-      if (fromTime !== null && t < fromTime) return false;
-      if (toTime !== null && t > toTime) return false;
-      return true;
-    };
+    if (metric === "sales") return this.aggregateSalesInPostgres(user, categoryValue, dateFrom, dateTo, customerCodes);
 
-    const valueById = new Map<string, number>();
-
-    if (metric === "collection") {
-      const result = await this.rieFacade.getEntityRecords("Collections", ctx);
-      this.assertAvailable(result, "التحصيل");
-      for (const row of result.records) {
-        if (!inWindow(toEpochMs(row.CollectionDate))) continue;
-        const id = String(row.CustomerCode ?? "").trim();
-        if (!id) continue;
-        const amount = toFiniteNumber(row.Amount) ?? 0;
-        valueById.set(id, (valueById.get(id) ?? 0) + amount);
-      }
-      return valueById;
-    }
-
-    if (metric === "returns") {
-      const result = await this.rieFacade.getEntityRecords("Returns", ctx);
-      this.assertAvailable(result, "المرتجعات");
-      for (const row of result.records) {
-        if (!inWindow(toEpochMs(row.ReturnDate))) continue;
-        const id = String(row.CustomerCode ?? "").trim();
-        if (!id) continue;
-        const amount = toFiniteNumber(row.TotalAmount) ?? 0;
-        valueById.set(id, (valueById.get(id) ?? 0) + amount);
-      }
-      return valueById;
-    }
-
-    // sales
-    return this.aggregateSalesInPostgres(user, categoryValue, dateFrom, dateTo, customerCodes);
-  }
-
-  // City is the only scope that routinely narrows a large heat map enough to
-  // change the join plan. Resolve its customer projection in PostgreSQL first
-  // so neither the customer entity nor raw facts are materialized in Node.
-  private async cityCustomerPointsInPostgres(user: AuthenticatedUser, cities: readonly string[]): Promise<HeatmapCustomerPoint[]> {
-    const customerFileIds = await this.activeMaterializedFileIds(user.companyId!, "Customers", "العملاء");
-    const allowedRoutes = await this.hierarchyResolver.resolveAllowedRouteIds(user.companyId!, {
-      roleCode: user.roleCode,
-      email: user.email,
+    const entityName = metric === "collection" ? "Collections" : "Returns";
+    await this.requireSources(ctx, [entityName], metric === "collection" ? "التحصيل" : "المرتجعات");
+    const totals = await this.scalableQuery.queryHeatmapEntityTotals({
+      ...ctx,
+      entityName,
+      dateField: metric === "collection" ? "CollectionDate" : "ReturnDate",
+      amountField: metric === "collection" ? "Amount" : "TotalAmount",
+      ...(fromTime !== null && Number.isFinite(fromTime) ? { fromTime } : {}),
+      ...(toTime !== null && Number.isFinite(toTime) ? { toTime } : {}),
+      customerCodes,
     });
-    const customerFiles = customerFileIds.map((id, precedence) => Prisma.sql`(${id}, ${precedence})`);
-    const routeValues = allowedRoutes ? [...allowedRoutes] : [];
-    const routeFilter = allowedRoutes === null
-      ? Prisma.empty
-      : routeValues.length === 0
-        ? Prisma.sql`AND FALSE`
-        : Prisma.sql`AND LOWER(BTRIM(COALESCE(cust."data" ->> 'RouteID', ''))) IN (${Prisma.join(routeValues)})`;
-    const customerDedup = customerFileIds.length === 1
-      ? Prisma.sql`SELECT * FROM customer_rows`
-      : Prisma.sql`
-          SELECT "data", precedence FROM (
-            SELECT cust.*, MIN(cust.precedence) OVER (PARTITION BY LOWER(BTRIM(COALESCE(cust."data" ->> 'CustomerCode', '')))) AS newest_precedence
-            FROM customer_rows cust WHERE BTRIM(COALESCE(cust."data" ->> 'CustomerCode', '')) <> ''
-          ) deduped WHERE precedence = newest_precedence
-          UNION ALL
-          SELECT "data", precedence FROM customer_rows WHERE BTRIM(COALESCE("data" ->> 'CustomerCode', '')) = ''`;
-    const rows = await this.prisma.$queryRaw<Array<{ id: string; label: string; lat: string | number | null; lon: string | number | null }>>(Prisma.sql`
-      WITH selected_customer_files("source_file_id", precedence) AS (VALUES ${Prisma.join(customerFiles)}),
-      customer_versions AS (
-        SELECT v.id, selected_customer_files.precedence
-        FROM "rie_dataset_versions" v JOIN selected_customer_files ON selected_customer_files."source_file_id" = v."source_file_id"
-        WHERE v."company_id" = ${user.companyId!} AND v."entity_name" = 'Customers' AND v."is_active" = TRUE
-      ), customer_rows AS (
-        SELECT r."data", active.precedence FROM "rie_entity_rows" r JOIN customer_versions active ON active.id = r."dataset_version_id"
-      ), customers AS (${customerDedup})
-      SELECT BTRIM(COALESCE(cust."data" ->> 'CustomerCode', '')) AS id,
-        COALESCE(cust."data" ->> 'CustomerName', BTRIM(COALESCE(cust."data" ->> 'CustomerCode', ''))) AS label,
-        cust."data" ->> 'Latitude' AS lat, cust."data" ->> 'Longitude' AS lon
-      FROM customers cust
-      WHERE BTRIM(COALESCE(cust."data" ->> 'City', '')) IN (${Prisma.join(cities)})
-        AND BTRIM(COALESCE(cust."data" ->> 'CustomerCode', '')) <> ''
-        ${routeFilter}
-    `);
-    return rows.map((row) => ({ id: row.id, label: row.label, lat: toFiniteNumber(row.lat), lon: toFiniteNumber(row.lon) }));
+    return new Map(totals.map((row) => [row.customerCode, row.total]));
   }
 
-  private async cityScopeValuesInPostgres(user: AuthenticatedUser): Promise<string[]> {
-    const customerFileIds = await this.activeMaterializedFileIds(user.companyId!, "Customers", "العملاء");
-    const customerFiles = customerFileIds.map((id, precedence) => Prisma.sql`(${id}, ${precedence})`);
-    const customerDedup = customerFileIds.length === 1
-      ? Prisma.sql`SELECT * FROM customer_rows`
-      : Prisma.sql`SELECT "data", precedence FROM (SELECT cust.*, MIN(cust.precedence) OVER (PARTITION BY LOWER(BTRIM(COALESCE(cust."data" ->> 'CustomerCode', '')))) AS newest_precedence FROM customer_rows cust WHERE BTRIM(COALESCE(cust."data" ->> 'CustomerCode', '')) <> '') deduped WHERE precedence = newest_precedence UNION ALL SELECT "data", precedence FROM customer_rows WHERE BTRIM(COALESCE("data" ->> 'CustomerCode', '')) = ''`;
-    const rows = await this.prisma.$queryRaw<Array<{ value: string }>>(Prisma.sql`
-      WITH selected_customer_files("source_file_id", precedence) AS (VALUES ${Prisma.join(customerFiles)}),
-      customer_versions AS (SELECT v.id, selected_customer_files.precedence FROM "rie_dataset_versions" v JOIN selected_customer_files ON selected_customer_files."source_file_id" = v."source_file_id" WHERE v."company_id" = ${user.companyId!} AND v."entity_name" = 'Customers' AND v."is_active" = TRUE),
-      customer_rows AS (SELECT r."data", active.precedence FROM "rie_entity_rows" r JOIN customer_versions active ON active.id = r."dataset_version_id"),
-      customers AS (${customerDedup})
-      SELECT DISTINCT BTRIM(COALESCE("data" ->> 'City', '')) AS value FROM customers WHERE BTRIM(COALESCE("data" ->> 'City', '')) <> '' ORDER BY value
-    `);
-    return rows.map((row) => row.value);
+  private async customerPointsInPostgres(user: AuthenticatedUser, input: HeatmapRieQueryInput): Promise<{ rows: HeatmapCustomerPoint[]; totalRows: number }> {
+    const ctx = this.rieContext(user);
+    await this.requireSources(ctx, ["Customers"], "العملاء");
+    const rows = await this.scalableQuery.queryHeatmapCustomerPoints({
+      ...ctx,
+      scopeField: input.scopeField,
+      scopeValues: input.scopeValues,
+      limit: MAX_CUSTOMERS_PER_REQUEST,
+    });
+    return {
+      rows: rows.map(({ id, label, lat, lon }) => ({ id, label, lat, lon })),
+      totalRows: rows[0]?.totalRows ?? 0,
+    };
   }
 
   // Lost Sales Map (DNA GVE catalog, Part 20.2): "أين تتركز الفرص الضائعة؟"
@@ -437,13 +164,11 @@ export class HeatmapService {
   // the user picks (a "prior" window and a "recent" window) — any SKU a
   // customer bought in the prior window but did NOT buy again in the recent
   // window counts as lost, valued at what it was worth in the prior window.
-  private async computeLostSalesValues(user: AuthenticatedUser, input: HeatmapRieQueryInput): Promise<Map<string, number>> {
+  private async computeLostSalesValues(user: AuthenticatedUser, input: HeatmapRieQueryInput, customerCodes?: readonly string[]): Promise<Map<string, number>> {
     const { priorDateFrom, priorDateTo, dateFrom, dateTo, categoryValue } = input;
     if (!priorDateFrom || !priorDateTo || !dateFrom || !dateTo) {
       throw new BadRequestException('metric "lostSales" requires priorDateFrom/priorDateTo and dateFrom/dateTo');
     }
-
-    const rows = await this.loadSalesJoinedRows(this.rieContext(user), categoryValue);
 
     const priorFromTime = Date.parse(priorDateFrom);
     const priorToTime = Date.parse(priorDateTo);
@@ -453,42 +178,13 @@ export class HeatmapService {
       throw new BadRequestException("priorDateFrom/priorDateTo/dateFrom/dateTo must be valid dates");
     }
 
-    const priorSkuValueByCustomer = new Map<string, Map<string, number>>();
-    const recentSkusByCustomer = new Map<string, Set<string>>();
-
-    for (const row of rows) {
-      const t = row.time;
-      if (t === null) continue;
-      if (!row.customerCode || !row.productCode) continue;
-
-      if (t >= priorFromTime && t <= priorToTime) {
-        let bySku = priorSkuValueByCustomer.get(row.customerCode);
-        if (!bySku) {
-          bySku = new Map();
-          priorSkuValueByCustomer.set(row.customerCode, bySku);
-        }
-        bySku.set(row.productCode, (bySku.get(row.productCode) ?? 0) + row.amount);
-      }
-      if (t >= recentFromTime && t <= recentToTime) {
-        let skus = recentSkusByCustomer.get(row.customerCode);
-        if (!skus) {
-          skus = new Set();
-          recentSkusByCustomer.set(row.customerCode, skus);
-        }
-        skus.add(row.productCode);
-      }
-    }
-
-    const lostValueById = new Map<string, number>();
-    for (const [id, priorSkus] of priorSkuValueByCustomer) {
-      const recentSkus = recentSkusByCustomer.get(id);
-      let lost = 0;
-      for (const [sku, value] of priorSkus) {
-        if (!recentSkus?.has(sku)) lost += value;
-      }
-      lostValueById.set(id, lost);
-    }
-    return lostValueById;
+    const ctx = this.rieContext(user);
+    await this.requireSources(ctx, categoryValue ? ["Invoices", "Invoice Items", "Products"] : ["Invoices", "Invoice Items"], categoryValue ? "الفواتير وأصنافها والمنتجات" : "الفواتير وأصنافها");
+    const rows = await this.scalableQuery.queryHeatmapSales({
+      ...ctx, mode: "lostSales", categoryValue,
+      priorFromTime, priorToTime, fromTime: recentFromTime, toTime: recentToTime, customerCodes,
+    });
+    return new Map(rows.map((row) => [row.customerCode, row.total]));
   }
 
   // Territory Opportunity Map (DNA GVE catalog, Part 20.2): "أين تتركز فرص
@@ -496,13 +192,11 @@ export class HeatmapService {
   // dimension, just total spend per customer, prior window vs recent
   // window. Same two-window rows as lostSales, aggregated without the SKU
   // breakdown.
-  private async computeOpportunityValues(user: AuthenticatedUser, input: HeatmapRieQueryInput): Promise<Map<string, number>> {
+  private async computeOpportunityValues(user: AuthenticatedUser, input: HeatmapRieQueryInput, customerCodes?: readonly string[]): Promise<Map<string, number>> {
     const { priorDateFrom, priorDateTo, dateFrom, dateTo, categoryValue } = input;
     if (!priorDateFrom || !priorDateTo || !dateFrom || !dateTo) {
       throw new BadRequestException('metric "opportunity" requires priorDateFrom/priorDateTo and dateFrom/dateTo');
     }
-
-    const rows = await this.loadSalesJoinedRows(this.rieContext(user), categoryValue);
 
     const priorFromTime = Date.parse(priorDateFrom);
     const priorToTime = Date.parse(priorDateTo);
@@ -512,68 +206,38 @@ export class HeatmapService {
       throw new BadRequestException("priorDateFrom/priorDateTo/dateFrom/dateTo must be valid dates");
     }
 
-    const priorTotalByCustomer = new Map<string, number>();
-    const recentTotalByCustomer = new Map<string, number>();
-
-    for (const row of rows) {
-      const t = row.time;
-      if (t === null || !row.customerCode) continue;
-      if (t >= priorFromTime && t <= priorToTime) {
-        priorTotalByCustomer.set(row.customerCode, (priorTotalByCustomer.get(row.customerCode) ?? 0) + row.amount);
-      }
-      if (t >= recentFromTime && t <= recentToTime) {
-        recentTotalByCustomer.set(row.customerCode, (recentTotalByCustomer.get(row.customerCode) ?? 0) + row.amount);
-      }
-    }
-
-    // Opportunity value = how much a customer's spend dropped, floored at 0
-    // (a customer who grew isn't a "declining" opportunity here).
-    const opportunityById = new Map<string, number>();
-    for (const [id, priorTotal] of priorTotalByCustomer) {
-      const recentTotal = recentTotalByCustomer.get(id) ?? 0;
-      const decline = priorTotal - recentTotal;
-      if (decline > 0) opportunityById.set(id, decline);
-    }
-    return opportunityById;
+    const ctx = this.rieContext(user);
+    await this.requireSources(ctx, ["Invoices", "Invoice Items"], "الفواتير وأصنافها");
+    const rows = await this.scalableQuery.queryHeatmapSales({
+      ...ctx, mode: "opportunity", categoryValue,
+      priorFromTime, priorToTime, fromTime: recentFromTime, toTime: recentToTime, customerCodes,
+    });
+    return new Map(rows.map((row) => [row.customerCode, row.total]));
   }
 
   async query(user: AuthenticatedUser, input: HeatmapRieQueryInput): Promise<HeatmapQueryResult> {
-    const ctx = this.rieContext(user);
     const cityScope = input.scopeField === "City" && !!input.scopeValues?.length;
-    let customerRows: HeatmapCustomerPoint[];
-    if (cityScope) {
-      customerRows = await this.cityCustomerPointsInPostgres(user, input.scopeValues!);
-    } else {
-      const customersResult = await this.rieFacade.getEntityRecords("Customers", ctx);
-      this.assertAvailable(customersResult, "العملاء");
-      let customerRecords = customersResult.records;
-      if (input.scopeField && input.scopeValues && input.scopeValues.length > 0) {
-        const scopeSet = new Set(input.scopeValues);
-        customerRecords = customerRecords.filter((row) => scopeSet.has(String(row[input.scopeField!] ?? "")));
-      }
-      customerRows = customerRecords.map((row) => ({
-        id: String(row.CustomerCode ?? "").trim(),
-        label: String(row.CustomerName ?? String(row.CustomerCode ?? "").trim()),
-        lat: toFiniteNumber(row.Latitude),
-        lon: toFiniteNumber(row.Longitude),
-      }));
-    }
-    if (cityScope && customerRows.length === 0) {
+    const scoped = !!input.scopeField && !!input.scopeValues?.length;
+    const customerResult = await this.customerPointsInPostgres(user, input);
+    const customerRows = customerResult.rows;
+    if (cityScope && customerResult.totalRows === 0) {
       throw new BadRequestException(`لا توجد بيانات مطابقة لـ City ضمن [${input.scopeValues!.join(", ")}]`);
     }
-    if (customerRows.length > MAX_CUSTOMERS_PER_REQUEST) {
+    if (customerResult.totalRows > MAX_CUSTOMERS_PER_REQUEST) {
       throw new BadRequestException(
-        `${customerRows.length} customers match this scope, above the ${MAX_CUSTOMERS_PER_REQUEST}-customer limit for one heat map. Narrow the scope and try again.`,
+        `${customerResult.totalRows} customers match this scope, above the ${MAX_CUSTOMERS_PER_REQUEST}-customer limit for one heat map. Narrow the scope and try again.`,
       );
     }
 
+    const scopedCustomerCodes = scoped ? customerRows.map((row) => row.id) : undefined;
+
     let valueById: Map<string, number> | null = null;
     if (input.metric === "lostSales") {
-      valueById = await this.computeLostSalesValues(user, input);
+      valueById = await this.computeLostSalesValues(user, input, scopedCustomerCodes);
     } else if (input.metric === "opportunity") {
-      valueById = await this.computeOpportunityValues(user, input);
+      valueById = await this.computeOpportunityValues(user, input, scopedCustomerCodes);
     } else if (input.metric !== "customerCount") {
-      valueById = await this.computeAggregateValues(user, input.metric, input.categoryValue, input.dateFrom, input.dateTo, cityScope ? customerRows.map((row) => row.id) : undefined);
+      valueById = await this.computeAggregateValues(user, input.metric, input.categoryValue, input.dateFrom, input.dateTo, scopedCustomerCodes);
     }
 
     const points: HeatmapQueryResult["points"] = [];
@@ -611,25 +275,30 @@ export class HeatmapService {
   // #2's customer-similarity scope-values/category-values. Route Planning
   // keeps using its own GET /route-planning/distinct-values untouched.
   async scopeValues(user: AuthenticatedUser, scopeField: HeatmapScopeField): Promise<HeatmapValuesResult> {
-    if (scopeField === "City") return { values: await this.cityScopeValuesInPostgres(user) };
-    const customersResult = await this.rieFacade.getEntityRecords("Customers", this.rieContext(user));
-    this.assertAvailable(customersResult, "العملاء");
-    const values = new Set<string>();
-    for (const row of customersResult.records) {
-      const v = String(row[scopeField] ?? "").trim();
-      if (v) values.add(v);
-    }
+    const ctx = this.rieContext(user);
+    await this.requireSources(ctx, ["Customers"], "العملاء");
+    const result = await this.rieFacade.queryCanonicalRecords({
+      ...(scopeField === "City" ? { companyId: ctx.companyId } : ctx),
+      entityName: "Customers",
+      projection: [{ field: scopeField, as: "value" }],
+      groupBy: [{ field: scopeField }],
+      unboundedFinalResult: true,
+    });
+    const values = new Set(result.records.map((row) => String(row.value ?? "").trim()).filter(Boolean));
     return { values: Array.from(values).sort((a, b) => a.localeCompare(b)) };
   }
 
   async categoryValues(user: AuthenticatedUser): Promise<HeatmapValuesResult> {
-    const productsResult = await this.rieFacade.getEntityRecords("Products", this.rieContext(user));
-    this.assertAvailable(productsResult, "المنتجات");
-    const values = new Set<string>();
-    for (const row of productsResult.records) {
-      const v = String(row.Category ?? "").trim();
-      if (v) values.add(v);
-    }
+    const ctx = this.rieContext(user);
+    await this.requireSources(ctx, ["Products"], "المنتجات");
+    const result = await this.rieFacade.queryCanonicalRecords({
+      companyId: ctx.companyId,
+      entityName: "Products",
+      projection: [{ field: "Category", as: "value" }],
+      groupBy: [{ field: "Category" }],
+      unboundedFinalResult: true,
+    });
+    const values = new Set(result.records.map((row) => String(row.value ?? "").trim()).filter(Boolean));
     return { values: Array.from(values).sort((a, b) => a.localeCompare(b)) };
   }
 

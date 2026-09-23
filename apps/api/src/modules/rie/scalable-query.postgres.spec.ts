@@ -284,6 +284,198 @@ test("scalable RIE incremental merge in PostgreSQL", {
     assert.deepEqual(invalidScope.customers, []);
   });
 
+  await t.test("Heatmap compact SQL preserves legacy points, totals, sales, lost-sales and opportunity semantics", async () => {
+    await upload("heat-customers", "Customers", "2026-09-02", [
+      { key: "C-1", data: { CustomerCode: " C-1 ", CustomerName: "One", Latitude: "24.7", Longitude: "46.7", RouteID: "R-1", City: "North", Channel: "A" } },
+      { key: "C-1␟1", data: { CustomerCode: "C-1", CustomerName: "One duplicate", Latitude: "0", Longitude: "0", RouteID: "R-1", City: "North", Channel: "A" } },
+      { key: "C-2", data: { CustomerCode: "C-2", CustomerName: "Two", Latitude: ".248e2", Longitude: "+46.8", RouteID: "R-1", City: " South ", Channel: "B" } },
+      { key: "C-3", data: { CustomerCode: "C-3", CustomerName: "Outside", Latitude: 25, Longitude: 47, RouteID: "R-2", City: "North", Channel: "A" } },
+      { key: "C-4", data: { CustomerCode: "C-4", CustomerName: "Exact scope", Latitude: 25, Longitude: 47, RouteID: "R-1", City: "North", Channel: " A " } },
+      { key: "blank", data: { CustomerCode: "", CustomerName: "Blank", Latitude: 25, Longitude: 47, RouteID: "R-1", City: "North", Channel: "A" } },
+    ], "heat-company");
+    await upload("heat-collections", "Collections", "2026-09-02", [
+      { key: "COL-1", data: { CollectionNo: "COL-1", CustomerCode: " C-1 ", CollectionDate: "2026-01-10", Amount: "1e2", RouteID: "R-1" } },
+      { key: "COL-2", data: { CollectionNo: "COL-2", CustomerCode: "C-1", CollectionDate: "2026-02-10", Amount: "bad", RouteID: "R-1" } },
+      { key: "COL-3", data: { CollectionNo: "COL-3", CustomerCode: "C-3", CollectionDate: "2026-01-10", Amount: 999, RouteID: "R-2" } },
+    ], "heat-company");
+    await upload("heat-returns", "Returns", "2026-09-02", [
+      { key: "RET-1", data: { ReturnNo: "RET-1", CustomerCode: "C-2", ReturnDate: "2026-01-15", TotalAmount: "+25.5", RouteID: "R-1" } },
+      { key: "RET-2", data: { ReturnNo: "RET-2", CustomerCode: "C-3", ReturnDate: "2026-01-15", TotalAmount: 999, RouteID: "R-2" } },
+    ], "heat-company");
+    await upload("heat-invoices", "Invoices", "2026-09-02", [
+      { key: "INV-A", data: { InvoiceNo: "INV-A", CustomerCode: "C-1", InvoiceDate: "2026-01-10", RouteID: "R-1" } },
+      { key: "INV-A␟1", data: { InvoiceNo: " INV-A ", CustomerCode: " C-2 ", InvoiceDate: "2026-01-10", RouteID: "R-1" } },
+      { key: "INV-B", data: { InvoiceNo: "INV-B", CustomerCode: "C-1", InvoiceDate: "2026-02-10", RouteID: "R-1" } },
+      { key: "INV-X", data: { InvoiceNo: "INV-X", CustomerCode: "C-3", InvoiceDate: "2026-01-10", RouteID: "R-2" } },
+    ], "heat-company");
+    await upload("heat-items", "Invoice Items", "2026-09-02", [
+      { key: "INV-A␟1", data: { InvoiceNo: "INV-A", LineNo: 1, ProductCode: "P-1", LineTotal: "1e2", RouteID: "R-1" } },
+      { key: "INV-B␟1", data: { InvoiceNo: "INV-B", LineNo: 1, ProductCode: "P-1", LineTotal: 50, RouteID: "R-1" } },
+      { key: "INV-X␟1", data: { InvoiceNo: "INV-X", LineNo: 1, ProductCode: "P-1", LineTotal: 999, RouteID: "R-2" } },
+    ], "heat-company");
+    await upload("heat-products", "Products", "2026-09-02", [
+      { key: "P-1", data: { ProductCode: "P-1", Category: "Food" } },
+      { key: "P-1␟1", data: { ProductCode: " P-1 ", Category: "Other" } },
+    ], "heat-company");
+    await upload("heat-other-customers", "Customers", "2026-09-02", [
+      { key: "OTHER", data: { CustomerCode: "OTHER", CustomerName: "Other", Latitude: 24, Longitude: 46, RouteID: "R-1", City: "North", Channel: "A" } },
+    ], "heat-other");
+    for (const company of ["heat-company", "heat-other"]) {
+      for (const entity of company === "heat-company" ? ["Customers", "Collections", "Returns", "Invoices", "Invoice Items", "Products"] : ["Customers"]) {
+        await db.query("SELECT rie_refresh_canonical_current_state($1, $2)", [company, entity]);
+      }
+    }
+
+    const heatService = new RieScalableQueryService({
+      $queryRaw: async (sql: Prisma.Sql) => {
+        lastQuery = sql;
+        return (await db.query(sql.text, sql.values)).rows;
+      },
+    } as never, { resolveAllowedRouteIds: async () => new Set(["r-1"]) } as never);
+    const legacyRows = async (entity: string) => (await db.query(`
+      SELECT row.data
+      FROM rie_canonical_entity_rows row
+      INNER JOIN files source_file ON source_file.id = row.source_file_id
+      WHERE row.company_id = 'heat-company' AND row.entity_name = $1
+        AND ($2::boolean = false OR LOWER(BTRIM(COALESCE(row.data ->> 'RouteID', ''))) = 'r-1')
+      ORDER BY source_file.created_at DESC, row.created_at ASC, row.id ASC
+    `, [entity, entity !== "Products"])).rows.map((row) => row.data as Record<string, unknown>);
+    const finite = (value: unknown): number | null => {
+      if (typeof value === "number") return Number.isFinite(value) ? value : null;
+      if (typeof value === "string" && value.trim() !== "") {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      return null;
+    };
+
+    const customers = await legacyRows("Customers");
+    const north = customers.filter((row) => String(row.CustomerCode ?? "").trim() && ["North"].includes(String(row.City ?? "").trim())).map((row) => ({
+      id: String(row.CustomerCode ?? "").trim(),
+      label: String(row.CustomerName ?? String(row.CustomerCode ?? "").trim()),
+      lat: finite(row.Latitude), lon: finite(row.Longitude),
+    }));
+    const points = await heatService.queryHeatmapCustomerPoints({
+      companyId: "heat-company", requestingUser: { roleCode: "SALES_REP", email: "rep@example.test" },
+      scopeField: "City", scopeValues: ["North"], limit: 5_000,
+    });
+    assert.deepEqual(points.map(({ totalRows: _totalRows, ...row }) => row), north);
+    assert.ok(points.every((row) => row.totalRows === north.length));
+    const exactChannel = await heatService.queryHeatmapCustomerPoints({
+      companyId: "heat-company", requestingUser: { roleCode: "SALES_REP", email: "rep@example.test" },
+      scopeField: "Channel", scopeValues: ["A"], limit: 5_000,
+    });
+    assert.deepEqual(exactChannel.map((row) => row.id), ["C-1", "C-1", ""]);
+    assert.doesNotMatch(lastQuery!.text, /rie_dataset_versions|rie_entity_rows|customer_source\.\*/);
+
+    for (const [entityName, dateField, amountField] of [
+      ["Collections", "CollectionDate", "Amount"],
+      ["Returns", "ReturnDate", "TotalAmount"],
+    ] as const) {
+      const legacy = new Map<string, number>();
+      for (const row of await legacyRows(entityName)) {
+        const time = Date.parse(String(row[dateField] ?? ""));
+        if (Number.isNaN(time) || time < Date.parse("2026-01-01") || time > Date.parse("2026-01-31")) continue;
+        const id = String(row.CustomerCode ?? "").trim();
+        if (!id) continue;
+        legacy.set(id, (legacy.get(id) ?? 0) + (finite(row[amountField]) ?? 0));
+      }
+      const actual = await heatService.queryHeatmapEntityTotals({
+        companyId: "heat-company", requestingUser: { roleCode: "SALES_REP", email: "rep@example.test" },
+        entityName, dateField, amountField, fromTime: Date.parse("2026-01-01"), toTime: Date.parse("2026-01-31"),
+      });
+      assert.deepEqual(new Map(actual.map((row) => [row.customerCode, row.total])), legacy);
+      assert.doesNotMatch(lastQuery!.text, /rie_dataset_versions|rie_entity_rows|metric_source\.\*/);
+    }
+
+    const invoicesRows = await legacyRows("Invoices");
+    const itemRows = await legacyRows("Invoice Items");
+    const productRows = await legacyRows("Products");
+    const directSales = new Map<string, number>();
+    for (const invoice of invoicesRows) {
+      const invoiceNo = String(invoice.InvoiceNo ?? "").trim();
+      const customerCode = String(invoice.CustomerCode ?? "").trim();
+      const time = Date.parse(String(invoice.InvoiceDate ?? ""));
+      if (!customerCode || time < Date.parse("2026-01-01") || time > Date.parse("2026-01-31")) continue;
+      for (const item of itemRows) {
+        if (String(item.InvoiceNo ?? "").trim() !== invoiceNo) continue;
+        directSales.set(customerCode, (directSales.get(customerCode) ?? 0) + (finite(item.LineTotal) ?? 0));
+      }
+    }
+    const sales = await heatService.queryHeatmapSales({
+      companyId: "heat-company", requestingUser: { roleCode: "SALES_REP", email: "rep@example.test" }, mode: "sales",
+      fromTime: Date.parse("2026-01-01"), toTime: Date.parse("2026-01-31"),
+    });
+    assert.deepEqual(new Map(sales.map((row) => [row.customerCode, row.total])), directSales);
+
+    const invoiceLookup = new Map<string, { customerCode: string; time: number }>();
+    for (const invoice of invoicesRows) {
+      const invoiceNo = String(invoice.InvoiceNo ?? "").trim();
+      const customerCode = String(invoice.CustomerCode ?? "").trim();
+      if (invoiceNo && customerCode) invoiceLookup.set(invoiceNo, { customerCode, time: Date.parse(String(invoice.InvoiceDate ?? "")) });
+    }
+    const productLookup = new Map<string, string>();
+    for (const product of productRows) {
+      const code = String(product.ProductCode ?? "").trim();
+      if (code) productLookup.set(code, String(product.Category ?? ""));
+    }
+    const joined = itemRows.flatMap((item) => {
+      const invoice = invoiceLookup.get(String(item.InvoiceNo ?? "").trim());
+      if (!invoice) return [];
+      return [{ ...invoice, productCode: String(item.ProductCode ?? "").trim(), amount: finite(item.LineTotal) ?? 0 }];
+    });
+    const priorFrom = Date.parse("2026-01-01");
+    const priorTo = Date.parse("2026-01-31");
+    const recentFrom = Date.parse("2026-02-01");
+    const recentTo = Date.parse("2026-02-28");
+    const priorByCustomerProduct = new Map<string, number>();
+    const recent = new Set<string>();
+    for (const row of joined) {
+      const key = `${row.customerCode}\u0000${row.productCode}`;
+      if (row.time >= priorFrom && row.time <= priorTo && row.customerCode && row.productCode) priorByCustomerProduct.set(key, (priorByCustomerProduct.get(key) ?? 0) + row.amount);
+      if (row.time >= recentFrom && row.time <= recentTo && row.customerCode && row.productCode) recent.add(key);
+    }
+    const legacyLost = new Map<string, number>();
+    for (const [key, amount] of priorByCustomerProduct) {
+      if (recent.has(key)) continue;
+      const customerCode = key.split("\u0000")[0]!;
+      legacyLost.set(customerCode, (legacyLost.get(customerCode) ?? 0) + amount);
+    }
+    const lost = await heatService.queryHeatmapSales({
+      companyId: "heat-company", requestingUser: { roleCode: "SALES_REP", email: "rep@example.test" }, mode: "lostSales",
+      priorFromTime: priorFrom, priorToTime: priorTo, fromTime: recentFrom, toTime: recentTo,
+    });
+    assert.deepEqual(new Map(lost.map((row) => [row.customerCode, row.total])), legacyLost);
+    const foodLost = await heatService.queryHeatmapSales({
+      companyId: "heat-company", requestingUser: { roleCode: "SALES_REP", email: "rep@example.test" }, mode: "lostSales", categoryValue: "Food",
+      priorFromTime: priorFrom, priorToTime: priorTo, fromTime: recentFrom, toTime: recentTo,
+    });
+    assert.deepEqual(foodLost, []);
+    assert.equal(productLookup.get("P-1"), "Other");
+
+    const priorByCustomer = new Map<string, number>();
+    const recentByCustomer = new Map<string, number>();
+    for (const row of joined) {
+      if (row.time >= priorFrom && row.time <= priorTo && row.customerCode) priorByCustomer.set(row.customerCode, (priorByCustomer.get(row.customerCode) ?? 0) + row.amount);
+      if (row.time >= recentFrom && row.time <= recentTo && row.customerCode) recentByCustomer.set(row.customerCode, (recentByCustomer.get(row.customerCode) ?? 0) + row.amount);
+    }
+    const legacyOpportunity = new Map([...priorByCustomer].flatMap(([customerCode, prior]) => {
+      const decline = prior - (recentByCustomer.get(customerCode) ?? 0);
+      return decline > 0 ? [[customerCode, decline] as const] : [];
+    }));
+    const opportunity = await heatService.queryHeatmapSales({
+      companyId: "heat-company", requestingUser: { roleCode: "SALES_REP", email: "rep@example.test" }, mode: "opportunity",
+      priorFromTime: priorFrom, priorToTime: priorTo, fromTime: recentFrom, toTime: recentTo,
+    });
+    assert.deepEqual(new Map(opportunity.map((row) => [row.customerCode, row.total])), legacyOpportunity);
+    const scopedOpportunity = await heatService.queryHeatmapSales({
+      companyId: "heat-company", requestingUser: { roleCode: "SALES_REP", email: "rep@example.test" }, mode: "opportunity",
+      priorFromTime: priorFrom, priorToTime: priorTo, fromTime: recentFrom, toTime: recentTo, customerCodes: ["C-1"],
+    });
+    assert.deepEqual(scopedOpportunity, []);
+    assert.doesNotMatch(lastQuery!.text, /rie_dataset_versions|rie_entity_rows|invoice_source\.\*|item_source\.\*/);
+  });
+
   await t.test("newer matching record wins regardless of insertion order, key casing or whitespace", async () => {
     const result = await service.query({ ...invoices, scope: { fields: [{ field: "InvoiceNo", values: ["INV-1"] }] } });
     assert.deepEqual(result.records, [{ InvoiceNo: " inv-1 ", InvoiceStatus: "Closed" }]);
