@@ -4,7 +4,7 @@ import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { RieRequestPlannerService } from "./rie-request-planner.service";
 import type { EntityQueryContext, EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope } from "./scalable-query.types";
+import type { RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRiePostgres, recordActiveVersionResolution } from "../../common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 
@@ -503,6 +503,206 @@ export class RieScalableQueryService {
       WHERE prior_total IS NOT NULL AND prior_total - recent_total > 0`}
     `);
     return rows.map((row) => ({ customerCode: row.customerCode, total: Number(row.total) }));
+  }
+
+  async queryVisitEfficiency(input: RieVisitEfficiencyQuery): Promise<RieVisitEfficiencyResult> {
+    if (!input.companyId?.trim()) throw new Error("RIE Visit Efficiency requires companyId.");
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const hierarchy = (source: "visit_source" | "route_source" | "customer_source"): Prisma.Sql[] => allowedRoutes === null
+      ? []
+      : allowedRoutes.size
+        ? [Prisma.sql`${normalizedField({ field: "RouteID", source })} IN (${Prisma.join([...allowedRoutes])})`]
+        : [Prisma.sql`FALSE`];
+    const customerCode = Prisma.sql`BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "customer_source" })}, ''))`;
+    const customerProjection = Prisma.sql`
+      customer_source.id AS source_row_id,
+      customer_source.precedence AS source_precedence,
+      customer_source."created_at" AS source_created_at,
+      ${customerCode} AS customer_id,
+      COALESCE(${textField({ field: "RouteID", source: "customer_source" })}, '') AS route_id,
+      COALESCE(${textField({ field: "City", source: "customer_source" })}, '') AS city,
+      COALESCE(${textField({ field: "CustomerClass", source: "customer_source" })}, '') AS customer_class,
+      COALESCE(${textField({ field: "Channel", source: "customer_source" })}, '') AS channel,
+      ${geoFiniteNumberField(textField({ field: "Latitude", source: "customer_source" }))} AS latitude,
+      ${geoFiniteNumberField(textField({ field: "Longitude", source: "customer_source" }))} AS longitude
+    `;
+    const routeProjection = Prisma.sql`
+      route_source.id AS source_row_id,
+      route_source.precedence AS source_precedence,
+      route_source."created_at" AS source_created_at,
+      BTRIM(COALESCE(${textField({ field: "RouteID", source: "route_source" })}, '')) AS route_id,
+      BTRIM(COALESCE(${textField({ field: "SalesRepID", source: "route_source" })}, '')) AS sales_rep_id
+    `;
+    const employeeProjection = Prisma.sql`
+      employee_source.id AS source_row_id,
+      employee_source.precedence AS source_precedence,
+      employee_source."created_at" AS source_created_at,
+      BTRIM(COALESCE(${textField({ field: "EmployeeID", source: "employee_source" })}, '')) AS employee_id,
+      COALESCE(${textField({ field: "EmployeeName", source: "employee_source" })}, BTRIM(COALESCE(${textField({ field: "EmployeeID", source: "employee_source" })}, ''))) AS employee_name
+    `;
+    const visitDate = textField({ field: "VisitDate", source: "visit_source" });
+    const visitTime = visitEfficiencyEpochField(visitDate);
+    const checkInTime = heatmapEpochField(textField({ field: "CheckInTime", source: "visit_source" }));
+    const visitPredicates = hierarchy("visit_source");
+    if (input.requireValidDate) visitPredicates.push(Prisma.sql`${visitTime} IS NOT NULL`);
+    if (input.fromTime !== undefined) visitPredicates.push(Prisma.sql`${visitTime} >= ${input.fromTime}`);
+    if (input.toTime !== undefined) visitPredicates.push(Prisma.sql`${visitTime} <= ${input.toTime}`);
+    const visitProjection = Prisma.sql`
+      visit_source.id AS source_row_id,
+      visit_source.precedence AS source_precedence,
+      visit_source."created_at" AS source_created_at,
+      BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "visit_source" })}, '')) AS customer_id,
+      BTRIM(COALESCE(${textField({ field: "RouteID", source: "visit_source" })}, '')) AS route_id,
+      CASE
+        WHEN BTRIM(COALESCE(${visitDate}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}$'
+        THEN BTRIM(${visitDate})
+        WHEN BTRIM(COALESCE(${visitDate}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}'
+        THEN TO_CHAR(BTRIM(${visitDate})::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD')
+        ELSE BTRIM(COALESCE(${visitDate}, ''))
+      END AS date_key,
+      ${checkInTime} AS check_in_time,
+      ${geoFiniteNumberField(textField({ field: "Latitude", source: "visit_source" }))} AS latitude,
+      ${geoFiniteNumberField(textField({ field: "Longitude", source: "visit_source" }))} AS longitude
+    `;
+    const customers = activeEntityRowsCte(input.companyId, "Customers", "customer", hierarchy("customer_source"), [], [], false, [], customerProjection);
+    const routes = activeEntityRowsCte(input.companyId, "Routes", "route", hierarchy("route_source"), [], [], false, [], routeProjection);
+    const employees = activeEntityRowsCte(input.companyId, "Employees", "employee", [], [], [], false, [], employeeProjection);
+    const visits = activeEntityRowsCte(input.companyId, "Visits", "visit", visitPredicates, [], [], false, [], visitProjection);
+    const scopeColumn = input.scopeField ? {
+      RouteID: "route_id", City: "city", CustomerClass: "customer_class", Channel: "channel",
+    }[input.scopeField] : null;
+    const scopePredicate = scopeColumn && input.scopeValues?.length
+      ? Prisma.sql`AND ${Prisma.raw(scopeColumn)} IN (${Prisma.join([...input.scopeValues])})`
+      : Prisma.empty;
+    const rows = await this.postgres<RieVisitEfficiencyResult[]>("queryVisitEfficiency.sql", {
+      kind: "specialized", operation: "queryVisitEfficiency", scopeField: input.scopeField ?? null,
+    }, () => Prisma.sql`
+      WITH ${customers}, ${routes}, ${employees}, ${visits},
+      customer_lookup AS MATERIALIZED (
+        SELECT customer_id, route_id, city, customer_class, channel, latitude, longitude
+        FROM (
+          SELECT customer_id, route_id, city, customer_class, channel, latitude, longitude,
+            ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY source_precedence ASC, source_created_at ASC, source_row_id ASC) AS row_number
+          FROM customer_active
+          WHERE customer_id <> ''
+        ) ranked
+        WHERE row_number = 1
+      ), scoped_customers AS MATERIALIZED (
+        SELECT * FROM customer_lookup WHERE TRUE ${scopePredicate}
+      ), route_lookup AS MATERIALIZED (
+        SELECT route_id, sales_rep_id
+        FROM (
+          SELECT route_id, sales_rep_id,
+            ROW_NUMBER() OVER (PARTITION BY route_id ORDER BY source_precedence DESC, source_created_at DESC, source_row_id DESC) AS row_number
+          FROM route_active
+          WHERE route_id <> '' AND sales_rep_id <> ''
+        ) ranked
+        WHERE row_number = 1
+      ), employee_lookup AS MATERIALIZED (
+        SELECT employee_id, employee_name
+        FROM (
+          SELECT employee_id, employee_name,
+            ROW_NUMBER() OVER (PARTITION BY employee_id ORDER BY source_precedence DESC, source_created_at DESC, source_row_id DESC) AS row_number
+          FROM employee_active
+          WHERE employee_id <> ''
+        ) ranked
+        WHERE row_number = 1
+      ), ordered_visits AS MATERIALIZED (
+        SELECT visit.*,
+          ROW_NUMBER() OVER (ORDER BY source_precedence ASC, source_created_at ASC, source_row_id ASC) - 1 AS source_order
+        FROM visit_active visit
+        ${scopeColumn && input.scopeValues?.length ? Prisma.sql`INNER JOIN scoped_customers scoped ON scoped.customer_id = visit.customer_id` : Prisma.empty}
+      ), prepared AS MATERIALIZED (
+        SELECT visit.customer_id, visit.date_key, visit.source_order,
+          COALESCE(employee.employee_name, route.sales_rep_id, visit.route_id) AS rep,
+          COALESCE(visit.check_in_time, visit.source_order::double precision) AS time_sort,
+          visit.check_in_time IS NOT NULL AS has_check_in,
+          CASE
+            WHEN visit.latitude BETWEEN -90 AND 90 AND visit.longitude BETWEEN -180 AND 180 AND NOT (visit.latitude = 0 AND visit.longitude = 0) THEN visit.latitude
+            WHEN customer.latitude BETWEEN -90 AND 90 AND customer.longitude BETWEEN -180 AND 180 AND NOT (customer.latitude = 0 AND customer.longitude = 0) THEN customer.latitude
+            ELSE NULL
+          END AS latitude,
+          CASE
+            WHEN visit.latitude BETWEEN -90 AND 90 AND visit.longitude BETWEEN -180 AND 180 AND NOT (visit.latitude = 0 AND visit.longitude = 0) THEN visit.longitude
+            WHEN customer.latitude BETWEEN -90 AND 90 AND customer.longitude BETWEEN -180 AND 180 AND NOT (customer.latitude = 0 AND customer.longitude = 0) THEN customer.longitude
+            ELSE NULL
+          END AS longitude
+        FROM ordered_visits visit
+        LEFT JOIN route_lookup route ON route.route_id = visit.route_id
+        LEFT JOIN employee_lookup employee ON employee.employee_id = route.sales_rep_id
+        LEFT JOIN customer_lookup customer ON customer.customer_id = visit.customer_id
+      ), eligible AS MATERIALIZED (
+        SELECT *, rep || ' ' || date_key AS group_key
+        FROM prepared
+        WHERE rep <> '' AND date_key <> ''
+      ), group_stats AS MATERIALIZED (
+        SELECT group_key, COUNT(*)::double precision AS group_count,
+          COUNT(*) FILTER (WHERE latitude IS NOT NULL AND longitude IS NOT NULL)::double precision AS coordinate_count,
+          MIN(source_order) AS group_order
+        FROM eligible
+        GROUP BY group_key
+      ), sequenced AS MATERIALIZED (
+        SELECT eligible.*,
+          stats.group_order,
+          ROW_NUMBER() OVER (PARTITION BY eligible.group_key ORDER BY eligible.time_sort ASC, eligible.source_order ASC) - 1 AS sequence,
+          LAG(eligible.latitude) OVER (PARTITION BY eligible.group_key ORDER BY eligible.time_sort ASC, eligible.source_order ASC) AS previous_latitude,
+          LAG(eligible.longitude) OVER (PARTITION BY eligible.group_key ORDER BY eligible.time_sort ASC, eligible.source_order ASC) AS previous_longitude
+        FROM eligible
+        INNER JOIN group_stats stats ON stats.group_key = eligible.group_key
+        WHERE stats.coordinate_count >= 2 AND eligible.latitude IS NOT NULL AND eligible.longitude IS NOT NULL
+      ), points AS MATERIALIZED (
+        SELECT customer_id || '-' || sequence AS id, customer_id AS label, latitude AS lat, longitude AS lon,
+          CASE WHEN sequence = 0 THEN 0::double precision ELSE
+            2 * 6371::double precision * ASIN(SQRT(LEAST(1::double precision,
+              POWER(SIN(RADIANS(latitude - previous_latitude) / 2), 2)
+              + COS(RADIANS(previous_latitude)) * COS(RADIANS(latitude))
+              * POWER(SIN(RADIANS(longitude - previous_longitude) / 2), 2)
+            ))) END AS value,
+          rep, date_key, group_key, group_order, sequence
+        FROM sequenced
+      ), rep_summary AS MATERIALIZED (
+        SELECT rep,
+          COUNT(DISTINCT group_key)::double precision AS visit_days,
+          COUNT(*)::double precision AS total_visits,
+          SUM(value)::double precision AS total_distance,
+          MIN(group_order) AS rep_order
+        FROM points
+        GROUP BY rep
+      )
+      SELECT
+        (SELECT COUNT(*)::double precision FROM points) AS "usedVisits",
+        COALESCE((SELECT SUM(group_count - coordinate_count)::double precision FROM group_stats), 0) AS "excludedNoCoordinates",
+        COALESCE((SELECT COUNT(*)::double precision FROM group_stats WHERE group_count = 1), 0) AS "excludedSingleVisitDays",
+        COALESCE((SELECT BOOL_OR(has_check_in) FROM prepared), FALSE) AS "timeColumnUsed",
+        (SELECT COUNT(*)::double precision FROM scoped_customers) AS "matchedScopeRows",
+        COALESCE((SELECT JSONB_AGG(JSONB_BUILD_OBJECT(
+          'id', id, 'label', label, 'lat', lat, 'lon', lon, 'value', value, 'rep', rep, 'dateKey', date_key
+        ) ORDER BY group_order, sequence) FROM points), '[]'::jsonb) AS points,
+        COALESCE((SELECT JSONB_AGG(JSONB_BUILD_OBJECT(
+          'rep', rep, 'visitDays', visit_days, 'totalVisits', total_visits,
+          'totalDistanceKm', total_distance,
+          'avgDistanceKmPerVisit', CASE WHEN total_visits > 0 THEN total_distance / total_visits ELSE 0 END
+        ) ORDER BY total_distance DESC, rep_order) FROM rep_summary), '[]'::jsonb) AS "repSummaries"
+    `);
+    const result = rows[0] ?? {
+      usedVisits: 0, excludedNoCoordinates: 0, excludedSingleVisitDays: 0,
+      timeColumnUsed: false, matchedScopeRows: 0, points: [], repSummaries: [],
+    };
+    return {
+      ...result,
+      usedVisits: Number(result.usedVisits),
+      excludedNoCoordinates: Number(result.excludedNoCoordinates),
+      excludedSingleVisitDays: Number(result.excludedSingleVisitDays),
+      matchedScopeRows: Number(result.matchedScopeRows),
+      points: result.points.map((point) => ({ ...point, lat: Number(point.lat), lon: Number(point.lon), value: Number(point.value) })),
+      repSummaries: result.repSummaries.map((summary) => ({
+        ...summary,
+        visitDays: Number(summary.visitDays), totalVisits: Number(summary.totalVisits),
+        totalDistanceKm: Number(summary.totalDistanceKm), avgDistanceKmPerVisit: Number(summary.avgDistanceKmPerVisit),
+      })),
+    };
   }
 
   async queryGeoCustomerSelection(input: RieGeoCustomerSelectionQuery): Promise<RieGeoCustomerSelectionRow[]> {
@@ -1868,6 +2068,8 @@ function numericField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WH
 /** Geo's legacy coercion accepted signed decimals and exponent notation. */
 function geoFiniteNumberField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`; }
 function heatmapEpochField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN EXTRACT(EPOCH FROM BTRIM(${field})::timestamptz) * 1000 ELSE NULL END`; }
+/** Node Date.parse treats a bare ISO calendar date as midnight UTC. */
+function visitEfficiencyEpochField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN EXTRACT(EPOCH FROM (BTRIM(${field})::date::timestamp AT TIME ZONE 'UTC')) * 1000 WHEN BTRIM(COALESCE(${field}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN EXTRACT(EPOCH FROM BTRIM(${field})::timestamptz) * 1000 ELSE NULL END`; }
 /** Matches RIE date filtering while making the route-stale subtraction safe. */
 function dateText(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN ${field} ~ '^\\d{4}-\\d{2}-\\d{2}' THEN LEFT(${field}, 10) ELSE NULL END`; }
 // Field names are validated identifiers.  Keep them as SQL literals rather

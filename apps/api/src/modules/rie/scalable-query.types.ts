@@ -133,6 +133,25 @@ export interface RieHeatmapSalesQuery extends EntityQueryContext {
   customerCodes?: readonly string[];
 }
 export interface RieHeatmapValueRow { customerCode: string; total: number; }
+export interface RieVisitEfficiencyQuery extends EntityQueryContext {
+  scopeField?: "RouteID" | "City" | "CustomerClass" | "Channel";
+  scopeValues?: readonly string[];
+  /** Preserve the legacy behavior whenever either date input was supplied. */
+  requireValidDate?: boolean;
+  fromTime?: number;
+  toTime?: number;
+}
+export interface RieVisitEfficiencyPoint { id: string; label: string; lat: number; lon: number; value: number; rep: string; dateKey: string; }
+export interface RieVisitEfficiencyRepSummary { rep: string; visitDays: number; totalVisits: number; totalDistanceKm: number; avgDistanceKmPerVisit: number; }
+export interface RieVisitEfficiencyResult {
+  usedVisits: number;
+  excludedNoCoordinates: number;
+  excludedSingleVisitDays: number;
+  timeColumnUsed: boolean;
+  matchedScopeRows: number;
+  points: RieVisitEfficiencyPoint[];
+  repSummaries: RieVisitEfficiencyRepSummary[];
+}
 export interface RieGeoProductQuery extends EntityQueryContext {
   customerIds: readonly string[];
   topProductsLimit: number;

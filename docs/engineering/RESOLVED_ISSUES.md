@@ -72,6 +72,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Commit:** This local commit.
 - **Regression-prevention rule:** Heatmap must not use `getEntityRecords()`, historical RIE tables, or entity-wide pagination. Preserve duplicate Invoice/Product Map semantics separately from direct sales-join multiplicity, and verify both against the PostgreSQL parity fixture.
 
+## Visit Efficiency — full canonical entity materialization
+
+- **Symptom/evidence:** Visit Efficiency loaded complete Visits, Routes, Employees, and Customers entities, then performed customer scope, date filtering, joins, coordinate fallback, rep/day grouping, ordering, and distance aggregation in Node. Its scope-values endpoint also loaded all Customers.
+- **Root cause:** The screen still used legacy `getEntityRecords()` reads even though the final response is a compact sequence and per-rep summary.
+- **Fix:** One current-state PostgreSQL query now applies company/hierarchy/customer/date scope, preserves legacy duplicate-map precedence and coordinate fallback, sequences visits, calculates Haversine legs, and returns only final points and rep summaries. Bare ISO dates are interpreted as midnight UTC to match Node `Date.parse` exactly; grouped scope values use a scalar canonical query.
+- **Commit:** This local commit.
+- **Regression-prevention rule:** Visit Efficiency must not materialize canonical entities or page through Visits/Customers. Keep its date-only values UTC-stable, retain PostgreSQL parity coverage for duplicate/order/null, hierarchy, company, scope, and invalid-bound semantics, and return only the compact screen result.
+
 ## Smart Loading — `queryManagementStockAlignment`
 
 - **Symptom:** Slow/heavy query execution and materialization pressure.
