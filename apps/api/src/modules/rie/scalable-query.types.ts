@@ -152,6 +152,47 @@ export interface RieVisitEfficiencyResult {
   points: RieVisitEfficiencyPoint[];
   repSummaries: RieVisitEfficiencyRepSummary[];
 }
+export interface RieTerritoryWindowQuery extends EntityQueryContext {
+  currentFromTime: number;
+  currentToTime: number;
+  priorFromTime: number;
+  priorToTime: number;
+  invoicesAvailable: boolean;
+  visitsAvailable: boolean;
+}
+export interface RieTerritorySummaryQuery extends RieTerritoryWindowQuery {
+  situationCustomerCodes: readonly string[];
+}
+export interface RieTerritorySummaryFactRow {
+  territoryId: string;
+  name: string;
+  lat: number;
+  lon: number;
+  customerCount: number;
+  salesCurrent: number;
+  salesPrior: number;
+  activeCurrentCount: number;
+  visitedCustomerCount: number;
+  situationCustomerCodes: string[];
+}
+export interface RieTerritoryCustomerFactsQuery extends RieTerritoryWindowQuery {
+  collectionsAvailable: boolean;
+  city?: string;
+}
+export interface RieTerritoryCustomerFactRow {
+  customerId: string;
+  customerName: string;
+  latitude: number | null;
+  longitude: number | null;
+  salesCurrent: number;
+  salesPrior: number;
+  collectionCurrent: number;
+  visitedCurrent: boolean;
+}
+export interface RieTerritoryCustomerFactsResult {
+  totalCustomers: number;
+  rows: RieTerritoryCustomerFactRow[];
+}
 export interface RieGeoProductQuery extends EntityQueryContext {
   customerIds: readonly string[];
   topProductsLimit: number;

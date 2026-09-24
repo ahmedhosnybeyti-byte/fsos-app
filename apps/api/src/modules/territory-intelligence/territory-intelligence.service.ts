@@ -14,7 +14,7 @@ import type {
 } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
-import type { EntityQueryResult } from "../rie/entity-provider.interface";
+import { RieScalableQueryService } from "../rie/scalable-query.service";
 import { SgiService } from "../sgi/sgi.service";
 
 // Territory Intelligence — groups Customers by City (the only geographic
@@ -23,25 +23,6 @@ import { SgiService } from "../sgi/sgi.service";
 // platform) and layers already-computed SGI situations on top (see
 // sgi.service.ts) rather than re-running situation detection. TARGET_BEHIND
 // is rep-level, not geographic, and is excluded entirely from grouping.
-
-function toFiniteNumber(value: unknown): number | null {
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
-  if (typeof value === "string" && value.trim() !== "") {
-    const n = Number(value.replace(/,/g, ""));
-    return Number.isFinite(n) ? n : null;
-  }
-  return null;
-}
-
-function toEpochMs(value: unknown): number | null {
-  if (value instanceof Date) return value.getTime();
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() !== "") {
-    const t = Date.parse(value);
-    return Number.isNaN(t) ? null : t;
-  }
-  return null;
-}
 
 // Same rounding + ar-EG locale convention as sgi.service.ts's fmt() —
 // reused here so amounts read consistently with the situations they're
@@ -52,20 +33,6 @@ function fmt(n: number): string {
 
 function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
-}
-
-// Lowercase, trim, collapse whitespace runs to "-", strip everything
-// outside [a-z0-9, Arabic block, hyphen]. Arabic city names must survive
-// this slug intact, so the Arabic Unicode range (؀-ۿ) is
-// deliberately kept rather than stripped. Two different City strings that
-// slugify to the same id are treated as the same territory by design (they
-// were effectively the same city, differing only in incidental formatting).
-function slugify(name: string): string {
-  return name
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9؀-ۿ-]/g, "");
 }
 
 // Equal-weight V1 default. Kept as a named const (rather than inlined
@@ -93,34 +60,25 @@ const RECOMMENDATION_BY_TYPE: Record<TerritorySituationType, (name: string) => s
   PRODUCT_DECLINE: (name) => `فيه تراجع في صنف معين داخل ${name} — راجع التوزيع والعرض في المنافذ المتأثرة.`,
 };
 
-interface TerritoryAcc {
-  name: string;
-  customerCodes: Set<string>;
-  latSum: number;
-  lonSum: number;
-  coordCount: number;
-}
-
-interface SalesAcc {
-  current: number;
-  prior: number;
-  activeCurrent: Set<string>;
-}
-
 @Injectable()
 export class TerritoryIntelligenceService {
   constructor(
     private readonly rieFacade: RieFacade,
     private readonly sgiService: SgiService,
+    private readonly scalableQuery: RieScalableQueryService,
   ) {}
 
   private rieContext(user: AuthenticatedUser) {
     return { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
   }
 
-  private assertEntityAvailable(result: EntityQueryResult, arabicLabel: string): void {
-    if (!result.available) {
-      throw new NotFoundException(`بيانات "${arabicLabel}" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.`);
+  private async sourceAvailable(user: AuthenticatedUser, entityName: string): Promise<boolean> {
+    return this.rieFacade.hasCanonicalEntitySources(this.rieContext(user), [entityName]);
+  }
+
+  private assertCustomersAvailable(available: boolean): void {
+    if (!available) {
+      throw new NotFoundException(`بيانات "العملاء" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.`);
     }
   }
 
@@ -138,94 +96,32 @@ export class TerritoryIntelligenceService {
     const priorFromTime = prevMonthStart.getTime();
     const priorToTime = prevMonthEnd.getTime();
 
-    const [customersResult, invoicesResult, visitsResult, sgiData] = await Promise.all([
-      this.rieFacade.getEntityRecords("Customers", ctx),
-      this.rieFacade.getEntityRecords("Invoices", ctx),
-      this.rieFacade.getEntityRecords("Visits", ctx),
+    const [customersAvailable, invoicesAvailable, visitsAvailable, sgiData] = await Promise.all([
+      this.sourceAvailable(user, "Customers"),
+      this.sourceAvailable(user, "Invoices"),
+      this.sourceAvailable(user, "Visits"),
       this.sgiService.getLatest(user),
     ]);
-    this.assertEntityAvailable(customersResult, "العملاء");
+    this.assertCustomersAvailable(customersAvailable);
 
-    const invoicesAvailable = invoicesResult.available;
-    const visitsAvailable = visitsResult.available;
-
-    // ---- Group customers by City (trimmed, non-empty only). ----
-    const territories = new Map<string, TerritoryAcc>();
-    const customerTerritory = new Map<string, string>(); // CustomerCode -> territory id
-
-    for (const c of customersResult.records) {
-      const city = String(c.City ?? "").trim();
-      if (!city) continue;
-      const code = String(c.CustomerCode ?? "").trim();
-      if (!code) continue;
-
-      const id = slugify(city);
-      let acc = territories.get(id);
-      if (!acc) {
-        acc = { name: city, customerCodes: new Set(), latSum: 0, lonSum: 0, coordCount: 0 };
-        territories.set(id, acc);
-      }
-      acc.customerCodes.add(code);
-      customerTerritory.set(code, id);
-
-      const lat = toFiniteNumber(c.Latitude);
-      const lon = toFiniteNumber(c.Longitude);
-      if (lat !== null && lon !== null) {
-        acc.latSum += lat;
-        acc.lonSum += lon;
-        acc.coordCount += 1;
-      }
-    }
-
-    // ---- Invoices join (Confirmed only) — degrades to null-per-territory
-    // metrics rather than blocking the whole screen when unavailable. ----
-    const salesByTerritory = new Map<string, SalesAcc>();
-    const getOrCreateSales = (id: string): SalesAcc => {
-      let s = salesByTerritory.get(id);
-      if (!s) {
-        s = { current: 0, prior: 0, activeCurrent: new Set() };
-        salesByTerritory.set(id, s);
-      }
-      return s;
-    };
-
-    if (invoicesAvailable) {
-      for (const inv of invoicesResult.records) {
-        if (String(inv.InvoiceStatus ?? "").trim() !== "Confirmed") continue;
-        const code = String(inv.CustomerCode ?? "").trim();
-        if (!code) continue;
-        const territoryId = customerTerritory.get(code);
-        if (!territoryId) continue;
-        const t = toEpochMs(inv.InvoiceDate);
-        if (t === null) continue;
-        const amount = toFiniteNumber(inv.TotalAfterVAT) ?? 0;
-
-        const s = getOrCreateSales(territoryId);
-        if (t >= fromTime && t <= toTime) {
-          s.current += amount;
-          s.activeCurrent.add(code);
-        }
-        if (t >= priorFromTime && t <= priorToTime) {
-          s.prior += amount;
-        }
-      }
-    }
-
-    // ---- Visits join (current window only). ----
-    const visitCustomersByTerritory = new Map<string, Set<string>>();
-    if (visitsAvailable) {
-      for (const v of visitsResult.records) {
-        const code = String(v.CustomerCode ?? "").trim();
-        if (!code) continue;
-        const territoryId = customerTerritory.get(code);
-        if (!territoryId) continue;
-        const t = toEpochMs(v.VisitDate);
-        if (t === null || t < fromTime || t > toTime) continue;
-
-        const set = visitCustomersByTerritory.get(territoryId) ?? new Set<string>();
-        set.add(code);
-        visitCustomersByTerritory.set(territoryId, set);
-      }
+    const situationCustomerCodes = sgiData?.situations.flatMap((situation) =>
+      situation.type !== "TARGET_BEHIND" && situation.entityType === "customer"
+        ? [situation.entityKey.trim()]
+        : [],
+    ) ?? [];
+    const territoryFacts = await this.scalableQuery.queryTerritorySummary({
+      ...ctx,
+      currentFromTime: fromTime,
+      currentToTime: toTime,
+      priorFromTime,
+      priorToTime,
+      invoicesAvailable,
+      visitsAvailable,
+      situationCustomerCodes,
+    });
+    const customerTerritory = new Map<string, string>();
+    for (const territory of territoryFacts) {
+      for (const customerCode of territory.situationCustomerCodes) customerTerritory.set(customerCode, territory.territoryId);
     }
 
     // ---- SGI situations, excluding TARGET_BEHIND (rep-level, not
@@ -246,24 +142,22 @@ export class TerritoryIntelligenceService {
     const severityRank: Record<SgiSituation["severity"], number> = { high: 0, medium: 1, low: 2 };
 
     const items: TerritorySummaryItem[] = [];
-    for (const [id, acc] of territories) {
-      const customerCount = acc.customerCodes.size;
-      const lat = acc.coordCount > 0 ? acc.latSum / acc.coordCount : 0;
-      const lon = acc.coordCount > 0 ? acc.lonSum / acc.coordCount : 0;
-
-      const sales = salesByTerritory.get(id);
-      const salesCurrent = sales?.current ?? 0;
-      const salesPrior = sales?.prior ?? 0;
+    for (const territory of territoryFacts) {
+      const id = territory.territoryId;
+      const customerCount = territory.customerCount;
+      const lat = territory.lat;
+      const lon = territory.lon;
+      const salesCurrent = territory.salesCurrent;
+      const salesPrior = territory.salesPrior;
       const salesGrowthPct = invoicesAvailable ? (salesPrior > 0 ? ((salesCurrent - salesPrior) / salesPrior) * 100 : null) : null;
 
-      const activeCount = sales?.activeCurrent.size ?? 0;
+      const activeCount = territory.activeCurrentCount;
       const activeCustomerRatePct = invoicesAvailable ? Math.round((activeCount / customerCount) * 100) : 0;
 
       const territorySituations = situationsByTerritory.get(id) ?? [];
       const lostSalesCount = territorySituations.filter((s) => s.type === "LOST_SALES").length;
 
-      const visitSet = visitCustomersByTerritory.get(id);
-      const visitCoveragePct = visitsAvailable ? Math.round(((visitSet?.size ?? 0) / customerCount) * 100) : null;
+      const visitCoveragePct = visitsAvailable ? Math.round((territory.visitedCustomerCount / customerCount) * 100) : null;
 
       const collectionRiskCount = territorySituations.filter((s) => s.type === "COLLECTION_RISK").length;
       const collectionHealthPct = sgiData === null ? null : clamp(100 - (collectionRiskCount / customerCount) * 100, 0, 100);
@@ -319,8 +213,8 @@ export class TerritoryIntelligenceService {
 
       const recommendation =
         topSituations.length === 0
-          ? `الأداء في ${acc.name} مستقر — حافظ على وتيرة الزيارات الحالية.`
-          : RECOMMENDATION_BY_TYPE[topSituations[0]!.type as TerritorySituationType](acc.name);
+          ? `الأداء في ${territory.name} مستقر — حافظ على وتيرة الزيارات الحالية.`
+          : RECOMMENDATION_BY_TYPE[topSituations[0]!.type as TerritorySituationType](territory.name);
 
       // Reuses each situation's own SGI-generated recommendation verbatim —
       // no regeneration.
@@ -335,7 +229,7 @@ export class TerritoryIntelligenceService {
 
       items.push({
         id,
-        name: acc.name,
+        name: territory.name,
         lat,
         lon,
         customerCount,
@@ -408,80 +302,30 @@ export class TerritoryIntelligenceService {
     const priorFromTime = prevMonthStart.getTime();
     const priorToTime = prevMonthEnd.getTime();
 
-    const [customersResult, invoicesResult, visitsResult, collectionsResult, sgiData] = await Promise.all([
-      this.rieFacade.getEntityRecords("Customers", ctx),
-      this.rieFacade.getEntityRecords("Invoices", ctx),
-      this.rieFacade.getEntityRecords("Visits", ctx),
-      this.rieFacade.getEntityRecords("Collections", ctx),
+    const [customersAvailable, invoicesAvailable, visitsAvailable, collectionsAvailable, sgiData] = await Promise.all([
+      this.sourceAvailable(user, "Customers"),
+      this.sourceAvailable(user, "Invoices"),
+      this.sourceAvailable(user, "Visits"),
+      this.sourceAvailable(user, "Collections"),
       this.sgiService.getLatest(user),
     ]);
-    this.assertEntityAvailable(customersResult, "العملاء");
-
-    const invoicesAvailable = invoicesResult.available;
-    const visitsAvailable = visitsResult.available;
-    const collectionsAvailable = collectionsResult.available;
-
-    let customerRecords = customersResult.records;
-    if (city && city.trim()) {
-      const target = city.trim();
-      customerRecords = customerRecords.filter((row) => String(row.City ?? "").trim() === target);
-      if (customerRecords.length === 0) {
-        throw new BadRequestException(`لا يوجد عملاء في المدينة "${target}"`);
-      }
+    this.assertCustomersAvailable(customersAvailable);
+    const targetCity = city && city.trim() ? city.trim() : undefined;
+    const customerFacts = await this.scalableQuery.queryTerritoryCustomerFacts({
+      ...ctx,
+      currentFromTime: fromTime,
+      currentToTime: toTime,
+      priorFromTime,
+      priorToTime,
+      invoicesAvailable,
+      visitsAvailable,
+      collectionsAvailable,
+      city: targetCity,
+    });
+    if (targetCity !== undefined && customerFacts.totalCustomers === 0) {
+      throw new BadRequestException(`لا يوجد عملاء في المدينة "${targetCity}"`);
     }
-
-    interface CustomerPointAcc {
-      name: string;
-      lat: number | null;
-      lon: number | null;
-      current: number;
-      prior: number;
-      collectionCurrent: number;
-    }
-    const byCustomer = new Map<string, CustomerPointAcc>();
-    for (const c of customerRecords) {
-      const code = String(c.CustomerCode ?? "").trim();
-      if (!code) continue;
-      const lat = toFiniteNumber(c.Latitude);
-      const lon = toFiniteNumber(c.Longitude);
-      byCustomer.set(code, { name: String(c.CustomerName ?? code), lat, lon, current: 0, prior: 0, collectionCurrent: 0 });
-    }
-
-    if (invoicesAvailable) {
-      for (const inv of invoicesResult.records) {
-        if (String(inv.InvoiceStatus ?? "").trim() !== "Confirmed") continue;
-        const code = String(inv.CustomerCode ?? "").trim();
-        const acc = byCustomer.get(code);
-        if (!acc) continue;
-        const t = toEpochMs(inv.InvoiceDate);
-        if (t === null) continue;
-        const amount = toFiniteNumber(inv.TotalAfterVAT) ?? 0;
-        if (t >= fromTime && t <= toTime) acc.current += amount;
-        if (t >= priorFromTime && t <= priorToTime) acc.prior += amount;
-      }
-    }
-
-    if (collectionsAvailable) {
-      for (const row of collectionsResult.records) {
-        const code = String(row.CustomerCode ?? "").trim();
-        const acc = byCustomer.get(code);
-        if (!acc) continue;
-        const t = toEpochMs(row.CollectionDate);
-        if (t === null || t < fromTime || t > toTime) continue;
-        acc.collectionCurrent += toFiniteNumber(row.Amount) ?? 0;
-      }
-    }
-
-    const visitedThisWindow = new Set<string>();
-    if (visitsAvailable) {
-      for (const v of visitsResult.records) {
-        const code = String(v.CustomerCode ?? "").trim();
-        if (!byCustomer.has(code)) continue;
-        const t = toEpochMs(v.VisitDate);
-        if (t === null || t < fromTime || t > toTime) continue;
-        visitedThisWindow.add(code);
-      }
-    }
+    const customerCodes = new Set(customerFacts.rows.map((row) => row.customerId));
 
     // Same situations-by-customer narrowing getSummary() does by territory
     // — here keyed directly by CustomerCode (entityKey), one level less of
@@ -491,7 +335,7 @@ export class TerritoryIntelligenceService {
       for (const s of sgiData.situations) {
         if (s.type === "TARGET_BEHIND" || s.entityType !== "customer") continue;
         const code = s.entityKey.trim();
-        if (!byCustomer.has(code)) continue;
+        if (!customerCodes.has(code)) continue;
         const arr = situationsByCustomer.get(code) ?? [];
         arr.push(s);
         situationsByCustomer.set(code, arr);
@@ -503,19 +347,20 @@ export class TerritoryIntelligenceService {
     let maxAbsValue = 0;
     const rawByCustomer = new Map<string, number | null>();
 
-    for (const [code, acc] of byCustomer) {
-      if (acc.lat === null || acc.lon === null) {
+    for (const customer of customerFacts.rows) {
+      const code = customer.customerId;
+      if (customer.latitude === null || customer.longitude === null) {
         excludedBadCoordinates++;
         continue;
       }
 
       const customerSituations = situationsByCustomer.get(code) ?? [];
-      const salesGrowthPct = invoicesAvailable ? (acc.prior > 0 ? ((acc.current - acc.prior) / acc.prior) * 100 : null) : null;
-      const isActive = invoicesAvailable ? acc.current > 0 : false;
+      const salesGrowthPct = invoicesAvailable ? (customer.salesPrior > 0 ? ((customer.salesCurrent - customer.salesPrior) / customer.salesPrior) * 100 : null) : null;
+      const isActive = invoicesAvailable ? customer.salesCurrent > 0 : false;
       const isLost = customerSituations.some((s) => s.type === "LOST_SALES");
-      const visitCoveragePct = visitsAvailable ? (visitedThisWindow.has(code) ? 100 : 0) : null;
+      const visitCoveragePct = visitsAvailable ? (customer.visitedCurrent ? 100 : 0) : null;
       const collectionHealthPct =
-        !collectionsAvailable || !invoicesAvailable || acc.current <= 0 ? null : clamp((acc.collectionCurrent / acc.current) * 100, 0, 100);
+        !collectionsAvailable || !invoicesAvailable || customer.salesCurrent <= 0 ? null : clamp((customer.collectionCurrent / customer.salesCurrent) * 100, 0, 100);
 
       let opportunityValueSar = 0;
       for (const s of customerSituations) {
@@ -576,9 +421,9 @@ export class TerritoryIntelligenceService {
 
       points.push({
         customerId: code,
-        customerName: acc.name,
-        latitude: acc.lat,
-        longitude: acc.lon,
+        customerName: customer.customerName,
+        latitude: customer.latitude,
+        longitude: customer.longitude,
         metric,
         rawValue,
         normalizedValue: 0, // filled in below once maxAbsValue is known across all points
@@ -593,8 +438,8 @@ export class TerritoryIntelligenceService {
 
     return {
       metric,
-      city: city && city.trim() ? city.trim() : null,
-      totalCustomers: customerRecords.length,
+      city: targetCity ?? null,
+      totalCustomers: customerFacts.totalCustomers,
       excludedBadCoordinates,
       points,
     };

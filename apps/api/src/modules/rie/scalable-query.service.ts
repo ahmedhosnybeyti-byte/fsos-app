@@ -4,7 +4,7 @@ import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { RieRequestPlannerService } from "./rie-request-planner.service";
 import type { EntityQueryContext, EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieValueScope, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
+import type { RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieTerritoryCustomerFactsQuery, RieTerritoryCustomerFactsResult, RieTerritorySummaryFactRow, RieTerritorySummaryQuery, RieValueScope, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRiePostgres, recordActiveVersionResolution } from "../../common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 
@@ -702,6 +702,287 @@ export class RieScalableQueryService {
         visitDays: Number(summary.visitDays), totalVisits: Number(summary.totalVisits),
         totalDistanceKm: Number(summary.totalDistanceKm), avgDistanceKmPerVisit: Number(summary.avgDistanceKmPerVisit),
       })),
+    };
+  }
+
+  async queryTerritorySummary(input: RieTerritorySummaryQuery): Promise<RieTerritorySummaryFactRow[]> {
+    if (!input.companyId?.trim()) throw new Error("RIE Territory summary requires companyId.");
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const hierarchy = (source: "customer_source" | "invoice_source" | "visit_source"): Prisma.Sql[] => allowedRoutes === null
+      ? []
+      : allowedRoutes.size
+        ? [Prisma.sql`${normalizedField({ field: "RouteID", source })} IN (${Prisma.join([...allowedRoutes])})`]
+        : [Prisma.sql`FALSE`];
+    const customerProjection = Prisma.sql`
+      customer_source.id AS source_row_id,
+      customer_source.precedence AS source_precedence,
+      customer_source."created_at" AS source_created_at,
+      BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "customer_source" })}, '')) AS customer_code,
+      BTRIM(COALESCE(${textField({ field: "City", source: "customer_source" })}, '')) AS city,
+      ${territoryFiniteNumberField(textField({ field: "Latitude", source: "customer_source" }))} AS latitude,
+      ${territoryFiniteNumberField(textField({ field: "Longitude", source: "customer_source" }))} AS longitude
+    `;
+    const customers = activeEntityRowsCte(input.companyId, "Customers", "customer", hierarchy("customer_source"), [], [], false, [], customerProjection);
+    const invoiceDate = territoryEpochField(textField({ field: "InvoiceDate", source: "invoice_source" }));
+    const invoicePredicates = [
+      ...hierarchy("invoice_source"),
+      input.invoicesAvailable ? Prisma.sql`TRUE` : Prisma.sql`FALSE`,
+      Prisma.sql`BTRIM(COALESCE(${textField({ field: "InvoiceStatus", source: "invoice_source" })}, '')) = 'Confirmed'`,
+      Prisma.sql`((${invoiceDate} >= ${input.currentFromTime} AND ${invoiceDate} <= ${input.currentToTime}) OR (${invoiceDate} >= ${input.priorFromTime} AND ${invoiceDate} <= ${input.priorToTime}))`,
+      Prisma.sql`BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "invoice_source" })}, '')) IN (SELECT customer_code FROM customer_mapping)`,
+    ];
+    const invoiceProjection = Prisma.sql`
+      invoice_source.id AS source_row_id,
+      invoice_source.precedence AS source_precedence,
+      invoice_source."created_at" AS source_created_at,
+      BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "invoice_source" })}, '')) AS customer_code,
+      ${invoiceDate} AS event_time,
+      COALESCE(${territoryFiniteNumberField(textField({ field: "TotalAfterVAT", source: "invoice_source" }))}, 0::double precision) AS amount
+    `;
+    const invoices = activeEntityRowsCte(input.companyId, "Invoices", "invoice", invoicePredicates, [], [], false, [], invoiceProjection);
+    const visitDate = territoryEpochField(textField({ field: "VisitDate", source: "visit_source" }));
+    const visitPredicates = [
+      ...hierarchy("visit_source"),
+      input.visitsAvailable ? Prisma.sql`TRUE` : Prisma.sql`FALSE`,
+      Prisma.sql`${visitDate} >= ${input.currentFromTime} AND ${visitDate} <= ${input.currentToTime}`,
+      Prisma.sql`BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "visit_source" })}, '')) IN (SELECT customer_code FROM customer_mapping)`,
+    ];
+    const visitProjection = Prisma.sql`
+      BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "visit_source" })}, '')) AS customer_code
+    `;
+    const visits = activeEntityRowsCte(input.companyId, "Visits", "visit", visitPredicates, [], [], false, [], visitProjection);
+    const situationPredicate = input.situationCustomerCodes.length
+      ? Prisma.sql`customer_code IN (${Prisma.join([...new Set(input.situationCustomerCodes)])})`
+      : Prisma.sql`FALSE`;
+    const rows = await this.postgres<Array<{
+      territoryId: string; name: string; lat: number; lon: number; customerCount: number;
+      salesCurrent: number; salesPrior: number; activeCurrentCount: number; visitedCustomerCount: number;
+      situationCustomerCodes: string[];
+    }>>("queryTerritorySummary.sql", {
+      kind: "specialized", operation: "queryTerritorySummary",
+      invoicesAvailable: input.invoicesAvailable, visitsAvailable: input.visitsAvailable,
+      situationCustomerCount: input.situationCustomerCodes.length,
+    }, () => Prisma.sql`
+      WITH ${customers},
+      customer_ordered AS MATERIALIZED (
+        SELECT customer_active.*,
+          ROW_NUMBER() OVER (ORDER BY source_precedence ASC, source_created_at ASC, source_row_id ASC) - 1 AS source_order
+        FROM customer_active
+      ), territory_customers AS MATERIALIZED (
+        SELECT ${territorySlugField(Prisma.sql`city`)} AS territory_id,
+          city, customer_code, latitude, longitude, source_order
+        FROM customer_ordered
+        WHERE city <> '' AND customer_code <> ''
+      ), customer_mapping AS MATERIALIZED (
+        SELECT customer_code, territory_id, source_order
+        FROM (
+          SELECT customer_code, territory_id, source_order,
+            ROW_NUMBER() OVER (PARTITION BY customer_code ORDER BY source_order DESC) AS row_number
+          FROM territory_customers
+        ) ranked
+        WHERE row_number = 1 AND territory_id <> ''
+      ), territories AS MATERIALIZED (
+        SELECT territory_id,
+          (ARRAY_AGG(city ORDER BY source_order))[1] AS name,
+          COUNT(DISTINCT customer_code)::double precision AS customer_count,
+          CASE WHEN COUNT(*) FILTER (WHERE latitude IS NOT NULL AND longitude IS NOT NULL) > 0
+            THEN SUM(latitude ORDER BY source_order) FILTER (WHERE latitude IS NOT NULL AND longitude IS NOT NULL)
+              / COUNT(*) FILTER (WHERE latitude IS NOT NULL AND longitude IS NOT NULL)
+            ELSE 0::double precision END AS latitude,
+          CASE WHEN COUNT(*) FILTER (WHERE latitude IS NOT NULL AND longitude IS NOT NULL) > 0
+            THEN SUM(longitude ORDER BY source_order) FILTER (WHERE latitude IS NOT NULL AND longitude IS NOT NULL)
+              / COUNT(*) FILTER (WHERE latitude IS NOT NULL AND longitude IS NOT NULL)
+            ELSE 0::double precision END AS longitude,
+          MIN(source_order) AS territory_order
+        FROM territory_customers
+        GROUP BY territory_id
+      ), situation_mapping AS MATERIALIZED (
+        SELECT territory_id, ARRAY_AGG(customer_code ORDER BY source_order) AS situation_customer_codes
+        FROM customer_mapping
+        WHERE ${situationPredicate}
+        GROUP BY territory_id
+      ), ${invoices},
+      invoice_ordered AS MATERIALIZED (
+        SELECT invoice_active.*,
+          ROW_NUMBER() OVER (ORDER BY source_precedence ASC, source_created_at ASC, source_row_id ASC) - 1 AS source_order
+        FROM invoice_active
+      ), invoice_totals AS MATERIALIZED (
+        SELECT mapping.territory_id,
+          COALESCE(SUM(invoice.amount ORDER BY invoice.source_order) FILTER (WHERE invoice.event_time >= ${input.currentFromTime} AND invoice.event_time <= ${input.currentToTime}), 0::double precision) AS sales_current,
+          COALESCE(SUM(invoice.amount ORDER BY invoice.source_order) FILTER (WHERE invoice.event_time >= ${input.priorFromTime} AND invoice.event_time <= ${input.priorToTime}), 0::double precision) AS sales_prior,
+          COUNT(DISTINCT invoice.customer_code) FILTER (WHERE invoice.event_time >= ${input.currentFromTime} AND invoice.event_time <= ${input.currentToTime})::double precision AS active_current_count
+        FROM invoice_ordered invoice
+        INNER JOIN customer_mapping mapping ON mapping.customer_code = invoice.customer_code
+        GROUP BY mapping.territory_id
+      ), ${visits},
+      visit_totals AS MATERIALIZED (
+        SELECT mapping.territory_id, COUNT(DISTINCT visit.customer_code)::double precision AS visited_customer_count
+        FROM visit_active visit
+        INNER JOIN customer_mapping mapping ON mapping.customer_code = visit.customer_code
+        GROUP BY mapping.territory_id
+      )
+      SELECT territory.territory_id AS "territoryId", territory.name,
+        territory.latitude AS lat, territory.longitude AS lon,
+        territory.customer_count AS "customerCount",
+        COALESCE(invoice.sales_current, 0::double precision) AS "salesCurrent",
+        COALESCE(invoice.sales_prior, 0::double precision) AS "salesPrior",
+        COALESCE(invoice.active_current_count, 0::double precision) AS "activeCurrentCount",
+        COALESCE(visit.visited_customer_count, 0::double precision) AS "visitedCustomerCount",
+        COALESCE(situation.situation_customer_codes, ARRAY[]::text[]) AS "situationCustomerCodes"
+      FROM territories territory
+      LEFT JOIN invoice_totals invoice ON invoice.territory_id = territory.territory_id
+      LEFT JOIN visit_totals visit ON visit.territory_id = territory.territory_id
+      LEFT JOIN situation_mapping situation ON situation.territory_id = territory.territory_id
+      ORDER BY territory.territory_order
+    `);
+    return rows.map((row) => ({
+      ...row,
+      lat: Number(row.lat), lon: Number(row.lon), customerCount: Number(row.customerCount),
+      salesCurrent: Number(row.salesCurrent), salesPrior: Number(row.salesPrior),
+      activeCurrentCount: Number(row.activeCurrentCount), visitedCustomerCount: Number(row.visitedCustomerCount),
+    }));
+  }
+
+  async queryTerritoryCustomerFacts(input: RieTerritoryCustomerFactsQuery): Promise<RieTerritoryCustomerFactsResult> {
+    if (!input.companyId?.trim()) throw new Error("RIE Territory customer facts require companyId.");
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const hierarchy = (source: "customer_source" | "invoice_source" | "visit_source" | "collection_source"): Prisma.Sql[] => allowedRoutes === null
+      ? []
+      : allowedRoutes.size
+        ? [Prisma.sql`${normalizedField({ field: "RouteID", source })} IN (${Prisma.join([...allowedRoutes])})`]
+        : [Prisma.sql`FALSE`];
+    const customerPredicates = hierarchy("customer_source");
+    if (input.city !== undefined) customerPredicates.push(Prisma.sql`BTRIM(COALESCE(${textField({ field: "City", source: "customer_source" })}, '')) = ${input.city}`);
+    const customerProjection = Prisma.sql`
+      customer_source.id AS source_row_id,
+      customer_source.precedence AS source_precedence,
+      customer_source."created_at" AS source_created_at,
+      BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "customer_source" })}, '')) AS customer_code,
+      COALESCE(${textField({ field: "CustomerName", source: "customer_source" })}, BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "customer_source" })}, ''))) AS customer_name,
+      ${territoryFiniteNumberField(textField({ field: "Latitude", source: "customer_source" }))} AS latitude,
+      ${territoryFiniteNumberField(textField({ field: "Longitude", source: "customer_source" }))} AS longitude
+    `;
+    const customers = activeEntityRowsCte(input.companyId, "Customers", "customer", customerPredicates, [], [], false, [], customerProjection);
+    const invoiceDate = territoryEpochField(textField({ field: "InvoiceDate", source: "invoice_source" }));
+    const invoiceProjection = Prisma.sql`
+      invoice_source.id AS source_row_id,
+      invoice_source.precedence AS source_precedence,
+      invoice_source."created_at" AS source_created_at,
+      BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "invoice_source" })}, '')) AS customer_code,
+      ${invoiceDate} AS event_time,
+      COALESCE(${territoryFiniteNumberField(textField({ field: "TotalAfterVAT", source: "invoice_source" }))}, 0::double precision) AS amount
+    `;
+    const invoices = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [
+      ...hierarchy("invoice_source"),
+      input.invoicesAvailable ? Prisma.sql`TRUE` : Prisma.sql`FALSE`,
+      Prisma.sql`BTRIM(COALESCE(${textField({ field: "InvoiceStatus", source: "invoice_source" })}, '')) = 'Confirmed'`,
+      Prisma.sql`((${invoiceDate} >= ${input.currentFromTime} AND ${invoiceDate} <= ${input.currentToTime}) OR (${invoiceDate} >= ${input.priorFromTime} AND ${invoiceDate} <= ${input.priorToTime}))`,
+      Prisma.sql`BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "invoice_source" })}, '')) IN (SELECT customer_code FROM customer_lookup)`,
+    ], [], [], false, [], invoiceProjection);
+    const visitDate = territoryEpochField(textField({ field: "VisitDate", source: "visit_source" }));
+    const visits = activeEntityRowsCte(input.companyId, "Visits", "visit", [
+      ...hierarchy("visit_source"),
+      input.visitsAvailable ? Prisma.sql`TRUE` : Prisma.sql`FALSE`,
+      Prisma.sql`${visitDate} >= ${input.currentFromTime} AND ${visitDate} <= ${input.currentToTime}`,
+      Prisma.sql`BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "visit_source" })}, '')) IN (SELECT customer_code FROM customer_lookup)`,
+    ], [], [], false, [], Prisma.sql`BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "visit_source" })}, '')) AS customer_code`);
+    const collectionDate = territoryEpochField(textField({ field: "CollectionDate", source: "collection_source" }));
+    const collectionProjection = Prisma.sql`
+      collection_source.id AS source_row_id,
+      collection_source.precedence AS source_precedence,
+      collection_source."created_at" AS source_created_at,
+      BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "collection_source" })}, '')) AS customer_code,
+      COALESCE(${territoryFiniteNumberField(textField({ field: "Amount", source: "collection_source" }))}, 0::double precision) AS amount
+    `;
+    const collections = activeEntityRowsCte(input.companyId, "Collections", "collection", [
+      ...hierarchy("collection_source"),
+      input.collectionsAvailable ? Prisma.sql`TRUE` : Prisma.sql`FALSE`,
+      Prisma.sql`${collectionDate} >= ${input.currentFromTime} AND ${collectionDate} <= ${input.currentToTime}`,
+      Prisma.sql`BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "collection_source" })}, '')) IN (SELECT customer_code FROM customer_lookup)`,
+    ], [], [], false, [], collectionProjection);
+    const rows = await this.postgres<Array<{
+      customerId: string | null; customerName: string | null; latitude: number | null; longitude: number | null;
+      salesCurrent: number | null; salesPrior: number | null; collectionCurrent: number | null;
+      visitedCurrent: boolean | null; totalCustomers: number;
+    }>>("queryTerritoryCustomerFacts.sql", {
+      kind: "specialized", operation: "queryTerritoryCustomerFacts", hasCity: input.city !== undefined,
+      invoicesAvailable: input.invoicesAvailable, visitsAvailable: input.visitsAvailable,
+      collectionsAvailable: input.collectionsAvailable,
+    }, () => Prisma.sql`
+      WITH ${customers},
+      customer_ordered AS MATERIALIZED (
+        SELECT customer_active.*,
+          ROW_NUMBER() OVER (ORDER BY source_precedence ASC, source_created_at ASC, source_row_id ASC) - 1 AS source_order
+        FROM customer_active
+      ), customer_summary AS MATERIALIZED (
+        SELECT COUNT(*)::double precision AS total_customers FROM customer_ordered
+      ), customer_lookup AS MATERIALIZED (
+        SELECT customer_code, customer_name, latitude, longitude, customer_order
+        FROM (
+          SELECT customer_code, customer_name, latitude, longitude,
+            MIN(source_order) OVER (PARTITION BY customer_code) AS customer_order,
+            ROW_NUMBER() OVER (PARTITION BY customer_code ORDER BY source_order DESC) AS row_number
+          FROM customer_ordered
+          WHERE customer_code <> ''
+        ) ranked
+        WHERE row_number = 1
+      ), ${invoices},
+      invoice_ordered AS MATERIALIZED (
+        SELECT invoice_active.*,
+          ROW_NUMBER() OVER (ORDER BY source_precedence ASC, source_created_at ASC, source_row_id ASC) - 1 AS source_order
+        FROM invoice_active
+      ), invoice_totals AS MATERIALIZED (
+        SELECT customer_code,
+          COALESCE(SUM(amount ORDER BY source_order) FILTER (WHERE event_time >= ${input.currentFromTime} AND event_time <= ${input.currentToTime}), 0::double precision) AS sales_current,
+          COALESCE(SUM(amount ORDER BY source_order) FILTER (WHERE event_time >= ${input.priorFromTime} AND event_time <= ${input.priorToTime}), 0::double precision) AS sales_prior
+        FROM invoice_ordered
+        GROUP BY customer_code
+      ), ${visits},
+      visited_customers AS MATERIALIZED (
+        SELECT DISTINCT customer_code FROM visit_active
+      ), ${collections},
+      collection_ordered AS MATERIALIZED (
+        SELECT collection_active.*,
+          ROW_NUMBER() OVER (ORDER BY source_precedence ASC, source_created_at ASC, source_row_id ASC) - 1 AS source_order
+        FROM collection_active
+      ), collection_totals AS MATERIALIZED (
+        SELECT customer_code, SUM(amount ORDER BY source_order)::double precision AS collection_current
+        FROM collection_ordered
+        GROUP BY customer_code
+      )
+      SELECT customer.customer_code AS "customerId", customer.customer_name AS "customerName",
+        customer.latitude, customer.longitude,
+        COALESCE(invoice.sales_current, 0::double precision) AS "salesCurrent",
+        COALESCE(invoice.sales_prior, 0::double precision) AS "salesPrior",
+        COALESCE(collection.collection_current, 0::double precision) AS "collectionCurrent",
+        (visited.customer_code IS NOT NULL) AS "visitedCurrent",
+        summary.total_customers AS "totalCustomers"
+      FROM customer_summary summary
+      LEFT JOIN customer_lookup customer ON TRUE
+      LEFT JOIN invoice_totals invoice ON invoice.customer_code = customer.customer_code
+      LEFT JOIN collection_totals collection ON collection.customer_code = customer.customer_code
+      LEFT JOIN visited_customers visited ON visited.customer_code = customer.customer_code
+      ORDER BY customer.customer_order NULLS LAST
+    `);
+    const totalCustomers = Number(rows[0]?.totalCustomers ?? 0);
+    return {
+      totalCustomers,
+      rows: rows.flatMap((row) => row.customerId === null || row.customerName === null
+        ? []
+        : [{
+            customerId: row.customerId,
+            customerName: row.customerName,
+            latitude: row.latitude === null ? null : Number(row.latitude),
+            longitude: row.longitude === null ? null : Number(row.longitude),
+            salesCurrent: Number(row.salesCurrent ?? 0),
+            salesPrior: Number(row.salesPrior ?? 0),
+            collectionCurrent: Number(row.collectionCurrent ?? 0),
+            visitedCurrent: Boolean(row.visitedCurrent),
+          }]),
     };
   }
 
@@ -2070,6 +2351,12 @@ function geoFiniteNumberField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql
 function heatmapEpochField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN EXTRACT(EPOCH FROM BTRIM(${field})::timestamptz) * 1000 ELSE NULL END`; }
 /** Node Date.parse treats a bare ISO calendar date as midnight UTC. */
 function visitEfficiencyEpochField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN EXTRACT(EPOCH FROM (BTRIM(${field})::date::timestamp AT TIME ZONE 'UTC')) * 1000 WHEN BTRIM(COALESCE(${field}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN EXTRACT(EPOCH FROM BTRIM(${field})::timestamptz) * 1000 ELSE NULL END`; }
+/** Territory's legacy Number coercion accepts comma-grouped and exponent values. */
+function territoryFiniteNumberField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(REPLACE(COALESCE(${field}, ''), ',', '')) ~ '^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$' THEN BTRIM(REPLACE(COALESCE(${field}, ''), ',', ''))::double precision ELSE NULL END`; }
+/** Mirrors Node Date.parse for canonical ISO dates without inheriting the database session timezone. */
+function territoryEpochField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN EXTRACT(EPOCH FROM (BTRIM(${field})::date::timestamp AT TIME ZONE 'UTC')) * 1000 WHEN BTRIM(COALESCE(${field}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN EXTRACT(EPOCH FROM BTRIM(${field})::timestamptz) * 1000 ELSE NULL END`; }
+/** PostgreSQL form of Territory Intelligence's established JavaScript slugify. */
+function territorySlugField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`REGEXP_REPLACE(REGEXP_REPLACE(LOWER(BTRIM(${field})), '\\s+', '-', 'g'), '[^a-z0-9؀-ۿ-]', '', 'g')`; }
 /** Matches RIE date filtering while making the route-stale subtraction safe. */
 function dateText(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN ${field} ~ '^\\d{4}-\\d{2}-\\d{2}' THEN LEFT(${field}, 10) ELSE NULL END`; }
 // Field names are validated identifiers.  Keep them as SQL literals rather

@@ -80,6 +80,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Commit:** This local commit.
 - **Regression-prevention rule:** Visit Efficiency must not materialize canonical entities or page through Visits/Customers. Keep its date-only values UTC-stable, retain PostgreSQL parity coverage for duplicate/order/null, hierarchy, company, scope, and invalid-bound semantics, and return only the compact screen result.
 
+## Territory Intelligence — full canonical entity materialization
+
+- **Symptom/evidence:** Territory summary loaded complete Customers, Invoices, and Visits entities; customer-points also loaded complete Collections. City grouping, customer joins, period filtering, distinct activity/visit counts, and monetary aggregation then ran in Node.
+- **Root cause:** The screen still consumed legacy entity-wide reads even though its two data contracts need only one prepared row per City or per final customer point.
+- **Fix:** Dedicated canonical current-state SQL now applies company/hierarchy and exact City/date/status scope first, preserves legacy duplicate-customer mapping and source ordering, aggregates facts at City/customer grain, and projects only compact fields used by the unchanged health/SGI response formulas. Optional source availability remains explicit and SGI mapping returns only customer codes that have situations.
+- **Commit:** This local commit.
+- **Regression-prevention rule:** Territory Intelligence must not call `getEntityRecords()`, read full JSONB rows, or page through Customers/Invoices/Visits/Collections. Preserve its first/last duplicate behavior, UTC date-only boundaries, City slug semantics, hierarchy/company isolation, and final ordering through the PostgreSQL parity fixture.
+
 ## Smart Loading — `queryManagementStockAlignment`
 
 - **Symptom:** Slow/heavy query execution and materialization pressure.
