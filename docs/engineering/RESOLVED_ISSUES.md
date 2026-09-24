@@ -133,8 +133,11 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 
 ## Visit Copilot performance
 
-- **Status:** Already optimized. It resolves the scoped customer slice first and performs fact aggregation in PostgreSQL.
-- **Regression-prevention rule:** Do not rework it merely because it uses multiple calls; require measured evidence of a regression or bottleneck first.
+- **Symptom/evidence:** Customer Briefing loaded complete Customers, Invoices, Invoice Items, Returns, Collections, Products, and Van Inventory entities, then performed date/customer/channel scope, joins, ranking, aggregation, and latest-stock selection in Node.
+- **Root cause:** The briefing path still used entity-wide legacy reads even though its decision inputs can be represented as compact customer, product, peer, return, collection, trend, and inventory facts.
+- **Fix:** One canonical current-state PostgreSQL query now applies company/hierarchy and exact date/customer/channel scope, preserves the legacy duplicate and ordering rules, and returns only prepared briefing facts. ISO timestamps are normalized to Node's UTC calendar day, while numeric Excel dates retain their established conversion.
+- **Commit:** This local commit.
+- **Regression-prevention rule:** Customer Briefing must not materialize full operational entities or page through their complete datasets. Keep its facts set-based and scalar-projected, and prove date, duplicate, ranking, peer, collection, and latest-inventory semantics against the legacy parity fixture.
 
 ## Smart Loading unintended automatic refresh
 

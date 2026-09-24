@@ -193,6 +193,51 @@ export interface RieTerritoryCustomerFactsResult {
   totalCustomers: number;
   rows: RieTerritoryCustomerFactRow[];
 }
+export type RieVisitCopilotBriefingEntity = "Customers" | "Invoices" | "Invoice Items" | "Returns" | "Collections" | "Products" | "Van Inventory";
+export interface RieVisitCopilotCustomerBriefingQuery extends EntityQueryContext {
+  customerCode: string;
+  from: string;
+  to: string;
+  previous30From: string;
+  previous30To: string;
+  recent30From: string;
+  today: string;
+  includeVanStock: boolean;
+}
+export interface RieVisitCopilotCustomerSalesFact {
+  customerCode: string;
+  sales: number;
+  invoiceCount: number;
+}
+export interface RieVisitCopilotProductFact {
+  productCode: string;
+  productName: string;
+  category: string | null;
+  quantity: number;
+  value: number;
+  lastPurchaseDate: string | null;
+}
+export interface RieVisitCopilotPeerProductFact {
+  productCode: string;
+  productName: string;
+  value: number;
+}
+export interface RieVisitCopilotCustomerBriefingFacts {
+  availability: Record<RieVisitCopilotBriefingEntity, boolean>;
+  customer: { customerCode: string; customerName: string; channel: string } | null;
+  visibleCustomerCount: number;
+  salesTotal: number;
+  invoiceCount: number;
+  recent30Sales: number;
+  previous30Sales: number;
+  customerSales: RieVisitCopilotCustomerSalesFact[];
+  customerProducts: RieVisitCopilotProductFact[];
+  peerProducts: RieVisitCopilotPeerProductFact[];
+  returns: { total: number; count: number };
+  collections: { collected: number; count: number; pending: number; bounced: number; overdue: number; oldestPendingDueDate: string | null };
+  vanInventoryRowCount: number;
+  vanProductCodes: string[];
+}
 export interface RieGeoProductQuery extends EntityQueryContext {
   customerIds: readonly string[];
   topProductsLimit: number;

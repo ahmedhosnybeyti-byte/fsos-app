@@ -19,7 +19,7 @@ import { RieScalableQueryService } from "./scalable-query.service";
 import { RieFsos360QueryService } from "./fsos-360-query.service";
 import type { Fsos360Query } from "@field-sales-os/schemas";
 import type { Fsos360ResolvedContext } from "../decision-analytics-studio/fsos-360-context.service";
-import type { RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery } from "./scalable-query.types";
+import type { RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRieLogicalOperation, observeRiePostgres, recordActiveVersionResolution, scopeMetadata } from "../../common/observability/rie-observability";
 import { RieRequestPlannerService, type RieRequestPlanOptions } from "./rie-request-planner.service";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
@@ -203,6 +203,14 @@ export class RieFacade {
     return observeRieLogicalOperation("queryCanonicalRecords", scopeMetadata(query), () => this.plannedOperation("queryCanonicalRecords", () => this.scalableQuery.query(query)));
   }
 
+  queryVisitCopilotCustomerBriefingFacts(query: RieVisitCopilotCustomerBriefingQuery): Promise<RieVisitCopilotCustomerBriefingFacts> {
+    return observeRieLogicalOperation("queryVisitCopilotCustomerBriefingFacts", scopeMetadata(query), () => this.plannedOperation("queryVisitCopilotCustomerBriefingFacts", async () => {
+      const entities: readonly RieVisitCopilotBriefingEntity[] = ["Customers", "Invoices", "Invoice Items", "Returns", "Collections", "Products", "Van Inventory"];
+      const availability = await this.canonicalEntityAvailability(query.companyId, entities);
+      return this.scalableQuery.queryVisitCopilotCustomerBriefingFacts(query, availability);
+    }));
+  }
+
   /** Request-scoped active-version metadata for callers issuing related RIE queries. */
   getActiveVersionCounts(companyId: string, entityNames: readonly string[]): Promise<Map<string, number>> {
     return observeRieLogicalOperation("getActiveVersionCounts", { companyId }, () => this.plannedOperation("getActiveVersionCounts", () => this.scalableQuery.getActiveVersionCounts(companyId, entityNames)));
@@ -355,6 +363,28 @@ export class RieFacade {
       const entityFiles = files.filter((file) => file.datasetType === datasetType);
       return entityFiles.length > 0 && entityFiles.every((file) => active.has(`${entityName}:${file.id}`));
     });
+  }
+
+  /** Resolve several optional briefing sources with one files read and one version read. */
+  private async canonicalEntityAvailability(
+    companyId: string,
+    entityNames: readonly RieVisitCopilotBriefingEntity[],
+  ): Promise<Record<RieVisitCopilotBriefingEntity, boolean>> {
+    const files = await this.postgres("visitCopilotBriefing.files", () => this.filesService.listConfirmedActiveForCompany(companyId));
+    const expected = entityNames.map((entityName) => ({ entityName, datasetType: ENTITY_DATASET_TYPE_MAP[entityName]!.datasetType }));
+    const relevantFiles = files.filter((file) => expected.some((item) => item.datasetType === file.datasetType));
+    const versions = relevantFiles.length
+      ? await this.postgres("visitCopilotBriefing.versions", () => this.prisma.rieDatasetVersion.findMany({
+          where: { companyId, entityName: { in: [...entityNames] }, isActive: true, sourceFileId: { in: relevantFiles.map((file) => file.id) } },
+          select: { entityName: true, sourceFileId: true },
+        }))
+      : [];
+    recordActiveVersionResolution(entityNames.length, versions.length);
+    const active = new Set(versions.map((version) => `${version.entityName}:${version.sourceFileId}`));
+    return Object.fromEntries(expected.map(({ entityName, datasetType }) => {
+      const entityFiles = relevantFiles.filter((file) => file.datasetType === datasetType);
+      return [entityName, entityFiles.length > 0 && entityFiles.every((file) => active.has(`${entityName}:${file.id}`))];
+    })) as Record<RieVisitCopilotBriefingEntity, boolean>;
   }
 
   private postgres<T>(operation: string, execute: () => Promise<T>): Promise<T> {

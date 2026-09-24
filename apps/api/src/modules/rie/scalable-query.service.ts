@@ -4,7 +4,7 @@ import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { RieRequestPlannerService } from "./rie-request-planner.service";
 import type { EntityQueryContext, EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieTerritoryCustomerFactsQuery, RieTerritoryCustomerFactsResult, RieTerritorySummaryFactRow, RieTerritorySummaryQuery, RieValueScope, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
+import type { RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieTerritoryCustomerFactsQuery, RieTerritoryCustomerFactsResult, RieTerritorySummaryFactRow, RieTerritorySummaryQuery, RieValueScope, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRiePostgres, recordActiveVersionResolution } from "../../common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 
@@ -983,6 +983,227 @@ export class RieScalableQueryService {
             collectionCurrent: Number(row.collectionCurrent ?? 0),
             visitedCurrent: Boolean(row.visitedCurrent),
           }]),
+    };
+  }
+
+  /** Compact Customer Briefing evidence without materializing canonical facts in Node. */
+  async queryVisitCopilotCustomerBriefingFacts(
+    input: RieVisitCopilotCustomerBriefingQuery,
+    availability: Record<RieVisitCopilotBriefingEntity, boolean>,
+  ): Promise<RieVisitCopilotCustomerBriefingFacts> {
+    if (!input.companyId?.trim()) throw new Error("RIE Visit Copilot customer briefing requires companyId.");
+    const customerCode = input.customerCode.trim();
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const hierarchy = (source: string): Prisma.Sql[] => allowedRoutes === null
+      ? []
+      : allowedRoutes.size
+        ? [Prisma.sql`${normalizedField({ field: "RouteID", source })} IN (${Prisma.join([...allowedRoutes])})`]
+        : [Prisma.sql`FALSE`];
+    const available = (entity: RieVisitCopilotBriefingEntity) => availability[entity] ? Prisma.sql`TRUE` : Prisma.sql`FALSE`;
+
+    const customers = activeEntityRowsCte(input.companyId, "Customers", "customer", [available("Customers"), ...hierarchy("customer_source")], [], [], false, [], Prisma.sql`
+      customer_source.id AS source_row_id,
+      customer_source.precedence AS source_precedence,
+      customer_source."created_at" AS source_created_at,
+      BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "customer_source" })}, '')) AS customer_code,
+      ${textField({ field: "CustomerName", source: "customer_source" })} AS customer_name,
+      BTRIM(COALESCE(${textField({ field: "Channel", source: "customer_source" })}, '')) AS channel
+    `);
+    const invoiceDate = visitCopilotDateField({ field: "InvoiceDate", source: "invoice_source" });
+    const invoices = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [
+      available("Invoices"), ...hierarchy("invoice_source"), Prisma.sql`${invoiceDate} IS NOT NULL`,
+      Prisma.sql`((${invoiceDate} >= ${input.from} AND ${invoiceDate} <= ${input.to}) OR (${invoiceDate} >= ${input.previous30From} AND ${invoiceDate} <= ${input.to}))`,
+    ], [], [], false, [], Prisma.sql`
+      invoice_source.id AS source_row_id,
+      invoice_source.precedence AS source_precedence,
+      invoice_source."created_at" AS source_created_at,
+      BTRIM(COALESCE(${textField({ field: "InvoiceNo", source: "invoice_source" })}, '')) AS invoice_no,
+      BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "invoice_source" })}, '')) AS customer_code,
+      ${invoiceDate} AS date_iso
+    `);
+    const itemProjection = Prisma.sql`
+      item_source.id AS source_row_id,
+      item_source.precedence AS source_precedence,
+      item_source."created_at" AS source_created_at,
+      BTRIM(COALESCE(${textField({ field: "InvoiceNo", source: "item_source" })}, '')) AS invoice_no,
+      BTRIM(COALESCE(${textField({ field: "ProductCode", source: "item_source" })}, '')) AS product_code,
+      COALESCE(${visitCopilotFiniteNumberField(textField({ field: "Quantity", source: "item_source" }))}, 0::double precision) AS quantity,
+      COALESCE(${visitCopilotFiniteNumberField(textField({ field: "LineTotal", source: "item_source" }))}, 0::double precision) AS line_total
+    `;
+    const returnDate = visitCopilotDateField({ field: "ReturnDate", source: "return_source" });
+    const returns = activeEntityRowsCte(input.companyId, "Returns", "return", [
+      available("Returns"), ...hierarchy("return_source"),
+      Prisma.sql`LOWER(BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "return_source" })}, ''))) = ${customerCode.toLowerCase()}`,
+      Prisma.sql`${returnDate} >= ${input.from} AND ${returnDate} <= ${input.to}`,
+    ], [], [], false, [], Prisma.sql`COALESCE(${visitCopilotFiniteNumberField(textField({ field: "TotalAmount", source: "return_source" }))}, 0::double precision) AS amount`);
+    const collectionDate = visitCopilotDateField({ field: "CollectionDate", source: "collection_source" });
+    const collectionDueDate = visitCopilotDateField({ field: "DueDate", source: "collection_source" });
+    const collections = activeEntityRowsCte(input.companyId, "Collections", "collection", [
+      available("Collections"), ...hierarchy("collection_source"),
+      Prisma.sql`LOWER(BTRIM(COALESCE(${textField({ field: "CustomerCode", source: "collection_source" })}, ''))) = ${customerCode.toLowerCase()}`,
+      Prisma.sql`LOWER(BTRIM(COALESCE(${textField({ field: "Status", source: "collection_source" })}, ''))) IN ('collected', 'cleared', 'pending', 'bounced')`,
+    ], [], [], false, [], Prisma.sql`
+      LOWER(BTRIM(COALESCE(${textField({ field: "Status", source: "collection_source" })}, ''))) AS status,
+      COALESCE(${visitCopilotFiniteNumberField(textField({ field: "Amount", source: "collection_source" }))}, 0::double precision) AS amount,
+      ${collectionDate} AS collection_date,
+      ${collectionDueDate} AS due_date
+    `);
+    const vanDate = visitCopilotDateField({ field: "ReportDate", source: "van_source" });
+    const vanInventory = activeEntityRowsCte(input.companyId, "Van Inventory", "van", [
+      input.includeVanStock ? available("Van Inventory") : Prisma.sql`FALSE`, ...hierarchy("van_source"),
+    ], [], [], false, [], Prisma.sql`
+      van_source.id AS source_row_id,
+      van_source.precedence AS source_precedence,
+      van_source."created_at" AS source_created_at,
+      ${vanDate} AS date_iso,
+      BTRIM(COALESCE(${textField({ field: "ProductCode", source: "van_source" })}, '')) AS product_code,
+      COALESCE(${visitCopilotFiniteNumberField(textField({ field: "Quantity", source: "van_source" }))}, 0::double precision) AS quantity
+    `);
+
+    type RawResult = {
+      customer: RieVisitCopilotCustomerBriefingFacts["customer"];
+      visibleCustomerCount: number; salesTotal: number; invoiceCount: number; recent30Sales: number; previous30Sales: number;
+      customerSales: RieVisitCopilotCustomerBriefingFacts["customerSales"];
+      customerProducts: RieVisitCopilotCustomerBriefingFacts["customerProducts"];
+      peerProducts: RieVisitCopilotCustomerBriefingFacts["peerProducts"];
+      returnsTotal: number; returnCount: number; collected: number; collectionCount: number; pending: number; bounced: number; overdue: number;
+      oldestPendingDueDate: string | null; vanInventoryRowCount: number; vanProductCodes: string[];
+    };
+    const rows = await this.postgres<RawResult[]>("queryVisitCopilotCustomerBriefingFacts.sql", {
+      kind: "specialized", operation: "queryVisitCopilotCustomerBriefingFacts", includeVanStock: input.includeVanStock,
+    }, () => Prisma.sql`
+      WITH ${customers},
+      customer_ordered AS MATERIALIZED (
+        SELECT customer_active.*, ROW_NUMBER() OVER (ORDER BY source_precedence, source_created_at, source_row_id) - 1 AS source_order
+        FROM customer_active
+      ), target_customer AS MATERIALIZED (
+        SELECT customer_code, COALESCE(customer_name, customer_code) AS customer_name, channel
+        FROM customer_ordered WHERE customer_code = ${customerCode} ORDER BY source_order LIMIT 1
+      ), visible_customer_codes AS MATERIALIZED (
+        SELECT customer_code, MIN(source_order) AS source_order FROM customer_ordered WHERE customer_code <> '' GROUP BY customer_code
+      ), peer_codes AS MATERIALIZED (
+        SELECT customer.customer_code FROM customer_ordered customer CROSS JOIN target_customer target
+        WHERE customer.customer_code <> '' AND customer.customer_code <> target.customer_code
+          AND (target.channel = '' OR LOWER(customer.channel) = LOWER(target.channel))
+        GROUP BY customer.customer_code
+      ), ${invoices},
+      invoice_ordered AS MATERIALIZED (
+        SELECT invoice_active.*, ROW_NUMBER() OVER (ORDER BY source_precedence, source_created_at, source_row_id) - 1 AS source_order
+        FROM invoice_active
+      ), period_invoice_counts AS MATERIALIZED (
+        SELECT customer_code, COUNT(*)::double precision AS invoice_count FROM invoice_ordered
+        WHERE date_iso >= ${input.from} AND date_iso <= ${input.to} GROUP BY customer_code
+      ), period_invoice_winners AS MATERIALIZED (
+        SELECT invoice_no, customer_code, date_iso FROM (
+          SELECT invoice_no, customer_code, date_iso, source_order,
+            ROW_NUMBER() OVER (PARTITION BY invoice_no ORDER BY source_order DESC) AS row_number
+          FROM invoice_ordered
+          WHERE invoice_no <> '' AND customer_code <> '' AND date_iso >= ${input.from} AND date_iso <= ${input.to}
+        ) ranked WHERE row_number = 1
+      ), trend_invoice_winners AS MATERIALIZED (
+        SELECT invoice_no, customer_code, date_iso FROM (
+          SELECT invoice_no, customer_code, date_iso, source_order,
+            ROW_NUMBER() OVER (PARTITION BY invoice_no ORDER BY source_order DESC) AS row_number
+          FROM invoice_ordered
+          WHERE invoice_no <> '' AND customer_code = ${customerCode}
+            AND date_iso >= ${input.previous30From} AND date_iso <= ${input.to}
+        ) ranked WHERE row_number = 1
+      ), relevant_invoice_numbers AS MATERIALIZED (
+        SELECT invoice_no FROM period_invoice_winners UNION SELECT invoice_no FROM trend_invoice_winners
+      ), ${activeEntityRowsCte(input.companyId, "Invoice Items", "item", [available("Invoice Items"), ...hierarchy("item_source")], [], [], false, [
+        Prisma.sql`INNER JOIN relevant_invoice_numbers relevant_invoice ON BTRIM(COALESCE(${textField({ field: "InvoiceNo", source: "item_source" })}, '')) = relevant_invoice.invoice_no`,
+      ], itemProjection)},
+      item_ordered AS MATERIALIZED (
+        SELECT item_active.*, ROW_NUMBER() OVER (ORDER BY source_precedence, source_created_at, source_row_id) - 1 AS source_order
+        FROM item_active
+      ), period_items AS MATERIALIZED (
+        SELECT item.source_order, invoice.customer_code, invoice.date_iso, item.product_code, item.quantity, item.line_total
+        FROM item_ordered item INNER JOIN period_invoice_winners invoice ON invoice.invoice_no = item.invoice_no
+      ), customer_sales AS MATERIALIZED (
+        SELECT item.customer_code, SUM(item.line_total ORDER BY item.source_order)::double precision AS sales, MIN(item.source_order) AS first_item_order
+        FROM period_items item INNER JOIN visible_customer_codes visible ON visible.customer_code = item.customer_code
+        GROUP BY item.customer_code
+      ), target_products AS MATERIALIZED (
+        SELECT item.product_code, SUM(item.quantity ORDER BY item.source_order)::double precision AS quantity,
+          SUM(item.line_total ORDER BY item.source_order)::double precision AS value, MAX(item.date_iso) AS last_purchase_date,
+          MIN(item.source_order) AS first_item_order
+        FROM period_items item WHERE item.customer_code = ${customerCode} AND item.product_code <> '' GROUP BY item.product_code
+      ), peer_products AS MATERIALIZED (
+        SELECT item.product_code, SUM(item.line_total ORDER BY item.source_order)::double precision AS value, MIN(item.source_order) AS first_item_order
+        FROM period_items item INNER JOIN peer_codes peer ON peer.customer_code = item.customer_code
+        WHERE item.product_code <> '' GROUP BY item.product_code
+      ), trend_totals AS MATERIALIZED (
+        SELECT COALESCE(SUM(item.line_total ORDER BY item.source_order) FILTER (WHERE invoice.date_iso >= ${input.recent30From}), 0::double precision) AS recent_sales,
+          COALESCE(SUM(item.line_total ORDER BY item.source_order) FILTER (WHERE invoice.date_iso >= ${input.previous30From} AND invoice.date_iso <= ${input.previous30To}), 0::double precision) AS previous_sales
+        FROM item_ordered item INNER JOIN trend_invoice_winners invoice ON invoice.invoice_no = item.invoice_no
+      ), relevant_product_keys AS MATERIALIZED (
+        SELECT product_code FROM target_products UNION SELECT product_code FROM peer_products
+      ), ${activeEntityRowsCte(input.companyId, "Products", "product", [available("Products")], [], [], false, [
+        Prisma.sql`INNER JOIN relevant_product_keys relevant_product ON BTRIM(COALESCE(${textField({ field: "ProductCode", source: "product_source" })}, '')) = relevant_product.product_code`,
+      ], Prisma.sql`
+        product_source.id AS source_row_id, product_source.precedence AS source_precedence,
+        product_source."created_at" AS source_created_at,
+        BTRIM(COALESCE(${textField({ field: "ProductCode", source: "product_source" })}, '')) AS product_code,
+        ${textField({ field: "ProductName", source: "product_source" })} AS product_name,
+        NULLIF(BTRIM(COALESCE(${textField({ field: "Category", source: "product_source" })}, '')), '') AS category
+      `)}, product_meta AS MATERIALIZED (
+        SELECT product_code, COALESCE(product_name, product_code) AS product_name, category FROM (
+          SELECT product_active.*, ROW_NUMBER() OVER (PARTITION BY product_code ORDER BY source_precedence DESC, source_created_at DESC, source_row_id DESC) AS row_number
+          FROM product_active WHERE product_code <> ''
+        ) ranked WHERE row_number = 1
+      ), ${returns}, return_totals AS MATERIALIZED (
+        SELECT COALESCE(SUM(amount), 0::double precision) AS total, COUNT(*)::double precision AS count FROM return_active
+      ), ${collections}, collection_totals AS MATERIALIZED (
+        SELECT COALESCE(SUM(amount) FILTER (WHERE status IN ('collected', 'cleared') AND collection_date >= ${input.from} AND collection_date <= ${input.to}), 0::double precision) AS collected,
+          COUNT(*) FILTER (WHERE status IN ('collected', 'cleared') AND collection_date >= ${input.from} AND collection_date <= ${input.to})::double precision AS collection_count,
+          COALESCE(SUM(amount) FILTER (WHERE status = 'pending'), 0::double precision) AS pending,
+          COALESCE(SUM(amount) FILTER (WHERE status = 'bounced'), 0::double precision) AS bounced,
+          COALESCE(SUM(amount) FILTER (WHERE status = 'pending' AND due_date < ${input.today}), 0::double precision) AS overdue,
+          MIN(due_date) FILTER (WHERE status = 'pending' AND due_date IS NOT NULL) AS oldest_pending_due_date
+        FROM collection_active
+      ), ${vanInventory}, latest_van_date AS MATERIALIZED (
+        SELECT MAX(date_iso) AS date_iso FROM van_active
+      ), van_products AS MATERIALIZED (
+        SELECT product_code, MIN(source_order) AS first_order FROM (
+          SELECT product_code, quantity, date_iso, ROW_NUMBER() OVER (ORDER BY source_precedence, source_created_at, source_row_id) AS source_order
+          FROM van_active
+        ) van CROSS JOIN latest_van_date latest
+        WHERE van.product_code <> '' AND van.quantity > 0
+          AND ((latest.date_iso IS NULL AND van.date_iso IS NULL) OR van.date_iso = latest.date_iso)
+        GROUP BY product_code
+      )
+      SELECT (SELECT JSONB_BUILD_OBJECT('customerCode', customer_code, 'customerName', customer_name, 'channel', channel) FROM target_customer) AS customer,
+        (SELECT COUNT(*)::double precision FROM visible_customer_codes) AS "visibleCustomerCount",
+        COALESCE((SELECT sales FROM customer_sales WHERE customer_code = ${customerCode}), 0::double precision) AS "salesTotal",
+        COALESCE((SELECT invoice_count FROM period_invoice_counts WHERE customer_code = ${customerCode}), 0::double precision) AS "invoiceCount",
+        trend_totals.recent_sales AS "recent30Sales", trend_totals.previous_sales AS "previous30Sales",
+        COALESCE((SELECT JSONB_AGG(JSONB_BUILD_OBJECT('customerCode', sales.customer_code, 'sales', sales.sales, 'invoiceCount', COALESCE(counts.invoice_count, 0::double precision)) ORDER BY sales.first_item_order)
+          FROM customer_sales sales LEFT JOIN period_invoice_counts counts ON counts.customer_code = sales.customer_code), '[]'::jsonb) AS "customerSales",
+        COALESCE((SELECT JSONB_AGG(JSONB_BUILD_OBJECT('productCode', product.product_code, 'productName', COALESCE(meta.product_name, product.product_code), 'category', meta.category, 'quantity', product.quantity, 'value', product.value, 'lastPurchaseDate', product.last_purchase_date) ORDER BY product.first_item_order)
+          FROM target_products product LEFT JOIN product_meta meta ON meta.product_code = product.product_code), '[]'::jsonb) AS "customerProducts",
+        COALESCE((SELECT JSONB_AGG(JSONB_BUILD_OBJECT('productCode', product.product_code, 'productName', COALESCE(meta.product_name, product.product_code), 'value', product.value) ORDER BY product.first_item_order)
+          FROM peer_products product LEFT JOIN product_meta meta ON meta.product_code = product.product_code), '[]'::jsonb) AS "peerProducts",
+        return_totals.total AS "returnsTotal", return_totals.count AS "returnCount",
+        collection_totals.collected, collection_totals.collection_count AS "collectionCount", collection_totals.pending,
+        collection_totals.bounced, collection_totals.overdue, collection_totals.oldest_pending_due_date AS "oldestPendingDueDate",
+        (SELECT COUNT(*)::double precision FROM van_active) AS "vanInventoryRowCount",
+        COALESCE((SELECT JSONB_AGG(product_code ORDER BY first_order) FROM van_products), '[]'::jsonb) AS "vanProductCodes"
+      FROM trend_totals CROSS JOIN return_totals CROSS JOIN collection_totals
+    `);
+    const row = rows[0];
+    return {
+      availability, customer: row?.customer ?? null, visibleCustomerCount: Number(row?.visibleCustomerCount ?? 0),
+      salesTotal: Number(row?.salesTotal ?? 0), invoiceCount: Number(row?.invoiceCount ?? 0),
+      recent30Sales: Number(row?.recent30Sales ?? 0), previous30Sales: Number(row?.previous30Sales ?? 0),
+      customerSales: Array.isArray(row?.customerSales) ? row.customerSales : [],
+      customerProducts: Array.isArray(row?.customerProducts) ? row.customerProducts : [],
+      peerProducts: Array.isArray(row?.peerProducts) ? row.peerProducts : [],
+      returns: { total: Number(row?.returnsTotal ?? 0), count: Number(row?.returnCount ?? 0) },
+      collections: { collected: Number(row?.collected ?? 0), count: Number(row?.collectionCount ?? 0), pending: Number(row?.pending ?? 0), bounced: Number(row?.bounced ?? 0), overdue: Number(row?.overdue ?? 0), oldestPendingDueDate: row?.oldestPendingDueDate ?? null },
+      vanInventoryRowCount: Number(row?.vanInventoryRowCount ?? 0),
+      vanProductCodes: Array.isArray(row?.vanProductCodes) ? row.vanProductCodes : [],
     };
   }
 
@@ -2353,6 +2574,20 @@ function heatmapEpochField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CA
 function visitEfficiencyEpochField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN EXTRACT(EPOCH FROM (BTRIM(${field})::date::timestamp AT TIME ZONE 'UTC')) * 1000 WHEN BTRIM(COALESCE(${field}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN EXTRACT(EPOCH FROM BTRIM(${field})::timestamptz) * 1000 ELSE NULL END`; }
 /** Territory's legacy Number coercion accepts comma-grouped and exponent values. */
 function territoryFiniteNumberField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(REPLACE(COALESCE(${field}, ''), ',', '')) ~ '^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$' THEN BTRIM(REPLACE(COALESCE(${field}, ''), ',', ''))::double precision ELSE NULL END`; }
+/** Mirrors Visit Copilot's Number(value.replace(/,/g, "")) coercion. */
+function visitCopilotFiniteNumberField(field: Prisma.Sql): Prisma.Sql { return territoryFiniteNumberField(field); }
+/** Canonical ISO timestamps and numeric Excel serial dates normalized to Node's UTC day. */
+function visitCopilotDateField(field: RieQueryField): Prisma.Sql {
+  const text = textField(field);
+  const json = Prisma.sql`${Prisma.raw(field.source ?? "base")}."data" -> ${Prisma.raw(`'${field.field}'`)}`;
+  return Prisma.sql`CASE
+    WHEN jsonb_typeof(${json}) = 'number' AND BTRIM(COALESCE(${text}, '')) ~ '^[0-9]+(\\.[0-9]+)?$'
+      AND BTRIM(${text})::double precision > 20000 AND BTRIM(${text})::double precision < 80000
+      THEN TO_CHAR(TIMESTAMP '1899-12-30' + BTRIM(${text})::double precision * INTERVAL '1 day', 'YYYY-MM-DD')
+    WHEN BTRIM(COALESCE(${text}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN BTRIM(${text})
+    WHEN BTRIM(COALESCE(${text}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}[T ]' THEN TO_CHAR(BTRIM(${text})::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD')
+    ELSE NULL END`;
+}
 /** Mirrors Node Date.parse for canonical ISO dates without inheriting the database session timezone. */
 function territoryEpochField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}$' THEN EXTRACT(EPOCH FROM (BTRIM(${field})::date::timestamp AT TIME ZONE 'UTC')) * 1000 WHEN BTRIM(COALESCE(${field}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN EXTRACT(EPOCH FROM BTRIM(${field})::timestamptz) * 1000 ELSE NULL END`; }
 /** PostgreSQL form of Territory Intelligence's established JavaScript slugify. */

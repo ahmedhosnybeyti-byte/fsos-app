@@ -896,145 +896,68 @@ export class VisitCopilotService {
     const range = resolveVisitCopilotPeriod(opts);
     const warnings: string[] = [];
 
-    const customers = await this.requireCustomers(ctx);
     const code = customerCode.trim();
-    const customer = customers.find((row) => String(row.CustomerCode ?? "").trim() === code);
-    // Hierarchy scoping already narrowed `customers` — a code outside the
-    // rep's visible routes is indistinguishable from a non-existent one.
-    if (!customer) throw new NotFoundException("العميل غير موجود ضمن نطاقك.");
-
-    const [invoices, items, returnsResult, collectionsResult, products, vanInventory] = await Promise.all([
-      this.tryEntity(ctx, "Invoices", "الفواتير", warnings),
-      this.tryEntity(ctx, "Invoice Items", "أصناف الفاتورة", warnings),
-      this.tryEntityResult(ctx, "Returns", "المرتجعات", warnings),
-      this.tryEntityResult(ctx, "Collections", "التحصيلات", warnings),
-      this.tryEntity(ctx, "Products", "الأصناف", warnings),
-      opts.vanStock ? this.tryEntity(ctx, "Van Inventory", "مخزون السيارة", warnings) : Promise.resolve([] as readonly EntityRecord[]),
-    ]);
-    const returns = returnsResult.records;
-    const collections = collectionsResult.records;
-
-    const productNames = new Map<string, string>();
-    const productCategories = new Map<string, string | null>();
-    for (const p of products) {
-      const pCode = String(p.ProductCode ?? "").trim();
-      if (pCode) {
-        productNames.set(pCode, String(p.ProductName ?? pCode));
-        productCategories.set(pCode, String(p.Category ?? "").trim() || null);
-      }
-    }
-
-    // Channel peers: other visible customers with the same Channel — the
-    // comparison set for cross-sell candidates. A customer without a
-    // channel is compared against all visible customers instead.
-    const channel = String(customer.Channel ?? "").trim();
-    const peerCodes = new Set<string>();
-    for (const row of customers) {
-      const c = String(row.CustomerCode ?? "").trim();
-      if (!c || c === code) continue;
-      if (channel === "" || String(row.Channel ?? "").trim().toLowerCase() === channel.toLowerCase()) peerCodes.add(c);
-    }
-    if (channel === "") warnings.push("العميل بدون قناة (Channel) محددة — تمت مقارنة الأصناف بكل عملاء نطاقك.");
-
-    // In-period invoice metadata (all visible customers — needed for peers).
-    const invoiceMeta = new Map<string, { customerCode: string; dateIso: string }>();
-    const trendInvoiceMeta = new Map<string, { customerCode: string; dateIso: string }>();
     const comparisonEnd = new Date(`${range.to}T00:00:00.000Z`);
     const recent30From = isoDay(new Date(comparisonEnd.getTime() - 29 * 86_400_000));
     const previous30From = isoDay(new Date(comparisonEnd.getTime() - 59 * 86_400_000));
     const previous30To = isoDay(new Date(comparisonEnd.getTime() - 30 * 86_400_000));
-    const invoiceCountByCustomer = new Map<string, number>();
-    for (const inv of invoices) {
-      const no = String(inv.InvoiceNo ?? "").trim();
-      const cust = String(inv.CustomerCode ?? "").trim();
-      const dateIso = isoDayOf(inv.InvoiceDate);
-      if (!no || !cust || !dateIso) continue;
-      if (dateIso >= range.from && dateIso <= range.to) {
-        invoiceMeta.set(no, { customerCode: cust, dateIso });
-        invoiceCountByCustomer.set(cust, (invoiceCountByCustomer.get(cust) ?? 0) + 1);
-      }
-      if (cust === code && dateIso >= previous30From && dateIso <= range.to) trendInvoiceMeta.set(no, { customerCode: cust, dateIso });
-    }
-
-    // One pass over Invoice Items: this customer's totals/top products +
-    // peer product demand, all in the analysis period.
-    let salesTotal = 0;
-    let recent30Sales = 0;
-    let previous30Sales = 0;
-    const salesByCustomer = new Map<string, number>();
-    const customerProducts = new Map<string, { qty: number; value: number; lastPurchaseDate: string | null }>();
-    const peerProductValue = new Map<string, number>();
-    for (const item of items) {
-      const no = String(item.InvoiceNo ?? "").trim();
-      const meta = invoiceMeta.get(no);
-      const trendMeta = trendInvoiceMeta.get(no);
-      const value = toFiniteNumber(item.LineTotal) ?? 0;
-      if (trendMeta) {
-        if (trendMeta.dateIso >= recent30From) recent30Sales += value;
-        else if (trendMeta.dateIso >= previous30From && trendMeta.dateIso <= previous30To) previous30Sales += value;
-      }
-      if (!meta) continue;
-      const pCode = String(item.ProductCode ?? "").trim();
-      salesByCustomer.set(meta.customerCode, (salesByCustomer.get(meta.customerCode) ?? 0) + value);
-      if (meta.customerCode === code) {
-        salesTotal += value;
-        if (pCode) {
-          const agg = customerProducts.get(pCode) ?? { qty: 0, value: 0, lastPurchaseDate: null };
-          agg.qty += toFiniteNumber(item.Quantity) ?? 0;
-          agg.value += value;
-          if (!agg.lastPurchaseDate || meta.dateIso > agg.lastPurchaseDate) agg.lastPurchaseDate = meta.dateIso;
-          customerProducts.set(pCode, agg);
-        }
-      } else if (peerCodes.has(meta.customerCode) && pCode) {
-        peerProductValue.set(pCode, (peerProductValue.get(pCode) ?? 0) + value);
-      }
-    }
-
-    const invoiceCount = invoiceCountByCustomer.get(code) ?? 0;
-
-    const trendPct = previous30Sales > 0 ? round2(((recent30Sales - previous30Sales) / previous30Sales) * 100) : null;
-
-    // Returns in the period.
-    let returnsTotal = 0;
-    let returnCount = 0;
-    for (const ret of returns) {
-      if (String(ret.CustomerCode ?? "").trim().toLowerCase() !== code.toLowerCase()) continue;
-      const dateIso = isoDayOf(ret.ReturnDate);
-      if (!dateIso || dateIso < range.from || dateIso > range.to) continue;
-      returnsTotal += toFiniteNumber(ret.TotalAmount) ?? 0;
-      returnCount++;
-    }
-    const returnsRate = salesTotal > 0 ? round2((returnsTotal / salesTotal) * 100) : null;
-
-    // Collections: collected is a flow (period-scoped); Pending/Bounced are
-    // outstanding exposure (a stock — counted regardless of period).
     const todayIso = isoDay(new Date());
-    let collected = 0;
-    let collectionCount = 0;
-    let pending = 0;
-    let bounced = 0;
-    let overdueAmount = 0;
-    let oldestPendingDueDate: string | null = null;
-    for (const col of collections) {
-      if (String(col.CustomerCode ?? "").trim().toLowerCase() !== code.toLowerCase()) continue;
-      const status = String(col.Status ?? "").trim().toLowerCase();
-      const amount = toFiniteNumber(col.Amount) ?? 0;
-      // Canonical imports use "Cleared" while older datasets use
-      // "Collected". Both mean a completed collection flow.
-      if (status === "collected" || status === "cleared") {
-        const dateIso = isoDayOf(col.CollectionDate);
-        if (dateIso && dateIso >= range.from && dateIso <= range.to) { collected += amount; collectionCount++; }
-      } else if (status === "pending") {
-        pending += amount;
-        const dueIso = isoDayOf(col.DueDate);
-        if (dueIso) {
-          if (!oldestPendingDueDate || dueIso < oldestPendingDueDate) oldestPendingDueDate = dueIso;
-          if (dueIso < todayIso) overdueAmount += amount;
-        }
-      } else if (status === "bounced") {
-        bounced += amount;
-      }
+    const facts = await this.rieFacade.queryVisitCopilotCustomerBriefingFacts({
+      ...ctx, customerCode: code, from: range.from, to: range.to,
+      previous30From, previous30To, recent30From, today: todayIso, includeVanStock: opts.vanStock,
+    });
+    if (!facts.availability.Customers) {
+      throw new NotFoundException('بيانات "العملاء" غير متاحة — تأكد من رفع ملف يطابق قالب الاستيراد الرسمي لهذا الـ Dataset.');
     }
+    // Hierarchy scoping happens inside the contract. A code outside the
+    // visible route set is indistinguishable from a non-existent customer.
+    if (!facts.customer) throw new NotFoundException("العميل غير موجود ضمن نطاقك.");
+    const customer: EntityRecord = {
+      CustomerCode: facts.customer.customerCode,
+      CustomerName: facts.customer.customerName,
+      Channel: facts.customer.channel,
+    };
+    const optionalSources: Array<readonly [keyof typeof facts.availability, string]> = [
+      ["Invoices", "الفواتير"], ["Invoice Items", "أصناف الفاتورة"], ["Returns", "المرتجعات"],
+      ["Collections", "التحصيلات"], ["Products", "الأصناف"],
+    ];
+    if (opts.vanStock) optionalSources.push(["Van Inventory", "مخزون السيارة"]);
+    for (const [entityName, label] of optionalSources) {
+      if (!facts.availability[entityName]) warnings.push(`بيانات "${label}" غير متاحة — بعض الأرقام قد تكون ناقصة.`);
+    }
+
+    const productNames = new Map<string, string>();
+    const productCategories = new Map<string, string | null>();
+    const customerProducts = new Map<string, { qty: number; value: number; lastPurchaseDate: string | null }>();
+    for (const product of facts.customerProducts) {
+      productNames.set(product.productCode, product.productName);
+      productCategories.set(product.productCode, product.category);
+      customerProducts.set(product.productCode, { qty: product.quantity, value: product.value, lastPurchaseDate: product.lastPurchaseDate });
+    }
+    const peerProductValue = new Map<string, number>();
+    for (const product of facts.peerProducts) {
+      productNames.set(product.productCode, product.productName);
+      peerProductValue.set(product.productCode, product.value);
+    }
+
+    const channel = String(customer.Channel ?? "").trim();
+    if (channel === "") warnings.push("العميل بدون قناة (Channel) محددة — تمت مقارنة الأصناف بكل عملاء نطاقك.");
+    const salesTotal = facts.salesTotal;
+    const recent30Sales = facts.recent30Sales;
+    const previous30Sales = facts.previous30Sales;
+    const invoiceCount = facts.invoiceCount;
+    const invoiceCountByCustomer = new Map(facts.customerSales.map((row) => [row.customerCode, row.invoiceCount]));
+    const salesByCustomer = new Map(facts.customerSales.map((row) => [row.customerCode, row.sales]));
+    const trendPct = previous30Sales > 0 ? round2(((recent30Sales - previous30Sales) / previous30Sales) * 100) : null;
+    const returnsTotal = facts.returns.total;
+    const returnCount = facts.returns.count;
+    const returnsRate = salesTotal > 0 ? round2((returnsTotal / salesTotal) * 100) : null;
+    const collected = facts.collections.collected;
+    const collectionCount = facts.collections.count;
+    const pending = facts.collections.pending;
+    const bounced = facts.collections.bounced;
+    const overdueAmount = facts.collections.overdue;
+    const oldestPendingDueDate = facts.collections.oldestPendingDueDate;
 
     const topProducts: BriefingProduct[] = Array.from(customerProducts.entries())
       .map(([pCode, agg]) => ({ productCode: pCode, productName: productNames.get(pCode) ?? pCode, category: productCategories.get(pCode) ?? null, qty: round2(agg.qty), value: round2(agg.value), lastPurchaseDate: agg.lastPurchaseDate }))
@@ -1052,18 +975,8 @@ export class VisitCopilotService {
       .filter(([pCode]) => !customerProducts.has(pCode))
       .sort((a, b) => b[1] - a[1]);
     if (opts.vanStock) {
-      if (vanInventory.length > 0) {
-        let latestIso: string | null = null;
-        for (const row of vanInventory) {
-          const dIso = isoDayOf(row.ReportDate);
-          if (dIso && (!latestIso || dIso > latestIso)) latestIso = dIso;
-        }
-        const inVan = new Set<string>();
-        for (const row of vanInventory) {
-          const dIso = isoDayOf(row.ReportDate);
-          const pCode = String(row.ProductCode ?? "").trim();
-          if (dIso === latestIso && pCode && (toFiniteNumber(row.Quantity) ?? 0) > 0) inVan.add(pCode);
-        }
+      if (facts.vanInventoryRowCount > 0) {
+        const inVan = new Set(facts.vanProductCodes);
         candidates = candidates.filter(([pCode]) => inVan.has(pCode));
       } else {
         warnings.push("فلتر مخزون السيارة مفعّل لكن لا توجد بيانات مخزون — عُرضت الاقتراحات دون فلترة.");
@@ -1093,9 +1006,7 @@ export class VisitCopilotService {
       topProduct: topProducts[0] ?? null,
       missingProduct: candidates[0] ? { productName: productNames.get(candidates[0][0]) ?? candidates[0][0], peerValue: round2(candidates[0][1]) } : null,
     });
-    const visibleCustomerCodes = new Set(customers.map((row) => String(row.CustomerCode ?? "").trim()).filter(Boolean));
     const sortedCustomerSales = Array.from(salesByCustomer.entries())
-      .filter(([customerCode]) => visibleCustomerCodes.has(customerCode))
       .sort((a, b) => b[1] - a[1]);
     const salesRankIndex = sortedCustomerSales.findIndex(([customerCode]) => customerCode === code);
     const salesRank = salesRankIndex >= 0 ? salesRankIndex + 1 : null;
@@ -1164,7 +1075,7 @@ export class VisitCopilotService {
           ? "لا توجد تحصيلات مسجلة خلال الفترة، ولا يمكن اعتبارها تأخرًا دون بيانات الاستحقاق."
           : "لا تظهر البيانات المتاحة تأخرًا مثبتًا في التحصيل.",
       salesRank,
-      customerCount: visibleCustomerCodes.size,
+      customerCount: facts.visibleCustomerCount,
       channel: channel || null,
       classifications,
       kpiEvaluations,
@@ -1188,7 +1099,7 @@ export class VisitCopilotService {
       improvementOpportunities: customer360.improvementOpportunities.length ? ["Prioritize the next measured customer action."] : [],
       managementDiagnosis: "Management assessment is based on the measured customer signals for this period.",
       executiveDecision: lostOpportunityResult.opportunities.length ? "Prioritize recovering stopped products before adding new products." : "Maintain the current customer plan and monitor the measured signals.",
-      collectionContext: collectionsResult.available ? (collectionCount ? "Collection activity is available for the selected period." : "No completed collections are recorded for the selected period.") : "Collections data is unavailable.",
+      collectionContext: facts.availability.Collections ? (collectionCount ? "Collection activity is available for the selected period." : "No completed collections are recorded for the selected period.") : "Collections data is unavailable.",
     } : customer360;
 
     return {
@@ -1198,7 +1109,7 @@ export class VisitCopilotService {
       sales: { total: round2(salesTotal), invoiceCount, trendPct },
       returns: { total: round2(returnsTotal), rate: returnsRate },
       collections: { collected: round2(collected), pending: round2(pending), bounced: round2(bounced), oldestPendingDueDate },
-      dataAvailability: { returns: returnsResult.available, collections: collectionsResult.available },
+      dataAvailability: { returns: facts.availability.Returns, collections: facts.availability.Collections },
       topProducts,
       missingProducts,
       diagnosis,
