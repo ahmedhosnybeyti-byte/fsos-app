@@ -109,6 +109,56 @@ export interface RieGeoCustomerDirectoryRow { id: string; name: string; lat: num
 export interface RieGeoExpansionCustomersResult { customers: RieGeoCustomerDirectoryRow[]; matchedScopeRows: number; }
 /** Customer-grain expansion input; the Invoice Items join never leaves PostgreSQL. */
 export interface RieGeoCustomerSalesRow { customerCode: string; total: number; }
+export type RieGeoEngineKpi = "sales" | "orders" | "customers" | "visits" | "collections" | "returns" | "lostSales";
+export interface RieGeoEngineFilters extends EntityQueryContext {
+  fromTime: number;
+  toTime: number;
+  priorFromTime: number;
+  priorToTime: number;
+  cityValues?: readonly string[];
+  channelValues?: readonly string[];
+  branchIds?: readonly string[];
+  customerCodes?: readonly string[];
+  categoryValues?: readonly string[];
+  brandValues?: readonly string[];
+  productCodes?: readonly string[];
+  repEmails?: readonly string[];
+  supervisorEmails?: readonly string[];
+  invoicesAvailable: boolean;
+}
+export interface RieGeoEngineMapQuery extends RieGeoEngineFilters {
+  kpi: RieGeoEngineKpi;
+  groupBy: "customer" | "city";
+}
+export interface RieGeoEnginePointFact { id: string; name: string; lat: number; lon: number; city: string; value: number; }
+export interface RieGeoEngineMapResult {
+  points: RieGeoEnginePointFact[];
+  scopedCustomerCodes: string[];
+  totalRows: number;
+  excludedBadCoordinates: number;
+  invoicesAvailable: boolean;
+}
+export interface RieGeoEngineTableQuery extends RieGeoEngineFilters {
+  page: number;
+  pageSize: number;
+}
+export interface RieGeoEngineTableFact {
+  invoiceNo: string;
+  lineNo: number;
+  date: string | null;
+  customerCode: string;
+  customerName: string;
+  city: string;
+  channel: string;
+  productCode: string;
+  productName: string;
+  category: string;
+  brand: string;
+  repName: string;
+  supervisorName: string;
+  amount: number;
+}
+export interface RieGeoEngineTableResult { rows: RieGeoEngineTableFact[]; totalRows: number; }
 export interface RieHeatmapCustomerPointsQuery extends EntityQueryContext {
   scopeField?: "RouteID" | "City" | "CustomerClass" | "Channel";
   scopeValues?: readonly string[];

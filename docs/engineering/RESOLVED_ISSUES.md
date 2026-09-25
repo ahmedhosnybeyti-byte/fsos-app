@@ -64,6 +64,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Commit:** This local commit.
 - **Regression-prevention rule:** Geo Intelligence must not call `getEntityRecords()` or page to the end of Customers, Invoices, or Invoice Items. Keep Geo facts scoped and aggregated in PostgreSQL, project only fields used by the response, and preserve old duplicate/order/null semantics with PostgreSQL parity fixtures.
 
+## Geo Engine — KPI-aware PostgreSQL facts
+
+- **Symptom/evidence:** Geo Engine materialized Customers and multiple operational entities in Node, then performed invoice/item joins, KPI filtering, customer/city grouping, sorting, and detail pagination in memory.
+- **Root cause:** The screen had no KPI-aware PostgreSQL contract, and its invoice date expression interpreted bare ISO dates in the PostgreSQL session timezone instead of matching Node `Date.parse` UTC semantics.
+- **Fix:** Add compact Geo Engine map/table RIE queries over canonical current-state rows. PostgreSQL now reads only the selected KPI facts, applies company/hierarchy/date/filter scope before joins, preserves the existing formulas and grouping semantics, and interprets bare invoice dates as midnight UTC through one shared invoice-date expression.
+- **Commit:** This local commit.
+- **Regression-prevention rule:** Geo Engine invoice-backed KPIs and detail reads must share the UTC-stable invoice-date expression. Keep fact selection KPI-aware, joins and aggregation in PostgreSQL, and prove customer/city parity against the legacy fixture before changing formulas or scopes.
+
 ## Heatmap — full canonical entity materialization
 
 - **Symptom/evidence:** Heatmap materialized complete Customers, Collections, Returns, Invoices, Invoice Items, and optional Products entities for several metrics; lost-sales and opportunity joins/window comparisons ran in Node, while older optimized branches still reconstructed historical newest-wins directly.
