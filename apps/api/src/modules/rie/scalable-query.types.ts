@@ -305,6 +305,34 @@ export interface RieGeoProductRow {
   targetProductCount: number | null;
 }
 
+export type RieProductFitPeerScope = "CUSTOMER_TYPE" | "HORECA_FALLBACK" | "CHANNEL" | "NONE";
+export interface RieProductFitQuery extends EntityQueryContext {
+  businessType: string | null;
+  channel: string | null;
+  /** Empty unless the current business type is eligible for the established HoReCa fallback. */
+  horecaCustomerTypes: readonly string[];
+  /** Internal facade guard preserving the entity provider's all-active-sources requirement. */
+  sourceAvailability?: { customers: boolean; invoices: boolean; invoiceItems: boolean; products: boolean };
+}
+export interface RieProductFitProduct extends EntityRecord {
+  ProductCode: string | null;
+  ProductName: string | null;
+  Category: string | null;
+  Brand: string | null;
+  ProductStatus: string | null;
+  Status: string | null;
+}
+export interface RieProductFitPeerSale {
+  productCode: string;
+  orderValue: number;
+  buyerCount: number;
+}
+export interface RieProductFitData {
+  peerScope: RieProductFitPeerScope;
+  peerSales: RieProductFitPeerSale[];
+  products: RieProductFitProduct[];
+}
+
 /** Product-grain management stale rollup; Route × Product remains SQL-only. */
 export interface RieRouteProductStalenessQuery extends EntityQueryContext {
   /** null/undefined means the caller's full hierarchy scope; [] means no routes. */

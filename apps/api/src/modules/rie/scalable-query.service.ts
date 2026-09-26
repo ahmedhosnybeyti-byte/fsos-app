@@ -4,7 +4,7 @@ import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { RieRequestPlannerService } from "./rie-request-planner.service";
 import type { EntityQueryContext, EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoEngineFilters, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieTerritoryCustomerFactsQuery, RieTerritoryCustomerFactsResult, RieTerritorySummaryFactRow, RieTerritorySummaryQuery, RieValueScope, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
+import type { RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoEngineFilters, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitPeerScope, RieProductFitQuery, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieTerritoryCustomerFactsQuery, RieTerritoryCustomerFactsResult, RieTerritorySummaryFactRow, RieTerritorySummaryQuery, RieValueScope, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRiePostgres, recordActiveVersionResolution } from "../../common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 
@@ -1741,6 +1741,213 @@ export class RieScalableQueryService {
       LIMIT ${input.topProductsLimit}
     `);
     return rows.map((row) => ({ ...row, totalQty: Number(row.totalQty), totalValue: Number(row.totalValue), customerCount: Number(row.customerCount), totalRowsConsidered: Number(row.totalRowsConsidered), targetProductCount: row.targetProductCount === null ? null : Number(row.targetProductCount) }));
+  }
+
+  /**
+   * Product Fit's compact company read. Peer selection, the invoice lookup,
+   * line aggregation and distinct-buyer count stay in PostgreSQL. Products
+   * cross the boundary only as the six scalar fields used by Node scoring.
+   */
+  async queryProductFitData(input: RieProductFitQuery): Promise<RieProductFitData> {
+    if (!input.companyId?.trim()) throw new Error("RIE Product Fit query requires companyId.");
+    const businessType = String(input.businessType ?? "").trim().toLowerCase();
+    const channel = String(input.channel ?? "").trim().toLowerCase();
+    const horecaTypes = [...new Set(input.horecaCustomerTypes.map((value) => value.trim().toLowerCase()).filter(Boolean))];
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const routePredicate = (source: string) => allowedRoutes === null
+      ? []
+      : [allowedRoutes.size
+          ? Prisma.sql`${normalizedField({ field: "RouteID", source })} IN (${Prisma.join([...allowedRoutes])})`
+          : Prisma.sql`FALSE`];
+
+    const customerProjection = Prisma.sql`
+      ${normalizedField({ field: "CustomerCode", source: "customer_source" })} AS customer_code,
+      ${normalizedField({ field: "CustomerType", source: "customer_source" })} AS customer_type,
+      ${normalizedField({ field: "Channel", source: "customer_source" })} AS channel
+    `;
+    const customerCte = activeEntityRowsCte(input.companyId, "Customers", "customer", input.sourceAvailability?.customers === false ? [Prisma.sql`FALSE`] : routePredicate("customer_source"), [], [], false, [], customerProjection);
+    const typePeers = Prisma.sql`type_peers AS MATERIALIZED (
+      SELECT DISTINCT customer.customer_code
+      FROM customer_active customer
+      WHERE ${businessType} <> '' AND customer.customer_type = ${businessType}
+    )`;
+    const channelPeers = Prisma.sql`channel_peers AS MATERIALIZED (
+      SELECT DISTINCT customer.customer_code
+      FROM customer_active customer
+      WHERE ${channel} <> '' AND customer.channel = ${channel}
+    )`;
+    const scopeChoice = Prisma.sql`scope_choice AS MATERIALIZED (
+      SELECT CASE
+        WHEN EXISTS (SELECT 1 FROM type_peers) THEN 'CUSTOMER_TYPE'
+        WHEN EXISTS (SELECT 1 FROM channel_peers) THEN 'CHANNEL'
+        ELSE 'NONE'
+      END::text AS peer_scope
+    )`;
+    const primaryPeers = Prisma.sql`primary_peers AS MATERIALIZED (
+      SELECT type_peers.customer_code FROM type_peers, scope_choice WHERE scope_choice.peer_scope = 'CUSTOMER_TYPE'
+      UNION ALL
+      SELECT channel_peers.customer_code FROM channel_peers, scope_choice WHERE scope_choice.peer_scope = 'CHANNEL'
+    )`;
+    const horecaPeers = Prisma.sql`horeca_peers AS MATERIALIZED (
+      SELECT DISTINCT customer.customer_code
+      FROM customer_active customer
+      WHERE ${horecaTypes.length > 0}
+        AND customer.customer_type IN (${Prisma.join(horecaTypes.length ? horecaTypes : ["__none__"])})
+    )`;
+    const eligiblePeers = Prisma.sql`eligible_peers AS MATERIALIZED (
+      SELECT candidates.customer_code,
+        BOOL_OR(candidates.primary_peer) AS primary_peer,
+        BOOL_OR(candidates.horeca_peer) AS horeca_peer
+      FROM (
+        SELECT primary_peers.customer_code, TRUE AS primary_peer, FALSE AS horeca_peer FROM primary_peers
+        UNION ALL
+        SELECT horeca_peers.customer_code, FALSE AS primary_peer, TRUE AS horeca_peer FROM horeca_peers
+      ) candidates
+      GROUP BY candidates.customer_code
+    )`;
+
+    // The legacy Node Map kept the last same-file duplicate InvoiceNo. Keep
+    // that lookup behavior after canonical newest-upload-wins resolution.
+    const invoiceProjection = Prisma.sql`
+      ${normalizedField({ field: "InvoiceNo", source: "invoice_source" })} AS invoice_no,
+      ${normalizedField({ field: "CustomerCode", source: "invoice_source" })} AS customer_code,
+      invoice_source."created_at" AS created_at,
+      invoice_source.id AS row_id
+    `;
+    const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", input.sourceAvailability?.invoices === false ? [Prisma.sql`FALSE`] : routePredicate("invoice_source"), [], [], false, [], invoiceProjection);
+    const invoiceLookup = Prisma.sql`invoice_lookup AS MATERIALIZED (
+      SELECT DISTINCT ON (invoice.invoice_no)
+        invoice.invoice_no, invoice.customer_code
+      FROM invoice_active invoice
+      ORDER BY invoice.invoice_no, invoice.created_at DESC, invoice.row_id DESC
+    )`;
+    const invoiceScoped = Prisma.sql`invoice_scoped AS MATERIALIZED (
+      SELECT invoice.invoice_no, invoice.customer_code, peer.primary_peer, peer.horeca_peer
+      FROM invoice_lookup invoice
+      INNER JOIN eligible_peers peer ON peer.customer_code = invoice.customer_code
+      WHERE invoice.customer_code <> ''
+    )`;
+
+    // Invoice Items are bounded by the already canonical, permission-scoped
+    // peer invoices before their newest-wins merge. InvoiceNo is part of the
+    // item primary key, so this cannot resurrect an older item version.
+    const itemProjection = Prisma.sql`
+      ${normalizedField({ field: "InvoiceNo", source: "item_source" })} AS invoice_no,
+      ${normalizedField({ field: "ProductCode", source: "item_source" })} AS product_code,
+      ${localDecisionNumberField("item_source", "LineTotal")} AS line_total
+    `;
+    const itemCte = activeEntityRowsCte(
+      input.companyId,
+      "Invoice Items",
+      "item",
+      input.sourceAvailability?.invoiceItems === false ? [Prisma.sql`FALSE`] : routePredicate("item_source"),
+      [],
+      [],
+      false,
+      [Prisma.sql`INNER JOIN invoice_scoped scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`],
+      itemProjection,
+    );
+    const joinedSales = Prisma.sql`joined_sales AS MATERIALIZED (
+      SELECT item.product_code, item.line_total, invoice.customer_code,
+        invoice.primary_peer, invoice.horeca_peer
+      FROM item_active item
+      INNER JOIN invoice_scoped invoice ON invoice.invoice_no = item.invoice_no
+      WHERE item.product_code <> ''
+    )`;
+    const primarySales = Prisma.sql`primary_sales AS MATERIALIZED (
+      SELECT sales.product_code,
+        COALESCE(SUM(sales.line_total), 0)::double precision AS order_value,
+        COUNT(DISTINCT sales.customer_code)::integer AS buyer_count
+      FROM joined_sales sales
+      WHERE sales.primary_peer
+      GROUP BY sales.product_code
+    )`;
+    const fallbackSales = Prisma.sql`fallback_sales AS MATERIALIZED (
+      SELECT sales.product_code,
+        COALESCE(SUM(sales.line_total), 0)::double precision AS order_value,
+        COUNT(DISTINCT sales.customer_code)::integer AS buyer_count
+      FROM joined_sales sales
+      WHERE sales.horeca_peer
+      GROUP BY sales.product_code
+    )`;
+    const selectedScope = Prisma.sql`selected_scope AS MATERIALIZED (
+      SELECT CASE
+        WHEN ${horecaTypes.length > 0}
+          AND NOT EXISTS (SELECT 1 FROM primary_sales)
+          AND EXISTS (SELECT 1 FROM fallback_sales)
+          THEN 'HORECA_FALLBACK'
+        ELSE scope_choice.peer_scope
+      END::text AS peer_scope
+      FROM scope_choice
+    )`;
+    const selectedSales = Prisma.sql`selected_sales AS MATERIALIZED (
+      SELECT primary_sales.* FROM primary_sales, selected_scope WHERE selected_scope.peer_scope <> 'HORECA_FALLBACK'
+      UNION ALL
+      SELECT fallback_sales.* FROM fallback_sales, selected_scope WHERE selected_scope.peer_scope = 'HORECA_FALLBACK'
+    )`;
+
+    const productProjection = Prisma.sql`
+      ${textField({ field: "ProductCode", source: "product_source" })} AS product_code,
+      ${textField({ field: "ProductName", source: "product_source" })} AS product_name,
+      ${textField({ field: "Category", source: "product_source" })} AS category,
+      ${textField({ field: "Brand", source: "product_source" })} AS brand,
+      ${textField({ field: "ProductStatus", source: "product_source" })} AS product_status,
+      ${textField({ field: "Status", source: "product_source" })} AS status,
+      product_source.precedence AS precedence,
+      product_source."created_at" AS created_at,
+      product_source.id AS row_id
+    `;
+    const productCte = activeEntityRowsCte(input.companyId, "Products", "product", input.sourceAvailability?.products === false ? [Prisma.sql`FALSE`] : [], [], [], false, [], productProjection);
+
+    const rows = await this.postgres<Array<{
+      peerScope: string;
+      peerSales: unknown;
+      products: unknown;
+    }>>("queryProductFitData.sql", { kind: "specialized", operation: "queryProductFitData" }, () => Prisma.sql`
+      WITH ${customerCte}, ${typePeers}, ${channelPeers}, ${scopeChoice}, ${primaryPeers}, ${horecaPeers}, ${eligiblePeers},
+        ${invoiceCte}, ${invoiceLookup}, ${invoiceScoped}, ${itemCte}, ${joinedSales}, ${primarySales}, ${fallbackSales},
+        ${selectedScope}, ${selectedSales}, ${productCte}
+      SELECT selected_scope.peer_scope AS "peerScope",
+        COALESCE((
+          SELECT JSONB_AGG(JSONB_BUILD_OBJECT(
+            'productCode', selected_sales.product_code,
+            'orderValue', selected_sales.order_value,
+            'buyerCount', selected_sales.buyer_count
+          ) ORDER BY selected_sales.product_code)
+          FROM selected_sales
+        ), '[]'::jsonb) AS "peerSales",
+        COALESCE((
+          SELECT JSONB_AGG(JSONB_BUILD_OBJECT(
+            'ProductCode', product.product_code,
+            'ProductName', product.product_name,
+            'Category', product.category,
+            'Brand', product.brand,
+            'ProductStatus', product.product_status,
+            'Status', product.status
+          ) ORDER BY product.precedence ASC, product.created_at ASC, product.row_id ASC)
+          FROM product_active product
+        ), '[]'::jsonb) AS products
+      FROM selected_scope
+    `);
+    const row = rows[0];
+    const peerScope: RieProductFitPeerScope = row?.peerScope === "CUSTOMER_TYPE" || row?.peerScope === "HORECA_FALLBACK" || row?.peerScope === "CHANNEL" ? row.peerScope : "NONE";
+    const rawSales = Array.isArray(row?.peerSales) ? row.peerSales : [];
+    const rawProducts = Array.isArray(row?.products) ? row.products : [];
+    return {
+      peerScope,
+      peerSales: rawSales.flatMap((value) => {
+        if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+        const sale = value as { productCode?: unknown; orderValue?: unknown; buyerCount?: unknown };
+        const productCode = String(sale.productCode ?? "");
+        if (!productCode) return [];
+        const orderValue = Number(sale.orderValue ?? 0);
+        const buyerCount = Number(sale.buyerCount ?? 0);
+        return [{ productCode, orderValue: Number.isFinite(orderValue) ? orderValue : 0, buyerCount: Number.isFinite(buyerCount) ? buyerCount : 0 }];
+      }),
+      products: rawProducts.flatMap((value) => value && typeof value === "object" && !Array.isArray(value) ? [value as RieProductFitData["products"][number]] : []),
+    };
   }
 
   private async queryActiveVersionCountsUngated(companyId: string, entityNames: readonly string[]): Promise<Map<string, number>> {

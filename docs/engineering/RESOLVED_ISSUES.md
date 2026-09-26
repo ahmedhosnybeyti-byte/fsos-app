@@ -177,3 +177,11 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Fix:** Use one dedicated PostgreSQL-first RIE contract that preserves company, hierarchy on both facts, inclusive InvoiceDate handling, canonical newest-wins and duplicate behavior, and returns only `SUM(Invoice Items.LineTotal)`.
 - **Commit:** Current local commit.
 - **Regression-prevention rule:** Local Decision aggregate intents must never materialize raw high-cardinality facts in Node when PostgreSQL can return the final scalar.
+
+## Product Fit — full company fact reads
+
+- **Symptom:** Each Product Fit cache miss loaded full Customers, Invoices, Invoice Items, and Products datasets, then selected peers, joined invoices, and aggregated sales and distinct buyers in Node.
+- **Root cause:** `ProductFitService.companyRecords()` used four legacy full-entity reads instead of a peer-scoped PostgreSQL contract.
+- **Fix:** Resolve hierarchy and peer priority in PostgreSQL, narrow Invoice Items through the canonical peer-invoice set, aggregate `SUM(LineTotal)` and distinct customers per product, and return only those aggregates plus the six Product fields used by Node matching/scoring. Preserve the permission-isolated five-minute cache and its missing-requester bypass.
+- **Commit:** Current local commit.
+- **Regression-prevention rule:** Product Fit must never return raw Customers, Invoices, or Invoice Items to Node; preserve CustomerType → Channel → conditional HoReCa fallback semantics and keep only final taxonomy/scoring work in Node.

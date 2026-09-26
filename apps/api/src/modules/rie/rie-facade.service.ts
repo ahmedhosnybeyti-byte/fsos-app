@@ -19,7 +19,7 @@ import { RieScalableQueryService } from "./scalable-query.service";
 import { RieFsos360QueryService } from "./fsos-360-query.service";
 import type { Fsos360Query } from "@field-sales-os/schemas";
 import type { Fsos360ResolvedContext } from "../decision-analytics-studio/fsos-360-context.service";
-import type { RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery } from "./scalable-query.types";
+import type { RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitQuery, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRieLogicalOperation, observeRiePostgres, recordActiveVersionResolution, scopeMetadata } from "../../common/observability/rie-observability";
 import { RieRequestPlannerService, type RieRequestPlanOptions } from "./rie-request-planner.service";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
@@ -255,6 +255,29 @@ export class RieFacade {
 
   queryRouteProductStaleness(query: RieRouteProductStalenessQuery): Promise<RieRouteProductStalenessRow[]> {
     return observeRieLogicalOperation("queryRouteProductStaleness", scopeMetadata(query), () => this.plannedOperation("queryRouteProductStaleness", () => this.scalableQuery.queryRouteProductStaleness(query)));
+  }
+
+  async queryProductFitData(query: RieProductFitQuery): Promise<RieProductFitData> {
+    return observeRieLogicalOperation("queryProductFitData", scopeMetadata(query), () => this.plannedOperation("queryProductFitData", async () => {
+      const entityNames: readonly RieVisitCopilotBriefingEntity[] = ["Customers", "Invoices", "Invoice Items", "Products"];
+      let availability: Record<RieVisitCopilotBriefingEntity, boolean>;
+      try {
+        availability = await this.canonicalEntityAvailability(query.companyId, entityNames);
+      } catch {
+        // Matches the legacy provider: failure to enumerate active sources is
+        // treated as unavailable data, not as partially trusted company data.
+        return { peerScope: "NONE", peerSales: [], products: [] };
+      }
+      return this.scalableQuery.queryProductFitData({
+        ...query,
+        sourceAvailability: {
+          customers: availability.Customers,
+          invoices: availability.Invoices,
+          invoiceItems: availability["Invoice Items"],
+          products: availability.Products,
+        },
+      });
+    }));
   }
 
   queryManagementStockAlignment(query: RieManagementStockAlignmentQuery): Promise<RieManagementStockAlignmentRow> {
