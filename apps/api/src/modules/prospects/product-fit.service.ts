@@ -41,14 +41,27 @@ export class ProductFitService {
     return output;
   }
 
+  // These records are hierarchy-scoped by requestingUser.  A company-only
+  // cache key would allow a response populated for one user's route scope to
+  // be reused for another user's scope, so reuse is deliberately limited to
+  // the same stable requester identity and role.  If either discriminator is
+  // absent, bypass the cache rather than guessing that scopes are equivalent.
+  private cacheKey(companyId: string, ctx: { companyId: string; requestingUser: { roleCode: string; email: string } }): string | null {
+    const email = ctx.requestingUser?.email?.trim().toLowerCase();
+    const roleCode = ctx.requestingUser?.roleCode?.trim().toUpperCase();
+    if (!email || !roleCode) return null;
+    return JSON.stringify([companyId, email, roleCode]);
+  }
+
   private companyRecords(companyId: string, ctx: { companyId: string; requestingUser: { roleCode: string; email: string } }) {
-    const cached = this.companyData.get(companyId);
+    const cacheKey = this.cacheKey(companyId, ctx);
+    const cached = cacheKey ? this.companyData.get(cacheKey) : undefined;
     if (cached && cached.until > Date.now()) return cached.value;
     const value = Promise.all(["Customers", "Invoices", "Invoice Items", "Products"].map(async (entity) => {
       const result = await this.rie.getEntityRecords(entity, ctx);
       return result.available ? result.records : [];
     }));
-    this.companyData.set(companyId, { until: Date.now() + 5 * 60 * 1000, value });
+    if (cacheKey) this.companyData.set(cacheKey, { until: Date.now() + 5 * 60 * 1000, value });
     return value;
   }
 
