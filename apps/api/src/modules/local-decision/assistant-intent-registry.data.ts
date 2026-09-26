@@ -374,7 +374,7 @@ export const ASSISTANT_INTENT_REGISTRY: readonly AssistantIntent[] = [
     requiredEntities: ["None"],
     requiredTimeContext: "Month",
     canAnswerLocally: "yes",
-    requiredBusinessService: "RieFacade.getEntityRecords('Invoice Items', ctx) filtered by date range (hierarchy-scoped automatically via applyHierarchyFilter), sum(LineTotal).",
+    requiredBusinessService: "RieFacade.queryLocalDecisionTotalSales(ctx, range) — PostgreSQL scopes current Invoices and Invoice Items by company, hierarchy, and InvoiceDate, then returns SUM(Invoice Items.LineTotal) as one compact result.",
     responseTemplate: "إجمالي المبيعات خلال {periodLabel}: {totalSales} جنيه.",
     aiFallback: "no",
   },

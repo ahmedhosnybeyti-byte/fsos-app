@@ -714,3 +714,101 @@ test("scalable RIE incremental merge in PostgreSQL", {
     }
   });
 });
+test("Local Decision GetTotalSales uses one canonical PostgreSQL aggregate with legacy result parity", {
+  skip: process.env.RIE_TEST_PGLITE_MODULE ? false : "Set RIE_TEST_PGLITE_MODULE to run PostgreSQL regression tests",
+}, async (t) => {
+  const { PGlite } = require(process.env.RIE_TEST_PGLITE_MODULE!) as { PGlite: new () => TestPostgres };
+  const db = new PGlite();
+  t.after(() => db.close());
+  await db.exec(`
+    CREATE TEMP TABLE rie_canonical_entity_rows (
+      id text PRIMARY KEY,
+      company_id text NOT NULL,
+      source_file_id text,
+      entity_name text NOT NULL,
+      entity_key text NOT NULL,
+      data jsonb NOT NULL,
+      created_at timestamptz NOT NULL,
+      updated_at timestamptz NOT NULL
+    );
+    CREATE UNIQUE INDEX rie_canonical_entity_rows_company_id_entity_name_entity_key_key
+      ON rie_canonical_entity_rows(company_id, entity_name, entity_key);
+    CREATE INDEX rie_canonical_entity_rows_company_id_entity_name_idx
+      ON rie_canonical_entity_rows(company_id, entity_name);
+  `);
+
+  const insert = (
+    id: string,
+    companyId: string,
+    entityName: string,
+    entityKey: string,
+    data: Record<string, unknown>,
+    createdAt: string,
+  ) => db.query(
+    "INSERT INTO rie_canonical_entity_rows VALUES ($1, $2, NULL, $3, $4, $5::jsonb, $6, $6)",
+    [id, companyId, entityName, entityKey, JSON.stringify(data), createdAt],
+  );
+
+  const invoiceRows: Array<[string, string, Record<string, unknown>, string]> = [
+    ["inv-start", "START", { InvoiceNo: "START", InvoiceDate: "2026-08-01", RouteID: "R-1" }, "2026-08-01T00:00:00Z"],
+    ["inv-end", "END", { InvoiceNo: "END", InvoiceDate: "2026-08-31T12:30:00.000Z", RouteID: "R-1" }, "2026-08-01T00:00:01Z"],
+    ["inv-middle", "MIDDLE", { InvoiceNo: "MIDDLE", InvoiceDate: "2026-08-15", RouteID: "R-1" }, "2026-08-01T00:00:02Z"],
+    ["inv-duplicate-first", "DUP-A", { InvoiceNo: "DUP", InvoiceDate: "2026-07-31", RouteID: "R-1" }, "2026-08-01T00:00:03Z"],
+    ["inv-duplicate-second", "DUP-B", { InvoiceNo: "DUP", InvoiceDate: "2026-08-10", RouteID: "R-1" }, "2026-08-01T00:00:04Z"],
+    ["inv-other-route", "OTHER-ROUTE", { InvoiceNo: "OTHER-ROUTE", InvoiceDate: "2026-08-10", RouteID: "R-2" }, "2026-08-01T00:00:05Z"],
+    ["inv-item-route-mismatch", "ITEM-ROUTE-MISMATCH", { InvoiceNo: "ITEM-ROUTE-MISMATCH", InvoiceDate: "2026-08-10", RouteID: "R-1" }, "2026-08-01T00:00:06Z"],
+    ["inv-invalid-date", "INVALID-DATE", { InvoiceNo: "INVALID-DATE", InvoiceDate: "not-a-date", RouteID: "R-1" }, "2026-08-01T00:00:07Z"],
+  ];
+  for (const [id, key, data, createdAt] of invoiceRows) {
+    await insert(id, "company-1", "Invoices", key, data, createdAt);
+  }
+
+  const itemRows: Array<[string, string, Record<string, unknown>]> = [
+    ["item-start-1", "START-1", { InvoiceNo: "START", LineNo: 1, LineTotal: 10, RouteID: "R-1" }],
+    ["item-start-2", "START-2", { InvoiceNo: "START", LineNo: 2, LineTotal: 20, RouteID: "R-1" }],
+    ["item-end", "END-1", { InvoiceNo: "END", LineNo: 1, LineTotal: 30, RouteID: "R-1" }],
+    ["item-middle-1", "MIDDLE-1", { InvoiceNo: "MIDDLE", LineNo: 1, LineTotal: 40, RouteID: "R-1" }],
+    ["item-middle-2", "MIDDLE-2", { InvoiceNo: "MIDDLE", LineNo: 2, LineTotal: 50, RouteID: "R-1" }],
+    ["item-duplicate-a", "MIDDLE-3-A", { InvoiceNo: "MIDDLE", LineNo: 3, LineTotal: 5, RouteID: "R-1" }],
+    ["item-duplicate-b", "MIDDLE-3-B", { InvoiceNo: "MIDDLE", LineNo: 3, LineTotal: 7, RouteID: "R-1" }],
+    ["item-null", "MIDDLE-4", { InvoiceNo: "MIDDLE", LineNo: 4, LineTotal: null, RouteID: "R-1" }],
+    ["item-blank", "MIDDLE-5", { InvoiceNo: "MIDDLE", LineNo: 5, LineTotal: " ", RouteID: "R-1" }],
+    ["item-invalid", "MIDDLE-6", { InvoiceNo: "MIDDLE", LineNo: 6, LineTotal: "not-a-number", RouteID: "R-1" }],
+    ["item-duplicate-header", "DUP-1", { InvoiceNo: "DUP", LineNo: 1, LineTotal: 100, RouteID: "R-1" }],
+    ["item-other-route", "OTHER-ROUTE-1", { InvoiceNo: "OTHER-ROUTE", LineNo: 1, LineTotal: 1000, RouteID: "R-2" }],
+    ["item-route-mismatch", "ITEM-ROUTE-MISMATCH-1", { InvoiceNo: "ITEM-ROUTE-MISMATCH", LineNo: 1, LineTotal: 2000, RouteID: "R-2" }],
+    ["item-invalid-date", "INVALID-DATE-1", { InvoiceNo: "INVALID-DATE", LineNo: 1, LineTotal: 8000, RouteID: "R-1" }],
+  ];
+  for (const [index, [id, key, data]] of itemRows.entries()) {
+    await insert(id, "company-1", "Invoice Items", key, data, `2026-08-01T00:01:${String(index).padStart(2, "0")}Z`);
+  }
+  await insert("c2-invoice", "company-2", "Invoices", "START", { InvoiceNo: "START", InvoiceDate: "2026-08-10", RouteID: "R-1" }, "2026-08-01T00:02:00Z");
+  await insert("c2-item", "company-2", "Invoice Items", "START-1", { InvoiceNo: "START", LineNo: 1, LineTotal: 9999, RouteID: "R-1" }, "2026-08-01T00:02:01Z");
+
+  let finalAggregateRows = -1;
+  let finalAggregateSql = "";
+  const service = new RieScalableQueryService({
+    $queryRaw: async (query: Prisma.Sql) => {
+      const result = await db.query(query.text, query.values);
+      finalAggregateSql = query.text;
+      finalAggregateRows = result.rows.length;
+      return result.rows;
+    },
+  } as never, { resolveAllowedRouteIds: async () => new Set(["r-1"]) } as never);
+  const context = {
+    companyId: "company-1",
+    requestingUser: { roleCode: "SALES_REP", email: "rep@example.com" },
+    start: "2026-08-01",
+    end: "2026-08-31",
+  };
+
+  assert.equal(await service.queryLocalDecisionTotalSales(context as never), 162);
+  assert.equal(finalAggregateRows, 1);
+  assert.match(finalAggregateSql, /SELECT COALESCE\(SUM\(item\.line_total\), 0\)::double precision AS total/);
+  assert.match(finalAggregateSql, /FROM "rie_canonical_entity_rows"/);
+  assert.doesNotMatch(finalAggregateSql, /rie_dataset_versions|rie_entity_rows|SELECT\s+(?:invoice|item)\.\*/i);
+  assert.equal(await service.queryLocalDecisionTotalSales({ ...context, start: "2025-01-01", end: "2025-01-31" } as never), 0);
+  assert.equal(await service.queryLocalDecisionTotalSales({
+    companyId: "company-2", start: "2026-08-01", end: "2026-08-31",
+  } as never), 9999);
+});

@@ -159,6 +159,74 @@ export class RieScalableQueryService {
     return { records: hasMore ? rows.slice(0, page.limit) : rows, page: { ...page, hasMore } };
   }
 
+  /** One-row PostgreSQL contract for Local Decision -> GetTotalSales. */
+  async queryLocalDecisionTotalSales(
+    input: EntityQueryContext & { start: string; end: string },
+  ): Promise<number> {
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const routePredicate = (source: string) => allowedRoutes === null
+      ? []
+      : [allowedRoutes.size
+          ? Prisma.sql`${normalizedField({ field: "RouteID", source })} IN (${Prisma.join([...allowedRoutes])})`
+          : Prisma.sql`FALSE`];
+    const invoiceProjection = Prisma.sql`
+      ${normalizedField({ field: "InvoiceNo", source: "invoice_source" })} AS invoice_no,
+      ${textField({ field: "InvoiceDate", source: "invoice_source" })} AS invoice_date,
+      invoice_source."created_at" AS created_at,
+      invoice_source.id AS row_id
+    `;
+    const invoiceCte = activeEntityRowsCte(
+      input.companyId,
+      "Invoices",
+      "invoice",
+      routePredicate("invoice_source"),
+      [],
+      [],
+      false,
+      [],
+      invoiceProjection,
+    );
+    const invoiceFirst = Prisma.sql`invoice_first AS MATERIALIZED (
+      SELECT DISTINCT ON (invoice.invoice_no)
+        invoice.invoice_no,
+        invoice.invoice_date
+      FROM invoice_active invoice
+      WHERE invoice.invoice_no <> ''
+      ORDER BY invoice.invoice_no, invoice.created_at ASC, invoice.row_id ASC
+    )`;
+    const invoiceScoped = Prisma.sql`invoice_scoped AS MATERIALIZED (
+      SELECT invoice_first.invoice_no
+      FROM invoice_first
+      WHERE ${dateText(Prisma.raw("invoice_first.invoice_date"))} >= ${input.start}
+        AND ${dateText(Prisma.raw("invoice_first.invoice_date"))} <= ${input.end}
+    )`;
+    const itemProjection = Prisma.sql`${localDecisionNumberField("item_source", "LineTotal")} AS line_total`;
+    const itemCte = activeEntityRowsCte(
+      input.companyId,
+      "Invoice Items",
+      "item",
+      routePredicate("item_source"),
+      [],
+      [],
+      false,
+      [Prisma.sql`INNER JOIN invoice_scoped scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`],
+      itemProjection,
+    );
+    const rows = await this.postgres<Array<{ total: number | null }>>(
+      "queryLocalDecisionTotalSales.sql",
+      { kind: "specialized", operation: "queryLocalDecisionTotalSales" },
+      () => Prisma.sql`
+      WITH ${invoiceCte}, ${invoiceFirst}, ${invoiceScoped}, ${itemCte}
+      SELECT COALESCE(SUM(item.line_total), 0)::double precision AS total
+      FROM item_active item
+    `,
+    );
+    const total = Number(rows[0]?.total ?? 0);
+    return Number.isFinite(total) ? total : 0;
+  }
+
   /**
    * Geo Intelligence's only customer read. Coordinates are validated and the
    * nearest/manual set is selected in PostgreSQL; Node receives at most the
@@ -2959,6 +3027,19 @@ function aggregateSql(aggregate: RieQueryAggregation): Prisma.Sql {
   return Prisma.sql`${Prisma.raw({ sum: "SUM", avg: "AVG", min: "MIN", max: "MAX" }[aggregate.op])}(${numeric})${rowFilter} AS ${alias}`;
 }
 function numericField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^-?[0-9]+(\\.[0-9]+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`; }
+/** Mirrors Number(value) + Number.isFinite for canonical JSON scalar values. */
+function localDecisionNumberField(source: string, field: string): Prisma.Sql {
+  const json = Prisma.sql`${Prisma.raw(source)}."data" -> ${Prisma.raw(`'${field}'`)}`;
+  const text = Prisma.sql`${Prisma.raw(source)}."data" ->> ${Prisma.raw(`'${field}'`)}`;
+  return Prisma.sql`CASE
+    WHEN ${json} IS NULL OR jsonb_typeof(${json}) = 'null' THEN 0
+    WHEN jsonb_typeof(${json}) = 'boolean' THEN CASE WHEN (${text})::boolean THEN 1 ELSE 0 END
+    WHEN BTRIM(COALESCE(${text}, '')) = '' THEN 0
+    WHEN BTRIM(COALESCE(${text}, '')) ~ '^[+-]?([0-9]+(\\.[0-9]*)?|\\.[0-9]+)([eE][+-]?[0-9]+)?$'
+      THEN BTRIM(${text})::double precision
+    ELSE NULL
+  END`;
+}
 /** Geo's legacy coercion accepted signed decimals and exponent notation. */
 function geoFiniteNumberField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`; }
 function heatmapEpochField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN EXTRACT(EPOCH FROM BTRIM(${field})::timestamptz) * 1000 ELSE NULL END`; }

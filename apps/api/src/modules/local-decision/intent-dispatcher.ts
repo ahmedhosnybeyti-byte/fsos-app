@@ -24,7 +24,7 @@ import { RieFacade } from "../rie/rie-facade.service";
 import { PrismaService } from "../../common/prisma";
 import { ASSISTANT_INTENT_REGISTRY, type AssistantIntent } from "./assistant-intent-registry.data";
 import { parseTimeContext, type DateRange } from "./time-context-parser";
-import { joinInvoiceHeaderAndItems, type DatasetRow } from "../files/dataset-query.util";
+import type { DatasetRow } from "../files/dataset-query.util";
 
 export type IntentDispatchOutcome =
   | { status: "answered"; intentId: string; text: string }
@@ -115,41 +115,15 @@ function findColumn(fields: readonly string[], candidates: readonly string[]): s
 
 async function handleGetTotalSales(rieFacade: RieFacade, prisma: PrismaService, user: AuthenticatedUser, range: DateRange, periodLabel: string): Promise<string> {
   const ctx = { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
-  const [items, invoices, currency] = await Promise.all([
-    rieFacade.getEntityRecords("Invoice Items", ctx),
-    rieFacade.getEntityRecords("Invoices", ctx),
+  const [sales, currency] = await Promise.all([
+    rieFacade.queryLocalDecisionTotalSales(ctx, range),
     resolveCurrencyLabel(prisma, user.companyId!),
   ]);
 
-  if (!items.available || !invoices.available) {
+  if (!sales.available) {
     return "لا توجد بيانات فواتير متاحة حاليًا للشركة — تأكد من رفع ملفات Invoices وInvoice Items أولاً.";
   }
-
-  const itemInvoiceCol = findColumn(items.fields, ["InvoiceNo"]);
-  const headerInvoiceCol = findColumn(invoices.fields, ["InvoiceNo"]);
-  const dateCol = findColumn(invoices.fields, ["InvoiceDate"]);
-  const lineTotalCol = findColumn(items.fields, ["LineTotal"]);
-
-  if (!itemInvoiceCol || !headerInvoiceCol || !dateCol || !lineTotalCol) {
-    return "تعذر إيجاد الأعمدة المطلوبة (InvoiceNo / InvoiceDate / LineTotal) في بيانات الفواتير الحالية.";
-  }
-
-  const joined = joinInvoiceHeaderAndItems(
-    invoices.records as DatasetRow[],
-    invoices.fields as string[],
-    headerInvoiceCol,
-    items.records as DatasetRow[],
-    items.fields as string[],
-    itemInvoiceCol,
-  );
-
-  const inRange = joined.rows.filter((row) => rowDateInRange(row, dateCol, range));
-  const total = inRange.reduce((sum, row) => {
-    const n = Number(row[lineTotalCol]);
-    return Number.isFinite(n) ? sum + n : sum;
-  }, 0);
-
-  return `إجمالي المبيعات خلال ${periodLabel}: ${fmtMoney(total)} ${currency}.`;
+  return `إجمالي المبيعات خلال ${periodLabel}: ${fmtMoney(sales.total)} ${currency}.`;
 }
 
 async function handleGetCollectionsTotal(rieFacade: RieFacade, prisma: PrismaService, user: AuthenticatedUser, range: DateRange, periodLabel: string): Promise<string> {

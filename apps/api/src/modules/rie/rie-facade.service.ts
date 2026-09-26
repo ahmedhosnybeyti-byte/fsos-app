@@ -37,6 +37,11 @@ export interface RieInvoiceSalesRow {
   amount: number;
 }
 
+export interface RieLocalDecisionTotalSalesResult {
+  available: boolean;
+  total: number;
+}
+
 /** Fact and large-dimension entities must enter RIE through a bounded scope. */
 export type RieHighCardinalityEntity = "Invoices" | "Invoice Items" | "Visits" | "Collections" | "Returns" | "Customers" | "Van Inventory";
 
@@ -228,6 +233,24 @@ export class RieFacade {
   /** Request-scoped active-version metadata for callers issuing related RIE queries. */
   getActiveVersionCounts(companyId: string, entityNames: readonly string[]): Promise<Map<string, number>> {
     return observeRieLogicalOperation("getActiveVersionCounts", { companyId }, () => this.plannedOperation("getActiveVersionCounts", () => this.scalableQuery.getActiveVersionCounts(companyId, entityNames)));
+  }
+
+  /**
+   * Local Decision's compact Total Sales contract.  Availability is checked
+   * without materializing facts; PostgreSQL then applies both sides of the
+   * legacy hierarchy scope, the inclusive invoice-date range, the canonical
+   * Invoice Items -> Invoices relationship, and SUM(LineTotal).
+   */
+  async queryLocalDecisionTotalSales(
+    context: EntityQueryContext,
+    range: { start: string; end: string },
+  ): Promise<RieLocalDecisionTotalSalesResult> {
+    if (!await this.hasCanonicalEntitySources(context, ["Invoices", "Invoice Items"])) {
+      return { available: false, total: 0 };
+    }
+
+    const total = await this.scalableQuery.queryLocalDecisionTotalSales({ ...context, ...range });
+    return { available: true, total };
   }
 
   queryRouteProductStaleness(query: RieRouteProductStalenessQuery): Promise<RieRouteProductStalenessRow[]> {

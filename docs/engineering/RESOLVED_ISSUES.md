@@ -161,3 +161,19 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Fix:** Persist only Route × Product last-sale inputs keyed by company, route, target date, and an active-source freshness signature. Resolve hierarchy scope live; use a snapshot only when every visible route is covered and the signature matches, otherwise retain the existing PostgreSQL aggregate and populate the input snapshot.
 - **Commit:** `fa0c32e`.
 - **Regression-prevention rule:** Never cache a final Smart Loading session. Keep threshold evaluation, Stale, Lost Opportunities final stock filtering, user scope, and response assembly live; a missing or stale input snapshot must fall back to PostgreSQL.
+
+## Shared invoice-sales analytical read — unbounded Invoice Items merge
+
+- **Symptom/evidence:** The common RIE invoice-sales read used by Geo Engine and Decision Analytics merged every active Invoice Items row before joining to the date- and permission-scoped invoices.
+- **Root cause:** The Invoice Items newest-wins CTE had no dependency on the final scoped invoice set, so a narrow authorized/date slice could still deduplicate the full active item fact.
+- **Fix:** Materialize the deduplicated, authorized invoice slice first and semi-join Invoice Items to those invoice keys before its newest-wins merge. Preserve the original item RouteID filter, join, aggregation grain, response shape, and permissions.
+- **Commit:** Current local commit (see Git history).
+- **Regression-prevention rule:** In invoice-sales reads, bind Invoice Items to the materialized scoped invoice keys before deduplication; never merge the entire active item fact when the request has an invoice scope.
+
+## Local Decision — `GetTotalSales` full fact reads
+
+- **Symptom:** A single Total Sales answer loaded all visible Invoices and Invoice Items into Node, then joined, date-filtered, and summed them in memory.
+- **Root cause:** `handleGetTotalSales` used two legacy `getEntityRecords` full reads instead of a scoped aggregate contract.
+- **Fix:** Use one dedicated PostgreSQL-first RIE contract that preserves company, hierarchy on both facts, inclusive InvoiceDate handling, canonical newest-wins and duplicate behavior, and returns only `SUM(Invoice Items.LineTotal)`.
+- **Commit:** Current local commit.
+- **Regression-prevention rule:** Local Decision aggregate intents must never materialize raw high-cardinality facts in Node when PostgreSQL can return the final scalar.
