@@ -344,7 +344,10 @@ test("management loading risk reads a permission-scoped prepared result without 
   const service = new SmartLoadingService(
     { queryManagementLoadingRisk: async (input: unknown) => { queryInput = input; return { people: [{ employeeId: "supervisor-1" }] }; } } as never,
     {} as never,
-    {} as never,
+    {
+      rieDatasetVersion: { findMany: async () => [] },
+      rieCanonicalEntityRow: { findFirst: async () => null },
+    } as never,
     { resolveAllowedRouteIds: async () => new Set(["route-b", "route-a"]) } as never,
     { getOrCompute: async (input: unknown, compute: () => Promise<unknown>) => { snapshotInput = input; return { value: await compute(), hit: false }; } } as never,
   );

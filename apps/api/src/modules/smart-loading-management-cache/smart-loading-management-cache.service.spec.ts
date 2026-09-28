@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 import { SmartLoadingManagementCacheService } from "./smart-loading-management-cache.service";
 
-const input = { companyId: "company-a", targetDate: "2026-09-20", salesFrom: "2025-09-20", salesTo: "2026-09-19", personLevel: "manager", routeIds: ["route-b", "route-a"] } as const;
+const input = { companyId: "company-a", targetDate: "2026-09-20", salesFrom: "2025-09-20", salesTo: "2026-09-19", personLevel: "manager", routeIds: ["route-b", "route-a"], sourceVersion: "returns-v1" } as const;
 
 test("management loading-risk snapshot reuses the prepared response for the same permission scope", async () => {
   const snapshots = new Map<string, unknown>();
@@ -27,6 +27,30 @@ test("management loading-risk snapshot reuses the prepared response for the same
   assert.equal(second.hit, true);
   assert.equal(calculations, 1);
   assert.deepEqual(second.value, first.value);
+});
+
+test("management loading-risk snapshot is refreshed when Returns or Return Items change", async () => {
+  const snapshots = new Map<string, unknown>();
+  const prisma = {
+    smartLoadingManagementLoadingRiskSnapshot: {
+      findUnique: async ({ where }: { where: { companyId_targetDate_salesFrom_salesTo_personLevel_scopeKey: Record<string, string> } }) => {
+        const key = JSON.stringify(where.companyId_targetDate_salesFrom_salesTo_personLevel_scopeKey);
+        return snapshots.has(key) ? { result: snapshots.get(key) } : null;
+      },
+      upsert: async ({ where, create }: { where: { companyId_targetDate_salesFrom_salesTo_personLevel_scopeKey: Record<string, string> }; create: { result: unknown } }) => {
+        snapshots.set(JSON.stringify(where.companyId_targetDate_salesFrom_salesTo_personLevel_scopeKey), create.result);
+      },
+    },
+  };
+  const service = new SmartLoadingManagementCacheService(prisma as never);
+  let calculations = 0;
+
+  await service.getOrCompute(input, async () => ({ affectedPersonCount: ++calculations }));
+  const refreshed = await service.getOrCompute({ ...input, sourceVersion: "returns-v2" }, async () => ({ affectedPersonCount: ++calculations }));
+
+  assert.equal(refreshed.hit, false);
+  assert.equal(calculations, 2);
+  assert.deepEqual(refreshed.value, { affectedPersonCount: 2 });
 });
 
 test("Van Inventory invalidation targets overlapping route snapshots plus company-wide snapshots", async () => {

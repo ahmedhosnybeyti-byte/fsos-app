@@ -619,6 +619,85 @@ test("scalable RIE incremental merge in PostgreSQL", {
     t.diagnostic(`Smart Loading PostgreSQL fixture: legacySqlMs=${legacyMilliseconds.toFixed(3)}, bundleSqlMs=${bundlePlan.milliseconds.toFixed(3)}`);
   });
 
+  await t.test("Smart Loading subtracts only scoped confirmed or approved returns after full-period aggregation", async () => {
+    const companyId = "returns-company";
+    let rowId = 0;
+    const insertCurrent = async (entityName: string, entityKey: string, data: Record<string, unknown>, company = companyId) => {
+      rowId += 1;
+      await db.query(
+        `INSERT INTO rie_canonical_entity_rows
+          (id, company_id, entity_name, entity_key, precedence, data, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, 1, $5::jsonb, now(), now())`,
+        [`returns-current-${rowId}`, company, entityName, entityKey, JSON.stringify(data)],
+      );
+    };
+    await insertCurrent("Invoices", "I-1", { InvoiceNo: "I-1", InvoiceDate: "2026-09-02", InvoiceStatus: "Confirmed", CustomerCode: "C-1", RouteID: "R-1" });
+    for (const [line, productCode, quantity] of [
+      [1, "P-0", 100], [2, "P-1", 100], [3, "P-2", 5], [4, "P-3", 10],
+      [5, "P-4", 10], [6, "P-5", 10], [7, "P-6", 10],
+    ] as const) {
+      await insertCurrent("Invoice Items", `I-1|${line}`, { InvoiceNo: "I-1", LineNo: line, RouteID: "R-1", ProductCode: productCode, Quantity: quantity });
+      await insertCurrent("Products", productCode, { ProductCode: productCode, ProductName: productCode, Category: "Fresh" });
+      await insertCurrent("Van Inventory", `2026-09-07|R-1|${productCode}`, { ReportDate: "2026-09-07", RouteID: "R-1", ProductCode: productCode, Quantity: 0 });
+    }
+    for (const [returnNo, returnDate, status, customerCode, routeId] of [
+      ["RET-1", "2026-09-03", "Confirmed", "C-1", "R-1"],
+      ["RET-2", "2026-09-04", "Approved", "C-1", "R-1"],
+      ["RET-OUTSIDE", "2026-08-31", "Confirmed", "C-1", "R-1"],
+      ["RET-CUSTOMER", "2026-09-03", "Confirmed", "C-2", "R-1"],
+      ["RET-PENDING", "2026-09-03", "Pending", "C-1", "R-1"],
+      ["RET-OTHER-ROUTE", "2026-09-03", "Confirmed", "C-1", "R-2"],
+    ] as const) {
+      await insertCurrent("Returns", returnNo, { ReturnNo: returnNo, ReturnDate: returnDate, Status: status, CustomerCode: customerCode, RouteID: routeId });
+    }
+    await insertCurrent("Return Items", "RET-1|1", { ReturnNo: "RET-1", LineNo: 1, ProductCode: "P-1", Quantity: 10 });
+    await insertCurrent("Return Items", "RET-1|2", { ReturnNo: "RET-1", LineNo: 2, ProductCode: "P-1", Quantity: 10 });
+    await insertCurrent("Return Items", "RET-1|3", { ReturnNo: "RET-1", LineNo: 3, ProductCode: "P-2", Quantity: 10 });
+    await insertCurrent("Return Items", "RET-2|1", { ReturnNo: "RET-2", LineNo: 1, ProductCode: "P-6", Quantity: 2 });
+    await insertCurrent("Return Items", "RET-OUTSIDE|1", { ReturnNo: "RET-OUTSIDE", LineNo: 1, ProductCode: "P-3", Quantity: 5 });
+    await insertCurrent("Return Items", "RET-CUSTOMER|1", { ReturnNo: "RET-CUSTOMER", LineNo: 1, ProductCode: "P-4", Quantity: 7 });
+    await insertCurrent("Return Items", "RET-PENDING|1", { ReturnNo: "RET-PENDING", LineNo: 1, ProductCode: "P-5", Quantity: 7 });
+    await insertCurrent("Return Items", "RET-OTHER-ROUTE|1", { ReturnNo: "RET-OTHER-ROUTE", LineNo: 1, ProductCode: "P-0", Quantity: 90 });
+    await insertCurrent("Returns", "RET-OTHER-COMPANY", { ReturnNo: "RET-OTHER-COMPANY", ReturnDate: "2026-09-03", Status: "Confirmed", CustomerCode: "C-1", RouteID: "R-1" }, "returns-company-2");
+    await insertCurrent("Return Items", "RET-OTHER-COMPANY|1", { ReturnNo: "RET-OTHER-COMPANY", LineNo: 1, ProductCode: "P-0", Quantity: 90 }, "returns-company-2");
+    await insertCurrent("Routes", "R-1", { RouteID: "R-1", SalesRepID: "REP-1", SupervisorID: "SUP-1", ManagerID: "MGR-1" });
+    await insertCurrent("Employees", "REP-1", { EmployeeID: "REP-1", EmployeeName: "Rep" });
+    await insertCurrent("Employees", "SUP-1", { EmployeeID: "SUP-1", EmployeeName: "Supervisor" });
+    await insertCurrent("Employees", "MGR-1", { EmployeeID: "MGR-1", EmployeeName: "Manager" });
+
+    const returnsService = new RieScalableQueryService({
+      $queryRaw: async (sql: Prisma.Sql) => (await db.query(sql.text, sql.values)).rows,
+    } as never, { resolveAllowedRouteIds: async () => new Set(["r-1"]) } as never);
+    const net = await returnsService.querySmartLoadingNetQuantities({
+      companyId, requestingUser: { roleCode: "SALES_REP", email: "rep@example.com" }, routeIds: ["r-1"],
+      customerCodes: ["c-1"], fromDate: "2026-09-01", toDate: "2026-09-07",
+    });
+    assert.deepEqual(Object.fromEntries(net.map((row) => [row.productCode, row.netQuantity])), {
+      "p-0": 100, "p-1": 80, "p-2": -5, "p-3": 10, "p-4": 10, "p-5": 10, "p-6": 8,
+    });
+
+    const managementInput = {
+      companyId, routeIds: ["r-1"], customerCodes: ["c-1"], targetDate: "2026-09-08",
+      salesFrom: "2026-09-01", salesTo: "2026-09-07",
+    };
+    const vehicleProducts = await returnsService.queryManagementVehicleProducts(managementInput);
+    const vehicleByProduct = Object.fromEntries(vehicleProducts.map((row) => [row.productCode, row.weeklyAverageSales]));
+    assert.equal(vehicleByProduct["p-0"], 100 / 12);
+    assert.equal(vehicleByProduct["p-1"], 80 / 12);
+    assert.equal(vehicleByProduct["p-2"], 0);
+    assert.equal(vehicleByProduct["p-6"], 8 / 12);
+
+    const bundle = await returnsService.queryManagementSmartLoadingBundle({ ...managementInput, staleDaysThreshold: 4 });
+    assert.deepEqual(bundle.vehicleProducts, vehicleProducts);
+    const risk = await returnsService.queryManagementLoadingRisk({
+      companyId, requestingUser: { roleCode: "SALES_REP", email: "rep@example.com" }, personLevel: "sales_rep",
+      targetDate: "2026-09-08", salesFrom: "2026-09-01", salesTo: "2026-09-07",
+    });
+    const riskProducts = risk.people.flatMap((person) => person.routes).flatMap((route) => route.products);
+    assert.equal(riskProducts.find((row) => row.productCode === "p-1")?.expectedDemand, 80 / 12);
+    assert.equal(riskProducts.some((row) => row.productCode === "p-2"), false);
+  });
+
   await t.test("management active vehicle routes preserve the generic scoped result", async () => {
     const generic = await service.query({
       companyId: "company-1",

@@ -10,9 +10,10 @@ export type ManagementRiskSnapshotInput = Readonly<{
   salesTo: string;
   personLevel: string;
   routeIds: readonly string[] | null;
+  sourceVersion: string;
 }>;
 
-const SOURCE_ENTITIES = new Set(["Van Inventory", "Invoices", "Invoice Items", "Routes", "Employees", "Products"]);
+const SOURCE_ENTITIES = new Set(["Van Inventory", "Invoices", "Invoice Items", "Returns", "Return Items", "Routes", "Employees", "Products"]);
 
 @Injectable()
 export class SmartLoadingManagementCacheService {
@@ -77,7 +78,10 @@ export class SmartLoadingManagementCacheService {
       salesFrom: input.salesFrom,
       salesTo: input.salesTo,
       personLevel: input.personLevel,
-      scopeKey: createHash("sha256").update(input.routeIds === null ? "company-wide" : this.normalizedRouteIds(input.routeIds).join("\u0000")).digest("hex"),
+      scopeKey: createHash("sha256").update(JSON.stringify({
+        routes: input.routeIds === null ? "company-wide" : this.normalizedRouteIds(input.routeIds),
+        sourceVersion: input.sourceVersion,
+      })).digest("hex"),
     };
   }
 

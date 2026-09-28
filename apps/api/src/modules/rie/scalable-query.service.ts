@@ -4,7 +4,7 @@ import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { RieRequestPlannerService } from "./rie-request-planner.service";
 import type { EntityQueryContext, EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoEngineFilters, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitPeerScope, RieProductFitQuery, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieStalePurchaseRow, RieStalePurchasesQuery, RieTerritoryCustomerFactsQuery, RieTerritoryCustomerFactsResult, RieTerritorySummaryFactRow, RieTerritorySummaryQuery, RieValueScope, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
+import type { RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoEngineFilters, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitPeerScope, RieProductFitQuery, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieSmartLoadingNetQuantityQuery, RieSmartLoadingNetQuantityRow, RieStalePurchaseRow, RieStalePurchasesQuery, RieTerritoryCustomerFactsQuery, RieTerritoryCustomerFactsResult, RieTerritorySummaryFactRow, RieTerritorySummaryQuery, RieValueScope, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRiePostgres, recordActiveVersionResolution } from "../../common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 
@@ -1983,6 +1983,100 @@ export class RieScalableQueryService {
     return this.executionCoordinator.resolveActiveVersionCounts(companyId, entityNames, plannedResolve);
   }
 
+  /** Sales Rep demand input; only one Product-grain net aggregate crosses RIE. */
+  async querySmartLoadingNetQuantities(input: RieSmartLoadingNetQuantityQuery): Promise<RieSmartLoadingNetQuantityRow[]> {
+    if (!input.companyId?.trim()) throw new Error("RIE Smart Loading net quantity requires companyId.");
+    const fromDate = normalizeDate(input.fromDate);
+    const toDate = normalizeDate(input.toDate);
+    const customerCodes = [...new Set(input.customerCodes.map((value) => value.trim().toLowerCase()).filter(Boolean))];
+    if (!customerCodes.length) return [];
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const hierarchyRoutes = allowedRoutes === null
+      ? null
+      : [...allowedRoutes].map((value) => value.trim().toLowerCase()).filter(Boolean);
+    const requestedRoutes = input.routeIds === undefined || input.routeIds === null
+      ? null
+      : [...new Set(input.routeIds.map((value) => value.trim().toLowerCase()).filter(Boolean))];
+    const effectiveRequestedRoutes = requestedRoutes === null
+      ? null
+      : hierarchyRoutes === null
+        ? requestedRoutes
+        : requestedRoutes.filter((routeId) => hierarchyRoutes.includes(routeId));
+    const routePredicate = (field: RieQueryField, routes: readonly string[] | null): Prisma.Sql[] => routes === null
+      ? []
+      : [routes.length ? Prisma.sql`${normalizedField(field)} IN (${Prisma.join(routes)})` : Prisma.sql`FALSE`];
+
+    const invoiceProjection = Prisma.sql`
+      ${normalizedField({ field: "InvoiceNo", source: "invoice_source" })} AS invoice_no
+    `;
+    const itemProjection = Prisma.sql`
+      ${normalizedField({ field: "InvoiceNo", source: "item_source" })} AS invoice_no,
+      ${normalizedField({ field: "ProductCode", source: "item_source" })} AS product_code,
+      ${numericField(textField({ field: "Quantity", source: "item_source" }))} AS quantity
+    `;
+    const returnProjection = Prisma.sql`
+      ${normalizedField({ field: "ReturnNo", source: "returned_source" })} AS return_no
+    `;
+    const returnItemProjection = Prisma.sql`
+      ${normalizedField({ field: "ReturnNo", source: "return_item_source" })} AS return_no,
+      ${normalizedField({ field: "ProductCode", source: "return_item_source" })} AS product_code,
+      ${numericField(textField({ field: "Quantity", source: "return_item_source" }))} AS quantity
+    `;
+    const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [
+      Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} >= ${fromDate}`,
+      Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${toDate}`,
+      Prisma.sql`${normalizedField({ field: "CustomerCode", source: "invoice_source" })} IN (${Prisma.join(customerCodes)})`,
+      Prisma.sql`${normalizedField({ field: "InvoiceStatus", source: "invoice_source" })} IN ('confirmed', 'posted')`,
+      ...routePredicate({ field: "RouteID", source: "invoice_source" }, hierarchyRoutes),
+      ...routePredicate({ field: "RouteID", source: "invoice_source" }, effectiveRequestedRoutes),
+    ], [], [], false, [], invoiceProjection);
+    const scopedInvoiceNumbers = Prisma.sql`scoped_invoice_numbers AS MATERIALIZED (
+      SELECT DISTINCT invoice.invoice_no FROM invoice_active invoice WHERE invoice.invoice_no <> ''
+    )`;
+    const itemCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], false, [
+      Prisma.sql`INNER JOIN scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`,
+    ], itemProjection);
+    const returnsCte = activeEntityRowsCte(input.companyId, "Returns", "returned", [
+      Prisma.sql`${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} >= ${fromDate}`,
+      Prisma.sql`${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} <= ${toDate}`,
+      Prisma.sql`${normalizedField({ field: "CustomerCode", source: "returned_source" })} IN (${Prisma.join(customerCodes)})`,
+      Prisma.sql`${normalizedField({ field: "Status", source: "returned_source" })} IN ('confirmed', 'approved')`,
+      ...routePredicate({ field: "RouteID", source: "returned_source" }, hierarchyRoutes),
+      ...routePredicate({ field: "RouteID", source: "returned_source" }, effectiveRequestedRoutes),
+    ], [], [], false, [], returnProjection);
+    const scopedReturnNumbers = Prisma.sql`scoped_return_numbers AS MATERIALIZED (
+      SELECT DISTINCT returned.return_no FROM returned_active returned WHERE returned.return_no <> ''
+    )`;
+    const returnItemsCte = activeEntityRowsCte(input.companyId, "Return Items", "return_item", [], [], [], false, [
+      Prisma.sql`INNER JOIN scoped_return_numbers scoped_return ON ${normalizedField({ field: "ReturnNo", source: "return_item_source" })} = scoped_return.return_no`,
+    ], returnItemProjection);
+
+    return this.postgres<RieSmartLoadingNetQuantityRow[]>("querySmartLoadingNetQuantities.sql", { kind: "specialized", operation: "querySmartLoadingNetQuantities" }, () => Prisma.sql`
+      WITH ${invoiceCte}, ${scopedInvoiceNumbers}, ${itemCte}, ${returnsCte}, ${scopedReturnNumbers}, ${returnItemsCte},
+      period_sales AS MATERIALIZED (
+        SELECT item.product_code, SUM(item.quantity)::double precision AS sold_quantity
+        FROM item_active item
+        INNER JOIN invoice_active invoice ON invoice.invoice_no = item.invoice_no
+        WHERE item.product_code <> ''
+        GROUP BY item.product_code
+      ),
+      period_returns AS MATERIALIZED (
+        SELECT return_item.product_code, SUM(return_item.quantity)::double precision AS returned_quantity
+        FROM return_item_active return_item
+        INNER JOIN returned_active returned ON returned.return_no = return_item.return_no
+        WHERE return_item.product_code <> ''
+        GROUP BY return_item.product_code
+      )
+      SELECT sales.product_code AS "productCode",
+        (sales.sold_quantity - COALESCE(returned.returned_quantity, 0))::double precision AS "netQuantity"
+      FROM period_sales sales
+      LEFT JOIN period_returns returned ON returned.product_code = sales.product_code
+      ORDER BY sales.product_code
+    `);
+  }
+
   /**
    * Calculates Smart Loading staleness at Route × Product entirely in
    * PostgreSQL, then returns the existing Product-grain screen contract.
@@ -2114,6 +2208,8 @@ export class RieScalableQueryService {
     const inventoryProjection = Prisma.sql`${normalizedField({ field: "RouteID", source: "inventory_source" })} AS route_id, NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory_source" })}, '')), '') AS report_date, ${normalizedField({ field: "ProductCode", source: "inventory_source" })} AS product_code, ${numericField(textField({ field: "Quantity", source: "inventory_source" }))} AS quantity`;
     const invoiceProjection = Prisma.sql`${normalizedField({ field: "InvoiceNo", source: "invoice_source" })} AS invoice_no, ${normalizedField({ field: "RouteID", source: "invoice_source" })} AS route_id`;
     const itemProjection = Prisma.sql`${normalizedField({ field: "InvoiceNo", source: "item_source" })} AS invoice_no, ${normalizedField({ field: "RouteID", source: "item_source" })} AS route_id, ${normalizedField({ field: "ProductCode", source: "item_source" })} AS product_code, ${numericField(textField({ field: "Quantity", source: "item_source" }))} AS quantity`;
+    const returnProjection = Prisma.sql`${normalizedField({ field: "ReturnNo", source: "returned_source" })} AS return_no, ${normalizedField({ field: "RouteID", source: "returned_source" })} AS route_id`;
+    const returnItemProjection = Prisma.sql`${normalizedField({ field: "ReturnNo", source: "return_item_source" })} AS return_no, ${normalizedField({ field: "ProductCode", source: "return_item_source" })} AS product_code, ${numericField(textField({ field: "Quantity", source: "return_item_source" }))} AS quantity`;
     const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [
       Prisma.sql`${dateText(textField({ field: "ReportDate", source: "inventory_source" }))} <= ${targetDate}${routeScope({ field: "RouteID", source: "inventory_source" })}`,
     ], [], [], false, [], inventoryProjection);
@@ -2126,6 +2222,16 @@ export class RieScalableQueryService {
     const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], false, [
       Prisma.sql`INNER JOIN scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`,
     ], itemProjection);
+    const returnsCte = activeEntityRowsCte(input.companyId, "Returns", "returned", [
+      Prisma.sql`${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} >= ${salesFrom} AND ${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} <= ${salesTo}${routeScope({ field: "RouteID", source: "returned_source" })}${customerCodes.length ? Prisma.sql` AND ${normalizedField({ field: "CustomerCode", source: "returned_source" })} IN (${Prisma.join(customerCodes)})` : Prisma.sql` AND FALSE`}`,
+      Prisma.sql`${normalizedField({ field: "Status", source: "returned_source" })} IN ('confirmed', 'approved')`,
+    ], [], [], false, [], returnProjection);
+    const scopedReturnNumbersCte = Prisma.sql`scoped_return_numbers AS MATERIALIZED (
+      SELECT DISTINCT returned.return_no FROM returned_active returned WHERE returned.return_no <> ''
+    )`;
+    const returnItemsCte = activeEntityRowsCte(input.companyId, "Return Items", "return_item", [], [], [], false, [
+      Prisma.sql`INNER JOIN scoped_return_numbers scoped_return ON ${normalizedField({ field: "ReturnNo", source: "return_item_source" })} = scoped_return.return_no`,
+    ], returnItemProjection);
     const inventoryRoute = Prisma.raw("inventory.route_id");
     const inventoryProduct = Prisma.raw("inventory.product_code");
     const inventoryQuantity = Prisma.raw("inventory.quantity");
@@ -2134,8 +2240,9 @@ export class RieScalableQueryService {
     const invoiceNo = Prisma.raw("item.invoice_no");
     const invoiceJoinNo = Prisma.raw("invoice.invoice_no");
     const effectiveSaleRoute = Prisma.sql`COALESCE(NULLIF(item.route_id, ''), invoice.route_id, '')`;
+    const returnRoute = Prisma.raw("returned.route_id");
     return this.postgres<RieManagementVehicleProductRow[]>("queryManagementVehicleProducts.sql", { kind: "specialized", operation: "queryManagementVehicleProducts" }, () => Prisma.sql`
-      WITH ${inventoryCte}, ${invoiceCte}, ${scopedInvoiceNumbersCte}, ${itemsCte},
+      WITH ${inventoryCte}, ${invoiceCte}, ${scopedInvoiceNumbersCte}, ${itemsCte}, ${returnsCte}, ${scopedReturnNumbersCte}, ${returnItemsCte},
       inventory_latest AS MATERIALIZED (
         SELECT ${inventoryRoute} AS route_id, MAX(inventory.report_date) AS report_date
         FROM inventory_active inventory
@@ -2149,12 +2256,33 @@ export class RieScalableQueryService {
         WHERE ${inventoryProduct} <> ''
         GROUP BY ${inventoryRoute}, ${inventoryProduct}
       ),
-      sales_by_route_product AS MATERIALIZED (
-        SELECT ${effectiveSaleRoute} AS route_id, ${itemProduct} AS product_code, SUM(${itemQuantity})::double precision / 12.0 AS weekly_average_sales
+      gross_sales_by_route_product AS MATERIALIZED (
+        SELECT ${effectiveSaleRoute} AS route_id, ${itemProduct} AS product_code, SUM(${itemQuantity})::double precision AS quantity
         FROM item_active item
         INNER JOIN invoice_active invoice ON ${invoiceNo} = ${invoiceJoinNo}
         WHERE ${itemProduct} <> '' AND ${effectiveSaleRoute} <> ''
         GROUP BY ${effectiveSaleRoute}, ${itemProduct}
+      ),
+      returns_by_route_product AS MATERIALIZED (
+        SELECT ${returnRoute} AS route_id, return_item.product_code, SUM(return_item.quantity)::double precision AS quantity
+        FROM return_item_active return_item
+        INNER JOIN returned_active returned ON returned.return_no = return_item.return_no
+        WHERE return_item.product_code <> '' AND ${returnRoute} <> ''
+        GROUP BY ${returnRoute}, return_item.product_code
+      ),
+      period_net_by_route_product AS MATERIALIZED (
+        SELECT COALESCE(sales.route_id, returned.route_id) AS route_id,
+          COALESCE(sales.product_code, returned.product_code) AS product_code,
+          (COALESCE(sales.quantity, 0) - COALESCE(returned.quantity, 0))::double precision AS net_quantity,
+          sales.product_code IS NOT NULL AS has_sales
+        FROM gross_sales_by_route_product sales
+        FULL OUTER JOIN returns_by_route_product returned
+          ON returned.route_id = sales.route_id AND returned.product_code = sales.product_code
+      ),
+      sales_by_route_product AS MATERIALIZED (
+        SELECT route_id, product_code, (GREATEST(net_quantity, 0) / 12.0)::double precision AS weekly_average_sales
+        FROM period_net_by_route_product
+        WHERE has_sales
       ),
       vehicle_product AS MATERIALIZED (
         SELECT COALESCE(stock.route_id, sales.route_id) AS route_id,
@@ -2268,6 +2396,15 @@ export class RieScalableQueryService {
         ${normalizedField({ field: "ProductCode", source: "window_item_source" })} AS product_code,
         ${numericField(textField({ field: "Quantity", source: "window_item_source" }))} AS quantity
       `;
+      const windowReturnProjection = Prisma.sql`
+        ${normalizedField({ field: "ReturnNo", source: "window_returned_source" })} AS return_no,
+        ${normalizedField({ field: "RouteID", source: "window_returned_source" })} AS route_id
+      `;
+      const windowReturnItemProjection = Prisma.sql`
+        ${normalizedField({ field: "ReturnNo", source: "window_return_item_source" })} AS return_no,
+        ${normalizedField({ field: "ProductCode", source: "window_return_item_source" })} AS product_code,
+        ${numericField(textField({ field: "Quantity", source: "window_return_item_source" }))} AS quantity
+      `;
       const productProjection = Prisma.sql`
         ${normalizedField({ field: "ProductCode", source: "product_source" })} AS product_code,
         NULLIF(BTRIM(COALESCE(${textField({ field: "Category", source: "product_source" })}, '')), '') AS category,
@@ -2298,6 +2435,18 @@ export class RieScalableQueryService {
       const windowItemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "window_item", [], [], [], false, [
         Prisma.sql`INNER JOIN window_scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "window_item_source" })} = scoped_invoice.invoice_no`,
       ], windowItemProjection);
+      const windowReturnsCte = activeEntityRowsCte(input.companyId, "Returns", "window_returned", [
+        Prisma.sql`${dateText(textField({ field: "ReturnDate", source: "window_returned_source" }))} >= ${salesFrom} AND ${dateText(textField({ field: "ReturnDate", source: "window_returned_source" }))} <= ${salesTo}${routeScope({ field: "RouteID", source: "window_returned_source" })}${customerCodes.length ? Prisma.sql` AND ${normalizedField({ field: "CustomerCode", source: "window_returned_source" })} IN (${Prisma.join(customerCodes)})` : Prisma.sql` AND FALSE`}`,
+        Prisma.sql`${normalizedField({ field: "Status", source: "window_returned_source" })} IN ('confirmed', 'approved')`,
+      ], [], [], false, [], windowReturnProjection);
+      const windowScopedReturnNumbersCte = Prisma.sql`window_scoped_return_numbers AS MATERIALIZED (
+        SELECT DISTINCT window_returned.return_no
+        FROM window_returned_active window_returned
+        WHERE window_returned.return_no <> ''
+      )`;
+      const windowReturnItemsCte = activeEntityRowsCte(input.companyId, "Return Items", "window_return_item", [], [], [], false, [
+        Prisma.sql`INNER JOIN window_scoped_return_numbers scoped_return ON ${normalizedField({ field: "ReturnNo", source: "window_return_item_source" })} = scoped_return.return_no`,
+      ], windowReturnItemProjection);
       const productCte = activeEntityRowsCte(input.companyId, "Products", "product", [], [], [], false, [
         Prisma.sql`INNER JOIN relevant_product_keys relevant_product ON ${normalizedField({ field: "ProductCode", source: "product_source" })} = relevant_product.product_code`,
       ], productProjection);
@@ -2309,6 +2458,7 @@ export class RieScalableQueryService {
     }>>("queryManagementSmartLoadingBundle.sql", { kind: "specialized", operation: "queryManagementSmartLoadingBundle" }, () => Prisma.sql`
         WITH ${inventoryCte}, ${staleInvoiceCte}, ${staleScopedInvoiceNumbersCte}, ${staleItemsCte},
         ${windowInvoiceCte}, ${windowScopedInvoiceNumbersCte}, ${windowItemsCte},
+        ${windowReturnsCte}, ${windowScopedReturnNumbersCte}, ${windowReturnItemsCte},
         inventory_latest AS MATERIALIZED (
           SELECT inventory.route_id, MAX(inventory.report_date) AS report_date
           FROM inventory_active inventory
@@ -2352,15 +2502,39 @@ export class RieScalableQueryService {
           FROM route_stale
           GROUP BY product_code
         ),
-        window_sales_by_route_product AS MATERIALIZED (
+        window_gross_sales_by_route_product AS MATERIALIZED (
           SELECT COALESCE(NULLIF(window_item.route_id, ''), window_invoice.route_id, '') AS route_id,
             window_item.product_code,
-            SUM(window_item.quantity)::double precision / 12.0 AS weekly_average_sales
+            SUM(window_item.quantity)::double precision AS quantity
           FROM window_item_active window_item
           INNER JOIN window_invoice_active window_invoice ON window_item.invoice_no = window_invoice.invoice_no
           WHERE window_item.product_code <> ''
             AND COALESCE(NULLIF(window_item.route_id, ''), window_invoice.route_id, '') <> ''
           GROUP BY COALESCE(NULLIF(window_item.route_id, ''), window_invoice.route_id, ''), window_item.product_code
+        ),
+        window_returns_by_route_product AS MATERIALIZED (
+          SELECT window_returned.route_id, window_return_item.product_code,
+            SUM(window_return_item.quantity)::double precision AS quantity
+          FROM window_return_item_active window_return_item
+          INNER JOIN window_returned_active window_returned
+            ON window_returned.return_no = window_return_item.return_no
+          WHERE window_return_item.product_code <> '' AND window_returned.route_id <> ''
+          GROUP BY window_returned.route_id, window_return_item.product_code
+        ),
+        window_period_net_by_route_product AS MATERIALIZED (
+          SELECT COALESCE(sales.route_id, returned.route_id) AS route_id,
+            COALESCE(sales.product_code, returned.product_code) AS product_code,
+            (COALESCE(sales.quantity, 0) - COALESCE(returned.quantity, 0))::double precision AS net_quantity,
+            sales.product_code IS NOT NULL AS has_sales
+          FROM window_gross_sales_by_route_product sales
+          FULL OUTER JOIN window_returns_by_route_product returned
+            ON returned.route_id = sales.route_id AND returned.product_code = sales.product_code
+        ),
+        window_sales_by_route_product AS MATERIALIZED (
+          SELECT route_id, product_code,
+            (GREATEST(net_quantity, 0) / 12.0)::double precision AS weekly_average_sales
+          FROM window_period_net_by_route_product
+          WHERE has_sales
         ),
         route_product_alignment AS MATERIALIZED (
           SELECT COALESCE(stock.route_id, sales.route_id) AS route_id,
@@ -2465,9 +2639,29 @@ export class RieScalableQueryService {
     const allowed = input.requestingUser ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser) : null;
     const routes = allowed ? [...allowed].map((value) => value.trim().toLowerCase()).filter(Boolean) : null;
     const routeScope = (field: RieQueryField) => routes === null ? Prisma.empty : routes.length ? Prisma.sql` AND ${normalizedField(field)} IN (${Prisma.join(routes)})` : Prisma.sql` AND FALSE`;
-    const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [Prisma.sql`${dateText(textField({ field: "ReportDate", source: "inventory_source" }))} <= ${targetDate}${routeScope({ field: "RouteID", source: "inventory_source" })}`], [], []);
-    const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} >= ${salesFrom} AND ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${salesTo}${routeScope({ field: "RouteID", source: "invoice_source" })}`], [], []);
-    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], []);
+    const inventoryProjection = Prisma.sql`${normalizedField({ field: "RouteID", source: "inventory_source" })} AS route_id, NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory_source" })}, '')), '') AS report_date, ${normalizedField({ field: "ProductCode", source: "inventory_source" })} AS product_code, ${numericField(textField({ field: "Quantity", source: "inventory_source" }))} AS quantity`;
+    const invoiceProjection = Prisma.sql`${normalizedField({ field: "InvoiceNo", source: "invoice_source" })} AS invoice_no, ${normalizedField({ field: "RouteID", source: "invoice_source" })} AS route_id`;
+    const itemProjection = Prisma.sql`${normalizedField({ field: "InvoiceNo", source: "item_source" })} AS invoice_no, ${normalizedField({ field: "RouteID", source: "item_source" })} AS route_id, ${normalizedField({ field: "ProductCode", source: "item_source" })} AS product_code, ${numericField(textField({ field: "Quantity", source: "item_source" }))} AS quantity`;
+    const returnProjection = Prisma.sql`${normalizedField({ field: "ReturnNo", source: "returned_source" })} AS return_no, ${normalizedField({ field: "RouteID", source: "returned_source" })} AS route_id`;
+    const returnItemProjection = Prisma.sql`${normalizedField({ field: "ReturnNo", source: "return_item_source" })} AS return_no, ${normalizedField({ field: "ProductCode", source: "return_item_source" })} AS product_code, ${numericField(textField({ field: "Quantity", source: "return_item_source" }))} AS quantity`;
+    const inventoryCte = activeEntityRowsCte(input.companyId, "Van Inventory", "inventory", [Prisma.sql`${dateText(textField({ field: "ReportDate", source: "inventory_source" }))} <= ${targetDate}${routeScope({ field: "RouteID", source: "inventory_source" })}`], [], [], false, [], inventoryProjection);
+    const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [Prisma.sql`${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} >= ${salesFrom} AND ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${salesTo}${routeScope({ field: "RouteID", source: "invoice_source" })}`], [], [], false, [], invoiceProjection);
+    const scopedInvoiceNumbersCte = Prisma.sql`scoped_invoice_numbers AS MATERIALIZED (
+      SELECT DISTINCT invoice.invoice_no FROM invoice_active invoice WHERE invoice.invoice_no <> ''
+    )`;
+    const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], false, [
+      Prisma.sql`INNER JOIN scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`,
+    ], itemProjection);
+    const returnsCte = activeEntityRowsCte(input.companyId, "Returns", "returned", [
+      Prisma.sql`${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} >= ${salesFrom} AND ${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} <= ${salesTo}${routeScope({ field: "RouteID", source: "returned_source" })}`,
+      Prisma.sql`${normalizedField({ field: "Status", source: "returned_source" })} IN ('confirmed', 'approved')`,
+    ], [], [], false, [], returnProjection);
+    const scopedReturnNumbersCte = Prisma.sql`scoped_return_numbers AS MATERIALIZED (
+      SELECT DISTINCT returned.return_no FROM returned_active returned WHERE returned.return_no <> ''
+    )`;
+    const returnItemsCte = activeEntityRowsCte(input.companyId, "Return Items", "return_item", [], [], [], false, [
+      Prisma.sql`INNER JOIN scoped_return_numbers scoped_return ON ${normalizedField({ field: "ReturnNo", source: "return_item_source" })} = scoped_return.return_no`,
+    ], returnItemProjection);
     // Company Admin has no restricted route set. Do not pass an empty SQL
     // fragment as a predicate, otherwise the active Route CTE compiles to a
     // dangling `AND` and PostgreSQL rejects the query.
@@ -2482,17 +2676,42 @@ export class RieScalableQueryService {
         : [Prisma.sql`FALSE`];
     const routesCte = activeEntityRowsCte(input.companyId, "Routes", "route", routePredicates, [], []);
     const repCte = activeEntityRowsCte(input.companyId, "Employees", "rep", [], [], []), supervisorCte = activeEntityRowsCte(input.companyId, "Employees", "supervisor", [], [], []), managerCte = activeEntityRowsCte(input.companyId, "Employees", "manager", [], [], []), productCte = activeEntityRowsCte(input.companyId, "Products", "product", [], [], []);
-    const invRoute = normalizedField({ field: "RouteID", source: "inventory" }), invProduct = normalizedField({ field: "ProductCode", source: "inventory" }), invQuantity = numericField(textField({ field: "Quantity", source: "inventory" }));
-    const itemProduct = normalizedField({ field: "ProductCode", source: "item" }), itemQuantity = numericField(textField({ field: "Quantity", source: "item" })), itemInvoice = normalizedField({ field: "InvoiceNo", source: "item" }), invoiceNo = normalizedField({ field: "InvoiceNo", source: "invoice" });
-    const saleRoute = Prisma.sql`LOWER(BTRIM(COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "RouteID", source: "item" })}, '')), ''), ${textField({ field: "RouteID", source: "invoice" })}, '')))`;
+    const saleRoute = Prisma.sql`COALESCE(NULLIF(item.route_id, ''), invoice.route_id, '')`;
     const routeId = normalizedField({ field: "RouteID", source: "route" }), routeRep = normalizedField({ field: "SalesRepID", source: "route" }), routeSupervisor = normalizedField({ field: "SupervisorID", source: "route" }), routeManager = normalizedField({ field: "ManagerID", source: "route" }), repId = normalizedField({ field: "EmployeeID", source: "rep" }), supervisorId = normalizedField({ field: "EmployeeID", source: "supervisor" }), managerId = normalizedField({ field: "EmployeeID", source: "manager" });
     const person = input.personLevel === "manager" ? { id: managerId, name: textField({ field: "EmployeeName", source: "manager" }) } : input.personLevel === "supervisor" ? { id: supervisorId, name: textField({ field: "EmployeeName", source: "supervisor" }) } : { id: repId, name: textField({ field: "EmployeeName", source: "rep" }) };
     const productCode = normalizedField({ field: "ProductCode", source: "product" }), productName = textField({ field: "ProductName", source: "product" });
     const rows = await this.postgres<RieManagementLoadingRiskRow[]>("queryManagementLoadingRisk.sql", { kind: "specialized", operation: "queryManagementLoadingRisk" }, () => Prisma.sql`
-      WITH ${inventoryCte}, ${invoiceCte}, ${itemsCte}, ${routesCte}, ${repCte}, ${supervisorCte}, ${managerCte}, ${productCte},
-      latest_inventory AS MATERIALIZED (SELECT ${invRoute} route_id, MAX(NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')) report_date FROM inventory_active inventory GROUP BY ${invRoute}),
-      stock AS MATERIALIZED (SELECT ${invRoute} route_id, ${invProduct} product_code, SUM(${invQuantity})::double precision current_stock FROM inventory_active inventory INNER JOIN latest_inventory latest ON latest.route_id=${invRoute} AND NULLIF(BTRIM(COALESCE(${textField({ field: "ReportDate", source: "inventory" })}, '')), '')=latest.report_date WHERE ${invProduct}<>'' GROUP BY ${invRoute}, ${invProduct}),
-      demand AS MATERIALIZED (SELECT ${saleRoute} route_id, ${itemProduct} product_code, (SUM(${itemQuantity})/12.0)::double precision expected_demand FROM item_active item INNER JOIN invoice_active invoice ON ${itemInvoice}=${invoiceNo} WHERE ${itemProduct}<>'' AND ${saleRoute}<>'' GROUP BY ${saleRoute}, ${itemProduct}),
+      WITH ${inventoryCte}, ${invoiceCte}, ${scopedInvoiceNumbersCte}, ${itemsCte}, ${returnsCte}, ${scopedReturnNumbersCte}, ${returnItemsCte}, ${routesCte}, ${repCte}, ${supervisorCte}, ${managerCte}, ${productCte},
+      latest_inventory AS MATERIALIZED (SELECT inventory.route_id, MAX(inventory.report_date) report_date FROM inventory_active inventory GROUP BY inventory.route_id),
+      stock AS MATERIALIZED (SELECT inventory.route_id, inventory.product_code, SUM(inventory.quantity)::double precision current_stock FROM inventory_active inventory INNER JOIN latest_inventory latest ON latest.route_id=inventory.route_id AND inventory.report_date=latest.report_date WHERE inventory.product_code<>'' GROUP BY inventory.route_id, inventory.product_code),
+      gross_demand AS MATERIALIZED (
+        SELECT ${saleRoute} route_id, item.product_code, SUM(item.quantity)::double precision quantity
+        FROM item_active item
+        INNER JOIN invoice_active invoice ON item.invoice_no=invoice.invoice_no
+        WHERE item.product_code<>'' AND ${saleRoute}<>''
+        GROUP BY ${saleRoute}, item.product_code
+      ),
+      returned_demand AS MATERIALIZED (
+        SELECT returned.route_id, return_item.product_code, SUM(return_item.quantity)::double precision quantity
+        FROM return_item_active return_item
+        INNER JOIN returned_active returned ON returned.return_no=return_item.return_no
+        WHERE return_item.product_code<>'' AND returned.route_id<>''
+        GROUP BY returned.route_id, return_item.product_code
+      ),
+      period_net_demand AS MATERIALIZED (
+        SELECT COALESCE(sales.route_id, returned.route_id) route_id,
+          COALESCE(sales.product_code, returned.product_code) product_code,
+          (COALESCE(sales.quantity, 0) - COALESCE(returned.quantity, 0))::double precision net_quantity,
+          sales.product_code IS NOT NULL has_sales
+        FROM gross_demand sales
+        FULL OUTER JOIN returned_demand returned
+          ON returned.route_id=sales.route_id AND returned.product_code=sales.product_code
+      ),
+      demand AS MATERIALIZED (
+        SELECT route_id, product_code, (GREATEST(net_quantity, 0)/12.0)::double precision expected_demand
+        FROM period_net_demand
+        WHERE has_sales
+      ),
       people AS MATERIALIZED (
         SELECT DISTINCT ${routeId} route_id, ${person.id} employee_id,
           COALESCE(NULLIF(BTRIM(COALESCE(${person.name}, '')), ''), ${person.id}) employee_name
@@ -2830,6 +3049,15 @@ export class RieScalableQueryService {
       ${normalizedField({ field: "ProductCode", source: "item_source" })} AS product_code,
       ${numericField(textField({ field: "Quantity", source: "item_source" }))} AS quantity
     `;
+    const returnProjection = Prisma.sql`
+      ${normalizedField({ field: "ReturnNo", source: "returned_source" })} AS return_no,
+      ${normalizedField({ field: "RouteID", source: "returned_source" })} AS route_id
+    `;
+    const returnItemProjection = Prisma.sql`
+      ${normalizedField({ field: "ReturnNo", source: "return_item_source" })} AS return_no,
+      ${normalizedField({ field: "ProductCode", source: "return_item_source" })} AS product_code,
+      ${numericField(textField({ field: "Quantity", source: "return_item_source" }))} AS quantity
+    `;
     const productProjection = Prisma.sql`
       ${normalizedField({ field: "ProductCode", source: "product_source" })} AS product_code,
       NULLIF(BTRIM(COALESCE(${textField({ field: "Category", source: "product_source" })}, '')), '') AS category,
@@ -2851,6 +3079,18 @@ export class RieScalableQueryService {
     const itemsCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], false, [
       Prisma.sql`INNER JOIN scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`,
     ], itemProjection);
+    const returnsCte = activeEntityRowsCte(input.companyId, "Returns", "returned", [
+      Prisma.sql`${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} >= ${salesFrom} AND ${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} <= ${salesTo}${routeScope({ field: "RouteID", source: "returned_source" })}${customerCodes.length ? Prisma.sql` AND ${normalizedField({ field: "CustomerCode", source: "returned_source" })} IN (${Prisma.join(customerCodes)})` : Prisma.sql` AND FALSE`}`,
+      Prisma.sql`${normalizedField({ field: "Status", source: "returned_source" })} IN ('confirmed', 'approved')`,
+    ], [], [], false, [], returnProjection);
+    const scopedReturnNumbersCte = Prisma.sql`scoped_return_numbers AS MATERIALIZED (
+      SELECT DISTINCT returned.return_no
+      FROM returned_active returned
+      WHERE returned.return_no <> ''
+    )`;
+    const returnItemsCte = activeEntityRowsCte(input.companyId, "Return Items", "return_item", [], [], [], false, [
+      Prisma.sql`INNER JOIN scoped_return_numbers scoped_return ON ${normalizedField({ field: "ReturnNo", source: "return_item_source" })} = scoped_return.return_no`,
+    ], returnItemProjection);
     const inventoryRoute = Prisma.raw("inventory.route_id");
     const inventoryProduct = Prisma.raw("inventory.product_code");
     const inventoryQuantity = Prisma.raw("inventory.quantity");
@@ -2859,8 +3099,9 @@ export class RieScalableQueryService {
     const invoiceNo = Prisma.raw("item.invoice_no");
     const invoiceJoinNo = Prisma.raw("invoice.invoice_no");
     const effectiveSaleRoute = Prisma.sql`COALESCE(NULLIF(item.route_id, ''), invoice.route_id, '')`;
+    const returnRoute = Prisma.raw("returned.route_id");
     const rows = await this.postgres<RieManagementStockAlignmentRow[]>("queryManagementStockAlignment.sql", { kind: "specialized", operation: "queryManagementStockAlignment" }, () => Prisma.sql`
-      WITH ${inventoryCte}, ${invoiceCte}, ${scopedInvoiceNumbersCte}, ${itemsCte},
+      WITH ${inventoryCte}, ${invoiceCte}, ${scopedInvoiceNumbersCte}, ${itemsCte}, ${returnsCte}, ${scopedReturnNumbersCte}, ${returnItemsCte},
       inventory_latest AS MATERIALIZED (
         SELECT ${inventoryRoute} AS route_id, MAX(inventory.report_date) AS report_date
         FROM inventory_active inventory
@@ -2873,12 +3114,33 @@ export class RieScalableQueryService {
           AND inventory.report_date = latest.report_date
         GROUP BY ${inventoryRoute}, ${inventoryProduct}
       ),
-      expected_by_route_product AS MATERIALIZED (
-        SELECT ${effectiveSaleRoute} AS route_id, ${itemProduct} AS product_code, SUM(${itemQuantity})::double precision / 12.0 AS expected_sales
+      gross_sales_by_route_product AS MATERIALIZED (
+        SELECT ${effectiveSaleRoute} AS route_id, ${itemProduct} AS product_code, SUM(${itemQuantity})::double precision AS quantity
         FROM item_active item
         INNER JOIN invoice_active invoice ON ${invoiceNo} = ${invoiceJoinNo}
         WHERE ${itemProduct} <> '' AND ${effectiveSaleRoute} <> ''
         GROUP BY ${effectiveSaleRoute}, ${itemProduct}
+      ),
+      returns_by_route_product AS MATERIALIZED (
+        SELECT ${returnRoute} AS route_id, return_item.product_code, SUM(return_item.quantity)::double precision AS quantity
+        FROM return_item_active return_item
+        INNER JOIN returned_active returned ON returned.return_no = return_item.return_no
+        WHERE return_item.product_code <> '' AND ${returnRoute} <> ''
+        GROUP BY ${returnRoute}, return_item.product_code
+      ),
+      period_net_by_route_product AS MATERIALIZED (
+        SELECT COALESCE(sales.route_id, returned.route_id) AS route_id,
+          COALESCE(sales.product_code, returned.product_code) AS product_code,
+          (COALESCE(sales.quantity, 0) - COALESCE(returned.quantity, 0))::double precision AS net_quantity,
+          sales.product_code IS NOT NULL AS has_sales
+        FROM gross_sales_by_route_product sales
+        FULL OUTER JOIN returns_by_route_product returned
+          ON returned.route_id = sales.route_id AND returned.product_code = sales.product_code
+      ),
+      expected_by_route_product AS MATERIALIZED (
+        SELECT route_id, product_code, (GREATEST(net_quantity, 0) / 12.0)::double precision AS expected_sales
+        FROM period_net_by_route_product
+        WHERE has_sales
       ),
       route_product_alignment AS MATERIALIZED (
         SELECT COALESCE(stock.route_id, expected.route_id) AS route_id,

@@ -162,6 +162,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Commit:** `fa0c32e`.
 - **Regression-prevention rule:** Never cache a final Smart Loading session. Keep threshold evaluation, Stale, Lost Opportunities final stock filtering, user scope, and response assembly live; a missing or stale input snapshot must fall back to PostgreSQL.
 
+## Smart Loading — gross historical demand ignored confirmed returns
+
+- **Symptom/evidence:** Sales Rep suggested loading and Management preview/loading-risk forecasts used gross Invoice Items quantity, so confirmed or approved product returns inside the same period did not reduce demand.
+- **Root cause:** The forecast aggregates had no Returns/Return Items branch, and the Management Loading Risk cache freshness inputs omitted both return entities.
+- **Fix:** Dedicated canonical current-state SQL now scopes invoice and return headers by company, hierarchy, route/customer, and date before joining bounded item facts; PostgreSQL aggregates full-period sales and confirmed/approved returns, subtracts them at Product or Route × Product grain, and applies `GREATEST(period sales - period returns, 0)` only after period aggregation. Existing Sales Rep calendar/visit/order/stock terms and Management `/12`, preview scope, loading-risk scope, and invoice-status behavior remain unchanged. Return source versions and canonical changes now invalidate Management Loading Risk snapshots.
+- **Commit:** This local commit.
+- **Regression-prevention rule:** Smart Loading forecasts must use period net quantity without raw fact reads, Node joins, N+1 queries, per-row clamping, or extra RIE fan-out. Returns outside the exact company/hierarchy/route/customer/date scope, or without Confirmed/Approved status, must not affect demand.
+
 ## Shared invoice-sales analytical read — unbounded Invoice Items merge
 
 - **Symptom/evidence:** The common RIE invoice-sales read used by Geo Engine and Decision Analytics merged every active Invoice Items row before joining to the date- and permission-scoped invoices.

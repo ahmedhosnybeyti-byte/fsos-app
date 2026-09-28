@@ -374,6 +374,19 @@ export interface RieManagementCategoryStockAlignment {
   alignmentPercent: number;
 }
 
+/** Sales Rep Smart Loading demand input; sales and returns stay in PostgreSQL. */
+export interface RieSmartLoadingNetQuantityQuery extends EntityQueryContext {
+  /** null/undefined means the caller's full hierarchy scope; [] means no routes. */
+  routeIds?: readonly string[] | null;
+  customerCodes: readonly string[];
+  fromDate: string;
+  toDate: string;
+}
+export interface RieSmartLoadingNetQuantityRow {
+  productCode: string;
+  netQuantity: number;
+}
+
 /** Product-grain management monitor rows; Route × Product stays in PostgreSQL. */
 export interface RieManagementVehicleProductsQuery extends EntityQueryContext {
   routeIds?: readonly string[] | null;

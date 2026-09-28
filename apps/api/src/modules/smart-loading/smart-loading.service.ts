@@ -248,6 +248,15 @@ export class SmartLoadingService {
     return createHash("sha256").update(JSON.stringify({ versions, latest: latest?.updatedAt.toISOString() ?? null })).digest("hex");
   }
 
+  private async managementLoadingRiskSnapshotVersion(companyId: string): Promise<string> {
+    const entities = ["Van Inventory", "Invoices", "Invoice Items", "Returns", "Return Items", "Routes", "Employees", "Products"];
+    const [versions, latest] = await Promise.all([
+      this.prisma.rieDatasetVersion.findMany({ where: { companyId, entityName: { in: entities }, isActive: true }, select: { entityName: true, id: true, updatedAt: true }, orderBy: [{ entityName: "asc" }, { id: "asc" }] }),
+      this.prisma.rieCanonicalEntityRow.findFirst({ where: { companyId, entityName: { in: entities } }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } }),
+    ]);
+    return createHash("sha256").update(JSON.stringify({ versions, latest: latest?.updatedAt.toISOString() ?? null })).digest("hex");
+  }
+
   private async readLastSaleSnapshot(companyId: string, routeIds: ReadonlySet<string>, targetDate: string, activeVersion: string): Promise<Map<string, number> | null> {
     if (routeIds.size === 0) return new Map();
     const routes = [...routeIds];
@@ -278,7 +287,10 @@ export class SmartLoadingService {
     const personLevel = user.roleCode === "COMPANY_ADMIN" ? "manager" : user.roleCode === "MANAGER" ? "supervisor" : "sales_rep";
     // Resolve permissions before both cache lookup and fallback execution. The
     // same scope remains enforced by RIE when a snapshot is first computed.
-    const allowedRouteIds = await this.hierarchyResolver.resolveAllowedRouteIds(user.companyId, { roleCode: user.roleCode, email: user.email });
+    const [allowedRouteIds, sourceVersion] = await Promise.all([
+      this.hierarchyResolver.resolveAllowedRouteIds(user.companyId, { roleCode: user.roleCode, email: user.email }),
+      this.managementLoadingRiskSnapshotVersion(user.companyId),
+    ]);
     const { value: response, hit } = await this.managementCache.getOrCompute({
       companyId: user.companyId,
       targetDate,
@@ -286,6 +298,7 @@ export class SmartLoadingService {
       salesTo,
       personLevel,
       routeIds: allowedRouteIds === null ? null : [...allowedRouteIds],
+      sourceVersion,
     }, async () => {
       const result = await this.rieFacade.queryManagementLoadingRisk({ ...this.rieContext(user), targetDate, salesFrom, salesTo, personLevel });
       return { targetDate, salesFrom, salesTo, affectedPersonCount: result.people.length, people: result.people };
@@ -828,7 +841,7 @@ export class SmartLoadingService {
     const allowed = new Set(customerRows.map((row) => String(row.customerCode ?? "").trim()));
     if (input.customerCodes.some((code) => !allowed.has(code))) throw new ForbiddenException("One or more customers are outside your scope.");
     const [salesRows, latestInventoryRows] = await Promise.all([
-      bounded(withSelectedRepScope({ ...ctx, entityName: "Invoice Items", projection: [{ field: "ProductCode", as: "productCode" }], joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }], hierarchyRoute: { field: "RouteID", source: "invoice" }, groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "netQuantity" }], scope: { customer: { values: requestedCustomerCodes, source: "invoice" }, date: { field: "InvoiceDate", source: "invoice", from: input.fromDate, to: input.toDate }, fields: [{ field: "InvoiceStatus", source: "invoice", values: ["Confirmed", "Posted"] }] } })),
+      this.rieFacade.querySmartLoadingNetQuantities({ ...ctx, routeIds: selectedRepRouteIds, customerCodes: requestedCustomerCodes, fromDate: input.fromDate, toDate: input.toDate }),
       bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }] })),
     ]);
     const latestReportDate = String(latestInventoryRows[0]?.latestReportDate ?? "").trim().slice(0, 10);
@@ -843,6 +856,6 @@ export class SmartLoadingService {
     const productRows = codes.size ? await bounded({ companyId: ctx.companyId, entityName: "Products", projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }], scope: { product: { values: [...codes] } } }) : [];
     const productNames = new Map(productRows.map((row) => [String(row.productCode ?? "").trim(), String(row.productName ?? row.productCode ?? "").trim()]));
     if (input.confirmedOrders.some((order) => !productNames.has(order.productCode))) throw new BadRequestException("One or more confirmed-order products are unavailable in RIE.");
-    return { targetDate: input.targetDate, fromDate: input.fromDate, toDate: input.toDate, calendarDaysInPeriod: days, products: [...codes].map((code) => { const demand = ((net.get(code) ?? 0) / days) * 7 / input.visitsPerWeek; const vehicleStock = stock.get(code) ?? null; const safetyStock = 0; return { productCode: code, productName: productNames.get(code) ?? code, estimatedCustomerDemand: demand, confirmedOrderQuantity: orders.get(code) ?? 0, safetyStock, vehicleStock, suggestedQuantity: demand + (orders.get(code) ?? 0) - safetyStock - (vehicleStock ?? 0) }; }), calculatedAt: new Date().toISOString() };
+    return { targetDate: input.targetDate, fromDate: input.fromDate, toDate: input.toDate, calendarDaysInPeriod: days, products: [...codes].map((code) => { const demand = (Math.max(0, net.get(code) ?? 0) / days) * 7 / input.visitsPerWeek; const vehicleStock = stock.get(code) ?? null; const safetyStock = 0; return { productCode: code, productName: productNames.get(code) ?? code, estimatedCustomerDemand: demand, confirmedOrderQuantity: orders.get(code) ?? 0, safetyStock, vehicleStock, suggestedQuantity: demand + (orders.get(code) ?? 0) - safetyStock - (vehicleStock ?? 0) }; }), calculatedAt: new Date().toISOString() };
   }
 }
