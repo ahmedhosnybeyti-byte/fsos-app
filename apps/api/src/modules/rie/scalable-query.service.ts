@@ -4,7 +4,7 @@ import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { RieRequestPlannerService } from "./rie-request-planner.service";
 import type { EntityQueryContext, EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieAssistantDatasetQuery, RieAssistantDatasetResult, RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoEngineFilters, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitPeerScope, RieProductFitQuery, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieSmartLoadingNetQuantityQuery, RieSmartLoadingNetQuantityRow, RieStalePurchaseRow, RieStalePurchasesQuery, RieTerritoryCustomerFactsQuery, RieTerritoryCustomerFactsResult, RieTerritorySummaryFactRow, RieTerritorySummaryQuery, RieValueScope, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
+import type { RieAssistantCustomerMentionQuery, RieAssistantDatasetQuery, RieAssistantDatasetResult, RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoEngineFilters, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitPeerScope, RieProductFitQuery, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieSmartLoadingNetQuantityQuery, RieSmartLoadingNetQuantityRow, RieStalePurchaseRow, RieStalePurchasesQuery, RieTerritoryCustomerFactsQuery, RieTerritoryCustomerFactsResult, RieTerritorySummaryFactRow, RieTerritorySummaryQuery, RieValueScope, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRiePostgres, recordActiveVersionResolution } from "../../common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 import { assistantDatasetFields } from "./assistant-dataset-query.data";
@@ -277,6 +277,56 @@ export class RieScalableQueryService {
       `,
     );
     return rows[0] ?? { totalMatchingRows: 0, records: [], noMatchHint: {} };
+  }
+
+  /**
+   * Returns only Customers that can possibly win the existing Dictionary
+   * Engine's exact-code/substring-name resolution. Final winner selection
+   * intentionally remains in Node so code priority, longest-name and
+   * canonical first-match semantics stay unchanged.
+   */
+  async queryAssistantCustomerMentionCandidates(input: RieAssistantCustomerMentionQuery): Promise<EntityRecord[]> {
+    if (!input.companyId?.trim()) throw new Error("RIE Assistant customer mention query requires companyId.");
+    const normalizedCodes = [...new Set(input.candidateCodes.map((code) => code.trim().toLowerCase()).filter(Boolean))];
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const hierarchy = allowedRoutes === null
+      ? Prisma.empty
+      : allowedRoutes.size
+        ? Prisma.sql`AND LOWER(BTRIM(COALESCE(customer."data" ->> 'RouteID', ''))) IN (${Prisma.join([...allowedRoutes])})`
+        : Prisma.sql`AND FALSE`;
+    const codePredicate = normalizedCodes.length
+      ? Prisma.sql`LOWER(BTRIM(COALESCE(customer."data" ->> 'CustomerCode', ''))) IN (${Prisma.join(normalizedCodes)})`
+      : Prisma.sql`FALSE`;
+    // Deliberately admit short nonblank name candidates here. The existing
+    // Node resolver applies its exact JS length >= 4 rule, avoiding Unicode
+    // length drift between PostgreSQL code points and JavaScript UTF-16.
+    const namePredicate = input.allowNameMatch
+      ? Prisma.sql`(customer."data" ->> 'CustomerName') IS NOT NULL
+          AND BTRIM(customer."data" ->> 'CustomerName') <> ''
+          AND POSITION(LOWER(BTRIM(customer."data" ->> 'CustomerName')) IN ${input.normalizedMessage}) > 0`
+      : Prisma.sql`FALSE`;
+    const rows = await this.postgres<Array<{ customerCode: string | null; customerName: string | null }>>(
+      "queryAssistantCustomerMentionCandidates.sql",
+      {
+        kind: "specialized",
+        operation: "queryAssistantCustomerMentionCandidates",
+        hasCodeCandidates: normalizedCodes.length > 0,
+        allowNameMatch: input.allowNameMatch,
+      },
+      () => Prisma.sql`
+        SELECT customer."data" ->> 'CustomerCode' AS "customerCode",
+          customer."data" ->> 'CustomerName' AS "customerName"
+        FROM "rie_canonical_entity_rows" customer
+        WHERE customer."company_id" = ${input.companyId}
+          AND customer."entity_name" = 'Customers'
+          ${hierarchy}
+          AND (${codePredicate} OR ${namePredicate})
+        ORDER BY customer.precedence ASC, customer."created_at" ASC, customer.id ASC
+      `,
+    );
+    return rows.map((row) => ({ CustomerCode: row.customerCode, CustomerName: row.customerName }));
   }
 
   /** One-row PostgreSQL contract for Local Decision -> GetTotalSales. */

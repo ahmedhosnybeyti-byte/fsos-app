@@ -53,6 +53,13 @@ export interface RieAssistantDatasetResult {
   totalMatchingRows: number;
   noMatchHint: Record<string, string[]>;
 }
+
+/** Candidate-only customer lookup for Assistant's pre-tool mention resolver. */
+export interface RieAssistantCustomerMentionQuery extends EntityQueryContext {
+  candidateCodes: readonly string[];
+  normalizedMessage: string;
+  allowNameMatch: boolean;
+}
 export interface RieQueryOrder { field?: RieQueryField; aggregate?: string; direction?: "asc" | "desc"; }
 /** Retain only rows at the latest text date/value within each partition. */
 export interface RieLatestPerScope { partitionBy: RieQueryField; orderBy: RieQueryField; }

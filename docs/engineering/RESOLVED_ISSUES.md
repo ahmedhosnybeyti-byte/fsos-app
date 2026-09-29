@@ -201,3 +201,11 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Fix:** Route only the closed safe subset through one coordinated canonical current-state PostgreSQL statement. It applies company/hierarchy scope, exact/`in` filters, count, canonical ordering, total count, projection, offset/limit, and zero-match hints before returning a compact result; all excluded behavior retains the legacy path.
 - **Commit:** This local commit.
 - **Regression-prevention rule:** Never widen the SQL-safe subset without an entity/field/operator whitelist and PostgreSQL parity coverage. Safe `query_dataset` requests must not call `getEntityRecords()`, page through facts, or rebuild filters/counts in Node.
+
+## Assistant customer mention resolution — full Customers read
+
+- **Symptom:** Every Assistant chat loaded all hierarchy-visible Customers before the tool loop solely to find an exact CustomerCode or a CustomerName substring in the message.
+- **Root cause:** The shared Dictionary Engine accepted only an already-materialized customer array, so the Assistant had no candidate-only RIE contract.
+- **Fix:** One coordinated canonical current-state PostgreSQL query now applies company and hierarchy scope, filters to possible code/name candidates, and projects only CustomerCode and CustomerName. The unchanged Dictionary Engine still selects the winner, preserving code priority, longest-name, canonical first-match, duplicate, blank, and no-match behavior.
+- **Commit:** This local commit.
+- **Regression-prevention rule:** Assistant pre-tool customer resolution must never call `getEntityRecords("Customers")`, page through Customers, or query once per candidate. Keep candidate extraction parameterized and winner parity covered against the original Dictionary Engine.

@@ -28,6 +28,7 @@ import {
 import { CORE_DNA_SYSTEM_PROMPT } from "./data/dna-core-prompt";
 import { formatScenarios, retrieveScenarios } from "./data/scenario-retrieval.util";
 import { resolveMentionedCustomer } from "../local-decision/dictionary-engine";
+import { extractCandidateCodes } from "../local-decision/regex-engine";
 import { resolveEntity, type ChatTurn, type EntityResolver } from "../local-decision/entity-resolution";
 import { buildEmployeeResolver, type EmployeeResolverAuth } from "../local-decision/resolvers/employee.resolver";
 import { buildBranchResolver, buildRegionResolver, type OrgUnitLike, type OrgUnitResolverAuth } from "../local-decision/resolvers/org-unit.resolver";
@@ -293,17 +294,9 @@ export class AssistantService {
     // silence, exactly as if this step didn't run.
     let mentionedCustomerLine = "";
     try {
-      // getEntityRecords returns an EntityQueryResult wrapper (available +
-      // records + fields), not a bare array — same shape VisitCopilotService
-      // reads via its own requireCustomers() helper. `available: false` (no
-      // Customers dataset uploaded yet) is treated the same as any other
-      // resolution failure here: silently skip, never block the chat.
-      const result = await this.rieFacade.getEntityRecords("Customers", this.rieContext(user));
-      if (result.available) {
-        const mentioned = resolveMentionedCustomer(input.message, result.records);
-        if (mentioned) {
-          mentionedCustomerLine = `\n\nملاحظة سياق (تم تحديدها محليًا بدون AI): رسالة المستخدم تذكر العميل "${mentioned.customerName}" (الكود: ${mentioned.customerCode}). إذا كان سؤال المستخدم عن عميل، استخدم هذا الكود مباشرة بدل تخمين الاسم أو البحث عنه.`;
-        }
+      const mentioned = await this.resolveCustomerMention(user, input.message);
+      if (mentioned) {
+        mentionedCustomerLine = `\n\nملاحظة سياق (تم تحديدها محليًا بدون AI): رسالة المستخدم تذكر العميل "${mentioned.customerName}" (الكود: ${mentioned.customerCode}). إذا كان سؤال المستخدم عن عميل، استخدم هذا الكود مباشرة بدل تخمين الاسم أو البحث عنه.`;
       }
     } catch {
       // Best-effort only — Dictionary Engine resolution is an optimization,
@@ -447,6 +440,18 @@ export class AssistantService {
       decision: null,
       blocks,
     };
+  }
+
+  private async resolveCustomerMention(user: AuthenticatedUser, message: string) {
+    const normalizedMessage = message.trim().toLowerCase();
+    const { candidateCodes } = extractCandidateCodes(message);
+    const candidates = await this.rieFacade.queryAssistantCustomerMentionCandidates({
+      ...this.rieContext(user),
+      candidateCodes,
+      normalizedMessage,
+      allowNameMatch: normalizedMessage.length >= 4,
+    });
+    return resolveMentionedCustomer(message, candidates);
   }
 
   // FDA Local Decision Layer — Entity Resolution trigger + dispatch.

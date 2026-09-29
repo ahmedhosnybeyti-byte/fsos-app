@@ -9,7 +9,7 @@ import type { ExecutionPlan } from "./query-execution.types";
 import type { BusinessRuleFn } from "./business-rules.types";
 import type { RelationshipDefinition } from "./relationship-registry.types";
 import type { RieQueryOptions, RieQueryResult } from "./rie-facade.types";
-import { ENTITY_PROVIDER, type EntityFieldFilter, type EntityProvider, type EntityQueryContext, type EntityQueryOptions, type EntityQueryResult } from "./entity-provider.interface";
+import { ENTITY_PROVIDER, type EntityFieldFilter, type EntityProvider, type EntityQueryContext, type EntityQueryOptions, type EntityQueryResult, type EntityRecord } from "./entity-provider.interface";
 import { Prisma } from "@field-sales-os/database";
 import { PrismaService } from "../../common/prisma";
 import { FilesService } from "../files/files.service";
@@ -19,7 +19,7 @@ import { RieScalableQueryService } from "./scalable-query.service";
 import { RieFsos360QueryService } from "./fsos-360-query.service";
 import type { Fsos360Query } from "@field-sales-os/schemas";
 import type { Fsos360ResolvedContext } from "../decision-analytics-studio/fsos-360-context.service";
-import type { RieAssistantDatasetQuery, RieAssistantDatasetResult, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitQuery, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieSmartLoadingNetQuantityQuery, RieSmartLoadingNetQuantityRow, RieStalePurchaseRow, RieStalePurchasesQuery, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery } from "./scalable-query.types";
+import type { RieAssistantCustomerMentionQuery, RieAssistantDatasetQuery, RieAssistantDatasetResult, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitQuery, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieSmartLoadingNetQuantityQuery, RieSmartLoadingNetQuantityRow, RieStalePurchaseRow, RieStalePurchasesQuery, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRieLogicalOperation, observeRiePostgres, recordActiveVersionResolution, scopeMetadata } from "../../common/observability/rie-observability";
 import { RieRequestPlannerService, type RieRequestPlanOptions } from "./rie-request-planner.service";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
@@ -211,6 +211,10 @@ export class RieFacade {
   /** Compact PostgreSQL-first surface for Assistant's safe query_dataset subset. */
   queryAssistantDataset(query: RieAssistantDatasetQuery): Promise<RieAssistantDatasetResult> {
     return observeRieLogicalOperation("queryAssistantDataset", scopeMetadata(query), () => this.plannedOperation("queryAssistantDataset", () => this.scalableQuery.queryAssistantDataset(query)));
+  }
+
+  queryAssistantCustomerMentionCandidates(query: RieAssistantCustomerMentionQuery): Promise<EntityRecord[]> {
+    return observeRieLogicalOperation("queryAssistantCustomerMentionCandidates", scopeMetadata(query), () => this.plannedOperation("queryAssistantCustomerMentionCandidates", () => this.scalableQuery.queryAssistantCustomerMentionCandidates(query)));
   }
 
   queryGeoEngineMap(query: Omit<RieGeoEngineMapQuery, "invoicesAvailable">): Promise<RieGeoEngineMapResult> {
