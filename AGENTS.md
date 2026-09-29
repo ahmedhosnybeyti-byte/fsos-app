@@ -2,6 +2,10 @@
 
 These are permanent architecture rules for the project and are not specific to any individual screen.
 
+## Official working folder
+
+Run Murshidak work only from `D:\Field Sales OS`. If the current workspace path differs, stop before taking action.
+
 ## Persistent engineering memory
 
 Before making performance-sensitive backend, data-query, or scalability changes, read:
