@@ -4,9 +4,10 @@ import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { RieRequestPlannerService } from "./rie-request-planner.service";
 import type { EntityQueryContext, EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoEngineFilters, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitPeerScope, RieProductFitQuery, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieSmartLoadingNetQuantityQuery, RieSmartLoadingNetQuantityRow, RieStalePurchaseRow, RieStalePurchasesQuery, RieTerritoryCustomerFactsQuery, RieTerritoryCustomerFactsResult, RieTerritorySummaryFactRow, RieTerritorySummaryQuery, RieValueScope, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
+import type { RieAssistantDatasetQuery, RieAssistantDatasetResult, RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoEngineFilters, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitPeerScope, RieProductFitQuery, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieSmartLoadingNetQuantityQuery, RieSmartLoadingNetQuantityRow, RieStalePurchaseRow, RieStalePurchasesQuery, RieTerritoryCustomerFactsQuery, RieTerritoryCustomerFactsResult, RieTerritorySummaryFactRow, RieTerritorySummaryQuery, RieValueScope, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRiePostgres, recordActiveVersionResolution } from "../../common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
+import { assistantDatasetFields } from "./assistant-dataset-query.data";
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
@@ -157,6 +158,125 @@ export class RieScalableQueryService {
     `);
     const hasMore = input.unboundedFinalResult ? false : rows.length > page.limit;
     return { records: hasMore ? rows.slice(0, page.limit) : rows, page: { ...page, hasMore } };
+  }
+
+  /**
+   * Assistant's closed equality-only dataset contract. Company, hierarchy,
+   * current-state, filters, count, ordering, projection and pagination all
+   * stay in one coordinated PostgreSQL statement.
+   */
+  async queryAssistantDataset(input: RieAssistantDatasetQuery): Promise<RieAssistantDatasetResult> {
+    if (!input.companyId?.trim()) throw new Error("RIE Assistant dataset query requires companyId.");
+    const allowedFields = assistantDatasetFields(input.entityName);
+    if (!allowedFields) throw new Error(`RIE Assistant dataset entity "${input.entityName}" is not allowed.`);
+    const fieldSet = new Set(allowedFields);
+    const assertedFields = [
+      ...input.filters.map((filter) => filter.field),
+      ...input.hintFields,
+      ...(input.projection ?? []),
+    ];
+    for (const field of assertedFields) {
+      if (!fieldSet.has(field)) throw new Error(`RIE Assistant dataset field "${field}" is not allowed for ${input.entityName}.`);
+    }
+    if (!Number.isInteger(input.pagination.limit) || input.pagination.limit < 1 || input.pagination.limit > 60) {
+      throw new Error("RIE Assistant dataset limit is invalid.");
+    }
+    if (!Number.isInteger(input.pagination.offset) || input.pagination.offset < 0) {
+      throw new Error("RIE Assistant dataset offset is invalid.");
+    }
+
+    const routeField = fieldSet.has("RouteID") ? "RouteID" : null;
+    const allowedRoutes = routeField && input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const hierarchy = allowedRoutes === null
+      ? Prisma.empty
+      : allowedRoutes.size
+        ? Prisma.sql`AND LOWER(BTRIM(COALESCE(source_row."data" ->> ${routeField}, ''))) IN (${Prisma.join([...allowedRoutes])})`
+        : Prisma.sql`AND FALSE`;
+    const predicates = input.filters.map((filter) => {
+      const normalized = filter.values.map((value) => value.trim().toLowerCase());
+      return normalized.length
+        ? Prisma.sql`(visible."data" ->> ${filter.field}) IS NOT NULL AND LOWER(BTRIM(visible."data" ->> ${filter.field})) IN (${Prisma.join(normalized)})`
+        : Prisma.sql`FALSE`;
+    });
+    const filterClause = predicates.length ? Prisma.sql`WHERE ${Prisma.join(predicates, " AND ")}` : Prisma.empty;
+    const projection = input.projection
+      ? Prisma.sql`(
+          SELECT COALESCE(jsonb_object_agg(projected.field, filtered."data" -> projected.field), '{}'::jsonb)
+          FROM (VALUES ${Prisma.join(input.projection.map((field) => Prisma.sql`(${field})`))}) projected(field)
+          WHERE filtered."data" ? projected.field
+        )`
+      : Prisma.sql`filtered."data"`;
+    const pageCte = input.countOnly
+      ? Prisma.sql`page AS (SELECT NULL::jsonb data, NULL::integer precedence, NULL::timestamptz created_at, NULL::text id WHERE FALSE)`
+      : Prisma.sql`page AS MATERIALIZED (
+          SELECT ${projection} AS data, filtered.precedence, filtered.created_at, filtered.id
+          FROM filtered
+          ORDER BY filtered.precedence ASC, filtered.created_at ASC, filtered.id ASC
+          LIMIT ${input.pagination.limit} OFFSET ${input.pagination.offset}
+        )`;
+    const hintExpression = input.hintFields.length
+      ? Prisma.sql`COALESCE((
+          SELECT jsonb_object_agg(grouped.field, grouped.values)
+          FROM (
+            SELECT ranked.field, jsonb_agg(ranked.value ORDER BY ranked.value_rank) AS values
+            FROM (
+              SELECT first_value.field, first_value.value,
+                ROW_NUMBER() OVER (PARTITION BY first_value.field ORDER BY first_value.precedence, first_value.created_at, first_value.id) AS value_rank
+              FROM (
+                SELECT DISTINCT ON (hint.field, visible."data" ->> hint.field)
+                  hint.field, visible."data" ->> hint.field AS value,
+                  visible.precedence, visible.created_at, visible.id
+                FROM visible
+                CROSS JOIN (VALUES ${Prisma.join(input.hintFields.map((field) => Prisma.sql`(${field})`))}) hint(field)
+                CROSS JOIN total
+                WHERE total.count = 0
+                  AND (visible."data" ->> hint.field) IS NOT NULL
+                  AND (visible."data" ->> hint.field) <> ''
+                ORDER BY hint.field, visible."data" ->> hint.field, visible.precedence, visible.created_at, visible.id
+              ) first_value
+            ) ranked
+            WHERE ranked.value_rank <= 8
+            GROUP BY ranked.field
+          ) grouped
+        ), '{}'::jsonb)`
+      : Prisma.sql`'{}'::jsonb`;
+
+    const rows = await this.postgres<Array<{
+      totalMatchingRows: number;
+      records: EntityRecord[];
+      noMatchHint: Record<string, string[]>;
+    }>>(
+      "queryAssistantDataset.sql",
+      {
+        kind: "specialized",
+        operation: "queryAssistantDataset",
+        entityName: input.entityName,
+        filterFields: input.filters.map((filter) => filter.field),
+        projection: input.projection,
+        hintFields: input.hintFields,
+        countOnly: input.countOnly,
+      },
+      () => Prisma.sql`
+        WITH visible AS MATERIALIZED (
+          SELECT source_row.id, source_row.precedence, source_row."data", source_row.created_at
+          FROM "rie_canonical_entity_rows" source_row
+          WHERE source_row.company_id = ${input.companyId}
+            AND source_row.entity_name = ${input.entityName}
+            ${hierarchy}
+        ), filtered AS MATERIALIZED (
+          SELECT visible.* FROM visible ${filterClause}
+        ), total AS (
+          SELECT COUNT(*)::double precision AS count FROM filtered
+        ), ${pageCte}
+        SELECT total.count AS "totalMatchingRows",
+          COALESCE((SELECT jsonb_agg(page.data ORDER BY page.precedence, page.created_at, page.id) FROM page), '[]'::jsonb) AS records,
+          ${hintExpression} AS "noMatchHint"
+        FROM total
+      `,
+    );
+    return rows[0] ?? { totalMatchingRows: 0, records: [], noMatchHint: {} };
   }
 
   /** One-row PostgreSQL contract for Local Decision -> GetTotalSales. */

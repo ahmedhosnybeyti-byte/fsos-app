@@ -32,6 +32,27 @@ export interface RieScalableQueryScope {
   fields?: readonly (RieValueScope & { field: string })[];
 }
 export interface RieQueryPagination { limit?: number; offset?: number; }
+
+/** Closed, equality-only contract used by Assistant query_dataset. */
+export interface RieAssistantDatasetFilter {
+  field: string;
+  values: readonly string[];
+}
+export interface RieAssistantDatasetQuery extends EntityQueryContext {
+  entityName: string;
+  filters: readonly RieAssistantDatasetFilter[];
+  /** null returns the official template projection; otherwise only these fields. */
+  projection: readonly string[] | null;
+  /** Fields whose scoped source values may be returned when the filter matches zero rows. */
+  hintFields: readonly string[];
+  countOnly: boolean;
+  pagination: { limit: number; offset: number };
+}
+export interface RieAssistantDatasetResult {
+  records: readonly EntityRecord[];
+  totalMatchingRows: number;
+  noMatchHint: Record<string, string[]>;
+}
 export interface RieQueryOrder { field?: RieQueryField; aggregate?: string; direction?: "asc" | "desc"; }
 /** Retain only rows at the latest text date/value within each partition. */
 export interface RieLatestPerScope { partitionBy: RieQueryField; orderBy: RieQueryField; }

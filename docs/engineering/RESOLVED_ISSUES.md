@@ -193,3 +193,11 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Fix:** Resolve hierarchy and peer priority in PostgreSQL, narrow Invoice Items through the canonical peer-invoice set, aggregate `SUM(LineTotal)` and distinct customers per product, and return only those aggregates plus the six Product fields used by Node matching/scoring. Preserve the permission-isolated five-minute cache and its missing-requester bypass.
 - **Commit:** Current local commit.
 - **Regression-prevention rule:** Product Fit must never return raw Customers, Invoices, or Invoice Items to Node; preserve CustomerType → Channel → conditional HoReCa fallback semantics and keep only final taxonomy/scoring work in Node.
+
+## Assistant `query_dataset` — safe filters materialized full entities
+
+- **Symptom:** Even bounded Assistant requests with only exact/`in` filters, count, projection, and pagination loaded the complete hierarchy-visible canonical entity into Node before filtering.
+- **Root cause:** `query_dataset` had one legacy execution path for both SQL-safe queries and richer search/group/sort/operator behavior.
+- **Fix:** Route only the closed safe subset through one coordinated canonical current-state PostgreSQL statement. It applies company/hierarchy scope, exact/`in` filters, count, canonical ordering, total count, projection, offset/limit, and zero-match hints before returning a compact result; all excluded behavior retains the legacy path.
+- **Commit:** This local commit.
+- **Regression-prevention rule:** Never widen the SQL-safe subset without an entity/field/operator whitelist and PostgreSQL parity coverage. Safe `query_dataset` requests must not call `getEntityRecords()`, page through facts, or rebuild filters/counts in Node.

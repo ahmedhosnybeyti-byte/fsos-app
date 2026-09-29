@@ -34,6 +34,7 @@ import { buildBranchResolver, buildRegionResolver, type OrgUnitLike, type OrgUni
 import { OrgUnitsService } from "../companies/org-units.service";
 import { dispatchIntent } from "../local-decision/intent-dispatcher";
 import { PrismaService } from "../../common/prisma";
+import { assistantDatasetFields } from "../rie/assistant-dataset-query.data";
 
 // Native, in-app replacement for the external ChatGPT Custom GPT screen.
 // Same job the GPT Actions (verify-access / dataset / render, see
@@ -95,6 +96,23 @@ const STALE_TOOL_RESULT_CHARS = 200; // below this, compaction isn't worth the r
 const STALE_TOOL_RESULT_PLACEHOLDER = JSON.stringify({
   note: "نتيجة سابقة تم استخدامها بالفعل في هذا الحوار — غير معروضة هنا لتوفير المساحة. نادِ الأداة تاني لو احتجت البيانات دي تاني.",
 });
+
+type AssistantDatasetInput = {
+  entityName?: string;
+  customerId?: string;
+  invoiceId?: string;
+  routeId?: string;
+  salesRep?: string;
+  search?: string;
+  filters?: Record<string, string | FilterOperatorSpec>;
+  aggregate?: { op: AggregateSpec["op"]; column?: string };
+  groupBy?: string;
+  columns?: string[];
+  sortBy?: string;
+  sortDir?: "asc" | "desc";
+  limit?: number;
+  offset?: number;
+};
 
 // Truncates long string field values so a single verbose/free-text column
 // can't blow the token budget on its own, then — belt-and-braces — drops
@@ -639,23 +657,11 @@ export class AssistantService {
   }
 
   private async queryDataset(user: AuthenticatedUser, raw: unknown): Promise<unknown> {
-    const input = raw as {
-      entityName?: string;
-      customerId?: string;
-      invoiceId?: string;
-      routeId?: string;
-      salesRep?: string;
-      search?: string;
-      filters?: Record<string, string | FilterOperatorSpec>;
-      aggregate?: { op: AggregateSpec["op"]; column?: string };
-      groupBy?: string;
-      columns?: string[];
-      sortBy?: string;
-      sortDir?: "asc" | "desc";
-      limit?: number;
-      offset?: number;
-    };
+    const input = raw as AssistantDatasetInput;
     if (!input.entityName) return { error: "entityName مطلوب." };
+
+    const postgresResult = await this.queryDatasetPostgresFirst(user, input);
+    if (postgresResult !== null) return postgresResult;
 
     // Migration #9 — RieFacade.getEntityRecords already applies Hierarchy
     // Row-Level Filtering internally (ExcelDatasetEntityProvider), so no
@@ -807,6 +813,114 @@ export class AssistantService {
       limit,
       offset,
       hasMore: offset + cappedRows.length < matchingRows.length,
+      rows: cappedRows,
+      ...(noMatchHint ? { noMatchHint } : {}),
+    };
+  }
+
+  /**
+   * Returns null only when the request is deliberately outside the safe
+   * equality/count subset and must retain the existing Node behavior.
+   */
+  private async queryDatasetPostgresFirst(user: AuthenticatedUser, input: AssistantDatasetInput): Promise<unknown | null> {
+    const headers = input.entityName ? assistantDatasetFields(input.entityName) : null;
+    if (!headers || input.search !== undefined || input.sortBy !== undefined || input.groupBy !== undefined) return null;
+    if (input.aggregate && input.aggregate.op !== "count") return null;
+    if ((input.limit !== undefined && !Number.isInteger(input.limit)) || (input.offset !== undefined && !Number.isInteger(input.offset))) return null;
+
+    const genericEntries = Object.entries(input.filters ?? {});
+    const filtersAreSafe = genericEntries.every(([, value]) => {
+      if (typeof value === "string") return true;
+      if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+      const keys = Object.keys(value);
+      return keys.length === 1 && keys[0] === "in" && Array.isArray(value.in) && value.in.every((item) => typeof item === "string");
+    });
+    if (!filtersAreSafe) return null;
+
+    const ctx = this.rieContext(user);
+    if (!await this.rieFacade.hasCanonicalEntitySources(ctx, [input.entityName!])) {
+      return { error: `الكيان "${input.entityName}" غير متاح لهذه الشركة. استخدم list_datasets للحصول على قائمة صحيحة.` };
+    }
+
+    const filters: Array<{ field: string; values: string[] }> = [];
+    const hintFields = new Set<string>();
+    try {
+      for (const key of ["customerId", "invoiceId", "routeId", "salesRep"] as const) {
+        const value = input[key];
+        if (!value) continue;
+        const field = resolveColumnAlias([...headers], key);
+        if (!field) {
+          throw new BadRequestException(
+            `No column matching "${key}" was found in this dataset. Available columns: ${headers.join(", ")}. Use "filters" with the exact column name instead.`,
+          );
+        }
+        filters.push({ field, values: [value] });
+        hintFields.add(field);
+      }
+      for (const [key, value] of genericEntries) {
+        const field = headers.find((header) => header.toLowerCase() === key.toLowerCase());
+        if (!field) {
+          throw new BadRequestException(`filters column "${key}" was not found in this dataset. Available columns: ${headers.join(", ")}.`);
+        }
+        filters.push({ field, values: typeof value === "string" ? [value] : [...value.in!] });
+        hintFields.add(field);
+      }
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "فلتر غير صالح." };
+    }
+
+    let aggregateColumn: string | undefined;
+    if (input.aggregate?.column) {
+      try {
+        aggregateColumn = resolveExactColumn([...headers], input.aggregate.column);
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : "عمود غير صالح." };
+      }
+    }
+
+    let projection: string[] | null = null;
+    if (!input.aggregate && input.columns && input.columns.length > 0) {
+      try {
+        projection = resolveColumns([...headers], input.columns);
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : "أعمدة غير صالحة." };
+      }
+    }
+
+    const limit = Math.min(Math.max(input.limit ?? 20, 1), MAX_ROWS_RETURNED_TO_MODEL);
+    const offset = Math.max(input.offset ?? 0, 0);
+    const result = await this.rieFacade.queryAssistantDataset({
+      ...ctx,
+      entityName: input.entityName!,
+      filters,
+      projection,
+      hintFields: [...hintFields],
+      countOnly: Boolean(input.aggregate),
+      pagination: { limit, offset },
+    });
+    const noMatchHint = Object.keys(result.noMatchHint).length ? result.noMatchHint : undefined;
+
+    if (input.aggregate) {
+      return {
+        totalMatchingRows: result.totalMatchingRows,
+        aggregate: {
+          op: "count",
+          column: aggregateColumn ?? null,
+          value: result.totalMatchingRows,
+          rowsAggregated: result.totalMatchingRows,
+          skippedNonNumericRows: 0,
+        },
+        ...(noMatchHint ? { noMatchHint } : {}),
+      };
+    }
+
+    const cappedRows = capRowsForModel(result.records as DatasetRow[]);
+    return {
+      totalMatchingRows: result.totalMatchingRows,
+      returnedRows: cappedRows.length,
+      limit,
+      offset,
+      hasMore: offset + cappedRows.length < result.totalMatchingRows,
       rows: cappedRows,
       ...(noMatchHint ? { noMatchHint } : {}),
     };
