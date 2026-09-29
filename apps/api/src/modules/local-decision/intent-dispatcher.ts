@@ -24,7 +24,6 @@ import { RieFacade } from "../rie/rie-facade.service";
 import { PrismaService } from "../../common/prisma";
 import { ASSISTANT_INTENT_REGISTRY, type AssistantIntent } from "./assistant-intent-registry.data";
 import { parseTimeContext, type DateRange } from "./time-context-parser";
-import type { DatasetRow } from "../files/dataset-query.util";
 
 export type IntentDispatchOutcome =
   | { status: "answered"; intentId: string; text: string }
@@ -90,29 +89,9 @@ function fmtMoney(n: number): string {
   return n.toLocaleString("ar-EG", { maximumFractionDigits: 2 });
 }
 
-// Every date field this dispatcher filters by (InvoiceDate, CollectionDate)
-// is a plain date string per the import templates — same convention
-// time-context-parser.ts documents. Comparison is done as ISO string
-// comparison after normalizing to YYYY-MM-DD, which sorts correctly for
-// same-format dates; values that don't parse as dates are excluded rather
-// than guessed.
-function rowDateInRange(row: DatasetRow, dateColumn: string, range: DateRange): boolean {
-  const raw = row[dateColumn];
-  if (raw === null || raw === undefined || raw === "") return false;
-  const d = new Date(String(raw));
-  if (Number.isNaN(d.getTime())) return false;
-  const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  return iso >= range.start && iso <= range.end;
-}
-
-function findColumn(fields: readonly string[], candidates: readonly string[]): string | null {
-  for (const c of candidates) {
-    const hit = fields.find((f) => f.toLowerCase() === c.toLowerCase());
-    if (hit) return hit;
-  }
-  return null;
-}
-
+// Date parsing/filtering for the wired aggregate intents now stays in their
+// PostgreSQL contracts; this dispatcher owns only time-context parsing and
+// the unchanged localized response wording.
 async function handleGetTotalSales(rieFacade: RieFacade, prisma: PrismaService, user: AuthenticatedUser, range: DateRange, periodLabel: string): Promise<string> {
   const ctx = { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
   const [sales, currency] = await Promise.all([
@@ -128,62 +107,31 @@ async function handleGetTotalSales(rieFacade: RieFacade, prisma: PrismaService, 
 
 async function handleGetCollectionsTotal(rieFacade: RieFacade, prisma: PrismaService, user: AuthenticatedUser, range: DateRange, periodLabel: string): Promise<string> {
   const ctx = { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
-  const [result, currency] = await Promise.all([rieFacade.getEntityRecords("Collections", ctx), resolveCurrencyLabel(prisma, user.companyId!)]);
+  const [result, currency] = await Promise.all([
+    rieFacade.queryLocalDecisionCollections(ctx, { mode: "collectionDateRange", ...range }),
+    resolveCurrencyLabel(prisma, user.companyId!),
+  ]);
 
   if (!result.available) {
     return "لا توجد بيانات تحصيل متاحة حاليًا للشركة — تأكد من رفع ملف Collections أولاً.";
   }
 
-  const dateCol = findColumn(result.fields, ["CollectionDate"]);
-  const amountCol = findColumn(result.fields, ["Amount"]);
-  if (!dateCol || !amountCol) {
-    return "تعذر إيجاد الأعمدة المطلوبة (CollectionDate / Amount) في بيانات التحصيل الحالية.";
-  }
-
-  const inRange = (result.records as DatasetRow[]).filter((row) => rowDateInRange(row, dateCol, range));
-  const total = inRange.reduce((sum, row) => {
-    const n = Number(row[amountCol]);
-    return Number.isFinite(n) ? sum + n : sum;
-  }, 0);
-
-  return `إجمالي التحصيل خلال ${periodLabel}: ${fmtMoney(total)} ${currency}.`;
+  return `إجمالي التحصيل خلال ${periodLabel}: ${fmtMoney(result.total)} ${currency}.`;
 }
 
 async function handleGetOverdueCollections(rieFacade: RieFacade, prisma: PrismaService, user: AuthenticatedUser): Promise<string> {
   const ctx = { companyId: user.companyId!, requestingUser: { roleCode: user.roleCode, email: user.email } };
-  const [result, currency] = await Promise.all([rieFacade.getEntityRecords("Collections", ctx), resolveCurrencyLabel(prisma, user.companyId!)]);
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const [result, currency] = await Promise.all([
+    rieFacade.queryLocalDecisionCollections(ctx, { mode: "overduePending", before: todayIso }),
+    resolveCurrencyLabel(prisma, user.companyId!),
+  ]);
 
   if (!result.available) {
     return "لا توجد بيانات تحصيل متاحة حاليًا للشركة — تأكد من رفع ملف Collections أولاً.";
   }
 
-  const statusCol = findColumn(result.fields, ["Status"]);
-  const dueDateCol = findColumn(result.fields, ["DueDate"]);
-  const amountCol = findColumn(result.fields, ["Amount"]);
-  const customerCol = findColumn(result.fields, ["CustomerCode"]);
-  if (!statusCol || !dueDateCol || !amountCol) {
-    return "تعذر إيجاد الأعمدة المطلوبة (Status / DueDate / Amount) في بيانات التحصيل الحالية.";
-  }
-
-  const todayIso = new Date().toISOString().slice(0, 10);
-  const overdue = (result.records as DatasetRow[]).filter((row) => {
-    const status = String(row[statusCol] ?? "").trim().toLowerCase();
-    if (status !== "pending") return false;
-    const due = row[dueDateCol];
-    if (due === null || due === undefined || due === "") return false;
-    const d = new Date(String(due));
-    if (Number.isNaN(d.getTime())) return false;
-    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-    return iso < todayIso;
-  });
-
-  const total = overdue.reduce((sum, row) => {
-    const n = Number(row[amountCol]);
-    return Number.isFinite(n) ? sum + n : sum;
-  }, 0);
-  const customerCount = customerCol ? new Set(overdue.map((r) => String(r[customerCol] ?? ""))).size : overdue.length;
-
-  return `إجمالي التحصيلات المتأخرة: ${fmtMoney(total)} ${currency}، عدد العملاء: ${customerCount}.`;
+  return `إجمالي التحصيلات المتأخرة: ${fmtMoney(result.total)} ${currency}، عدد العملاء: ${result.customerCount}.`;
 }
 
 // Single entry point. Returns "not_matched" for any message that doesn't

@@ -60,6 +60,19 @@ export interface RieAssistantCustomerMentionQuery extends EntityQueryContext {
   normalizedMessage: string;
   allowNameMatch: boolean;
 }
+
+export type RieLocalDecisionCollectionsScope =
+  | { mode: "collectionDateRange"; start: string; end: string; customerCodes?: readonly string[] }
+  | { mode: "overduePending"; before: string; customerCodes?: readonly string[] };
+export type RieLocalDecisionCollectionsQuery = EntityQueryContext & RieLocalDecisionCollectionsScope;
+export interface RieLocalDecisionCollectionsSummary {
+  total: number;
+  pendingTotal: number;
+  bouncedTotal: number;
+  collectedTotal: number;
+  customerCount: number;
+  oldestDueDate: string | null;
+}
 export interface RieQueryOrder { field?: RieQueryField; aggregate?: string; direction?: "asc" | "desc"; }
 /** Retain only rows at the latest text date/value within each partition. */
 export interface RieLatestPerScope { partitionBy: RieQueryField; orderBy: RieQueryField; }

@@ -19,7 +19,7 @@ import { RieScalableQueryService } from "./scalable-query.service";
 import { RieFsos360QueryService } from "./fsos-360-query.service";
 import type { Fsos360Query } from "@field-sales-os/schemas";
 import type { Fsos360ResolvedContext } from "../decision-analytics-studio/fsos-360-context.service";
-import type { RieAssistantCustomerMentionQuery, RieAssistantDatasetQuery, RieAssistantDatasetResult, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitQuery, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieSmartLoadingNetQuantityQuery, RieSmartLoadingNetQuantityRow, RieStalePurchaseRow, RieStalePurchasesQuery, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery } from "./scalable-query.types";
+import type { RieAssistantCustomerMentionQuery, RieAssistantDatasetQuery, RieAssistantDatasetResult, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieLocalDecisionCollectionsQuery, RieLocalDecisionCollectionsScope, RieLocalDecisionCollectionsSummary, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitQuery, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieSmartLoadingNetQuantityQuery, RieSmartLoadingNetQuantityRow, RieStalePurchaseRow, RieStalePurchasesQuery, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRieLogicalOperation, observeRiePostgres, recordActiveVersionResolution, scopeMetadata } from "../../common/observability/rie-observability";
 import { RieRequestPlannerService, type RieRequestPlanOptions } from "./rie-request-planner.service";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
@@ -40,6 +40,10 @@ export interface RieInvoiceSalesRow {
 export interface RieLocalDecisionTotalSalesResult {
   available: boolean;
   total: number;
+}
+
+export interface RieLocalDecisionCollectionsResult extends RieLocalDecisionCollectionsSummary {
+  available: boolean;
 }
 
 /** Fact and large-dimension entities must enter RIE through a bounded scope. */
@@ -260,6 +264,17 @@ export class RieFacade {
 
     const total = await this.scalableQuery.queryLocalDecisionTotalSales({ ...context, ...range });
     return { available: true, total };
+  }
+
+  async queryLocalDecisionCollections(
+    context: EntityQueryContext,
+    scope: RieLocalDecisionCollectionsScope,
+  ): Promise<RieLocalDecisionCollectionsResult> {
+    if (!await this.hasCanonicalEntitySources(context, ["Collections"])) {
+      return { available: false, total: 0, pendingTotal: 0, bouncedTotal: 0, collectedTotal: 0, customerCount: 0, oldestDueDate: null };
+    }
+    const summary = await this.scalableQuery.queryLocalDecisionCollections({ ...context, ...scope } as RieLocalDecisionCollectionsQuery);
+    return { available: true, ...summary };
   }
 
   queryRouteProductStaleness(query: RieRouteProductStalenessQuery): Promise<RieRouteProductStalenessRow[]> {

@@ -209,3 +209,11 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Fix:** One coordinated canonical current-state PostgreSQL query now applies company and hierarchy scope, filters to possible code/name candidates, and projects only CustomerCode and CustomerName. The unchanged Dictionary Engine still selects the winner, preserving code priority, longest-name, canonical first-match, duplicate, blank, and no-match behavior.
 - **Commit:** This local commit.
 - **Regression-prevention rule:** Assistant pre-tool customer resolution must never call `getEntityRecords("Customers")`, page through Customers, or query once per candidate. Keep candidate extraction parameterized and winner parity covered against the original Dictionary Engine.
+
+## Local Decision Collections intents — full fact reads
+
+- **Symptom:** `GetCollectionsTotal` and `GetOverdueCollections` loaded every hierarchy-visible Collections record, then filtered dates/statuses and aggregated amounts/customers in Node.
+- **Root cause:** The two production-wired intents still used the legacy entity provider instead of a compact Local Decision Collections contract.
+- **Fix:** One specialized canonical current-state query now applies company/hierarchy plus date, Pending/due-date, and optional customer scope before returning a single aggregate row. It preserves all-status date totals, exact Pending overdue semantics, JavaScript Number/isFinite coercion, distinct blank-customer handling, oldest due date, wording, and source fallbacks.
+- **Commit:** This local commit.
+- **Regression-prevention rule:** Production-wired Collections aggregates must not call `getEntityRecords("Collections")` or materialize facts in Node. Keep status/date/customer predicates in coordinated parameterized PostgreSQL and return only compact aggregates.

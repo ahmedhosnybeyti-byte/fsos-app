@@ -4,7 +4,7 @@ import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { RieRequestPlannerService } from "./rie-request-planner.service";
 import type { EntityQueryContext, EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieAssistantCustomerMentionQuery, RieAssistantDatasetQuery, RieAssistantDatasetResult, RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoEngineFilters, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitPeerScope, RieProductFitQuery, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieSmartLoadingNetQuantityQuery, RieSmartLoadingNetQuantityRow, RieStalePurchaseRow, RieStalePurchasesQuery, RieTerritoryCustomerFactsQuery, RieTerritoryCustomerFactsResult, RieTerritorySummaryFactRow, RieTerritorySummaryQuery, RieValueScope, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
+import type { RieAssistantCustomerMentionQuery, RieAssistantDatasetQuery, RieAssistantDatasetResult, RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoEngineFilters, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieLocalDecisionCollectionsQuery, RieLocalDecisionCollectionsSummary, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitPeerScope, RieProductFitQuery, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieSmartLoadingNetQuantityQuery, RieSmartLoadingNetQuantityRow, RieStalePurchaseRow, RieStalePurchasesQuery, RieTerritoryCustomerFactsQuery, RieTerritoryCustomerFactsResult, RieTerritorySummaryFactRow, RieTerritorySummaryQuery, RieValueScope, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRiePostgres, recordActiveVersionResolution } from "../../common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 import { assistantDatasetFields } from "./assistant-dataset-query.data";
@@ -395,6 +395,73 @@ export class RieScalableQueryService {
     );
     const total = Number(rows[0]?.total ?? 0);
     return Number.isFinite(total) ? total : 0;
+  }
+
+  /** One-row PostgreSQL contract for Local Decision's wired Collections intents. */
+  async queryLocalDecisionCollections(input: RieLocalDecisionCollectionsQuery): Promise<RieLocalDecisionCollectionsSummary> {
+    if (!input.companyId?.trim()) throw new Error("RIE Local Decision Collections query requires companyId.");
+    const allowedRoutes = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const predicates: Prisma.Sql[] = [];
+    if (allowedRoutes !== null) {
+      predicates.push(allowedRoutes.size
+        ? Prisma.sql`${normalizedField({ field: "RouteID", source: "collection_source" })} IN (${Prisma.join([...allowedRoutes])})`
+        : Prisma.sql`FALSE`);
+    }
+    if (input.customerCodes) {
+      const customerCodes = input.customerCodes.map((value) => value.trim().toLowerCase());
+      predicates.push(customerCodes.length
+        ? Prisma.sql`${normalizedField({ field: "CustomerCode", source: "collection_source" })} IN (${Prisma.join(customerCodes)})`
+        : Prisma.sql`FALSE`);
+    }
+    if (input.mode === "collectionDateRange") {
+      const collectionDate = localDecisionDateField("collection_source", "CollectionDate");
+      predicates.push(Prisma.sql`${collectionDate} >= ${input.start} AND ${collectionDate} <= ${input.end}`);
+    } else {
+      const dueDate = localDecisionDateField("collection_source", "DueDate");
+      predicates.push(Prisma.sql`${normalizedField({ field: "Status", source: "collection_source" })} = 'pending'`);
+      predicates.push(Prisma.sql`${dueDate} < ${input.before}`);
+    }
+    const collections = activeEntityRowsCte(input.companyId, "Collections", "collection", predicates, [], []);
+    const amount = localDecisionNumberField("collection", "Amount");
+    const status = normalizedField({ field: "Status", source: "collection" });
+    const dueDate = localDecisionDateField("collection", "DueDate");
+    const customer = textField({ field: "CustomerCode", source: "collection" });
+    const rows = await this.postgres<Array<{
+      total: number | null;
+      pendingTotal: number | null;
+      bouncedTotal: number | null;
+      collectedTotal: number | null;
+      customerCount: number;
+      oldestDueDate: string | null;
+    }>>(
+      "queryLocalDecisionCollections.sql",
+      { kind: "specialized", operation: "queryLocalDecisionCollections", mode: input.mode, hasCustomerScope: input.customerCodes !== undefined },
+      () => Prisma.sql`
+        WITH ${collections}
+        SELECT COALESCE(SUM(${amount}), 0)::double precision AS total,
+          COALESCE(SUM(${amount}) FILTER (WHERE ${status} = 'pending'), 0)::double precision AS "pendingTotal",
+          COALESCE(SUM(${amount}) FILTER (WHERE ${status} = 'bounced'), 0)::double precision AS "bouncedTotal",
+          COALESCE(SUM(${amount}) FILTER (WHERE ${status} = 'collected'), 0)::double precision AS "collectedTotal",
+          COUNT(DISTINCT COALESCE(${customer}, ''))::integer AS "customerCount",
+          MIN(${dueDate}) AS "oldestDueDate"
+        FROM collection_active collection
+      `,
+    );
+    const row = rows[0];
+    const finite = (value: number | null | undefined) => {
+      const number = Number(value ?? 0);
+      return Number.isFinite(number) ? number : 0;
+    };
+    return {
+      total: finite(row?.total),
+      pendingTotal: finite(row?.pendingTotal),
+      bouncedTotal: finite(row?.bouncedTotal),
+      collectedTotal: finite(row?.collectedTotal),
+      customerCount: Number(row?.customerCount ?? 0),
+      oldestDueDate: row?.oldestDueDate ?? null,
+    };
   }
 
   /**
@@ -3678,6 +3745,11 @@ function localDecisionNumberField(source: string, field: string): Prisma.Sql {
       THEN BTRIM(${text})::double precision
     ELSE NULL
   END`;
+}
+/** Official Local Decision date fields are ISO days; invalid/blank values stay excluded. */
+function localDecisionDateField(source: string, field: string): Prisma.Sql {
+  const text = Prisma.sql`${Prisma.raw(source)}."data" ->> ${Prisma.raw(`'${field}'`)}`;
+  return Prisma.sql`CASE WHEN BTRIM(COALESCE(${text}, '')) ~ '^\\d{4}-\\d{2}-\\d{2}' THEN LEFT(BTRIM(${text}), 10) ELSE NULL END`;
 }
 /** Geo's legacy coercion accepted signed decimals and exponent notation. */
 function geoFiniteNumberField(field: Prisma.Sql): Prisma.Sql { return Prisma.sql`CASE WHEN BTRIM(COALESCE(${field}, '')) ~ '^[+-]?(\\d+(\\.\\d*)?|\\.\\d+)([eE][+-]?\\d+)?$' THEN BTRIM(COALESCE(${field}, ''))::double precision ELSE NULL END`; }
