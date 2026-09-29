@@ -39,9 +39,7 @@ test("trace connects facade, hierarchy, semaphore and PostgreSQL with accurate c
     const prisma = {
       $queryRaw: async () => {
         sqlCalls += 1;
-        return sqlCalls === 1
-          ? [{ entityName: "Customers", versionCount: 1n }]
-          : [{ CustomerCode: "customer-secret", CustomerName: "payload-secret" }];
+        return [{ CustomerCode: "customer-secret", CustomerName: "payload-secret" }];
       },
     };
     const hierarchy = new CanonicalHierarchyResolverService(prisma as never);
@@ -61,19 +59,19 @@ test("trace connects facade, hierarchy, semaphore and PostgreSQL with accurate c
       completeRieRequest(200);
     });
 
-    assert.equal(sqlCalls, 2);
+    assert.equal(sqlCalls, 1);
     const summary = events.find((event) => event.event === "rie_request_summary");
     assert.ok(summary);
     assert.equal(summary.traceId, "trace-test-1");
     assert.equal(summary.rieLogicalOperationCount, 1);
-    assert.equal(summary.sqlOperationCount, 2);
-    assert.equal(summary.semaphoreAcquisitionCount, 2);
+    assert.equal(summary.sqlOperationCount, 1);
+    assert.equal(summary.semaphoreAcquisitionCount, 1);
     assert.equal(summary.directSqlOperationCount, 0);
     assert.equal(summary.hierarchyResolutionCount, 2);
-    assert.equal(summary.versionResolutionCount, 1);
-    assert.equal(summary.activeVersionEntityCount, 1);
-    assert.equal(summary.activeSourceVersionCount, 1);
-    assert.equal(summary.rowsReturnedTotal, 2);
+    assert.equal(summary.versionResolutionCount, 0);
+    assert.equal(summary.activeVersionEntityCount, 0);
+    assert.equal(summary.activeSourceVersionCount, 0);
+    assert.equal(summary.rowsReturnedTotal, 1);
     assert.ok(events.some((event) => event.layer === "facade" && event.traceId === "trace-test-1"));
     assert.ok(events.some((event) => event.layer === "semaphore" && event.traceId === "trace-test-1"));
     assert.ok(events.some((event) => event.layer === "postgres" && event.governance === "semaphore" && event.traceId === "trace-test-1"));
@@ -118,19 +116,13 @@ test("FSOS360 SQL is visible through the RIE execution coordinator", async () =>
   }
 });
 
-test("planned Smart Loading-style work reuses hierarchy and active versions while bounding fan-out", async () => {
+test("planned Smart Loading-style work reuses hierarchy and reads canonical current-state while bounding fan-out", async () => {
   const events: Event[] = [];
   const restore = setRieTelemetryTestSink((event) => events.push({ ...event }), 1);
   try {
-    let activeVersionQueries = 0;
     let factQueries = 0;
     const prisma = {
-      $queryRaw: async (query: { strings?: readonly string[] }) => {
-        const text = query.strings?.join(" ") ?? "";
-        if (text.includes('COUNT(*) AS "versionCount"')) {
-          activeVersionQueries += 1;
-          return [{ entityName: "Customers", versionCount: 1n }];
-        }
+      $queryRaw: async () => {
         factQueries += 1;
         return [];
       },
@@ -154,7 +146,6 @@ test("planned Smart Loading-style work reuses hierarchy and active versions whil
       completeRieRequest(200);
     });
 
-    assert.equal(activeVersionQueries, 1);
     assert.equal(factQueries, 2);
     const summary = events.find((event) => event.event === "rie_request_summary");
     assert.ok(summary);
@@ -163,7 +154,8 @@ test("planned Smart Loading-style work reuses hierarchy and active versions whil
     assert.equal(summary.plannedOperationMaxActiveCount, 1);
     assert.equal(summary.hierarchyResolutionCount, 1);
     assert.ok(Number(summary.hierarchyReuseCount) >= 3);
-    assert.ok(Number(summary.activeVersionReuseCount) >= 1);
+    assert.equal(summary.versionResolutionCount, 0);
+    assert.equal(summary.activeVersionReuseCount, 0);
   } finally {
     restore();
   }
