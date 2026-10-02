@@ -10,6 +10,15 @@ type Row = Record<string, unknown>;
 const number = (v: unknown) => typeof v === "bigint" ? Number(v) : typeof v === "number" ? (Number.isFinite(v) ? v : null) : typeof v === "string" && v.trim() && Number.isFinite(Number(v.replace(/,/g, ""))) ? Number(v.replace(/,/g, "")) : null;
 const key = (v: unknown) => String(v ?? "").slice(0, 10);
 const monthStart = (d: Date, delta = 0) => new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + delta, 1));
+const dateKeyInTimeZone = (date: Date, timeZone: string | null | undefined) => {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timeZone || "UTC", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(date);
+    const value = (type: string) => parts.find((part) => part.type === type)?.value;
+    const year = value("year"), month = value("month"), day = value("day");
+    if (year && month && day) return `${year}-${month}-${day}`;
+  } catch {}
+  return date.toISOString().slice(0, 10);
+};
 
 @Injectable()
 export class DashboardPerformanceService {
@@ -18,7 +27,7 @@ export class DashboardPerformanceService {
   private aggregate(query: RieScalableQuery): Promise<RieScalableQueryResult> { return this.rie.queryCanonicalRecords({ ...query, pagination: { limit: 500 } }); }
 
   async get(user: AuthenticatedUser, benchmark: DashboardBenchmark, routeIds?: string[], dateFrom?: string, dateTo?: string, comparisonFrom?: string, comparisonTo?: string) {
-    const now = new Date(), currentFrom = dateFrom ? new Date(`${dateFrom}T00:00:00Z`) : monthStart(now), currentTo = dateTo ? new Date(`${dateTo}T23:59:59Z`) : now, comparisonStart = comparisonFrom ? new Date(`${comparisonFrom}T00:00:00Z`) : null, comparisonEnd = comparisonTo ? new Date(`${comparisonTo}T23:59:59Z`) : null, start = monthStart(currentFrom), next = monthStart(currentTo, 1), ctx = this.ctx(user), factFrom = (comparisonStart ?? monthStart(currentFrom, -3)).getTime(), factTo = currentTo.getTime();
+    const now = new Date(), defaultDate = dateTo ? null : dateKeyInTimeZone(now, (await this.prisma.companyProfile.findUnique({ where: { companyId: user.companyId! }, select: { timeZone: true } }))?.timeZone), currentFrom = dateFrom ? new Date(`${dateFrom}T00:00:00Z`) : defaultDate ? monthStart(new Date(`${defaultDate}T00:00:00Z`)) : monthStart(now), currentTo = new Date(`${dateTo ?? defaultDate}T23:59:59Z`), comparisonStart = comparisonFrom ? new Date(`${comparisonFrom}T00:00:00Z`) : null, comparisonEnd = comparisonTo ? new Date(`${comparisonTo}T23:59:59Z`) : null, start = monthStart(currentFrom), next = monthStart(currentTo, 1), ctx = this.ctx(user), factFrom = (comparisonStart ?? monthStart(currentFrom, -3)).getTime(), factTo = currentTo.getTime();
     const routeScope = routeIds?.length ? { route: { values: routeIds } } : {};
     // Scope -> Join -> Aggregate: this service receives only daily KPI buckets,
     // never fact pages or raw rows to join/aggregate in Node.

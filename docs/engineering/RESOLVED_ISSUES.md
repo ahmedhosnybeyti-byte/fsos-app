@@ -24,6 +24,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Commit:** `codex/dashboard-remove-redundant-distinct`.
 - **Regression-prevention rule:** Do not compute daily distinct values when the response always overwrites them with period-level distinct values.
 
+## Dashboard Performance — default date window before local midnight
+
+- **Symptom/evidence:** Shortly after midnight in the company timezone, Team Performance included the new calendar day's sales while Dashboard reported sales as zero for the same company and route scope.
+- **Root cause:** Dashboard defaulted its upper boundary to the server's current UTC instant. Before UTC midnight, that excluded the company's current local date from both the canonical invoice query and the selling-day calendar, while Team Performance used its explicit local `dateTo` value.
+- **Fix:** For Dashboard requests without an explicit `dateTo`, derive the current calendar date from `CompanyProfile.timeZone` and query through that date's end. Explicit date ranges and Team Performance remain unchanged.
+- **Commit:** This local production hotfix commit.
+- **Regression-prevention rule:** Calendar-day dashboard defaults must use the configured company timezone and must be parity-tested against an equivalent explicit Team Performance date range.
+
 ## Management Smart Loading — repeated loading-risk calculation
 
 - **Symptom/evidence:** The Company Admin management loading-risk endpoint was the first mixed-load failure at 50 VU (8 timeouts in 21 requests, p95 about 30 seconds), while it rebuilt the same scoped Van Inventory, Invoices, Invoice Items, Routes, Employees, and Products analysis for every open.

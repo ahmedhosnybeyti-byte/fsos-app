@@ -1,6 +1,7 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
 import { DashboardPerformanceService } from "./dashboard-performance.service";
+import { TeamPerformanceService } from "../team-performance/team-performance.service";
 import type { RieScalableQuery } from "../rie/scalable-query.types";
 
 const resultPage = (records: Record<string, unknown>[]) => ({ records, page: { limit: 500, offset: 0, hasMore: false } });
@@ -61,4 +62,53 @@ test("preserves period-level distinct dashboard metrics after removing redundant
   assert.equal(result.metrics.invoices.current, 2);
   assert.equal(result.metrics.customers.current, 3);
   assert.equal(result.metrics.skus.current, 4);
+});
+
+test("uses the company calendar day for the default window and matches Team Performance sales", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-02T21:12:00.000Z") });
+  const queries: RieScalableQuery[] = [];
+  const result = (records: Record<string, unknown>[]) => ({ records, page: { limit: 500, offset: 0, hasMore: false } });
+  const rie = {
+    runPlannedRequest: async <T>(_options: unknown, execute: () => Promise<T>) => execute(),
+    getActiveVersionCounts: async () => new Map([
+      ["Routes", 1], ["Invoices", 1], ["Invoice Items", 1], ["Collections", 1], ["Returns", 1], ["Targets", 1], ["Employees", 1],
+    ]),
+    queryCanonicalRecords: async (query: RieScalableQuery) => {
+      queries.push(query);
+      if (query.entityName === "Invoice Items" && query.projection.some((field) => field.as === "date")) {
+        return result([{ date: "2026-10-03T00:00:00.000Z", sales: 280 }]);
+      }
+      if (query.entityName === "Invoice Items" && query.projection.some((field) => field.as === "repEmail")) {
+        return result([{ routeIds: ["R-1"], salesRepId: "REP-1", repName: "Rep 1", repEmail: "rep@example.com", value: 280 }]);
+      }
+      if (query.entityName === "Invoice Items") return result([{ invoices: 1, customers: 1, skus: 1 }]);
+      return result([]);
+    },
+  };
+  const prisma = {
+    companyProfile: { findUnique: async () => ({ timeZone: "Asia/Riyadh" }) },
+    salesCalendar: { findMany: async ({ where }: any) => {
+      const month = where.calendarDate.gte.getUTCMonth();
+      return [{ calendarDate: new Date(Date.UTC(2026, month, 3)), workingDay: true }];
+    } },
+  };
+  const user = { companyId: "company", userId: "manager", email: "manager@example.com", roleCode: "MANAGER" } as any;
+  const dashboardService = new DashboardPerformanceService(rie as any, prisma as any);
+  const teamService = new TeamPerformanceService(rie as any);
+
+  const dashboard = await dashboardService.get(user, "previous-month", ["R-1"]);
+  const team = await teamService.query(user, { dateFrom: "2026-10-01", dateTo: "2026-10-03", routeIds: ["R-1"] } as any);
+  const dashboardSalesQuery = queries.find((query) => query.entityName === "Invoice Items" && query.projection.some((field) => field.as === "date"))!;
+  const teamSalesQuery = queries.find((query) => query.entityName === "Invoice Items" && query.projection.some((field) => field.as === "repEmail"))!;
+  const dashboardDate = dashboardSalesQuery.scope!.date as { to: number };
+  const teamDate = teamSalesQuery.scope!.date as { to: string };
+
+  assert.equal(new Date(dashboardDate.to).toISOString().slice(0, 10), teamDate.to);
+  assert.equal(dashboardSalesQuery.companyId, teamSalesQuery.companyId);
+  assert.deepEqual(dashboardSalesQuery.requestingUser, teamSalesQuery.requestingUser);
+  assert.deepEqual(dashboardSalesQuery.joins?.[0], teamSalesQuery.joins?.[0]);
+  assert.deepEqual(dashboardSalesQuery.hierarchyRoute, teamSalesQuery.hierarchyRoute);
+  assert.deepEqual(dashboardSalesQuery.scope!.route, teamSalesQuery.scope!.route);
+  assert.equal(dashboard.metrics.sales.current, 280);
+  assert.equal(team.summary.sales, 280);
 });
