@@ -2,6 +2,14 @@
 
 This is durable engineering history. A **RESOLVED** item is historical evidence, not a permanent assumption. It may be reopened only when new measurements prove a regression; cite that new evidence before changing the previous design.
 
+## SGI manager hierarchy-scope bypass
+
+- **Symptom:** A Manager could receive company-wide SGI situations, targets, and rep statistics; a Manager-triggered recalculation could also persist a partial hierarchy snapshot as the latest shared company report.
+- **Root cause:** `getLatest()` only narrowed Sales Rep and Supervisor views using direct-supervisor metadata, while manual recalculation executed under the caller's role and persisted that caller-scoped result.
+- **Fix:** Derive permitted rep emails from the canonical allowed-route hierarchy, scope every persisted SGI output field per viewer, and always persist a company-wide source snapshot before returning the viewer-scoped recalculation result.
+- **Commit:** This fix commit.
+- **Regression-prevention rule:** Persist SGI once at company scope; any per-user SGI response must derive its visible reps from canonical hierarchy route scope before returning situations, goals, directories, or rep statistics.
+
 ## File row search hierarchy-scope bypass
 
 - **Symptom:** `GET /files/:id/search-rows` validated only that the file belonged to the caller's company, allowing a route-scoped user to match and receive rows from other routes in that company.

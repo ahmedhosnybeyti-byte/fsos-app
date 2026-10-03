@@ -3,6 +3,7 @@ import type { SgiLatestResult, SgiRecalculateInput, SgiRecalculateResult, SgiRep
 import { PrismaService } from "../../common/prisma";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { RieFacade } from "../rie/rie-facade.service";
+import { CanonicalHierarchyResolverService } from "../rie/canonical-hierarchy-resolver.service";
 
 // Sales Growth Intelligence (SGI) Phase 1 — the Situation Detection ->
 // Opportunity Discovery -> Recommendation -> Opportunity Scoring pipeline
@@ -177,6 +178,7 @@ export class SgiService {
   constructor(
     private readonly rieFacade: RieFacade,
     private readonly prisma: PrismaService,
+    private readonly hierarchyResolver: CanonicalHierarchyResolverService,
   ) {}
 
   private rieContext(companyId: string, requestingUser: { roleCode: string; email: string }) {
@@ -235,7 +237,13 @@ export class SgiService {
 
   async recalculate(user: AuthenticatedUser, input: SgiRecalculateInput): Promise<SgiRecalculateResult> {
     if (!user.companyId) throw new ForbiddenException();
-    return this.runRecalculation(user.companyId, { roleCode: user.roleCode, email: user.email }, user.userId, input);
+    const result = await this.runRecalculation(user.companyId, { roleCode: "COMPANY_ADMIN", email: "system@internal" }, user.userId, input);
+    return this.scopeRecalculateResult(result, user);
+  }
+
+  async recalculateNow(user: AuthenticatedUser): Promise<SgiRecalculateResult> {
+    if (!user.companyId) throw new ForbiddenException();
+    return this.scopeRecalculateResult(await this.recalculateForCompany(user.companyId), user);
   }
 
   // Cron entry point — computes a freshly-derived "this month so far" vs
@@ -838,10 +846,8 @@ export class SgiService {
       repStats,
       warnings,
       summary,
-      // Unfiltered (company-wide) briefing — this is what a COMPANY_ADMIN/
-      // MANAGER sees immediately after a manual recalculate. getLatest()
-      // below regenerates it per-viewer against their own filtered
-      // situations, so a rep's copy leads with their own top item.
+      // Unfiltered company snapshot. Every interactive caller receives a
+      // per-viewer briefing regenerated from its hierarchy-filtered result.
       briefing: buildBriefing(summary, situations),
     };
 
@@ -861,11 +867,9 @@ export class SgiService {
   }
 
   // Returns the most recently persisted recalculation, narrowed to the
-  // requesting user's own visibility (SALES_REP: their own situations only;
-  // SUPERVISOR: their team's; everyone else: unfiltered) — using the
-  // repSupervisorMap captured at recalculation time. Unchanged by
-  // Migration #8 — this method never touched Sales/Collection files
-  // directly.
+  // requesting user's canonical hierarchy visibility. Company/Super Admin
+  // remain unfiltered; Manager, Supervisor, and Sales Rep are narrowed from
+  // their permitted route-owned reps before any output is returned.
   async getLatest(user: AuthenticatedUser): Promise<SgiLatestResult | null> {
     if (!user.companyId) throw new ForbiddenException();
     const companyId = user.companyId;
@@ -878,56 +882,8 @@ export class SgiService {
     });
     if (!row) return null;
 
-    const content = row.content as unknown as SgiRecalculateResult;
-    const scopedToOwnTeam = user.roleCode === "SUPERVISOR" || user.roleCode === "SALES_REP";
-
-    // 2026-07-20: monthlyGoal used to be returned straight from
-    // content.summary — a single company-wide figure baked in at
-    // recalculation time — for every role. A SALES_REP's "الهدف الشهري"
-    // card ended up showing the exact same numbers as the Company Admin's.
-    // Scoped here the same way situations already were: a rep gets their
-    // own target/actual (from repMonthlyGoals), a supervisor gets their
-    // team's sum, everyone else keeps the company-wide total.
-    let situations = content.situations;
-    let monthlyGoal = content.summary.monthlyGoal;
-    if (user.roleCode === "SALES_REP") {
-      const email = user.email.trim().toLowerCase();
-      situations = situations.filter((s) => s.ownerRepEmail === email);
-      const mine = content.repMonthlyGoals?.[email];
-      monthlyGoal = {
-        targetTotal: mine?.targetTotal ?? null,
-        actualTotal: mine?.actualTotal ?? 0,
-        progressPct: mine?.targetTotal && mine.targetTotal > 0 ? Math.round((mine.actualTotal / mine.targetTotal) * 100) : null,
-      };
-    } else if (user.roleCode === "SUPERVISOR") {
-      const email = user.email.trim().toLowerCase();
-      const myReps = new Set(
-        Object.entries(content.repSupervisorMap ?? {})
-          .filter(([, sup]) => sup === email)
-          .map(([rep]) => rep),
-      );
-      situations = situations.filter((s) => s.ownerRepEmail !== null && myReps.has(s.ownerRepEmail));
-
-      let teamTarget: number | null = null;
-      let teamActual = 0;
-      for (const repEmail of myReps) {
-        const entry = content.repMonthlyGoals?.[repEmail];
-        if (!entry) continue;
-        if (entry.targetTotal !== null) teamTarget = (teamTarget ?? 0) + entry.targetTotal;
-        teamActual += entry.actualTotal;
-      }
-      monthlyGoal = {
-        targetTotal: teamTarget,
-        actualTotal: teamActual,
-        progressPct: teamTarget && teamTarget > 0 ? Math.round((teamActual / teamTarget) * 100) : null,
-      };
-    }
-
-    const summary: SgiRecalculateResult["summary"] = {
-      totalSituations: situations.length,
-      highSeverityCount: situations.filter((s) => s.severity === "high").length,
-      monthlyGoal,
-    };
+    const content = await this.scopeRecalculateResult(row.content as unknown as SgiRecalculateResult, user);
+    const { situations, summary } = content;
 
     const repEmails = Array.from(new Set(situations.map((s) => s.ownerRepEmail).filter((e): e is string => e !== null)));
     let repDirectory: SgiRepDirectoryEntry[] = [];
@@ -964,7 +920,29 @@ export class SgiService {
       briefing: buildBriefing(summary, situations),
       repDirectory,
       repStats,
-      scopedToOwnTeam,
+      scopedToOwnTeam: user.roleCode !== "COMPANY_ADMIN" && user.roleCode !== "SUPER_ADMIN",
     };
+  }
+
+  private async scopeRecalculateResult(content: SgiRecalculateResult, user: AuthenticatedUser): Promise<SgiRecalculateResult> {
+    const allowedRepEmails = await this.hierarchyResolver.resolveAllowedSalesRepEmails(user.companyId!, { roleCode: user.roleCode, email: user.email });
+    if (allowedRepEmails === null) return content;
+
+    const situations = content.situations.filter((s) => s.ownerRepEmail !== null && allowedRepEmails.has(s.ownerRepEmail));
+    const repSupervisorMap = Object.fromEntries(Object.entries(content.repSupervisorMap ?? {}).filter(([email]) => allowedRepEmails.has(email)));
+    const repMonthlyGoals = Object.fromEntries(Object.entries(content.repMonthlyGoals ?? {}).filter(([email]) => allowedRepEmails.has(email)));
+    const repStats = Object.fromEntries(Object.entries(content.repStats ?? {}).filter(([email]) => allowedRepEmails.has(email)));
+    let targetTotal: number | null = null;
+    let actualTotal = 0;
+    for (const entry of Object.values(repMonthlyGoals)) {
+      if (entry.targetTotal !== null) targetTotal = (targetTotal ?? 0) + entry.targetTotal;
+      actualTotal += entry.actualTotal;
+    }
+    const summary: SgiRecalculateResult["summary"] = {
+      totalSituations: situations.length,
+      highSeverityCount: situations.filter((s) => s.severity === "high").length,
+      monthlyGoal: { targetTotal, actualTotal, progressPct: targetTotal && targetTotal > 0 ? Math.round((actualTotal / targetTotal) * 100) : null },
+    };
+    return { ...content, situations, repSupervisorMap, repMonthlyGoals, repStats, summary, briefing: buildBriefing(summary, situations) };
   }
 }

@@ -40,7 +40,7 @@ export class SgiController {
   @Auth("COMPANY_ADMIN", "MANAGER")
   recalculateNow(@CurrentUser() user: AuthenticatedUser) {
     if (!user.companyId) throw new ForbiddenException();
-    return this.sgiService.recalculateForCompany(user.companyId);
+    return this.sgiService.recalculateNow(user);
   }
 
   // Any authenticated role may read the latest situations — visibility is

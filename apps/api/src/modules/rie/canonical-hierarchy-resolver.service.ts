@@ -194,6 +194,43 @@ export class CanonicalHierarchyResolverService {
     return Array.from(new Set(routes.rows.map((row) => String(row[routeIdCol] ?? "").trim()).filter(Boolean))).sort();
   }
 
+  // Converts the same canonical route scope used by every data reader into
+  // the owning sales-rep emails needed by persisted, rep-attributed views.
+  // null preserves unrestricted Company/Super Admin access; an empty set
+  // remains fail-closed for a scoped role.
+  async resolveAllowedSalesRepEmails(companyId: string, user: HierarchyFilterUser): Promise<Set<string> | null> {
+    const allowedRouteIds = await this.resolveAllowedRouteIds(companyId, user);
+    if (allowedRouteIds === null) return null;
+
+    const [routes, employees] = await Promise.all([this.fetchRawEntityRows("Routes", companyId), this.fetchRawEntityRows("Employees", companyId)]);
+    if (!routes) return new Set();
+    const routeIdCol = findHeader(routes.headers, "RouteID");
+    const salesRepCol = findHeader(routes.headers, "SalesRepID");
+    if (!routeIdCol || !salesRepCol) return new Set();
+
+    const emailByEmployeeId = new Map<string, string>();
+    if (employees) {
+      const employeeIdCol = findHeader(employees.headers, "EmployeeID");
+      const employeeEmailCol = findHeader(employees.headers, "Email");
+      if (employeeIdCol && employeeEmailCol) {
+        for (const row of employees.rows) {
+          const id = cell(row[employeeIdCol]);
+          const email = cell(row[employeeEmailCol]);
+          if (id && email) emailByEmployeeId.set(id, email);
+        }
+      }
+    }
+
+    const emails = new Set<string>();
+    for (const row of routes.rows) {
+      const routeId = cell(row[routeIdCol]);
+      if (!routeId || !allowedRouteIds.has(routeId)) continue;
+      const salesRep = cell(row[salesRepCol]);
+      if (salesRep) emails.add(emailByEmployeeId.get(salesRep) ?? salesRep);
+    }
+    return emails;
+  }
+
   async listCompanyRoutes(companyId: string): Promise<Array<{ id: string; name: string | null }>> {
     const routes = await this.fetchRawEntityRows("Routes", companyId);
     if (!routes) return [];
