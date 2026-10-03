@@ -2,6 +2,14 @@
 
 This is durable engineering history. A **RESOLVED** item is historical evidence, not a permanent assumption. It may be reopened only when new measurements prove a regression; cite that new evidence before changing the previous design.
 
+## User Activity public-user response projection
+
+- **Symptom:** `GET /admin/user-activity/search` and `GET /admin/user-activity/tree` returned complete Prisma User records through broad relation includes, exposing `passwordHash` and other authentication-sensitive fields.
+- **Root cause:** The User Activity service returned `prisma.user.findMany()` results directly instead of declaring an HTTP-safe selection and response DTO.
+- **Fix:** Use one explicit public-user select and a defensive DTO for both endpoints; include only the identity, organizational-display, role, and employee fields required by User Activity.
+- **Commit:** This fix commit.
+- **Regression-prevention rule:** User Activity search and tree endpoints must use the shared public-user projection and DTO. Never return a User Prisma model or broad relation include from an HTTP response.
+
 ## Operational Leaflet basemap API-key watermark
 
 - **Symptom:** Operational maps displayed a repeated `API KEY REQUIRED` watermark across their tile surface.

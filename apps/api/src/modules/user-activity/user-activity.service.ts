@@ -23,6 +23,41 @@ export const USER_ACTIVITY_RETENTION_DAYS = {
   dailySummaries: retentionDays("USER_ACTIVITY_SUMMARY_RETENTION_DAYS", 365),
 } as const;
 
+// This is the complete HTTP-safe user shape for User Activity search and
+// tree responses. Keep authentication, session, quota, and contact fields
+// out of this selection; controllers return this data directly.
+const userActivityPublicUserSelect = {
+  id: true,
+  companyId: true,
+  roleId: true,
+  email: true,
+  fullName: true,
+  status: true,
+  orgUnitId: true,
+  company: { select: { id: true, name: true } },
+  orgUnit: { select: { id: true, name: true } },
+  role: { select: { id: true, code: true, name: true } },
+  employee: { select: { id: true, managerId: true } },
+} satisfies Prisma.UserSelect;
+
+type UserActivityPublicUserRecord = Prisma.UserGetPayload<{ select: typeof userActivityPublicUserSelect }>;
+
+function toUserActivityPublicUser(user: UserActivityPublicUserRecord) {
+  return {
+    id: user.id,
+    companyId: user.companyId,
+    roleId: user.roleId,
+    email: user.email,
+    fullName: user.fullName,
+    status: user.status,
+    orgUnitId: user.orgUnitId,
+    company: user.company ? { id: user.company.id, name: user.company.name } : null,
+    orgUnit: user.orgUnit ? { id: user.orgUnit.id, name: user.orgUnit.name } : null,
+    role: { id: user.role.id, code: user.role.code, name: user.role.name },
+    employee: user.employee ? { id: user.employee.id, managerId: user.employee.managerId } : null,
+  };
+}
+
 export interface ActivityInput {
   type: string; category: "ACCESS" | "BUSINESS" | "ADMIN" | "SECURITY"; actorType?: UserActivityActorType;
   actorUserId?: string | null; subjectUserId?: string | null; actorRole?: string | null; companyId?: string | null;
@@ -68,7 +103,12 @@ export class UserActivityService {
 
   async search(viewer: AuthenticatedUser, q: string) {
     const scope = await this.visibleUserIds(viewer);
-    return this.prisma.user.findMany({ where: { id: { in: scope }, OR: [{ fullName: { contains: q, mode: "insensitive" } }, { email: { contains: q, mode: "insensitive" } }] }, include: { company: true, orgUnit: true, role: true }, take: 50 });
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: scope }, OR: [{ fullName: { contains: q, mode: "insensitive" } }, { email: { contains: q, mode: "insensitive" } }] },
+      select: userActivityPublicUserSelect,
+      take: 50,
+    });
+    return users.map(toUserActivityPublicUser);
   }
   async overview(viewer: AuthenticatedUser, from?: string, to?: string) {
     const ids = await this.visibleUserIds(viewer); const timestamp: Prisma.DateTimeFilter = {};
@@ -83,7 +123,12 @@ export class UserActivityService {
   }
   async tree(viewer: AuthenticatedUser) {
     const ids = await this.visibleUserIds(viewer);
-    return this.prisma.user.findMany({ where: { id: { in: ids } }, include: { company: true, orgUnit: true, role: true, employee: { select: { id: true, managerId: true } } }, orderBy: [{ companyId: "asc" }, { fullName: "asc" }] });
+    const users = await this.prisma.user.findMany({
+      where: { id: { in: ids } },
+      select: userActivityPublicUserSelect,
+      orderBy: [{ companyId: "asc" }, { fullName: "asc" }],
+    });
+    return users.map(toUserActivityPublicUser);
   }
   private sanitizeMetadata(metadata?: Record<string, unknown>): Prisma.InputJsonValue | undefined {
     if (!metadata) return undefined;
