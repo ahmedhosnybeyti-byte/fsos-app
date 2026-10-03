@@ -2466,13 +2466,56 @@ export class VisitCopilotService {
     const category = taxonomyForCanonicalChannel(repChannel)?.category;
     if (category !== "traditional" && category !== "modern") return new Map<string, { products: ScoredProspect["nearbyBestSellers"]; customerCount: number }>();
     const ctx = this.rieContext(user);
-    const [customers, invoices, items, products] = await Promise.all([this.requireCustomers(ctx), this.tryEntity(ctx, "Invoices", "الفواتير", warnings), this.tryEntity(ctx, "Invoice Items", "أصناف الفاتورة", warnings), this.tryEntity(ctx, "Products", "الأصناف", warnings)]);
-    const names = new Map(products.map((row) => [String(row.ProductCode ?? "").trim(), String(row.ProductName ?? row.ProductCode ?? "").trim()]));
-    const invoiceCustomers = new Map<string, string>();
-    for (const row of invoices) { const no = String(row.InvoiceNo ?? "").trim(); const code = String(row.CustomerCode ?? "").trim(); const date = isoDayOf(row.InvoiceDate); if (no && code && date && date >= range.from && date <= range.to) invoiceCustomers.set(no, code); }
+    const customers = await this.rieFacade.queryCanonicalRecords({
+      ...ctx,
+      entityName: "Customers",
+      projection: ["CustomerCode", "Channel", "Latitude", "Longitude"].map((field) => ({ field })),
+      pagination: { limit: 5_000 },
+    });
+    if (customers.page.hasMore) throw new BadRequestException("عدد العملاء القريبين يتجاوز الحد المدعوم.");
+    let salesRows: readonly EntityRecord[] = [];
+    try {
+      const sales = await this.rieFacade.queryCanonicalRecords({
+        ...ctx,
+        entityName: "Invoice Items",
+        projection: [{ field: "CustomerCode", source: "invoice", as: "customerCode" }, { field: "ProductCode", as: "productCode" }],
+        groupBy: [{ field: "CustomerCode", source: "invoice" }, { field: "ProductCode" }],
+        joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }],
+        hierarchyRoute: { field: "RouteID", source: "invoice" },
+        scope: { date: { field: "InvoiceDate", source: "invoice", from: range.from, to: range.to } },
+        aggregates: [{ op: "count", as: "lines" }, { op: "sum", field: "Quantity", as: "qty" }],
+        internalAggregate: true,
+        pagination: { limit: 25_000 },
+      });
+      if (sales.page.hasMore) throw new BadRequestException("نتيجة المنتجات القريبة المجمعة تتجاوز الحد المدعوم.");
+      salesRows = sales.records;
+    } catch (error) {
+      if (error instanceof BadRequestException) throw error;
+      warnings.push('تعذر قراءة بيانات "الفواتير" — بعض الأرقام قد تكون ناقصة.');
+      warnings.push('تعذر قراءة بيانات "أصناف الفاتورة" — بعض الأرقام قد تكون ناقصة.');
+    }
     const byCustomer = new Map<string, Map<string, { lines: number; qty: number }>>();
-    for (const row of items) { const customer = invoiceCustomers.get(String(row.InvoiceNo ?? "").trim()); const code = String(row.ProductCode ?? "").trim(); if (!customer || !code) continue; const product = byCustomer.get(customer) ?? new Map(); const agg = product.get(code) ?? { lines: 0, qty: 0 }; agg.lines++; agg.qty += toFiniteNumber(row.Quantity) ?? 0; product.set(code, agg); byCustomer.set(customer, product); }
-    const points = customers.map((row) => ({ code: String(row.CustomerCode ?? "").trim(), channel: String(row.Channel ?? "").trim(), lat: toFiniteNumber(row.Latitude), lon: toFiniteNumber(row.Longitude) })).filter((row) => row.code && row.lat !== null && row.lon !== null && byCustomer.has(row.code));
+    for (const row of salesRows) { const customer = String(row.customerCode ?? "").trim(); const code = String(row.productCode ?? "").trim(); if (!customer || !code) continue; const product = byCustomer.get(customer) ?? new Map(); product.set(code, { lines: toFiniteNumber(row.lines) ?? 0, qty: toFiniteNumber(row.qty) ?? 0 }); byCustomer.set(customer, product); }
+    const productCodes = [...new Set(salesRows.map((row) => String(row.productCode ?? "").trim()).filter(Boolean))];
+    let productRows: readonly EntityRecord[] = [];
+    if (productCodes.length) {
+      try {
+        const products = await this.rieFacade.queryCanonicalRecords({
+          companyId: user.companyId!,
+          entityName: "Products",
+          projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }],
+          scope: { product: { values: productCodes } },
+          pagination: { limit: 5_000 },
+        });
+        if (products.page.hasMore) throw new BadRequestException("عدد أسماء المنتجات القريبة يتجاوز الحد المدعوم.");
+        productRows = products.records;
+      } catch (error) {
+        if (error instanceof BadRequestException) throw error;
+        warnings.push('تعذر قراءة بيانات "الأصناف" — بعض الأرقام قد تكون ناقصة.');
+      }
+    }
+    const names = new Map(productRows.map((row) => [String(row.productCode ?? "").trim(), String(row.productName ?? row.productCode ?? "").trim()]));
+    const points = customers.records.map((row) => ({ code: String(row.CustomerCode ?? "").trim(), channel: String(row.Channel ?? "").trim(), lat: toFiniteNumber(row.Latitude), lon: toFiniteNumber(row.Longitude) })).filter((row) => row.code && row.lat !== null && row.lon !== null && byCustomer.has(row.code));
     const result = new Map<string, { products: ScoredProspect["nearbyBestSellers"]; customerCount: number }>();
     for (const prospect of prospects) {
       if (prospect.lat === null || prospect.lon === null) { result.set(prospect.id, { products: [], customerCount: 0 }); continue; }
