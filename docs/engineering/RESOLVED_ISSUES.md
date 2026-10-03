@@ -40,6 +40,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Commit:** `3224a36987328765d583cd6d612e40b858a92a5c`.
 - **Regression-prevention rule:** Migrate a feature through `RieFacade.runPlannedRequest()` before adding concurrent RIE work. Never place fact rows in the planner cache, bypass PostgreSQL scoping, or raise the global RIE semaphore as a substitute for a request budget.
 
+## Visit Copilot Discovery — repeated route-stat reads exhausted the RIE budget
+
+- **Symptom/evidence:** Production `GET /api/v1/visit-copilot/discovery` returned 500 with `RiePostgresExecutionBudgetExceededError`. The request had already completed Daily Brief with 19 semaphore acquisitions, then failed at 24 while `buildDiscoveryStats()` launched repeated Customers, Invoices, and Invoice Items reads.
+- **Root cause:** Discovery built the authoritative daily route and its PostgreSQL customer/invoice/sales aggregates, then discarded the internal invoice-count facts and reconstructed the same route statistics through three legacy entity-wide reads.
+- **Fix:** Keep the Daily Brief response unchanged, retain its internal customer invoice-count/AOV facts for the current request, and derive Discovery channel/centroid statistics from those already-scoped aggregates. The request budget remains 24 and hierarchy, company, date, and VisitDay scope stay unchanged.
+- **Commit:** This fix commit.
+- **Regression-prevention rule:** Discovery must reuse the Daily Brief route facts within the same request. Do not add a second Customers/Invoices/Invoice Items read or raise the RIE execution budget to hide repeated work.
+
 ## RIE authoritative PostgreSQL execution coordination
 
 - **Symptom/evidence:** The process-wide RIE limit was 20, but admission was operation-scoped and incomplete. One HTTP request could submit 3–6 or more PostgreSQL executions concurrently, while direct FSOS 360, nested metadata, pagination, and several Prisma-backed RIE reads did not all share the same authoritative boundary.

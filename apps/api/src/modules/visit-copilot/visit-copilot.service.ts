@@ -370,6 +370,11 @@ interface DiscoveryStats {
   centroid: LatLon | null;
 }
 
+interface DailyBriefBuild {
+  result: DailyBriefResult;
+  discoveryStats: DiscoveryStats;
+}
+
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
 }
@@ -598,6 +603,10 @@ export class VisitCopilotService {
   }
 
   private async buildDailyBrief(user: AuthenticatedUser, periodInput: PeriodInput): Promise<DailyBriefResult> {
+    return (await this.buildDailyBriefWithDiscoveryStats(user, periodInput)).result;
+  }
+
+  private async buildDailyBriefWithDiscoveryStats(user: AuthenticatedUser, periodInput: PeriodInput): Promise<DailyBriefBuild> {
     const ctx = this.rieContext(user);
     const range = resolveVisitCopilotPeriod(periodInput);
     const warnings: string[] = [];
@@ -684,6 +693,7 @@ export class VisitCopilotService {
         lon: hasCoords ? lon : null,
         visitSequence: toFiniteNumber(row.VisitSequence),
         channel: String(row.Channel ?? "").trim() || null,
+        invoiceCount,
         avgOrderValue: invoiceCount > 0 ? round2(sales / invoiceCount) : 0,
         lastVisitDate: isoDayOf(lastVisitByCustomer.get(code)) ?? null,
         // never invoiced in the data → treat as the maximum gap (most stale)
@@ -786,7 +796,7 @@ export class VisitCopilotService {
       customerNames: new Map(entries.filter((entry) => !entry.isProspect).map((entry) => [entry.customerCode, entry.customerName])),
     });
 
-    return {
+    const result: DailyBriefResult = {
       date: todayIso,
       weekday,
       isWorkingDay,
@@ -799,6 +809,21 @@ export class VisitCopilotService {
       warnings,
       lostOpportunityResult,
     };
+    const discoveryStats = this.assembleDiscoveryStats(
+      range,
+      raw
+        .filter((customer) => customer.customerCode !== "")
+        .map((customer) => ({
+          customerCode: customer.customerCode,
+          name: customer.customerName,
+          lat: customer.lat,
+          lon: customer.lon,
+          channel: customer.channel,
+          invoiceCount: customer.invoiceCount,
+          avgOrderValue: customer.avgOrderValue,
+        })),
+    );
+    return { result, discoveryStats };
   }
 
   // ------------------------------------------------------------------
@@ -1963,9 +1988,7 @@ export class VisitCopilotService {
     // as the plan/list above it.  Do not reconstruct this from Customers in
     // Discovery: daily-brief is the single server-side authority for the
     // selected date, rep hierarchy, and recurring VisitDay route.
-    const dailyRoute = await this.buildDailyBrief(user, query);
-    const routeCustomerCodes = new Set(dailyRoute.customers.map((customer) => customer.customerCode));
-    const stats = await this.buildDiscoveryStats(user, query, warnings, routeCustomerCodes);
+    const { discoveryStats: stats } = await this.buildDailyBriefWithDiscoveryStats(user, query);
     const taxonomy = taxonomyForCanonicalChannel(stats.repChannel);
     const savedRows = taxonomy
       ? await this.prisma.prospect.findMany({ where: { companyId: user.companyId!, marketSegment: taxonomy.segment, ...(query.minimumScore === undefined ? {} : { scoreTotal: { gte: query.minimumScore } }) }, include: { intelligenceProfile: { select: { businessClassification: true, productFitInsights: true } } }, orderBy: { createdAt: "desc" } })
@@ -2394,6 +2417,10 @@ export class VisitCopilotService {
       })
       .filter((c) => c.customerCode !== "" && (!customerCodes || customerCodes.has(c.customerCode)));
 
+    return this.assembleDiscoveryStats(range, statCustomers);
+  }
+
+  private assembleDiscoveryStats(range: VisitCopilotPeriodRange, statCustomers: DiscoveryStats["customers"]): DiscoveryStats {
     // repChannel = most frequent non-empty Channel (case-insensitive
     // grouping, first-seen label kept for display).
     const channelCounts = new Map<string, { label: string; count: number }>();
