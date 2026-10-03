@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { formatDate } from "@/lib/utils";
+import { canManageCompanySourceFiles, canUploadSourceFiles } from "@/lib/files-permissions";
 import type { EmployeeExportResult, ExportableEmployee, FileProvisioningResult, FileRecord } from "@/lib/types";
 
 // Per-Employee Scoped Excel Export (2026-07-27) — same client-side workbook
@@ -82,7 +83,11 @@ export default function FilesPage() {
     queryFn: () => filesApi.list(effectiveCompanyId),
     enabled: !isSuperAdmin || !!targetCompanyId,
   });
-  const canManage = user?.role.code === "COMPANY_ADMIN";
+  // Source workbooks are mutable only by a Company Admin. SUPER_ADMIN keeps
+  // its existing on-behalf-of upload flow; replace/delete remain scoped to a
+  // company's own administrator.
+  const canUpload = canUploadSourceFiles(user?.role.code);
+  const canManage = canManageCompanySourceFiles(user?.role.code);
   // Grouped by batchId — the active-upload limit counts distinct physical
   // uploads now, not individual entity rows (a single 18-sheet master file
   // is still just ONE upload). See FilesService.countActiveBatches.
@@ -158,13 +163,15 @@ export default function FilesPage() {
         </div>
       )}
 
-      <UploadDropzone
-        atLimit={atLimit}
-        disabled={isSuperAdmin && !targetCompanyId}
-        targetCompanyId={effectiveCompanyId}
-        onUploaded={invalidate}
-        onProvisioned={setProvisioning}
-      />
+      {canUpload && (
+        <UploadDropzone
+          atLimit={atLimit}
+          disabled={isSuperAdmin && !targetCompanyId}
+          targetCompanyId={effectiveCompanyId}
+          onUploaded={invalidate}
+          onProvisioned={setProvisioning}
+        />
+      )}
 
       {provisioning && provisioning.created.length > 0 && (
         <ProvisioningPanel provisioning={provisioning} onDismiss={() => setProvisioning(null)} />

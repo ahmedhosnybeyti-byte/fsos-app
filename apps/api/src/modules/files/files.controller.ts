@@ -45,7 +45,7 @@ export class FilesController {
   // batchId. See FilesService.processWorkbook / uploadFile for the full
   // accept/reject/ignore semantics per sheet.
   @Post()
-  @Auth()
+  @Auth("COMPANY_ADMIN")
   @ApiConsumes("multipart/form-data")
   @UseInterceptors(FileInterceptor("file"))
   async upload(
