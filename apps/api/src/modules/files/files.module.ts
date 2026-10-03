@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { forwardRef, Module } from "@nestjs/common";
 import { AuditLogModule } from "../audit-log/audit-log.module";
 import { FilesService } from "./files.service";
 import { FilesController } from "./files.controller";
@@ -11,9 +11,10 @@ import { PlatformSettingsModule } from "../platform-settings/platform-settings.m
 import { UserActivityModule } from "../user-activity/user-activity.module";
 import { SmartLoadingManagementCacheModule } from "../smart-loading-management-cache/smart-loading-management-cache.module";
 import { WorkbookIngestionWorkerService } from "./workbook-ingestion-worker.service";
+import { RieModule } from "../rie/rie.module";
 
 @Module({
-  imports: [AuditLogModule, ImportValidationModule, SubscriptionsModule, PlatformSettingsModule, UserActivityModule, SmartLoadingManagementCacheModule],
+  imports: [forwardRef(() => RieModule), AuditLogModule, ImportValidationModule, SubscriptionsModule, PlatformSettingsModule, UserActivityModule, SmartLoadingManagementCacheModule],
   providers: [
     FilesService,
     WorkbookIngestionWorkerService,

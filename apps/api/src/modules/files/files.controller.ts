@@ -110,7 +110,7 @@ export class FilesController {
     @Query(new ZodValidationPipe(searchFileRowsQuerySchema)) query: SearchFileRowsQueryInput,
   ) {
     if (!user.companyId) throw new ForbiddenException();
-    return this.filesService.searchRows(id, user.companyId, query.q, query.limit);
+    return this.filesService.searchRows(id, user, query.q, query.limit);
   }
 
   @Get(":id/download-url")

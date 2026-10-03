@@ -10,7 +10,7 @@ import { AuditLogService } from "../audit-log/audit-log.service";
 import { STORAGE_PROVIDER, type StorageProvider } from "./storage/storage-provider.interface";
 import { DatasetClassifierService } from "./classification/dataset-classifier.service";
 import type { SheetClassification } from "./classification/types";
-import { normalizeHeader } from "./dataset-query.util";
+import { applyHierarchyFilter, normalizeHeader } from "./dataset-query.util";
 import { ImportTemplateMatcherService } from "../import-validation/import-template-matcher.service";
 import { ImportValidationService } from "../import-validation/import-validation.service";
 import { ImportValidationRejectedException } from "../import-validation/import-validation.errors";
@@ -20,6 +20,8 @@ import { PlatformSettingsService } from "../platform-settings/platform-settings.
 import { UserActivityService } from "../user-activity/user-activity.service";
 import { SmartLoadingManagementCacheService } from "../smart-loading-management-cache/smart-loading-management-cache.service";
 import { serializeExcelParse } from "../../common/excel-parse-queue";
+import { CanonicalHierarchyResolverService } from "../rie/canonical-hierarchy-resolver.service";
+import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 
 const SALES_CALENDAR_ENTITY = "Sales Calendar";
 const EMPLOYEES_ENTITY = "Employees";
@@ -277,6 +279,7 @@ export class FilesService {
     private readonly platformSettingsService: PlatformSettingsService,
     private readonly userActivity: UserActivityService,
     private readonly smartLoadingManagementCache: SmartLoadingManagementCacheService,
+    private readonly hierarchyResolver: CanonicalHierarchyResolverService,
   ) {}
 
   private validateUpload(file: Express.Multer.File, maxUploadSizeMb: number) {
@@ -1393,7 +1396,9 @@ export class FilesService {
   // Capture: a rep types a customer code or name, this returns the matching
   // row(s) as-is so they can visually confirm they typed the right customer
   // before a location gets saved against that code.
-  async searchRows(id: string, companyId: string, query: string, limit = 10): Promise<{ headers: string[]; rows: Record<string, unknown>[] }> {
+  async searchRows(id: string, user: AuthenticatedUser, query: string, limit = 10): Promise<{ headers: string[]; rows: Record<string, unknown>[] }> {
+    const companyId = user.companyId;
+    if (!companyId) throw new NotFoundException("File not found");
     const file = await this.prisma.file.findUnique({ where: { id } });
     if (!file || file.companyId !== companyId) throw new NotFoundException("File not found");
 
@@ -1409,11 +1414,17 @@ export class FilesService {
       return (sheet ? XLSX.utils.sheet_to_json(sheet) : []) as Record<string, unknown>[];
     });
     if (allRows.length === 0) return { headers: [], rows: [] };
+    const headers = ((file.parsedMetadata as { headers?: string[] } | null)?.headers) ?? Object.keys(allRows[0] ?? {});
+    // Match every other uploaded-dataset reader: resolve the caller's
+    // canonical route scope, then filter before the user-provided search and
+    // limit can expose an out-of-scope row.
+    const routeAllowed = await this.hierarchyResolver.resolveAllowedRouteIds(companyId, { roleCode: user.roleCode, email: user.email });
+    const visibleRows = applyHierarchyFilter(allRows, headers, routeAllowed);
     const needle = query.trim().toLowerCase();
-    if (!needle) return { headers: Object.keys(allRows[0] ?? {}), rows: [] };
+    if (!needle) return { headers, rows: [] };
 
     const matches: Record<string, unknown>[] = [];
-    for (const row of allRows) {
+    for (const row of visibleRows) {
       const hit = Object.values(row).some((v) => v !== null && v !== undefined && String(v).toLowerCase().includes(needle));
       if (hit) {
         matches.push(row);
@@ -1421,7 +1432,6 @@ export class FilesService {
       }
     }
 
-    const headers = ((file.parsedMetadata as { headers?: string[] } | null)?.headers) ?? Object.keys(allRows[0] ?? {});
     return { headers, rows: matches };
   }
 }

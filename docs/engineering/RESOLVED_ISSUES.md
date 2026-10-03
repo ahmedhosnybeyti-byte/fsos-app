@@ -2,6 +2,14 @@
 
 This is durable engineering history. A **RESOLVED** item is historical evidence, not a permanent assumption. It may be reopened only when new measurements prove a regression; cite that new evidence before changing the previous design.
 
+## File row search hierarchy-scope bypass
+
+- **Symptom:** `GET /files/:id/search-rows` validated only that the file belonged to the caller's company, allowing a route-scoped user to match and receive rows from other routes in that company.
+- **Root cause:** The search path parsed and searched the complete workbook sheet without resolving the caller's canonical hierarchy route set or applying the shared row filter.
+- **Fix:** Resolve the canonical allowed-route set and apply `applyHierarchyFilter` before substring matching and limiting; the response shape and Company Admin's unrestricted company access remain unchanged.
+- **Commit:** This fix commit.
+- **Regression-prevention rule:** Any legacy uploaded-file reader that returns row data must apply canonical hierarchy scope before user-provided filtering, searching, or limiting.
+
 ## User Activity public-user response projection
 
 - **Symptom:** `GET /admin/user-activity/search` and `GET /admin/user-activity/tree` returned complete Prisma User records through broad relation includes, exposing `passwordHash` and other authentication-sensitive fields.

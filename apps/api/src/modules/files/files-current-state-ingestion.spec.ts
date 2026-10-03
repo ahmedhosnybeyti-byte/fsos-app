@@ -40,6 +40,7 @@ test("canonical upload history preserves duplicate and blank business keys befor
     {} as never,
     {} as never,
     {} as never,
+    {} as never,
   );
 
   await (service as unknown as {

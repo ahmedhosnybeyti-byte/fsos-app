@@ -1,4 +1,4 @@
-import { Module } from "@nestjs/common";
+import { forwardRef, Module } from "@nestjs/common";
 import { FilesModule } from "../files/files.module";
 import { GraphBuilderService } from "./graph-builder.service";
 import { ENTITY_PROVIDER } from "./entity-provider.interface";
@@ -34,7 +34,7 @@ import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.serv
 // Engine, Business Rules Engine, and eventually FSOS Engines via the
 // Integration Layer) inject these services.
 @Module({
-  imports: [FilesModule],
+  imports: [forwardRef(() => FilesModule)],
   providers: [
     GraphBuilderService,
     CanonicalHierarchyResolverService,
