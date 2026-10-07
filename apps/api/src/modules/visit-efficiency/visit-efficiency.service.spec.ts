@@ -45,6 +45,37 @@ test("Visit Efficiency returns the compact PostgreSQL result without materializi
   assert.deepEqual(result.points[0], { id: "C-1-0", label: "C-1", lat: 24.7, lon: 46.7, value: 0, rep: "Rep", dateKey: "2026-01-01" });
 });
 
+test("Visit Efficiency forwards each operational viewer to the canonical hierarchy scope", async () => {
+  const contexts: Array<{ roleCode: string; email: string }> = [];
+  const facade = { hasCanonicalEntitySources: async () => true };
+  const scalable = {
+    queryVisitEfficiency: async (input: { requestingUser: { roleCode: string; email: string } }) => {
+      contexts.push(input.requestingUser);
+      return {
+        usedVisits: 0, excludedNoCoordinates: 0, excludedSingleVisitDays: 0,
+        timeColumnUsed: false, matchedScopeRows: 0, points: [], repSummaries: [],
+      };
+    },
+  };
+  const service = new VisitEfficiencyService(facade as never, scalable as never);
+
+  for (const [roleCode, email] of [
+    ["COMPANY_ADMIN", "admin@example.test"],
+    ["MANAGER", "manager@example.test"],
+    ["SUPERVISOR", "supervisor@example.test"],
+    ["SALES_REP", "rep@example.test"],
+  ] as const) {
+    await service.query({ ...user, roleCode, email }, {});
+  }
+
+  assert.deepEqual(contexts, [
+    { roleCode: "COMPANY_ADMIN", email: "admin@example.test" },
+    { roleCode: "MANAGER", email: "manager@example.test" },
+    { roleCode: "SUPERVISOR", email: "supervisor@example.test" },
+    { roleCode: "SALES_REP", email: "rep@example.test" },
+  ]);
+});
+
 test("Visit Efficiency preserves source and empty-scope errors", async () => {
   let missing = "Routes";
   const facade = {
