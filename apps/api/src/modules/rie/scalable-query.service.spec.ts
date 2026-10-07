@@ -283,3 +283,30 @@ test("management lost opportunities keeps both covered and uncovered rows and re
   assert.ok(captured?.values?.includes("r-1"));
   assert.ok(captured?.values?.includes("tuesday"));
 });
+
+test("Visit Copilot calculates final lost opportunities in PostgreSQL within company hierarchy scope", async () => {
+  let captured: { strings?: readonly string[]; values?: readonly unknown[] } | undefined;
+  const service = new RieScalableQueryService({
+    $queryRaw: async (query: typeof captured) => {
+      captured = query;
+      return [{ positiveBaselineCount: 1, rows: [{ customerCode: "c-1", productCode: "p-1", productName: "Product", category: null, baselineNetQuantity: 12, recentNetQuantity: 0, suggestedQuantity: 4 }] }];
+    },
+  } as never, { resolveAllowedRouteIds: async () => new Set(["R-1"]) } as never);
+
+  const result = await service.queryVisitCopilotLostOpportunities({
+    companyId: "company-1",
+    requestingUser: { roleCode: "MANAGER", email: "manager@example.com" },
+    customerCodes: ["C-1"],
+    baselineFrom: "2026-05-06", baselineTo: "2026-08-03", recentFrom: "2026-08-04", recentTo: "2026-09-02",
+  });
+
+  assert.equal(result.positiveBaselineCount, 1);
+  assert.equal(result.rows.length, 1);
+  const sql = captured?.strings?.join(" ") ?? "";
+  assert.match(sql, /scoped_invoice_numbers AS MATERIALIZED/);
+  assert.match(sql, /scoped_return_numbers AS MATERIALIZED/);
+  assert.match(sql, /positive_baseline AS MATERIALIZED/);
+  assert.match(sql, /recent_net_quantity = 0/);
+  assert.ok(captured?.values?.includes("r-1"));
+  assert.ok(captured?.values?.includes("c-1"));
+});

@@ -4,7 +4,7 @@ import { PrismaService } from "../../common/prisma";
 import { CanonicalHierarchyResolverService } from "./canonical-hierarchy-resolver.service";
 import { RieRequestPlannerService } from "./rie-request-planner.service";
 import type { EntityQueryContext, EntityRecord, EntityQueryResult } from "./entity-provider.interface";
-import type { RieAssistantCustomerMentionQuery, RieAssistantDatasetQuery, RieAssistantDatasetResult, RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoEngineFilters, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieLocalDecisionCollectionsQuery, RieLocalDecisionCollectionsSummary, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitPeerScope, RieProductFitQuery, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieSmartLoadingNetQuantityQuery, RieSmartLoadingNetQuantityRow, RieStalePurchaseRow, RieStalePurchasesQuery, RieTerritoryCustomerFactsQuery, RieTerritoryCustomerFactsResult, RieTerritorySummaryFactRow, RieTerritorySummaryQuery, RieValueScope, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
+import type { RieAssistantCustomerMentionQuery, RieAssistantDatasetQuery, RieAssistantDatasetResult, RieDateScope, RieGeoCustomerDirectoryQuery, RieGeoCustomerDirectoryRow, RieGeoCustomerSalesRow, RieGeoCustomerSelectionQuery, RieGeoCustomerSelectionRow, RieGeoEngineFilters, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieGeoExpansionCustomersResult, RieGeoProductQuery, RieGeoProductRow, RieHeatmapCustomerPointRow, RieHeatmapCustomerPointsQuery, RieHeatmapEntityTotalsQuery, RieHeatmapSalesQuery, RieHeatmapValueRow, RieLatestPerScope, RieLocalDecisionCollectionsQuery, RieLocalDecisionCollectionsSummary, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementLostOpportunityRow, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitPeerScope, RieProductFitQuery, RieQueryAggregation, RieQueryField, RieQueryJoin, RieRouteFallbackScope, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieSmartLoadingNetQuantityQuery, RieSmartLoadingNetQuantityRow, RieStalePurchaseRow, RieStalePurchasesQuery, RieTerritoryCustomerFactsQuery, RieTerritoryCustomerFactsResult, RieTerritorySummaryFactRow, RieTerritorySummaryQuery, RieValueScope, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery, RieVisitCopilotLostOpportunitiesQuery, RieVisitCopilotLostOpportunitiesResult, RieVisitCopilotLostOpportunityRow, RieVisitEfficiencyQuery, RieVisitEfficiencyResult } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRiePostgres, recordActiveVersionResolution } from "../../common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 import { assistantDatasetFields } from "./assistant-dataset-query.data";
@@ -3239,6 +3239,136 @@ export class RieScalableQueryService {
       page: { ...page, hasMore: Boolean(result?.hasMore) },
       rows: Array.isArray(result?.rows) ? result.rows : [],
     };
+  }
+
+  /**
+   * Visit Copilot's existing 90-day-versus-30-day rule, calculated entirely
+   * in PostgreSQL.  This deliberately returns only the final lost rows, not
+   * the much larger intermediate Customer x Product aggregates.
+   */
+  async queryVisitCopilotLostOpportunities(input: RieVisitCopilotLostOpportunitiesQuery): Promise<RieVisitCopilotLostOpportunitiesResult> {
+    if (!input.companyId?.trim()) throw new Error("RIE Visit Copilot lost opportunities requires companyId.");
+    const baselineFrom = normalizeDate(input.baselineFrom);
+    const baselineTo = normalizeDate(input.baselineTo);
+    const recentFrom = normalizeDate(input.recentFrom);
+    const recentTo = normalizeDate(input.recentTo);
+    const customerCodes = [...new Set(input.customerCodes.map((value) => value.trim().toLowerCase()).filter(Boolean))];
+    if (!customerCodes.length) return { positiveBaselineCount: 0, rows: [] };
+    const allowed = input.requestingUser
+      ? await this.hierarchyResolver.resolveAllowedRouteIds(input.companyId, input.requestingUser)
+      : null;
+    const routes = allowed === null ? null : [...allowed].map((value) => value.trim().toLowerCase()).filter(Boolean);
+    const routeScope = (field: RieQueryField): Prisma.Sql => routes === null
+      ? Prisma.empty
+      : routes.length
+        ? Prisma.sql` AND ${normalizedField(field)} IN (${Prisma.join(routes)})`
+        : Prisma.sql` AND FALSE`;
+    const invoiceProjection = Prisma.sql`
+      ${normalizedField({ field: "RouteID", source: "invoice_source" })} AS route_id,
+      ${normalizedField({ field: "CustomerCode", source: "invoice_source" })} AS customer_code,
+      ${normalizedField({ field: "InvoiceNo", source: "invoice_source" })} AS invoice_no,
+      ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} AS invoice_date,
+      ${normalizedField({ field: "InvoiceStatus", source: "invoice_source" })} AS invoice_status
+    `;
+    const itemProjection = Prisma.sql`
+      ${normalizedField({ field: "InvoiceNo", source: "item_source" })} AS invoice_no,
+      ${normalizedField({ field: "ProductCode", source: "item_source" })} AS product_code,
+      ${numericField(textField({ field: "Quantity", source: "item_source" }))} AS quantity
+    `;
+    const returnProjection = Prisma.sql`
+      ${normalizedField({ field: "RouteID", source: "returned_source" })} AS route_id,
+      ${normalizedField({ field: "CustomerCode", source: "returned_source" })} AS customer_code,
+      ${normalizedField({ field: "ReturnNo", source: "returned_source" })} AS return_no,
+      ${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} AS return_date,
+      ${normalizedField({ field: "Status", source: "returned_source" })} AS return_status
+    `;
+    const returnItemProjection = Prisma.sql`
+      ${normalizedField({ field: "ReturnNo", source: "return_item_source" })} AS return_no,
+      ${normalizedField({ field: "ProductCode", source: "return_item_source" })} AS product_code,
+      ${numericField(textField({ field: "Quantity", source: "return_item_source" }))} AS quantity
+    `;
+    const invoiceCte = activeEntityRowsCte(input.companyId, "Invoices", "invoice", [Prisma.sql`
+      ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} >= ${baselineFrom}
+      AND ${dateText(textField({ field: "InvoiceDate", source: "invoice_source" }))} <= ${recentTo}
+      AND ${normalizedField({ field: "CustomerCode", source: "invoice_source" })} IN (${Prisma.join(customerCodes)})
+      ${routeScope({ field: "RouteID", source: "invoice_source" })}
+    `], [], [], false, [], invoiceProjection);
+    const scopedInvoiceNumbersCte = Prisma.sql`scoped_invoice_numbers AS MATERIALIZED (
+      SELECT DISTINCT invoice.invoice_no FROM invoice_active invoice WHERE invoice.invoice_no <> ''
+    )`;
+    const itemCte = activeEntityRowsCte(input.companyId, "Invoice Items", "item", [], [], [], false, [
+      Prisma.sql`INNER JOIN scoped_invoice_numbers scoped_invoice ON ${normalizedField({ field: "InvoiceNo", source: "item_source" })} = scoped_invoice.invoice_no`,
+    ], itemProjection);
+    const returnsCte = activeEntityRowsCte(input.companyId, "Returns", "returned", [Prisma.sql`
+      ${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} >= ${baselineFrom}
+      AND ${dateText(textField({ field: "ReturnDate", source: "returned_source" }))} <= ${recentTo}
+      AND ${normalizedField({ field: "CustomerCode", source: "returned_source" })} IN (${Prisma.join(customerCodes)})
+      ${routeScope({ field: "RouteID", source: "returned_source" })}
+    `], [], [], false, [], returnProjection);
+    const scopedReturnNumbersCte = Prisma.sql`scoped_return_numbers AS MATERIALIZED (
+      SELECT DISTINCT returned.return_no FROM returned_active returned WHERE returned.return_no <> ''
+    )`;
+    const returnItemsCte = activeEntityRowsCte(input.companyId, "Return Items", "return_item", [], [], [], false, [
+      Prisma.sql`INNER JOIN scoped_return_numbers scoped_return ON ${normalizedField({ field: "ReturnNo", source: "return_item_source" })} = scoped_return.return_no`,
+    ], returnItemProjection);
+    const productCte = activeEntityRowsCte(input.companyId, "Products", "product", [], [], []);
+    const productCode = normalizedField({ field: "ProductCode", source: "product" });
+    const rawRows = await this.postgres<Array<{ positiveBaselineCount: number; rows: RieVisitCopilotLostOpportunityRow[] }>>(
+      "queryVisitCopilotLostOpportunities.sql",
+      { kind: "specialized", operation: "queryVisitCopilotLostOpportunities" },
+      () => Prisma.sql`
+        WITH ${invoiceCte}, ${scopedInvoiceNumbersCte}, ${itemCte}, ${returnsCte}, ${scopedReturnNumbersCte}, ${returnItemsCte}, ${productCte},
+        sales AS MATERIALIZED (
+          SELECT invoice.customer_code, item.product_code,
+            SUM(CASE WHEN invoice.invoice_date BETWEEN ${baselineFrom} AND ${baselineTo} THEN item.quantity ELSE 0 END)::double precision baseline_sales,
+            SUM(CASE WHEN invoice.invoice_date BETWEEN ${recentFrom} AND ${recentTo} THEN item.quantity ELSE 0 END)::double precision recent_sales
+          FROM item_active item INNER JOIN invoice_active invoice ON item.invoice_no = invoice.invoice_no
+          WHERE invoice.customer_code <> '' AND item.product_code <> '' AND invoice.invoice_status IN ('confirmed', 'posted')
+          GROUP BY invoice.customer_code, item.product_code
+        ),
+        returned AS MATERIALIZED (
+          SELECT returned.customer_code, return_item.product_code,
+            SUM(CASE WHEN returned.return_date BETWEEN ${baselineFrom} AND ${baselineTo} THEN return_item.quantity ELSE 0 END)::double precision baseline_returns,
+            SUM(CASE WHEN returned.return_date BETWEEN ${recentFrom} AND ${recentTo} THEN return_item.quantity ELSE 0 END)::double precision recent_returns
+          FROM return_item_active return_item INNER JOIN returned_active returned ON return_item.return_no = returned.return_no
+          WHERE returned.customer_code <> '' AND return_item.product_code <> '' AND returned.return_status IN ('confirmed', 'approved')
+          GROUP BY returned.customer_code, return_item.product_code
+        ),
+        net AS MATERIALIZED (
+          SELECT COALESCE(sales.customer_code, returned.customer_code) customer_code, COALESCE(sales.product_code, returned.product_code) product_code,
+            (COALESCE(sales.baseline_sales, 0) - COALESCE(returned.baseline_returns, 0))::double precision baseline_net_quantity,
+            (COALESCE(sales.recent_sales, 0) - COALESCE(returned.recent_returns, 0))::double precision recent_net_quantity
+          FROM sales FULL OUTER JOIN returned ON sales.customer_code = returned.customer_code AND sales.product_code = returned.product_code
+        ),
+        product_names AS MATERIALIZED (
+          SELECT DISTINCT ON (${productCode}) ${productCode} product_code,
+            COALESCE(NULLIF(BTRIM(COALESCE(${textField({ field: "ProductName", source: "product" })}, '')), ''), ${productCode}) product_name,
+            NULLIF(BTRIM(COALESCE(${textField({ field: "Category", source: "product" })}, '')), '') category
+          FROM product_active product WHERE ${productCode} <> '' ORDER BY ${productCode}, product."entity_key" DESC
+        ),
+        positive_baseline AS MATERIALIZED (
+          SELECT * FROM net WHERE baseline_net_quantity > 0
+        ),
+        opportunities AS MATERIALIZED (
+          SELECT positive_baseline.customer_code "customerCode", positive_baseline.product_code "productCode",
+            COALESCE(product_names.product_name, positive_baseline.product_code) "productName", product_names.category "category",
+            positive_baseline.baseline_net_quantity "baselineNetQuantity", positive_baseline.recent_net_quantity "recentNetQuantity",
+            ROUND(positive_baseline.baseline_net_quantity / 3.0)::double precision "suggestedQuantity"
+          FROM positive_baseline LEFT JOIN product_names ON product_names.product_code = positive_baseline.product_code
+          WHERE positive_baseline.recent_net_quantity = 0
+        ),
+        summary AS MATERIALIZED (SELECT COUNT(*)::integer "positiveBaselineCount" FROM positive_baseline)
+        SELECT summary."positiveBaselineCount",
+          COALESCE(JSONB_AGG(JSONB_BUILD_OBJECT(
+            'customerCode', "customerCode", 'productCode', "productCode", 'productName', "productName", 'category', "category",
+            'baselineNetQuantity', "baselineNetQuantity", 'recentNetQuantity', "recentNetQuantity", 'suggestedQuantity', "suggestedQuantity"
+          ) ORDER BY "customerCode", "productName", "productCode"), '[]'::jsonb) rows
+        FROM summary LEFT JOIN opportunities ON TRUE
+        GROUP BY summary."positiveBaselineCount"
+      `,
+    );
+    const result = rawRows[0];
+    return { positiveBaselineCount: Number(result?.positiveBaselineCount ?? 0), rows: Array.isArray(result?.rows) ? result.rows : [] };
   }
 
   /**

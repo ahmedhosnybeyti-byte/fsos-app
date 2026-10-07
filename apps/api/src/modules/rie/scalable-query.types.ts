@@ -510,6 +510,29 @@ export interface RieManagementLostOpportunitiesResult {
   rows: RieManagementLostOpportunityRow[];
 }
 
+/** Final Customer x Product lost-opportunity rows for Visit Copilot. Raw
+ * invoice and return facts remain inside PostgreSQL. */
+export interface RieVisitCopilotLostOpportunitiesQuery extends EntityQueryContext {
+  baselineFrom: string;
+  baselineTo: string;
+  recentFrom: string;
+  recentTo: string;
+  customerCodes: readonly string[];
+}
+export interface RieVisitCopilotLostOpportunityRow {
+  customerCode: string;
+  productCode: string;
+  productName: string;
+  category: string | null;
+  baselineNetQuantity: number;
+  recentNetQuantity: number;
+  suggestedQuantity: number;
+}
+export interface RieVisitCopilotLostOpportunitiesResult {
+  positiveBaselineCount: number;
+  rows: RieVisitCopilotLostOpportunityRow[];
+}
+
 /** Product-grain stale-purchase evidence; Product × Customer stays inside SQL. */
 export interface RieStalePurchasesQuery extends EntityQueryContext {
   /** Routes holding active vehicle inventory for the current session. */
