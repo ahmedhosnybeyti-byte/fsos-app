@@ -179,6 +179,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Commit:** This local commit.
 - **Regression-prevention rule:** Customer Briefing must not materialize full operational entities or page through their complete datasets. Keep its facts set-based and scalar-projected, and prove date, duplicate, ranking, peer, collection, and latest-inventory semantics against the legacy parity fixture.
 
+## Visit Copilot management lost opportunities hidden by intermediate result cap
+
+- **Symptom/evidence:** Company Admin Visit Copilot returned "data unavailable" for Lost Opportunities while the same data appeared for a Sales Rep. The company-wide request produced more than 5,000 intermediate Customer × Product aggregate rows.
+- **Root cause:** The shared lost-opportunity service ran four separately paged aggregates and interpreted any `hasMore` result as missing source data.
+- **Fix:** One canonical PostgreSQL query now applies company and canonical hierarchy scope to headers first, narrows items through scoped document keys, calculates invoice-minus-confirmed-return net quantity, and returns only final lost-opportunity rows.
+- **Commit:** `eb52fe8`.
+- **Regression-prevention rule:** Visit Copilot must never treat an intermediate aggregate page cap as unavailable data. Keep its full baseline/recent rule and Company Admin/Manager/Supervisor/Sales Rep scope in PostgreSQL; do not load or join raw facts in Node.
+
 ## Smart Loading unintended automatic refresh
 
 - **Symptom:** Smart Loading requests refreshed automatically on window focus or network reconnect after becoming stale.
