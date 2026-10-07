@@ -2,6 +2,21 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 import { VisitCopilotService } from "./visit-copilot.service";
 
+test("Visit Copilot retains canonical management identities and Sales Rep restrictions", async () => {
+  const service = new VisitCopilotService({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
+  const scopedActor = (service as unknown as { scopedActor: (user: { companyId: string; userId: string; roleCode: string; email: string }, salesRepId?: string) => Promise<unknown> }).scopedActor;
+  const companyAdmin = { companyId: "company", userId: "admin", roleCode: "COMPANY_ADMIN", email: "admin@example.com" };
+  const manager = { companyId: "company", userId: "manager", roleCode: "MANAGER", email: "manager@example.com" };
+  const salesRep = { companyId: "company", userId: "rep", roleCode: "SALES_REP", email: "rep@example.com" };
+
+  assert.equal(await scopedActor(companyAdmin), companyAdmin);
+  assert.equal(await scopedActor(manager), manager);
+  assert.equal(await scopedActor(salesRep), salesRep);
+  await assert.rejects(() => scopedActor(companyAdmin, "REP-1"));
+  await assert.rejects(() => scopedActor(manager, "REP-1"));
+  await assert.rejects(() => scopedActor(salesRep, "REP-1"));
+});
+
 test("Visit Copilot enters a bounded RIE request plan for its direct and fan-out reads", async () => {
   const plans: Array<{ name: string; maxConcurrentOperations: number; maxOperations: number }> = [];
   const rieFacade = {

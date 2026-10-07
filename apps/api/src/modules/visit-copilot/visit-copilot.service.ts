@@ -478,6 +478,13 @@ export class VisitCopilotService {
       if (salesRepId) throw new ForbiddenException();
       return user;
     }
+    // Management viewers retain their identity, allowing RIE to apply the
+    // canonical Company/Manager hierarchy route scope on every data read.
+    // The unchanged UI sends a selected rep only for Supervisors.
+    if (user.roleCode === "MANAGER" || user.roleCode === "COMPANY_ADMIN") {
+      if (salesRepId) throw new ForbiddenException();
+      return user;
+    }
     if (user.roleCode !== "SUPERVISOR" || !user.companyId || !salesRepId) throw new ForbiddenException();
     const options = await this.supervisedSalesReps(user);
     if (!options.some((rep) => rep.employeeCode === salesRepId)) throw new ForbiddenException();

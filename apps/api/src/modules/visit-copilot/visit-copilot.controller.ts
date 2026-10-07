@@ -39,13 +39,13 @@ export class VisitCopilotController {
   constructor(private readonly visitCopilotService: VisitCopilotService) {}
 
   @Get("sales-reps")
-  @Auth("SUPERVISOR")
+  @Auth("SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   salesReps(@CurrentUser() user: AuthenticatedUser) {
     return this.visitCopilotService.supervisedSalesReps(user);
   }
 
   @Get("daily-brief")
-  @Auth("SALES_REP", "SUPERVISOR")
+  @Auth("SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   dailyBrief(
     @CurrentUser() user: AuthenticatedUser,
     @Query(new ZodValidationPipe(visitCopilotDailyBriefQuerySchema)) query: VisitCopilotDailyBriefQuery, @Query("salesRepId") salesRepId?: string,
@@ -55,14 +55,14 @@ export class VisitCopilotController {
   }
 
   @Post("plan")
-  @Auth("SALES_REP", "SUPERVISOR")
+  @Auth("SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   plan(@CurrentUser() user: AuthenticatedUser, @Body(new ZodValidationPipe(visitCopilotPlanRequestSchema)) body: VisitCopilotPlanRequest, @Query("salesRepId") salesRepId?: string) {
     if (!user.companyId) throw new ForbiddenException();
     return this.visitCopilotService.plan(user, body, salesRepId);
   }
 
   @Get("briefing/:customerCode")
-  @Auth("SALES_REP", "SUPERVISOR")
+  @Auth("SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   briefing(
     @CurrentUser() user: AuthenticatedUser,
     @Param("customerCode") customerCode: string,
@@ -73,7 +73,7 @@ export class VisitCopilotController {
   }
 
   @Post("chat")
-  @Auth("SALES_REP", "SUPERVISOR")
+  @Auth("SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   @RequiresPaidPlan()
   chat(@CurrentUser() user: AuthenticatedUser, @Body(new ZodValidationPipe(visitCopilotChatRequestSchema)) body: VisitCopilotChatRequest, @Query("salesRepId") salesRepId?: string) {
     if (!user.companyId) throw new ForbiddenException();
@@ -85,7 +85,7 @@ export class VisitCopilotController {
   // `user` (SgiService.getLatest's own hierarchy filter), same as every
   // other endpoint in this controller.
   @Get("daily-360-summary")
-  @Auth("SALES_REP", "SUPERVISOR")
+  @Auth("SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   daily360Summary(
     @CurrentUser() user: AuthenticatedUser,
     @Query(new ZodValidationPipe(visitCopilotDaily360SummaryQuerySchema)) query: VisitCopilotDaily360SummaryQuery, @Query("salesRepId") salesRepId?: string,
@@ -99,13 +99,13 @@ export class VisitCopilotController {
   // ------------------------------------------------------------------
 
   @Get("lost-opportunity-exclusions")
-  @Auth("SALES_REP", "SUPERVISOR")
+  @Auth("SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   listLostOpportunityExclusions(@CurrentUser() user: AuthenticatedUser) {
     return this.visitCopilotService.listLostOpportunityExclusions(user);
   }
 
   @Post("lost-opportunity-exclusions")
-  @Auth("SALES_REP", "SUPERVISOR")
+  @Auth("SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   createLostOpportunityExclusion(
     @CurrentUser() user: AuthenticatedUser,
     @Body(new ZodValidationPipe(createLostOpportunityExclusionSchema)) body: CreateLostOpportunityExclusion,
@@ -114,13 +114,13 @@ export class VisitCopilotController {
   }
 
   @Post("lost-opportunity-exclusions/:id/revoke")
-  @Auth("SALES_REP", "SUPERVISOR")
+  @Auth("SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   revokeLostOpportunityExclusion(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string) {
     return this.visitCopilotService.revokeLostOpportunityExclusion(user, id);
   }
 
   @Get("discovery")
-  @Auth("SALES_REP", "SUPERVISOR")
+  @Auth("SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   discovery(
     @CurrentUser() user: AuthenticatedUser,
     @Query(new ZodValidationPipe(visitCopilotDiscoveryQuerySchema)) query: VisitCopilotDiscoveryQuery, @Query("salesRepId") salesRepId?: string,
@@ -134,7 +134,7 @@ export class VisitCopilotController {
   // path is kept for frontend compatibility; "search" is the
   // provider-neutral alias for new callers.
   @Post("discovery/google-search")
-  @Auth("SALES_REP", "SUPERVISOR")
+  @Auth("SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   googleSearch(
     @CurrentUser() user: AuthenticatedUser,
     @Body(new ZodValidationPipe(visitCopilotGoogleSearchRequestSchema)) body: VisitCopilotGoogleSearchRequest, @Query("salesRepId") salesRepId?: string,
@@ -144,7 +144,7 @@ export class VisitCopilotController {
   }
 
   @Post("discovery/search")
-  @Auth("SALES_REP", "SUPERVISOR")
+  @Auth("SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   discoverySearch(
     @CurrentUser() user: AuthenticatedUser,
     @Body(new ZodValidationPipe(visitCopilotGoogleSearchRequestSchema)) body: VisitCopilotGoogleSearchRequest, @Query("salesRepId") salesRepId?: string,
@@ -154,7 +154,7 @@ export class VisitCopilotController {
   }
 
   @Get("discovery/limit")
-  @Auth("SALES_REP", "SUPERVISOR")
+  @Auth("SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   discoveryLimit(@CurrentUser() user: AuthenticatedUser, @Query("salesRepId") salesRepId?: string) {
     if (!user.companyId) throw new ForbiddenException();
     return this.visitCopilotService.discoveryLimit(user, salesRepId);
@@ -167,7 +167,7 @@ export class VisitCopilotController {
   }
 
   @Patch("prospects/:id/status")
-  @Auth("SALES_REP", "SUPERVISOR")
+  @Auth("SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   updateProspectStatus(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
@@ -178,7 +178,7 @@ export class VisitCopilotController {
   }
 
   @Get("route-opportunities")
-  @Auth("SALES_REP", "SUPERVISOR")
+  @Auth("SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   routeOpportunities(
     @CurrentUser() user: AuthenticatedUser,
     @Query(new ZodValidationPipe(visitCopilotDiscoveryQuerySchema)) query: VisitCopilotDiscoveryQuery, @Query("salesRepId") salesRepId?: string,
@@ -190,7 +190,7 @@ export class VisitCopilotController {
   // Same query shape as the customer briefing (period + vanStock) — the
   // response mirrors the customer briefing too, plus isProspect:true.
   @Get("prospect-briefing/:id")
-  @Auth("SALES_REP", "SUPERVISOR")
+  @Auth("SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
   prospectBriefing(
     @CurrentUser() user: AuthenticatedUser,
     @Param("id") id: string,
