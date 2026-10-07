@@ -1457,10 +1457,14 @@ export class VisitCopilotService {
       const id = String(value ?? "").trim();
       return id ? employeeName.get(id) || id : null;
     };
+    // Lost-opportunity fact keys are normalized by RIE. Customer dimensions
+    // retain their display casing, so normalize this presentation lookup too;
+    // otherwise management rows lose their hierarchy and collapse into one
+    // flat customer group.
     return new Map(customers.records.map((customer) => {
       const route = routeById.get(String(customer.RouteID ?? "").trim());
       const region = String(customer.RegionName ?? customer.RegionID ?? route?.RegionName ?? route?.RegionID ?? "").trim() || null;
-      return [String(customer.CustomerCode ?? "").trim(), { region, manager: label(route?.ManagerID), supervisor: label(route?.SupervisorID), salesRep: label(route?.SalesRepID) }];
+      return [String(customer.CustomerCode ?? "").trim().toLowerCase(), { region, manager: label(route?.ManagerID), supervisor: label(route?.SupervisorID), salesRep: label(route?.SalesRepID) }];
     }));
   }
 
@@ -1643,7 +1647,7 @@ export class VisitCopilotService {
       stoppedProducts: [{ productName: opportunity.productName, quantity: opportunity.baselineNetQuantity, unit: "", value: opportunity.suggestedQuantity }],
       diagnosis: diagnosis.diagnosis, visitDecision: diagnosis.visitAction, likelyReason: null, visitGoal: diagnosis.visitGoal, confidence: diagnosis.confidence, extraProductCount: 0,
       customerCode: opportunity.customerCode, productCode: opportunity.productCode, productName: opportunity.productName, category: opportunity.category, baselineNetQuantity: opportunity.baselineNetQuantity, recentNetQuantity: opportunity.recentNetQuantity, suggestedQuantity: opportunity.suggestedQuantity,
-      hierarchy: hierarchyByCustomer.get(opportunity.customerCode),
+      hierarchy: hierarchyByCustomer.get(opportunity.customerCode.trim().toLowerCase()),
       };
     });
     // ---- Collections + priority debtors (COLLECTION_RISK situations for
