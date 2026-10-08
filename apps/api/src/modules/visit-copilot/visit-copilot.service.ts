@@ -157,6 +157,29 @@ export interface DailyBriefResult {
   lostOpportunityResult: LostOpportunityResult;
 }
 
+/**
+ * A Lost Opportunity is an alternative expected value for a planned customer
+ * visit, not an additional visit. Keep a single expected-sale value per
+ * customer so the same stop cannot be counted twice.
+ */
+export function expectedSalesForPlannedVisits(
+  customers: readonly Pick<DailyBriefCustomer, "customerCode" | "avgOrderValue" | "isProspect">[],
+  opportunities: readonly Pick<LostOpportunityResult["opportunities"][number], "customerCode" | "expectedSales">[],
+): number {
+  const lostSalesByCustomer = new Map<string, number>();
+  for (const opportunity of opportunities) {
+    const customerCode = opportunity.customerCode.trim().toLowerCase();
+    if (customerCode === "") continue;
+    lostSalesByCustomer.set(customerCode, (lostSalesByCustomer.get(customerCode) ?? 0) + opportunity.expectedSales);
+  }
+
+  return round2(customers.reduce((sum, customer) => {
+    if (customer.isProspect) return sum;
+    const lostSales = lostSalesByCustomer.get(customer.customerCode.trim().toLowerCase()) ?? 0;
+    return sum + Math.max(customer.avgOrderValue, lostSales);
+  }, 0));
+}
+
 export interface BriefingProduct {
   productCode: string;
   productName: string;
@@ -810,7 +833,7 @@ export class VisitCopilotService {
       isWorkingDay,
       visitCount: entries.length,
       dailyTargetSales,
-      expectedSalesTotal: round2(entries.reduce((sum, e) => sum + e.avgOrderValue, 0) + lostOpportunityResult.opportunities.reduce((sum, opportunity) => sum + opportunity.expectedSales, 0)),
+      expectedSalesTotal: expectedSalesForPlannedVisits(entries, lostOpportunityResult.opportunities),
       estimatedDistanceKm,
       estimatedDurationMin,
       customers: entries,

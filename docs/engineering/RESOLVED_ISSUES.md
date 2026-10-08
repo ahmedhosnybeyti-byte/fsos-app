@@ -195,6 +195,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Commit:** Current Visit Copilot calculation commit (see Git history).
 - **Regression-prevention rule:** Keep baseline visit counting and product-price aggregation inside the authorized company/hierarchy/date SQL scope. Never replace a zero visit count with a synthetic divisor, and never omit such opportunities from the lost-opportunity count or Expected Sales.
 
+## Visit Copilot Daily Expected Sales — duplicate customer potential
+
+- **Symptom:** Daily Expected Sales was inflated after Lost Opportunity potential was added on top of every customer's current average invoice value.
+- **Root cause:** The daily total treated a customer's Lost Opportunity potential as an additional visit instead of an alternative expected value for that same planned visit.
+- **Fix:** Aggregate Lost Opportunity expected sales per customer, then use `MAX(current average invoice value, combined lost-opportunity potential)` once for each non-prospect planned customer.
+- **Commit:** Current local commit (see Git history).
+- **Regression-prevention rule:** Daily Expected Sales must contribute at most one expected-sale value per planned customer. Never add a customer's baseline average and Lost Opportunity potential together.
+
 ## Smart Loading unintended automatic refresh
 
 - **Symptom:** Smart Loading requests refreshed automatically on window focus or network reconnect after becoming stale.

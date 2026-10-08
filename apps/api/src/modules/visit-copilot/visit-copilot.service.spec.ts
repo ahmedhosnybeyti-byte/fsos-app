@@ -1,6 +1,25 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { VisitCopilotService } from "./visit-copilot.service";
+import { expectedSalesForPlannedVisits, VisitCopilotService } from "./visit-copilot.service";
+
+test("daily expected sales uses one higher expected value per customer without double counting lost opportunities", () => {
+  const total = expectedSalesForPlannedVisits(
+    [
+      { customerCode: "C-1", avgOrderValue: 100 },
+      { customerCode: "C-2", avgOrderValue: 200 },
+      { customerCode: "prospect:1", avgOrderValue: 0, isProspect: true },
+    ],
+    [
+      { customerCode: "c-1", expectedSales: 70 },
+      { customerCode: "C-2", expectedSales: 150 },
+      { customerCode: "C-2", expectedSales: 125 },
+    ],
+  );
+
+  // C-1 keeps its invoice average (100); C-2 uses its combined lost-SKU
+  // potential (150 + 125) instead of adding that potential to 200.
+  assert.equal(total, 375);
+});
 
 test("Visit Copilot retains canonical management identities and Sales Rep restrictions", async () => {
   const service = new VisitCopilotService({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, {} as never);
