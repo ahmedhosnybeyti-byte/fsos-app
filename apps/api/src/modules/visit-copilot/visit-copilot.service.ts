@@ -810,7 +810,7 @@ export class VisitCopilotService {
       isWorkingDay,
       visitCount: entries.length,
       dailyTargetSales,
-      expectedSalesTotal: round2(entries.reduce((sum, e) => sum + e.avgOrderValue, 0)),
+      expectedSalesTotal: round2(entries.reduce((sum, e) => sum + e.avgOrderValue, 0) + lostOpportunityResult.opportunities.reduce((sum, opportunity) => sum + opportunity.expectedSales, 0)),
       estimatedDistanceKm,
       estimatedDurationMin,
       customers: entries,

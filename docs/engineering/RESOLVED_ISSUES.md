@@ -191,9 +191,9 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 
 - **Symptom:** Lost Opportunities suggested a quantity using a fixed monthly divisor, which did not represent the quantity expected for the customer's next actual visit.
 - **Root cause:** The 90-day net baseline quantity was divided by `3` without counting the customer's actual visits in that same baseline.
-- **Fix:** Visit Copilot now counts baseline Visits at customer grain in PostgreSQL and calculates `ROUND(net baseline quantity / actual baseline visits)`. A zero visit count retains the opportunity but returns no suggested quantity or expected-sale contribution, with the explicit baseline-visit explanation. Non-Copilot callers retain their prior suggestion rule.
+- **Fix:** Visit Copilot now counts baseline Visits at customer grain in PostgreSQL and calculates `ROUND(net baseline quantity / actual baseline visits)`. A zero visit count retains the opportunity and returns no suggested quantity, while Expected Sales uses the baseline net quantity times the same baseline product selling price. Non-Copilot callers retain their prior suggestion rule.
 - **Commit:** Current Visit Copilot calculation commit (see Git history).
-- **Regression-prevention rule:** Keep baseline visit counting inside the authorized company/hierarchy/date SQL scope. Never replace a zero visit count with a synthetic divisor, and never omit such opportunities from the lost-opportunity count.
+- **Regression-prevention rule:** Keep baseline visit counting and product-price aggregation inside the authorized company/hierarchy/date SQL scope. Never replace a zero visit count with a synthetic divisor, and never omit such opportunities from the lost-opportunity count or Expected Sales.
 
 ## Smart Loading unintended automatic refresh
 

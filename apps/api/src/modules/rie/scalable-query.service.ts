@@ -3273,7 +3273,8 @@ export class RieScalableQueryService {
     const itemProjection = Prisma.sql`
       ${normalizedField({ field: "InvoiceNo", source: "item_source" })} AS invoice_no,
       ${normalizedField({ field: "ProductCode", source: "item_source" })} AS product_code,
-      ${numericField(textField({ field: "Quantity", source: "item_source" }))} AS quantity
+      ${numericField(textField({ field: "Quantity", source: "item_source" }))} AS quantity,
+      ${numericField(textField({ field: "LineTotal", source: "item_source" }))} AS line_total
     `;
     const returnProjection = Prisma.sql`
       ${normalizedField({ field: "RouteID", source: "returned_source" })} AS route_id,
@@ -3323,6 +3324,11 @@ export class RieScalableQueryService {
           THEN ROUND(positive_baseline.baseline_net_quantity / actual_visits.actual_visit_count)::double precision
           ELSE NULL END`
       : Prisma.sql`ROUND(positive_baseline.baseline_net_quantity / 3.0)::double precision`;
+    const expectedSalesQuantity = input.useActualBaselineVisits
+      ? Prisma.sql`CASE WHEN COALESCE(actual_visits.actual_visit_count, 0) > 0
+          THEN ROUND(positive_baseline.baseline_net_quantity / actual_visits.actual_visit_count)
+          ELSE positive_baseline.baseline_net_quantity END`
+      : Prisma.sql`ROUND(positive_baseline.baseline_net_quantity / 3.0)`;
     const productCte = activeEntityRowsCte(input.companyId, "Products", "product", [], [], []);
     const productCode = normalizedField({ field: "ProductCode", source: "product" });
     const rawRows = await this.postgres<Array<{ positiveBaselineCount: number; rows: RieVisitCopilotLostOpportunityRow[] }>>(
@@ -3333,6 +3339,7 @@ export class RieScalableQueryService {
         sales AS MATERIALIZED (
           SELECT invoice.customer_code, item.product_code,
             SUM(CASE WHEN invoice.invoice_date BETWEEN ${baselineFrom} AND ${baselineTo} THEN item.quantity ELSE 0 END)::double precision baseline_sales,
+            SUM(CASE WHEN invoice.invoice_date BETWEEN ${baselineFrom} AND ${baselineTo} THEN item.line_total ELSE 0 END)::double precision baseline_sales_value,
             SUM(CASE WHEN invoice.invoice_date BETWEEN ${recentFrom} AND ${recentTo} THEN item.quantity ELSE 0 END)::double precision recent_sales
           FROM item_active item INNER JOIN invoice_active invoice ON item.invoice_no = invoice.invoice_no
           WHERE invoice.customer_code <> '' AND item.product_code <> '' AND invoice.invoice_status IN ('confirmed', 'posted')
@@ -3349,6 +3356,8 @@ export class RieScalableQueryService {
         net AS MATERIALIZED (
           SELECT COALESCE(sales.customer_code, returned.customer_code) customer_code, COALESCE(sales.product_code, returned.product_code) product_code,
             (COALESCE(sales.baseline_sales, 0) - COALESCE(returned.baseline_returns, 0))::double precision baseline_net_quantity,
+            COALESCE(sales.baseline_sales_value, 0)::double precision baseline_sales_value,
+            COALESCE(sales.baseline_sales, 0)::double precision baseline_sales_quantity,
             (COALESCE(sales.recent_sales, 0) - COALESCE(returned.recent_returns, 0))::double precision recent_net_quantity
           FROM sales FULL OUTER JOIN returned ON sales.customer_code = returned.customer_code AND sales.product_code = returned.product_code
         ),
@@ -3369,7 +3378,8 @@ export class RieScalableQueryService {
           SELECT positive_baseline.customer_code "customerCode", positive_baseline.product_code "productCode",
             COALESCE(product_names.product_name, positive_baseline.product_code) "productName", product_names.category "category",
             positive_baseline.baseline_net_quantity "baselineNetQuantity", positive_baseline.recent_net_quantity "recentNetQuantity",
-            ${suggestedQuantity} "suggestedQuantity"
+            ${suggestedQuantity} "suggestedQuantity",
+            ROUND(${expectedSalesQuantity} * positive_baseline.baseline_sales_value / NULLIF(positive_baseline.baseline_sales_quantity, 0), 2)::double precision "expectedSales"
           FROM positive_baseline LEFT JOIN product_names ON product_names.product_code = positive_baseline.product_code
           LEFT JOIN actual_visits ON actual_visits.customer_code = positive_baseline.customer_code
           WHERE positive_baseline.recent_net_quantity = 0
@@ -3378,7 +3388,7 @@ export class RieScalableQueryService {
         SELECT summary."positiveBaselineCount",
           COALESCE(JSONB_AGG(JSONB_BUILD_OBJECT(
             'customerCode', "customerCode", 'productCode', "productCode", 'productName', "productName", 'category', "category",
-            'baselineNetQuantity', "baselineNetQuantity", 'recentNetQuantity', "recentNetQuantity", 'suggestedQuantity', "suggestedQuantity"
+            'baselineNetQuantity', "baselineNetQuantity", 'recentNetQuantity', "recentNetQuantity", 'suggestedQuantity', "suggestedQuantity", 'expectedSales', COALESCE("expectedSales", 0)
           ) ORDER BY "customerCode", "productName", "productCode"), '[]'::jsonb) rows
         FROM summary LEFT JOIN opportunities ON TRUE
         GROUP BY summary."positiveBaselineCount"

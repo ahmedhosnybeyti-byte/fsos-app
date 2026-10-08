@@ -289,7 +289,7 @@ test("Visit Copilot calculates final lost opportunities in PostgreSQL within com
   const service = new RieScalableQueryService({
     $queryRaw: async (query: typeof captured) => {
       captured = query;
-      return [{ positiveBaselineCount: 1, rows: [{ customerCode: "c-1", productCode: "p-1", productName: "Product", category: null, baselineNetQuantity: 12, recentNetQuantity: 0, suggestedQuantity: 4 }] }];
+      return [{ positiveBaselineCount: 1, rows: [{ customerCode: "c-1", productCode: "p-1", productName: "Product", category: null, baselineNetQuantity: 12, recentNetQuantity: 0, suggestedQuantity: 4, expectedSales: 20 }] }];
     },
   } as never, { resolveAllowedRouteIds: async () => new Set(["R-1"]) } as never);
 
@@ -308,6 +308,8 @@ test("Visit Copilot calculates final lost opportunities in PostgreSQL within com
   assert.match(sql, /positive_baseline AS MATERIALIZED/);
   assert.match(sql, /actual_visits AS MATERIALIZED/);
   assert.match(sql, /COUNT\(\*\)::integer actual_visit_count/);
+  assert.match(sql, /baseline_sales_value/);
+  assert.match(sql, /"expectedSales"/);
   assert.match(sql, /recent_net_quantity = 0/);
   assert.ok(captured?.values?.includes("r-1"));
   assert.ok(captured?.values?.includes("c-1"));

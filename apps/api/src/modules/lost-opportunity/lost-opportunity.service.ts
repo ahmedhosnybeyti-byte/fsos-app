@@ -15,6 +15,8 @@ export type LostOpportunity = {
   suggestedQuantity: number;
   /** False only when Visit Copilot has no baseline visit with which to derive a per-visit quantity. */
   suggestedQuantityAvailable: boolean;
+  /** Monetary visit potential derived from the baseline product selling price. */
+  expectedSales: number;
 };
 export type LostOpportunityResult = { opportunities: LostOpportunity[]; status: LostOpportunityStatus };
 export type LostOpportunityRequest = EntityQueryContext & { selectedDate: string; customerCodes: readonly string[]; customerNames?: ReadonlyMap<string, string>; useActualBaselineVisits?: boolean };
@@ -46,7 +48,9 @@ export class LostOpportunityService {
         joins: [{ entityName: joinEntity, alias: joinAlias, on: { left: { field: joinKey }, rightField: joinKey } }],
         hierarchyRoute: { field: "RouteID", source: joinAlias },
         scope: { customer: { values: customerCodes, source: joinAlias }, date: { field: dateField, source: joinAlias, from, to }, fields: [{ field: statusField, source: joinAlias, values: statuses }] },
-        aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], pagination: { limit: 5_000 },
+        aggregates: entityName === "Invoice Items"
+          ? [{ op: "sum", field: "Quantity", as: "quantity" }, { op: "sum", field: "LineTotal", as: "salesValue" }]
+          : [{ op: "sum", field: "Quantity", as: "quantity" }], pagination: { limit: 5_000 },
       });
     try {
       const [invoiceBaseline, invoiceRecent, returnBaseline, returnRecent, visits] = await Promise.all([
@@ -60,13 +64,17 @@ export class LostOpportunityService {
       ]);
       const runs = [invoiceBaseline, invoiceRecent, returnBaseline, returnRecent, ...(visits ? [visits] : [])];
       if (runs.some((run) => run.page.hasMore)) return { opportunities: [], status: "data-unavailable" };
-      const quantities = new Map<string, { customerCode: string; productCode: string; baseline: number; recent: number }>();
+      const quantities = new Map<string, { customerCode: string; productCode: string; baseline: number; recent: number; baselineInvoiceQuantity: number; baselineInvoiceSales: number }>();
       const add = (rows: readonly EntityRecord[], bucket: "baseline" | "recent", sign: number) => rows.forEach((row) => {
         const customerCode = key(row.customerCode), productCode = key(row.productCode);
         if (!customerCode || !productCode) return;
         const pairKey = `${customerCode}\u0000${productCode}`;
-        const pair = quantities.get(pairKey) ?? { customerCode, productCode, baseline: 0, recent: 0 };
+        const pair = quantities.get(pairKey) ?? { customerCode, productCode, baseline: 0, recent: 0, baselineInvoiceQuantity: 0, baselineInvoiceSales: 0 };
         pair[bucket] += numberValue(row.quantity) * sign;
+        if (sign > 0 && bucket === "baseline") {
+          pair.baselineInvoiceQuantity += numberValue(row.quantity);
+          pair.baselineInvoiceSales += numberValue(row.salesValue);
+        }
         quantities.set(pairKey, pair);
       });
       add(invoiceBaseline.records, "baseline", 1); add(invoiceRecent.records, "recent", 1);
@@ -80,7 +88,10 @@ export class LostOpportunityService {
       const opportunities = positive.filter((pair) => pair.recent === 0).map((pair) => {
         const actualVisits = visitsByCustomer.get(pair.customerCode) ?? 0;
         const suggestedQuantityAvailable = !input.useActualBaselineVisits || actualVisits > 0;
-        return { customerCode: pair.customerCode, customerName: input.customerNames?.get(pair.customerCode) ?? pair.customerCode, productCode: pair.productCode, productName: productsByCode.get(pair.productCode)?.name ?? pair.productCode, category: productsByCode.get(pair.productCode)?.category ?? null, baselineNetQuantity: pair.baseline, recentNetQuantity: pair.recent, suggestedQuantity: suggestedQuantityAvailable ? Math.round(pair.baseline / (input.useActualBaselineVisits ? actualVisits : 3)) : 0, suggestedQuantityAvailable };
+        const suggestedQuantity = suggestedQuantityAvailable ? Math.round(pair.baseline / (input.useActualBaselineVisits ? actualVisits : 3)) : 0;
+        const unitPrice = pair.baselineInvoiceQuantity > 0 ? pair.baselineInvoiceSales / pair.baselineInvoiceQuantity : 0;
+        const expectedSalesQuantity = suggestedQuantityAvailable ? suggestedQuantity : pair.baseline;
+        return { customerCode: pair.customerCode, customerName: input.customerNames?.get(pair.customerCode) ?? pair.customerCode, productCode: pair.productCode, productName: productsByCode.get(pair.productCode)?.name ?? pair.productCode, category: productsByCode.get(pair.productCode)?.category ?? null, baselineNetQuantity: pair.baseline, recentNetQuantity: pair.recent, suggestedQuantity, suggestedQuantityAvailable, expectedSales: Math.round(expectedSalesQuantity * unitPrice * 100) / 100 };
       }).sort((a, b) => a.customerName.localeCompare(b.customerName, "ar") || a.productName.localeCompare(b.productName, "ar"));
       return { opportunities, status: positive.length === 0 ? "no-baseline-sales" : opportunities.length === 0 ? "no-lost-opportunities" : "available" };
     } catch { return { opportunities: [], status: "data-unavailable" }; }
@@ -105,6 +116,7 @@ export class LostOpportunityService {
         customerName: customerNames.get(key(row.customerCode).toLowerCase()) ?? row.customerCode,
         suggestedQuantity: row.suggestedQuantity ?? 0,
         suggestedQuantityAvailable: row.suggestedQuantity !== null,
+        expectedSales: row.expectedSales,
       })).sort((a, b) => a.customerName.localeCompare(b.customerName, "ar") || a.productName.localeCompare(b.productName, "ar"));
       return { opportunities, status: result.positiveBaselineCount === 0 ? "no-baseline-sales" : opportunities.length === 0 ? "no-lost-opportunities" : "available" };
     } catch { return { opportunities: [], status: "data-unavailable" }; }
@@ -214,6 +226,7 @@ export class LostOpportunityService {
           recentNetQuantity: pair.recent,
           suggestedQuantity: Math.round(pair.baseline / 3),
           suggestedQuantityAvailable: true,
+          expectedSales: 0,
         }))
         .sort((a, b) => a.customerName.localeCompare(b.customerName, "ar") || a.productName.localeCompare(b.productName, "ar"));
       return { opportunities, status: positive.length === 0 ? "no-baseline-sales" : opportunities.length === 0 ? "no-lost-opportunities" : "available" };

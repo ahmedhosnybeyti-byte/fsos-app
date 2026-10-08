@@ -528,6 +528,7 @@ export interface RieVisitCopilotLostOpportunityRow {
   baselineNetQuantity: number;
   recentNetQuantity: number;
   suggestedQuantity: number | null;
+  expectedSales: number;
 }
 export interface RieVisitCopilotLostOpportunitiesResult {
   positiveBaselineCount: number;

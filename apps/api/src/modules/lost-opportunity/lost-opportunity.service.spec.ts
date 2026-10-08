@@ -18,7 +18,7 @@ test("uses the final PostgreSQL result so a company-wide intermediate page canno
       query = value;
       return {
         positiveBaselineCount: 1,
-        rows: [{ customerCode: "c1", productCode: "p1", productName: "Product 1", category: "Drinks", baselineNetQuantity: 9, recentNetQuantity: 0, suggestedQuantity: 3 }],
+        rows: [{ customerCode: "c1", productCode: "p1", productName: "Product 1", category: "Drinks", baselineNetQuantity: 9, recentNetQuantity: 0, suggestedQuantity: 3, expectedSales: 27 }],
       };
     },
   } as never);
@@ -27,6 +27,7 @@ test("uses the final PostgreSQL result so a company-wide intermediate page canno
   assert.equal(result.status, "available");
   assert.equal(result.opportunities[0]?.customerName, "Customer");
   assert.equal(result.opportunities[0]?.suggestedQuantity, 3);
+  assert.equal(result.opportunities[0]?.expectedSales, 27);
   assert.deepEqual(query?.customerCodes, ["C1"]);
   assert.equal(query?.baselineFrom, "2026-04-03");
   assert.equal(query?.recentFrom, "2026-07-02");
@@ -53,7 +54,7 @@ test("keeps Sales Rep on the established bounded query path", async () => {
     queryVisitCopilotLostOpportunities: async () => { specializedCalled = true; return { positiveBaselineCount: 0, rows: [] }; },
     queryCanonicalRecords: async (query: { entityName: string; scope?: { date?: { from: string } } }) => query.entityName === "Products"
       ? { records: [{ productCode: "P1", productName: "Product 1", category: "Drinks" }], page: { hasMore: false } }
-      : { records: query.entityName === "Visits" ? [{ customerCode: "C1", actualVisitCount: 3 }] : query.entityName === "Invoice Items" && query.scope?.date?.from === "2026-04-03" ? [{ customerCode: "C1", productCode: "P1", quantity: 9 }] : [], page: { hasMore: false } },
+      : { records: query.entityName === "Visits" ? [{ customerCode: "C1", actualVisitCount: 3 }] : query.entityName === "Invoice Items" && query.scope?.date?.from === "2026-04-03" ? [{ customerCode: "C1", productCode: "P1", quantity: 9, salesValue: 45 }] : [], page: { hasMore: false } },
   } as never);
   const result = await service.detect({ ...input, useActualBaselineVisits: true, requestingUser: { roleCode: "SALES_REP", email: "rep@example.com" } });
   assert.equal(specializedCalled, false);
@@ -61,6 +62,7 @@ test("keeps Sales Rep on the established bounded query path", async () => {
   assert.equal(result.opportunities[0]?.customerCode, "C1");
   assert.equal(result.opportunities[0]?.suggestedQuantity, 3);
   assert.equal(result.opportunities[0]?.suggestedQuantityAvailable, true);
+  assert.equal(result.opportunities[0]?.expectedSales, 15);
 });
 
 test("keeps a lost opportunity visible but leaves Suggested Qty uncomputed when baseline visits are zero", async () => {
@@ -68,11 +70,12 @@ test("keeps a lost opportunity visible but leaves Suggested Qty uncomputed when 
     hasCanonicalEntitySources: async () => true,
     queryCanonicalRecords: async (query: { entityName: string; scope?: { date?: { from: string } } }) => query.entityName === "Products"
       ? { records: [{ productCode: "P1", productName: "Product 1", category: "Drinks" }], page: { hasMore: false } }
-      : { records: query.entityName === "Invoice Items" && query.scope?.date?.from === "2026-04-03" ? [{ customerCode: "C1", productCode: "P1", quantity: 120 }] : [], page: { hasMore: false } },
+      : { records: query.entityName === "Invoice Items" && query.scope?.date?.from === "2026-04-03" ? [{ customerCode: "C1", productCode: "P1", quantity: 120, salesValue: 600 }] : [], page: { hasMore: false } },
   } as never);
   const result = await service.detect({ ...input, useActualBaselineVisits: true, requestingUser: { roleCode: "SALES_REP", email: "rep@example.com" } });
   assert.equal(result.status, "available");
   assert.equal(result.opportunities.length, 1);
   assert.equal(result.opportunities[0]?.suggestedQuantity, 0);
   assert.equal(result.opportunities[0]?.suggestedQuantityAvailable, false);
+  assert.equal(result.opportunities[0]?.expectedSales, 600);
 });
