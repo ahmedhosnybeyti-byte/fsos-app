@@ -32,7 +32,7 @@ export function buildDaily360Diagnosis(input: {
   productName: string;
   sales90: number;
   sales30: number;
-  suggestedQuantity: number;
+  suggestedQuantity: number | null;
   returnQuantity?: number | null;
   lastPurchaseDate?: string | null;
 }): Daily360Diagnosis {
@@ -67,7 +67,7 @@ export function buildDaily360Diagnosis(input: {
       diagnosis: `Lost Sales: كان لصنف ${input.productName} صافي مبيعات ${format(sales90)} خلال 90 يومًا، ثم توقف تمامًا خلال آخر 30 يومًا.${lastPurchase} لا توجد بيانات كافية لتحديد السبب بدقة.`,
       confidence: "متوسط",
       visitAction: `استفسر عن سبب توقف ${input.productName} وحاول استرجاعه؛ تحقق من وجود الصنف لدى العميل قبل اقتراح الطلب.`,
-      visitGoal: `إعادة ${input.productName} بكمية تدريجية لا تتجاوز ${format(input.suggestedQuantity)}.`,
+      visitGoal: input.suggestedQuantity === null ? "لا توجد زيارات فعلية خلال فترة الأساس لحساب كمية الزيارة المقترحة." : `إعادة ${input.productName} بكمية تدريجية لا تتجاوز ${format(input.suggestedQuantity)}.`,
     };
   }
 
@@ -103,7 +103,7 @@ export function buildDaily360DiagnosisV2(input: {
   productName: string;
   sales90: number;
   sales30: number;
-  suggestedQuantity: number;
+  suggestedQuantity: number | null;
   returnQuantity?: number | null;
   lastPurchaseDate?: string | null;
 }): Daily360Diagnosis {
@@ -129,7 +129,7 @@ export function buildCustomerVisitDiagnosis(input: {
   pendingCollection: number;
   bouncedCollection: number;
   overdueCollection: number;
-  lostSkus: readonly { productName: string; baselineNetQuantity: number; suggestedQuantity: number }[];
+  lostSkus: readonly { productName: string; baselineNetQuantity: number; suggestedQuantity: number | null }[];
   topProduct: { productName: string; value: number } | null;
   missingProduct: { productName: string; peerValue: number } | null;
 }): CustomerVisitDiagnosis {
@@ -164,7 +164,7 @@ export function buildCustomerVisitDiagnosis(input: {
       visitObjective: `استعادة توزيع ${primary.productName} تدريجيًا قبل اقتراح أصناف جديدة.`,
       visitActions: [
         `استفسر عن سبب توقف ${primary.productName} وتحقق من وجوده لدى العميل.`,
-        `اقترح إعادة ${primary.productName} بكمية لا تتجاوز ${format(primary.suggestedQuantity)}.`,
+        primary.suggestedQuantity === null ? "لا توجد زيارات فعلية خلال فترة الأساس لحساب كمية الزيارة المقترحة." : `اقترح إعادة ${primary.productName} بكمية لا تتجاوز ${format(primary.suggestedQuantity)}.`,
         input.returnsTotal > 0 ? "راجع المرتجعات قبل زيادة كمية أي صنف مستعاد." : "ركز على استعادة الأصناف المفقودة بدل إضافة SKU جديد.",
       ],
     };
@@ -216,7 +216,7 @@ export function buildCustomerVisitDiagnosis(input: {
 export function buildCustomerVisitDiagnosisV2(input: {
   salesTotal: number; invoiceCount: number; recent30Sales: number | null; previous30Sales: number | null;
   returnsTotal: number; bouncedCollection: number; overdueCollection: number;
-  lostSkus: readonly { productName: string; baselineNetQuantity: number; suggestedQuantity: number }[];
+  lostSkus: readonly { productName: string; baselineNetQuantity: number; suggestedQuantity: number | null }[];
   topProduct: { productName: string; value: number } | null; missingProduct: { productName: string; peerValue: number } | null;
 }): CustomerVisitDiagnosisV2 {
   const collectionRisk = input.bouncedCollection + input.overdueCollection;
@@ -233,7 +233,7 @@ export function buildCustomerVisitDiagnosisV2(input: {
       : trendPct !== null && trendPct < 0
         ? `إجمالي مبيعات العميل تراجع، و${assortment} هاتان إشارتان منفصلتان؛ سبب توقف الأصناف غير مثبت من البيانات الحالية.`
         : `فقدان توزيع مثبت: ${assortment} سبب توقف الأصناف غير مثبت من البيانات الحالية.`;
-    return { evidence: [...(overall ? [overall] : []), assortment], diagnosis, confidence: "عالٍ", rootCauseConfidence: unknown, visitObjective: `استعادة توزيع ${primary.productName} تدريجيًا قبل اقتراح أصناف جديدة.`, visitActions: [`استفسر عن سبب توقف ${primary.productName} وتحقق من وجوده لدى العميل.`, `اقترح إعادة ${primary.productName} بكمية لا تتجاوز ${format(primary.suggestedQuantity)}.`, input.returnsTotal > 0 ? "راجع المرتجعات قبل زيادة كمية أي صنف مستعاد." : "ركز على استعادة الأصناف المفقودة بدل إضافة SKU جديد."] };
+    return { evidence: [...(overall ? [overall] : []), assortment], diagnosis, confidence: "عالٍ", rootCauseConfidence: unknown, visitObjective: `استعادة توزيع ${primary.productName} تدريجيًا قبل اقتراح أصناف جديدة.`, visitActions: [`استفسر عن سبب توقف ${primary.productName} وتحقق من وجوده لدى العميل.`, primary.suggestedQuantity === null ? "لا توجد زيارات فعلية خلال فترة الأساس لحساب كمية الزيارة المقترحة." : `اقترح إعادة ${primary.productName} بكمية لا تتجاوز ${format(primary.suggestedQuantity)}.`, input.returnsTotal > 0 ? "راجع المرتجعات قبل زيادة كمية أي صنف مستعاد." : "ركز على استعادة الأصناف المفقودة بدل إضافة SKU جديد."] };
   }
   if (input.returnsTotal > 0) return { evidence: [`مرتجعات مثبتة بقيمة ${format(input.returnsTotal)}.`], diagnosis: "المرتجعات هي إشارة الضغط الظاهرة؛ سببها غير مثبت من البيانات الحالية.", confidence: "متوسط", rootCauseConfidence: "منخفض", visitObjective: "مراجعة المرتجع والكمية السابقة قبل أي زيادة في الطلب.", visitActions: ["راجع الأصناف والكميات المرتجعة مع العميل.", "أكد استمرار الأصناف الحالية قبل اقتراح تحميل إضافي."] };
   if (trendPct !== null && trendPct < 0) return { evidence: [overall!], diagnosis: "تراجع مثبت في إجمالي قيمة الطلب بين آخر 30 يومًا والـ30 يومًا السابقة؛ السبب غير مثبت من البيانات الحالية.", confidence: "عالٍ", rootCauseConfidence: unknown, visitObjective: "تأكيد استمرار الأصناف الحالية واستعادة عمق الطلب تدريجيًا.", visitActions: [input.topProduct ? `أكد استمرار ${input.topProduct.productName}، وهو من أعلى المنتجات بقيمة ${format(input.topProduct.value)}.` : "راجع الأصناف الحالية قبل اقتراح أي جديد.", "استفسر عن التغير في الطلب وسجل الملاحظة دون افتراض السبب."] };

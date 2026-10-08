@@ -13,9 +13,11 @@ export type LostOpportunity = {
   baselineNetQuantity: number;
   recentNetQuantity: number;
   suggestedQuantity: number;
+  /** False only when Visit Copilot has no baseline visit with which to derive a per-visit quantity. */
+  suggestedQuantityAvailable: boolean;
 };
 export type LostOpportunityResult = { opportunities: LostOpportunity[]; status: LostOpportunityStatus };
-export type LostOpportunityRequest = EntityQueryContext & { selectedDate: string; customerCodes: readonly string[]; customerNames?: ReadonlyMap<string, string> };
+export type LostOpportunityRequest = EntityQueryContext & { selectedDate: string; customerCodes: readonly string[]; customerNames?: ReadonlyMap<string, string>; useActualBaselineVisits?: boolean };
 
 const DAY_MS = 86_400_000;
 const key = (value: unknown) => String(value ?? "").trim();
@@ -47,12 +49,16 @@ export class LostOpportunityService {
         aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], pagination: { limit: 5_000 },
       });
     try {
-      const runs = await Promise.all([
+      const [invoiceBaseline, invoiceRecent, returnBaseline, returnRecent, visits] = await Promise.all([
         query("Invoice Items", "InvoiceDate", "InvoiceStatus", ["Confirmed", "Posted"], baselineFrom, baselineTo, "Invoices", "invoice", "InvoiceNo", "CustomerCode"),
         query("Invoice Items", "InvoiceDate", "InvoiceStatus", ["Confirmed", "Posted"], recentFrom, recentTo, "Invoices", "invoice", "InvoiceNo", "CustomerCode"),
         query("Return Items", "ReturnDate", "Status", ["Confirmed", "Approved"], baselineFrom, baselineTo, "Returns", "returned", "ReturnNo", "CustomerCode"),
         query("Return Items", "ReturnDate", "Status", ["Confirmed", "Approved"], recentFrom, recentTo, "Returns", "returned", "ReturnNo", "CustomerCode"),
+        input.useActualBaselineVisits
+          ? this.rieFacade.queryCanonicalRecords({ ...input, entityName: "Visits", projection: [{ field: "CustomerCode", as: "customerCode" }], groupBy: [{ field: "CustomerCode" }], hierarchyRoute: { field: "RouteID" }, scope: { customer: { values: customerCodes }, date: { field: "VisitDate", from: baselineFrom, to: baselineTo } }, aggregates: [{ op: "count", as: "actualVisitCount" }], pagination: { limit: 5_000 } })
+          : Promise.resolve(null),
       ]);
+      const runs = [invoiceBaseline, invoiceRecent, returnBaseline, returnRecent, ...(visits ? [visits] : [])];
       if (runs.some((run) => run.page.hasMore)) return { opportunities: [], status: "data-unavailable" };
       const quantities = new Map<string, { customerCode: string; productCode: string; baseline: number; recent: number }>();
       const add = (rows: readonly EntityRecord[], bucket: "baseline" | "recent", sign: number) => rows.forEach((row) => {
@@ -63,14 +69,19 @@ export class LostOpportunityService {
         pair[bucket] += numberValue(row.quantity) * sign;
         quantities.set(pairKey, pair);
       });
-      add(runs[0].records, "baseline", 1); add(runs[1].records, "recent", 1);
-      add(runs[2].records, "baseline", -1); add(runs[3].records, "recent", -1);
+      add(invoiceBaseline.records, "baseline", 1); add(invoiceRecent.records, "recent", 1);
+      add(returnBaseline.records, "baseline", -1); add(returnRecent.records, "recent", -1);
+      const visitsByCustomer = new Map((visits?.records ?? []).map((row) => [key(row.customerCode), numberValue(row.actualVisitCount)]));
       const positive = [...quantities.values()].filter((pair) => pair.baseline > 0);
       const productCodes = [...new Set(positive.map((pair) => pair.productCode))];
       const products = productCodes.length ? await this.rieFacade.queryCanonicalRecords({ companyId: input.companyId, entityName: "Products", projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }, { field: "Category", as: "category" }], scope: { product: { values: productCodes } }, pagination: { limit: 5_000 } }) : null;
       if (products?.page.hasMore) return { opportunities: [], status: "data-unavailable" };
       const productsByCode = new Map((products?.records ?? []).map((p) => [key(p.productCode), { name: key(p.productName) || key(p.productCode), category: key(p.category) || null }]));
-      const opportunities = positive.filter((pair) => pair.recent === 0).map((pair) => ({ customerCode: pair.customerCode, customerName: input.customerNames?.get(pair.customerCode) ?? pair.customerCode, productCode: pair.productCode, productName: productsByCode.get(pair.productCode)?.name ?? pair.productCode, category: productsByCode.get(pair.productCode)?.category ?? null, baselineNetQuantity: pair.baseline, recentNetQuantity: pair.recent, suggestedQuantity: Math.round(pair.baseline / 3) })).sort((a, b) => a.customerName.localeCompare(b.customerName, "ar") || a.productName.localeCompare(b.productName, "ar"));
+      const opportunities = positive.filter((pair) => pair.recent === 0).map((pair) => {
+        const actualVisits = visitsByCustomer.get(pair.customerCode) ?? 0;
+        const suggestedQuantityAvailable = !input.useActualBaselineVisits || actualVisits > 0;
+        return { customerCode: pair.customerCode, customerName: input.customerNames?.get(pair.customerCode) ?? pair.customerCode, productCode: pair.productCode, productName: productsByCode.get(pair.productCode)?.name ?? pair.productCode, category: productsByCode.get(pair.productCode)?.category ?? null, baselineNetQuantity: pair.baseline, recentNetQuantity: pair.recent, suggestedQuantity: suggestedQuantityAvailable ? Math.round(pair.baseline / (input.useActualBaselineVisits ? actualVisits : 3)) : 0, suggestedQuantityAvailable };
+      }).sort((a, b) => a.customerName.localeCompare(b.customerName, "ar") || a.productName.localeCompare(b.productName, "ar"));
       return { opportunities, status: positive.length === 0 ? "no-baseline-sales" : opportunities.length === 0 ? "no-lost-opportunities" : "available" };
     } catch { return { opportunities: [], status: "data-unavailable" }; }
   }
@@ -82,16 +93,18 @@ export class LostOpportunityService {
     const customerCodes = [...new Set(input.customerCodes.map(key).filter(Boolean))];
     if (Number.isNaN(selectedDate.getTime())) return { opportunities: [], status: "data-unavailable" };
     if (!customerCodes.length) return { opportunities: [], status: "no-customers" };
-    if (!await this.rieFacade.hasCanonicalEntitySources(input, ["Products", "Invoices", "Invoice Items", "Returns", "Return Items"])) return { opportunities: [], status: "data-unavailable" };
+    if (!await this.rieFacade.hasCanonicalEntitySources(input, ["Products", "Invoices", "Invoice Items", "Returns", "Return Items", ...(input.useActualBaselineVisits ? ["Visits"] : [])])) return { opportunities: [], status: "data-unavailable" };
     const baselineFrom = isoDay(addDays(selectedDate, -119)), baselineTo = isoDay(addDays(selectedDate, -30));
     const recentFrom = isoDay(addDays(selectedDate, -29)), recentTo = input.selectedDate;
     if (input.requestingUser?.roleCode === "SALES_REP") return this.detectSalesRepScalable(input, customerCodes, baselineFrom, baselineTo, recentFrom, recentTo);
     try {
-      const result = await this.rieFacade.queryVisitCopilotLostOpportunities({ ...input, baselineFrom, baselineTo, recentFrom, recentTo, customerCodes });
+      const result = await this.rieFacade.queryVisitCopilotLostOpportunities({ ...input, baselineFrom, baselineTo, recentFrom, recentTo, customerCodes, useActualBaselineVisits: input.useActualBaselineVisits === true });
       const customerNames = new Map([...input.customerNames ?? []].map(([code, name]) => [key(code).toLowerCase(), name]));
       const opportunities = result.rows.map((row) => ({
         ...row,
         customerName: customerNames.get(key(row.customerCode).toLowerCase()) ?? row.customerCode,
+        suggestedQuantity: row.suggestedQuantity ?? 0,
+        suggestedQuantityAvailable: row.suggestedQuantity !== null,
       })).sort((a, b) => a.customerName.localeCompare(b.customerName, "ar") || a.productName.localeCompare(b.productName, "ar"));
       return { opportunities, status: result.positiveBaselineCount === 0 ? "no-baseline-sales" : opportunities.length === 0 ? "no-lost-opportunities" : "available" };
     } catch { return { opportunities: [], status: "data-unavailable" }; }
@@ -200,6 +213,7 @@ export class LostOpportunityService {
           baselineNetQuantity: pair.baseline,
           recentNetQuantity: pair.recent,
           suggestedQuantity: Math.round(pair.baseline / 3),
+          suggestedQuantityAvailable: true,
         }))
         .sort((a, b) => a.customerName.localeCompare(b.customerName, "ar") || a.productName.localeCompare(b.productName, "ar"));
       return { opportunities, status: positive.length === 0 ? "no-baseline-sales" : opportunities.length === 0 ? "no-lost-opportunities" : "available" };

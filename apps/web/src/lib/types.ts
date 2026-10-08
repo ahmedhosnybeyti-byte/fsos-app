@@ -1530,7 +1530,7 @@ export interface VisitCopilotBriefing {
     soldSkuCount: number;
     lostSkuCount: number;
     soldSkus: VisitCopilotBriefingProduct[];
-    lostSkus: { productCode: string; productName: string; category: string | null; baselineNetQuantity: number; recentNetQuantity: number; suggestedQuantity: number }[];
+    lostSkus: { productCode: string; productName: string; category: string | null; baselineNetQuantity: number; recentNetQuantity: number; suggestedQuantity: number | null }[];
     collectionContext: string;
     salesRank: number | null;
     customerCount: number;
@@ -1700,7 +1700,7 @@ export interface VisitCopilot360LostOpportunity {
   category: string | null;
   baselineNetQuantity: number;
   recentNetQuantity: number;
-  suggestedQuantity: number;
+  suggestedQuantity: number | null;
   hierarchy?: {
     region: string | null;
     manager: string | null;

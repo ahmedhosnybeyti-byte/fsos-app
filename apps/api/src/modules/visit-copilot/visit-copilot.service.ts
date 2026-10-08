@@ -192,7 +192,7 @@ export interface CustomerBriefingResult {
     soldSkuCount: number;
     lostSkuCount: number;
     soldSkus: BriefingProduct[];
-    lostSkus: { productCode: string; productName: string; category: string | null; baselineNetQuantity: number; recentNetQuantity: number; suggestedQuantity: number }[];
+    lostSkus: { productCode: string; productName: string; category: string | null; baselineNetQuantity: number; recentNetQuantity: number; suggestedQuantity: number | null }[];
     collectionContext: string;
     salesRank: number | null;
     customerCount: number;
@@ -798,6 +798,7 @@ export class VisitCopilotService {
 
     const lostOpportunityResult = await this.lostOpportunityService.detect({
       ...ctx,
+      useActualBaselineVisits: true,
       selectedDate: todayIso,
       customerCodes: entries.filter((entry) => !entry.isProspect).map((entry) => entry.customerCode),
       customerNames: new Map(entries.filter((entry) => !entry.isProspect).map((entry) => [entry.customerCode, entry.customerName])),
@@ -1022,6 +1023,7 @@ export class VisitCopilotService {
 
     const lostOpportunityResult = await this.lostOpportunityService.detect({
       ...ctx,
+      useActualBaselineVisits: true,
       selectedDate: range.to,
       customerCodes: [code],
       customerNames: new Map([[code, String(customer.CustomerName ?? code)]]),
@@ -1099,7 +1101,7 @@ export class VisitCopilotService {
         category: opportunity.category,
         baselineNetQuantity: opportunity.baselineNetQuantity,
         recentNetQuantity: opportunity.recentNetQuantity,
-        suggestedQuantity: opportunity.suggestedQuantity,
+        suggestedQuantity: opportunity.suggestedQuantityAvailable ? opportunity.suggestedQuantity : null,
       })).sort((a, b) => b.baselineNetQuantity - a.baselineNetQuantity),
       collectionContext: overdueAmount > 0 || bounced > 0
         ? `يوجد تحصيل متأخر بقيمة ${round2(overdueAmount)} أو مرتجع بقيمة ${round2(bounced)}.`
@@ -1639,14 +1641,14 @@ export class VisitCopilotService {
         productName: opportunity.productName,
         sales90: opportunity.baselineNetQuantity,
         sales30: opportunity.recentNetQuantity,
-        suggestedQuantity: opportunity.suggestedQuantity,
+        suggestedQuantity: opportunity.suggestedQuantityAvailable ? opportunity.suggestedQuantity : null,
       });
       return {
       customerName: opportunity.customerName, declineValue: opportunity.baselineNetQuantity, valueBefore: opportunity.baselineNetQuantity, valueAfter: opportunity.recentNetQuantity,
       lastVisitDate: brief.customers.find((customer) => customer.customerCode === opportunity.customerCode)?.lastVisitDate ?? null,
-      stoppedProducts: [{ productName: opportunity.productName, quantity: opportunity.baselineNetQuantity, unit: "", value: opportunity.suggestedQuantity }],
+      stoppedProducts: [{ productName: opportunity.productName, quantity: opportunity.baselineNetQuantity, unit: "", value: opportunity.suggestedQuantityAvailable ? opportunity.suggestedQuantity : null }],
       diagnosis: diagnosis.diagnosis, visitDecision: diagnosis.visitAction, likelyReason: null, visitGoal: diagnosis.visitGoal, confidence: diagnosis.confidence, extraProductCount: 0,
-      customerCode: opportunity.customerCode, productCode: opportunity.productCode, productName: opportunity.productName, category: opportunity.category, baselineNetQuantity: opportunity.baselineNetQuantity, recentNetQuantity: opportunity.recentNetQuantity, suggestedQuantity: opportunity.suggestedQuantity,
+      customerCode: opportunity.customerCode, productCode: opportunity.productCode, productName: opportunity.productName, category: opportunity.category, baselineNetQuantity: opportunity.baselineNetQuantity, recentNetQuantity: opportunity.recentNetQuantity, suggestedQuantity: opportunity.suggestedQuantityAvailable ? opportunity.suggestedQuantity : null,
       hierarchy: hierarchyByCustomer.get(opportunity.customerCode.trim().toLowerCase()),
       };
     });

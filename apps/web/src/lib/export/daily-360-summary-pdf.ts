@@ -76,7 +76,7 @@ export function groupDaily360PdfOpportunities(
   return sortDaily360Customers(groups, (customer) => ({
     customerName: customer.customerName,
     itemsCount: customer.opportunities.length,
-    suggestedQuantity: customer.opportunities.reduce((sum, opportunity) => sum + opportunity.suggestedQuantity, 0),
+    suggestedQuantity: customer.opportunities.reduce((sum, opportunity) => sum + (opportunity.suggestedQuantity ?? 0), 0),
   }));
 }
 
@@ -211,7 +211,7 @@ export function renderDaily360PdfPages(
   current().y += 10;
 
   for (const customer of groups) {
-    const totalSuggested = customer.opportunities.reduce((sum, opportunity) => sum + opportunity.suggestedQuantity, 0);
+    const totalSuggested = customer.opportunities.reduce((sum, opportunity) => sum + (opportunity.suggestedQuantity ?? 0), 0);
     const totalDecline = customer.opportunities.reduce((sum, opportunity) => sum + opportunity.declineValue, 0);
     ensure(144);
     drawSectionCard(current(), 124);
@@ -245,7 +245,7 @@ export function renderDaily360PdfPages(
       drawWrappedText(current(), opportunity.productName, "700 21px Tahoma, Arial, sans-serif", NAVY, contentWidth, 28, contentX);
       drawWrappedText(
         current(),
-        `${label("copilot.summary360BaselineQuantity", opportunity.baselineNetQuantity)}  |  ${label("copilot.summary360RecentQuantity", opportunity.recentNetQuantity)}  |  ${label("copilot.summary360DeclineQuantity", opportunity.declineValue)}  |  ${label("copilot.summary360SuggestedQuantity", opportunity.suggestedQuantity)}`,
+        `${label("copilot.summary360BaselineQuantity", opportunity.baselineNetQuantity)}  |  ${label("copilot.summary360RecentQuantity", opportunity.recentNetQuantity)}  |  ${label("copilot.summary360DeclineQuantity", opportunity.declineValue)}  |  ${opportunity.suggestedQuantity === null ? "لا توجد زيارات فعلية خلال فترة الأساس لحساب كمية الزيارة المقترحة." : label("copilot.summary360SuggestedQuantity", opportunity.suggestedQuantity)}`,
         "500 17px Tahoma, Arial, sans-serif",
         "#365c82",
         contentWidth,

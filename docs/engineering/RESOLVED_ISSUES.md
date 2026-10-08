@@ -187,6 +187,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Commit:** `eb52fe8`.
 - **Regression-prevention rule:** Visit Copilot must never treat an intermediate aggregate page cap as unavailable data. Keep its full baseline/recent rule and Company Admin/Manager/Supervisor/Sales Rep scope in PostgreSQL; do not load or join raw facts in Node.
 
+## Visit Copilot — suggested quantity must be per actual baseline visit
+
+- **Symptom:** Lost Opportunities suggested a quantity using a fixed monthly divisor, which did not represent the quantity expected for the customer's next actual visit.
+- **Root cause:** The 90-day net baseline quantity was divided by `3` without counting the customer's actual visits in that same baseline.
+- **Fix:** Visit Copilot now counts baseline Visits at customer grain in PostgreSQL and calculates `ROUND(net baseline quantity / actual baseline visits)`. A zero visit count retains the opportunity but returns no suggested quantity or expected-sale contribution, with the explicit baseline-visit explanation. Non-Copilot callers retain their prior suggestion rule.
+- **Commit:** Current Visit Copilot calculation commit (see Git history).
+- **Regression-prevention rule:** Keep baseline visit counting inside the authorized company/hierarchy/date SQL scope. Never replace a zero visit count with a synthetic divisor, and never omit such opportunities from the lost-opportunity count.
+
 ## Smart Loading unintended automatic refresh
 
 - **Symptom:** Smart Loading requests refreshed automatically on window focus or network reconnect after becoming stale.

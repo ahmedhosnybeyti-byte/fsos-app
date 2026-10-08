@@ -306,6 +306,8 @@ test("Visit Copilot calculates final lost opportunities in PostgreSQL within com
   assert.match(sql, /scoped_invoice_numbers AS MATERIALIZED/);
   assert.match(sql, /scoped_return_numbers AS MATERIALIZED/);
   assert.match(sql, /positive_baseline AS MATERIALIZED/);
+  assert.match(sql, /actual_visits AS MATERIALIZED/);
+  assert.match(sql, /COUNT\(\*\)::integer actual_visit_count/);
   assert.match(sql, /recent_net_quantity = 0/);
   assert.ok(captured?.values?.includes("r-1"));
   assert.ok(captured?.values?.includes("c-1"));

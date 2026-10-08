@@ -351,7 +351,9 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                               <span className="grid w-full gap-1 text-xs text-muted-foreground sm:grid-cols-3">
                                 <span>{t("copilot.summary360OpportunityCount", { value: customer.opportunityCount })}</span>
                                 <span>{t("copilot.summary360ProductCount", { value: customer.productCount })}</span>
-                                <span className="font-medium text-foreground">{t("copilot.summary360TotalSuggestedQuantity", { value: customer.totalSuggestedQuantity.toLocaleString() })}</span>
+                                {customer.totalSuggestedQuantity === null
+                                  ? <span className="font-medium text-muted-foreground">لا توجد زيارات فعلية خلال فترة الأساس لحساب كمية الزيارة المقترحة.</span>
+                                  : <span className="font-medium text-foreground">{t("copilot.summary360TotalSuggestedQuantity", { value: customer.totalSuggestedQuantity.toLocaleString() })}</span>}
                               </span>
                             </button>
                             {customerIsOpen && (
@@ -398,7 +400,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                                                 <span>{t("copilot.summary360BaselineQuantity", { value: op.baselineNetQuantity.toLocaleString() })}</span>
                                                 <span>{t("copilot.summary360RecentQuantity", { value: op.recentNetQuantity.toLocaleString() })}</span>
                                                 <span>{t("copilot.summary360DeclineQuantity", { value: op.declineValue.toLocaleString() })}</span>
-                                                <span className="font-medium text-foreground">{t("copilot.summary360SuggestedQuantity", { value: op.suggestedQuantity.toLocaleString() })}</span>
+                                                {op.suggestedQuantity === null ? <span className="font-medium text-muted-foreground">لا توجد زيارات فعلية خلال فترة الأساس لحساب كمية الزيارة المقترحة.</span> : <span className="font-medium text-foreground">{t("copilot.summary360SuggestedQuantity", { value: op.suggestedQuantity.toLocaleString() })}</span>}
                                               </div>
                                               <p className="text-xs text-muted-foreground">
                                                 {op.lastVisitDate ? t("copilot.summary360LastVisit", { date: op.lastVisitDate }) : t("copilot.summary360LastVisitUnknown")}
@@ -412,7 +414,7 @@ export function Daily360SummaryModal({ open, onOpenChange, period, selectedDate,
                                                   <div className="flex flex-wrap gap-1.5">
                                                     {op.stoppedProducts.map((product, productIndex) => (
                                                       <span key={`${product.productName}-${productIndex}`} className="rounded-full border border-orange-400/30 bg-orange-500/10 px-2.5 py-0.5 text-xs font-medium text-orange-700 dark:text-orange-300">
-                                                        {product.productName}{" \u00B7 "}{product.quantity.toLocaleString()} {product.unit}{" \u00B7 "}{product.value.toLocaleString()}
+                                                        {product.productName}{" \u00B7 "}{product.quantity.toLocaleString()} {product.unit}{product.value === null ? "" : <> {"\u00B7"} {product.value.toLocaleString()}</>}
                                                       </span>
                                                     ))}
                                                     {Boolean(op.extraProductCount) && (

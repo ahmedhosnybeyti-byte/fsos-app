@@ -242,7 +242,7 @@ export const visitCopilot360StoppedProductSchema = z.object({
   productName: z.string(),
   quantity: z.number(),
   unit: z.string(),
-  value: z.number(),
+  value: z.number().nullable(),
 });
 export type VisitCopilot360StoppedProduct = z.infer<typeof visitCopilot360StoppedProductSchema>;
 
@@ -274,7 +274,7 @@ export const visitCopilot360LostOpportunitySchema = z.object({
   category: z.string().nullable(),
   baselineNetQuantity: z.number(),
   recentNetQuantity: z.number(),
-  suggestedQuantity: z.number(),
+  suggestedQuantity: z.number().nullable(),
   // Presentation-only path, resolved from the already-authorized Customer ->
   // Route -> Employee relations. It is deliberately optional so cached
   // reports from before the hierarchy view remain valid.

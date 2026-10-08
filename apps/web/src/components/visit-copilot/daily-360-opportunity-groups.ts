@@ -18,7 +18,7 @@ export type Daily360CustomerGroup = {
   customerName: string;
   opportunityCount: number;
   productCount: number;
-  totalSuggestedQuantity: number;
+  totalSuggestedQuantity: number | null;
   totalDeclineQuantity: number;
   categories: Daily360CategoryGroup[];
   hierarchy?: VisitCopilot360LostOpportunity["hierarchy"];
@@ -139,7 +139,12 @@ export function groupDaily360LostOpportunities(
       customerName: customer.customerName,
       opportunityCount: customer.opportunities.length,
       productCount: customer.opportunities.length,
-      totalSuggestedQuantity: customer.opportunities.reduce((sum, opportunity) => sum + opportunity.suggestedQuantity, 0),
+      totalSuggestedQuantity: (() => {
+        const calculated = customer.opportunities
+          .map((opportunity) => opportunity.suggestedQuantity)
+          .filter((quantity): quantity is number => quantity !== null);
+        return calculated.length ? calculated.reduce((sum, quantity) => sum + quantity, 0) : null;
+      })(),
       totalDeclineQuantity: customer.opportunities.reduce((sum, opportunity) => sum + opportunity.declineValue, 0),
       categories: groupedCategories,
       hierarchy: customer.opportunities[0]?.hierarchy,
@@ -149,7 +154,7 @@ export function groupDaily360LostOpportunities(
   return sortDaily360Customers(groups, (customer) => ({
     customerName: customer.customerName,
     itemsCount: customer.productCount,
-    suggestedQuantity: customer.totalSuggestedQuantity,
+    suggestedQuantity: customer.totalSuggestedQuantity ?? 0,
   }));
 }
 

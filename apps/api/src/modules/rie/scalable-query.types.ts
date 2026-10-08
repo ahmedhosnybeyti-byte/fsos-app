@@ -518,6 +518,7 @@ export interface RieVisitCopilotLostOpportunitiesQuery extends EntityQueryContex
   recentFrom: string;
   recentTo: string;
   customerCodes: readonly string[];
+  useActualBaselineVisits?: boolean;
 }
 export interface RieVisitCopilotLostOpportunityRow {
   customerCode: string;
@@ -526,7 +527,7 @@ export interface RieVisitCopilotLostOpportunityRow {
   category: string | null;
   baselineNetQuantity: number;
   recentNetQuantity: number;
-  suggestedQuantity: number;
+  suggestedQuantity: number | null;
 }
 export interface RieVisitCopilotLostOpportunitiesResult {
   positiveBaselineCount: number;

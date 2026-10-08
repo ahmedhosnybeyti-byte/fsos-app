@@ -1,4 +1,4 @@
-import type { SgiSituation, VisitCopilot360StoppedProduct } from "@field-sales-os/schemas";
+import type { VisitCopilot360StoppedProduct } from "@field-sales-os/schemas";
 
 // Recommendation Builder for "ملخص اليوم 360°" (2026-07-29 follow-up) —
 // deterministic, zero-GPT coaching text per lost-opportunity customer card.
@@ -49,7 +49,7 @@ function pctDrop(before: number, after: number): number | null {
 // a more specific, more actionable case ("توقف صنف") than a plain aggregate
 // sales drop, so it's coached differently even though both share the same
 // SgiSituationType.
-function resolveOpportunityType(situation: Pick<SgiSituation, "stoppedProducts">): Daily360OpportunityType {
+function resolveOpportunityType(situation: { stoppedProducts?: readonly VisitCopilot360StoppedProduct[] }): Daily360OpportunityType {
   return (situation.stoppedProducts?.length ?? 0) > 0 ? "product-stopped" : "sales-decline";
 }
 
@@ -62,7 +62,7 @@ export function buildLostOpportunityCoaching(input: {
   const opportunityType = resolveOpportunityType(input);
   const decline = Math.max(0, input.valueBefore - input.valueAfter);
   const drop = pctDrop(input.valueBefore, input.valueAfter);
-  const sortedProducts = [...input.stoppedProducts].sort((a, b) => b.value - a.value);
+  const sortedProducts = [...input.stoppedProducts].sort((a, b) => (b.value ?? 0) - (a.value ?? 0));
   const topProducts = sortedProducts.slice(0, MAX_VISIBLE_PRODUCTS);
   const extraProductCount = Math.max(0, sortedProducts.length - topProducts.length);
   const topProduct = sortedProducts[0] ?? null;
@@ -71,7 +71,7 @@ export function buildLostOpportunityCoaching(input: {
     // Real evidence: this specific product's quantity/value is on record as
     // having dropped to zero (or near it) for this customer — the product
     // name and its prior pattern are facts from stoppedProducts, not a guess.
-    const diagnosis = `${input.customerName} توقف عن شراء ${topProduct.productName} (كان يشتري ${fmt(topProduct.quantity)} ${topProduct.unit} بقيمة ${fmt(topProduct.value)})${extraProductCount > 0 ? ` وأصناف أخرى` : ""}.`;
+    const diagnosis = `${input.customerName} توقف عن شراء ${topProduct.productName} (كان يشتري ${fmt(topProduct.quantity)} ${topProduct.unit}${topProduct.value === null ? "؛ لا توجد زيارات فعلية خلال فترة الأساس لحساب كمية الزيارة المقترحة." : ` بقيمة ${fmt(topProduct.value)}`})${extraProductCount > 0 ? ` وأصناف أخرى` : ""}.`;
     const likelyReason = "قد يكون السبب مشكلة توفر لدى العميل، تجربة منافس، أو تغيّر في احتياجه لهذا الصنف — يحتاج تأكيد ميداني.";
     const visitAction = `اسأل ${input.customerName} عن سبب توقف ${topProduct.productName} تحديدًا — تحقق من المخزون الحالي لديه أو وجود بديل من منافس.`;
     const visitGoal = `الاتفاق على إعادة طلب ${topProduct.productName} بكمية قريبة من متوسطه السابق (${fmt(topProduct.quantity)} ${topProduct.unit}).`;

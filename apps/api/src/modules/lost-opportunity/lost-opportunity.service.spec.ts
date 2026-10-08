@@ -53,10 +53,26 @@ test("keeps Sales Rep on the established bounded query path", async () => {
     queryVisitCopilotLostOpportunities: async () => { specializedCalled = true; return { positiveBaselineCount: 0, rows: [] }; },
     queryCanonicalRecords: async (query: { entityName: string; scope?: { date?: { from: string } } }) => query.entityName === "Products"
       ? { records: [{ productCode: "P1", productName: "Product 1", category: "Drinks" }], page: { hasMore: false } }
-      : { records: query.entityName === "Invoice Items" && query.scope?.date?.from === "2026-04-03" ? [{ customerCode: "C1", productCode: "P1", quantity: 9 }] : [], page: { hasMore: false } },
+      : { records: query.entityName === "Visits" ? [{ customerCode: "C1", actualVisitCount: 3 }] : query.entityName === "Invoice Items" && query.scope?.date?.from === "2026-04-03" ? [{ customerCode: "C1", productCode: "P1", quantity: 9 }] : [], page: { hasMore: false } },
   } as never);
-  const result = await service.detect({ ...input, requestingUser: { roleCode: "SALES_REP", email: "rep@example.com" } });
+  const result = await service.detect({ ...input, useActualBaselineVisits: true, requestingUser: { roleCode: "SALES_REP", email: "rep@example.com" } });
   assert.equal(specializedCalled, false);
   assert.equal(result.status, "available");
   assert.equal(result.opportunities[0]?.customerCode, "C1");
+  assert.equal(result.opportunities[0]?.suggestedQuantity, 3);
+  assert.equal(result.opportunities[0]?.suggestedQuantityAvailable, true);
+});
+
+test("keeps a lost opportunity visible but leaves Suggested Qty uncomputed when baseline visits are zero", async () => {
+  const service = new LostOpportunityService({
+    hasCanonicalEntitySources: async () => true,
+    queryCanonicalRecords: async (query: { entityName: string; scope?: { date?: { from: string } } }) => query.entityName === "Products"
+      ? { records: [{ productCode: "P1", productName: "Product 1", category: "Drinks" }], page: { hasMore: false } }
+      : { records: query.entityName === "Invoice Items" && query.scope?.date?.from === "2026-04-03" ? [{ customerCode: "C1", productCode: "P1", quantity: 120 }] : [], page: { hasMore: false } },
+  } as never);
+  const result = await service.detect({ ...input, useActualBaselineVisits: true, requestingUser: { roleCode: "SALES_REP", email: "rep@example.com" } });
+  assert.equal(result.status, "available");
+  assert.equal(result.opportunities.length, 1);
+  assert.equal(result.opportunities[0]?.suggestedQuantity, 0);
+  assert.equal(result.opportunities[0]?.suggestedQuantityAvailable, false);
 });

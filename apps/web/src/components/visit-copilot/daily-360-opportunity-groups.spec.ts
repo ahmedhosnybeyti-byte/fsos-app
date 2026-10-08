@@ -28,7 +28,7 @@ function opportunity(input: Partial<VisitCopilot360LostOpportunity> & Pick<Visit
     extraProductCount: input.extraProductCount ?? 0,
     baselineNetQuantity: input.baselineNetQuantity ?? 3,
     recentNetQuantity: input.recentNetQuantity ?? 0,
-    suggestedQuantity: input.suggestedQuantity ?? 1,
+    suggestedQuantity: input.suggestedQuantity === undefined ? 1 : input.suggestedQuantity,
     hierarchy: input.hierarchy,
   };
 }
@@ -105,4 +105,21 @@ test("customer accordions are independently toggleable and categories start clos
   assert.equal(openCategories.has(dairyForSecondCustomer), false);
   openCategories = toggleDaily360OpenCategory(openCategories, dairyForFirstCustomer);
   assert.equal(openCategories.size, 0);
+});
+
+test("excludes uncomputed visit quantities from the customer total", () => {
+  const groups = groupDaily360LostOpportunities([
+    opportunity({ customerCode: "C1", customerName: "Customer", productCode: "P1", productName: "Milk", suggestedQuantity: null }),
+    opportunity({ customerCode: "C1", customerName: "Customer", productCode: "P2", productName: "Juice", suggestedQuantity: 10 }),
+  ], "Uncategorized");
+  assert.equal(groups[0]?.opportunityCount, 2);
+  assert.equal(groups[0]?.totalSuggestedQuantity, 10);
+});
+
+test("leaves the customer total uncomputed when none of its opportunities has baseline visits", () => {
+  const groups = groupDaily360LostOpportunities([
+    opportunity({ customerCode: "C1", customerName: "Customer", productCode: "P1", productName: "Milk", suggestedQuantity: null }),
+  ], "Uncategorized");
+  assert.equal(groups[0]?.opportunityCount, 1);
+  assert.equal(groups[0]?.totalSuggestedQuantity, null);
 });

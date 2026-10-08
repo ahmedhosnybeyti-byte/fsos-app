@@ -3311,13 +3311,25 @@ export class RieScalableQueryService {
     const returnItemsCte = activeEntityRowsCte(input.companyId, "Return Items", "return_item", [], [], [], false, [
       Prisma.sql`INNER JOIN scoped_return_numbers scoped_return ON ${normalizedField({ field: "ReturnNo", source: "return_item_source" })} = scoped_return.return_no`,
     ], returnItemProjection);
+    const visitsCte = input.useActualBaselineVisits ? activeEntityRowsCte(input.companyId, "Visits", "visit", [Prisma.sql`
+      ${dateText(textField({ field: "VisitDate", source: "visit_source" }))} >= ${baselineFrom}
+      AND ${dateText(textField({ field: "VisitDate", source: "visit_source" }))} <= ${baselineTo}
+      AND ${normalizedField({ field: "CustomerCode", source: "visit_source" })} IN (${Prisma.join(customerCodes)})
+      ${routeScope({ field: "RouteID", source: "visit_source" })}
+    `], [], [], false, [], Prisma.sql`${normalizedField({ field: "CustomerCode", source: "visit_source" })} AS customer_code`)
+      : Prisma.sql`visit_active AS MATERIALIZED (SELECT NULL::text customer_code WHERE FALSE)`;
+    const suggestedQuantity = input.useActualBaselineVisits
+      ? Prisma.sql`CASE WHEN COALESCE(actual_visits.actual_visit_count, 0) > 0
+          THEN ROUND(positive_baseline.baseline_net_quantity / actual_visits.actual_visit_count)::double precision
+          ELSE NULL END`
+      : Prisma.sql`ROUND(positive_baseline.baseline_net_quantity / 3.0)::double precision`;
     const productCte = activeEntityRowsCte(input.companyId, "Products", "product", [], [], []);
     const productCode = normalizedField({ field: "ProductCode", source: "product" });
     const rawRows = await this.postgres<Array<{ positiveBaselineCount: number; rows: RieVisitCopilotLostOpportunityRow[] }>>(
       "queryVisitCopilotLostOpportunities.sql",
       { kind: "specialized", operation: "queryVisitCopilotLostOpportunities" },
       () => Prisma.sql`
-        WITH ${invoiceCte}, ${scopedInvoiceNumbersCte}, ${itemCte}, ${returnsCte}, ${scopedReturnNumbersCte}, ${returnItemsCte}, ${productCte},
+        WITH ${invoiceCte}, ${scopedInvoiceNumbersCte}, ${itemCte}, ${returnsCte}, ${scopedReturnNumbersCte}, ${returnItemsCte}, ${visitsCte}, ${productCte},
         sales AS MATERIALIZED (
           SELECT invoice.customer_code, item.product_code,
             SUM(CASE WHEN invoice.invoice_date BETWEEN ${baselineFrom} AND ${baselineTo} THEN item.quantity ELSE 0 END)::double precision baseline_sales,
@@ -3349,12 +3361,17 @@ export class RieScalableQueryService {
         positive_baseline AS MATERIALIZED (
           SELECT * FROM net WHERE baseline_net_quantity > 0
         ),
+        actual_visits AS MATERIALIZED (
+          SELECT customer_code, COUNT(*)::integer actual_visit_count
+          FROM visit_active WHERE customer_code <> '' GROUP BY customer_code
+        ),
         opportunities AS MATERIALIZED (
           SELECT positive_baseline.customer_code "customerCode", positive_baseline.product_code "productCode",
             COALESCE(product_names.product_name, positive_baseline.product_code) "productName", product_names.category "category",
             positive_baseline.baseline_net_quantity "baselineNetQuantity", positive_baseline.recent_net_quantity "recentNetQuantity",
-            ROUND(positive_baseline.baseline_net_quantity / 3.0)::double precision "suggestedQuantity"
+            ${suggestedQuantity} "suggestedQuantity"
           FROM positive_baseline LEFT JOIN product_names ON product_names.product_code = positive_baseline.product_code
+          LEFT JOIN actual_visits ON actual_visits.customer_code = positive_baseline.customer_code
           WHERE positive_baseline.recent_net_quantity = 0
         ),
         summary AS MATERIALIZED (SELECT COUNT(*)::integer "positiveBaselineCount" FROM positive_baseline)
