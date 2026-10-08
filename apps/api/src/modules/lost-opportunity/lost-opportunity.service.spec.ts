@@ -45,3 +45,18 @@ test("keeps the existing no-baseline and recent-purchase outcomes", async () => 
   } as never);
   assert.equal((await withoutBaseline.detect(input)).status, "no-baseline-sales");
 });
+
+test("keeps Sales Rep on the established bounded query path", async () => {
+  let specializedCalled = false;
+  const service = new LostOpportunityService({
+    hasCanonicalEntitySources: async () => true,
+    queryVisitCopilotLostOpportunities: async () => { specializedCalled = true; return { positiveBaselineCount: 0, rows: [] }; },
+    queryCanonicalRecords: async (query: { entityName: string; scope?: { date?: { from: string } } }) => query.entityName === "Products"
+      ? { records: [{ productCode: "P1", productName: "Product 1", category: "Drinks" }], page: { hasMore: false } }
+      : { records: query.entityName === "Invoice Items" && query.scope?.date?.from === "2026-04-03" ? [{ customerCode: "C1", productCode: "P1", quantity: 9 }] : [], page: { hasMore: false } },
+  } as never);
+  const result = await service.detect({ ...input, requestingUser: { roleCode: "SALES_REP", email: "rep@example.com" } });
+  assert.equal(specializedCalled, false);
+  assert.equal(result.status, "available");
+  assert.equal(result.opportunities[0]?.customerCode, "C1");
+});

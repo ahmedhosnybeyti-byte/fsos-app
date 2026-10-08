@@ -34,6 +34,47 @@ const isConfirmedReturnStatus = (value: unknown) => ["confirmed", "approved"].in
 export class LostOpportunityService {
   constructor(private readonly rieFacade: RieFacade) {}
 
+  /** Preserve the Sales Rep's established bounded query path exactly. */
+  private async detectSalesRepScalable(input: LostOpportunityRequest, customerCodes: readonly string[], baselineFrom: string, baselineTo: string, recentFrom: string, recentTo: string): Promise<LostOpportunityResult> {
+    const query = (entityName: string, dateField: string, statusField: string, statuses: string[], from: string, to: string, joinEntity: string, joinAlias: string, joinKey: string, customerField: string) =>
+      this.rieFacade.queryCanonicalRecords({
+        ...input, entityName,
+        projection: [{ field: customerField, source: joinAlias, as: "customerCode" }, { field: "ProductCode", as: "productCode" }],
+        groupBy: [{ field: customerField, source: joinAlias }, { field: "ProductCode" }],
+        joins: [{ entityName: joinEntity, alias: joinAlias, on: { left: { field: joinKey }, rightField: joinKey } }],
+        hierarchyRoute: { field: "RouteID", source: joinAlias },
+        scope: { customer: { values: customerCodes, source: joinAlias }, date: { field: dateField, source: joinAlias, from, to }, fields: [{ field: statusField, source: joinAlias, values: statuses }] },
+        aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], pagination: { limit: 5_000 },
+      });
+    try {
+      const runs = await Promise.all([
+        query("Invoice Items", "InvoiceDate", "InvoiceStatus", ["Confirmed", "Posted"], baselineFrom, baselineTo, "Invoices", "invoice", "InvoiceNo", "CustomerCode"),
+        query("Invoice Items", "InvoiceDate", "InvoiceStatus", ["Confirmed", "Posted"], recentFrom, recentTo, "Invoices", "invoice", "InvoiceNo", "CustomerCode"),
+        query("Return Items", "ReturnDate", "Status", ["Confirmed", "Approved"], baselineFrom, baselineTo, "Returns", "returned", "ReturnNo", "CustomerCode"),
+        query("Return Items", "ReturnDate", "Status", ["Confirmed", "Approved"], recentFrom, recentTo, "Returns", "returned", "ReturnNo", "CustomerCode"),
+      ]);
+      if (runs.some((run) => run.page.hasMore)) return { opportunities: [], status: "data-unavailable" };
+      const quantities = new Map<string, { customerCode: string; productCode: string; baseline: number; recent: number }>();
+      const add = (rows: readonly EntityRecord[], bucket: "baseline" | "recent", sign: number) => rows.forEach((row) => {
+        const customerCode = key(row.customerCode), productCode = key(row.productCode);
+        if (!customerCode || !productCode) return;
+        const pairKey = `${customerCode}\u0000${productCode}`;
+        const pair = quantities.get(pairKey) ?? { customerCode, productCode, baseline: 0, recent: 0 };
+        pair[bucket] += numberValue(row.quantity) * sign;
+        quantities.set(pairKey, pair);
+      });
+      add(runs[0].records, "baseline", 1); add(runs[1].records, "recent", 1);
+      add(runs[2].records, "baseline", -1); add(runs[3].records, "recent", -1);
+      const positive = [...quantities.values()].filter((pair) => pair.baseline > 0);
+      const productCodes = [...new Set(positive.map((pair) => pair.productCode))];
+      const products = productCodes.length ? await this.rieFacade.queryCanonicalRecords({ companyId: input.companyId, entityName: "Products", projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }, { field: "Category", as: "category" }], scope: { product: { values: productCodes } }, pagination: { limit: 5_000 } }) : null;
+      if (products?.page.hasMore) return { opportunities: [], status: "data-unavailable" };
+      const productsByCode = new Map((products?.records ?? []).map((p) => [key(p.productCode), { name: key(p.productName) || key(p.productCode), category: key(p.category) || null }]));
+      const opportunities = positive.filter((pair) => pair.recent === 0).map((pair) => ({ customerCode: pair.customerCode, customerName: input.customerNames?.get(pair.customerCode) ?? pair.customerCode, productCode: pair.productCode, productName: productsByCode.get(pair.productCode)?.name ?? pair.productCode, category: productsByCode.get(pair.productCode)?.category ?? null, baselineNetQuantity: pair.baseline, recentNetQuantity: pair.recent, suggestedQuantity: Math.round(pair.baseline / 3) })).sort((a, b) => a.customerName.localeCompare(b.customerName, "ar") || a.productName.localeCompare(b.productName, "ar"));
+      return { opportunities, status: positive.length === 0 ? "no-baseline-sales" : opportunities.length === 0 ? "no-lost-opportunities" : "available" };
+    } catch { return { opportunities: [], status: "data-unavailable" }; }
+  }
+
   /** The complete rule runs in PostgreSQL so a company-wide scope cannot
    * overflow an intermediate, paged Customer x Product aggregate. */
   private async detectScalable(input: LostOpportunityRequest): Promise<LostOpportunityResult> {
@@ -44,6 +85,7 @@ export class LostOpportunityService {
     if (!await this.rieFacade.hasCanonicalEntitySources(input, ["Products", "Invoices", "Invoice Items", "Returns", "Return Items"])) return { opportunities: [], status: "data-unavailable" };
     const baselineFrom = isoDay(addDays(selectedDate, -119)), baselineTo = isoDay(addDays(selectedDate, -30));
     const recentFrom = isoDay(addDays(selectedDate, -29)), recentTo = input.selectedDate;
+    if (input.requestingUser?.roleCode === "SALES_REP") return this.detectSalesRepScalable(input, customerCodes, baselineFrom, baselineTo, recentFrom, recentTo);
     try {
       const result = await this.rieFacade.queryVisitCopilotLostOpportunities({ ...input, baselineFrom, baselineTo, recentFrom, recentTo, customerCodes });
       const customerNames = new Map([...input.customerNames ?? []].map(([code, name]) => [key(code).toLowerCase(), name]));
