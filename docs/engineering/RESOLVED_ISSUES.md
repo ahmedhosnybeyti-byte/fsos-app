@@ -218,6 +218,14 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Commit:** This local commit.
 - **Regression-prevention rule:** Smart Loading forecasts must use period net quantity without raw fact reads, Node joins, N+1 queries, per-row clamping, or extra RIE fan-out. Returns outside the exact company/hierarchy/route/customer/date scope, or without Confirmed/Approved status, must not affect demand.
 
+## Smart Loading — PostgreSQL-normalized product codes hid recommendations
+
+- **Symptom:** The Smart Loading session opened, but the Loading Recommendations section became empty after the automatic recalculation even when eligible sales produced a positive suggested quantity.
+- **Root cause:** The PostgreSQL-first net-demand query introduced in `92361d2` returned normalized lowercase Product Codes, while `session.products` retained the canonical Product Code casing from Products. The UI intentionally intersects recalculated products with session products using the response contract's Product Code, so the case-only contract mismatch removed every otherwise valid recommendation.
+- **Fix:** Normalize Product Code only for server-side joins across net demand, confirmed orders, inventory, and Products, then return the canonical Products.ProductCode in the unchanged recalculation response. Demand, confirmed-order, safety-stock, vehicle-stock, and return formulas remain unchanged and no query or RIE acquisition was added.
+- **Commit:** Uncommitted working-tree fix.
+- **Regression-prevention rule:** PostgreSQL-normalized identifiers may be used as internal join keys, but Smart Loading API responses must return the canonical identifier form consumed by the session contract. Cover mixed-case SQL/canonical identifiers with a positive-recommendation regression test.
+
 ## Shared invoice-sales analytical read — unbounded Invoice Items merge
 
 - **Symptom/evidence:** The common RIE invoice-sales read used by Geo Engine and Decision Analytics merged every active Invoice Items row before joining to the date- and permission-scoped invoices.

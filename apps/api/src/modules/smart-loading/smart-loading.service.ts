@@ -849,13 +849,38 @@ export class SmartLoadingService {
       ? await bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "ProductCode", as: "productCode" }], groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { date: { field: "ReportDate", values: [latestReportDate] } } }))
       : [];
     const net = new Map<string, number>();
-    for (const row of salesRows) { const code = String(row.productCode ?? "").trim(); if (code) net.set(code, toFiniteNumber(row.netQuantity) ?? 0); }
+    const fallbackProductCodes = new Map<string, string>();
+    for (const row of salesRows) {
+      const rawCode = String(row.productCode ?? "").trim();
+      const code = normalizedProductCode(rawCode);
+      if (!code) continue;
+      net.set(code, toFiniteNumber(row.netQuantity) ?? 0);
+      fallbackProductCodes.set(code, rawCode);
+    }
     const stock = new Map<string, number>();
-    for (const row of inventoryRows) { const code = String(row.productCode ?? "").trim(); if (code) stock.set(code, toFiniteNumber(row.quantity) ?? 0); }
-    const days = Math.floor((to.getTime() - from.getTime()) / MS_PER_DAY) + 1; const orders = new Map(input.confirmedOrders.map((row) => [row.productCode, row.quantity])); const codes = new Set([...net.keys(), ...orders.keys()]);
+    for (const row of inventoryRows) {
+      const rawCode = String(row.productCode ?? "").trim();
+      const code = normalizedProductCode(rawCode);
+      if (!code) continue;
+      stock.set(code, toFiniteNumber(row.quantity) ?? 0);
+      if (!fallbackProductCodes.has(code)) fallbackProductCodes.set(code, rawCode);
+    }
+    const days = Math.floor((to.getTime() - from.getTime()) / MS_PER_DAY) + 1;
+    const orders = new Map<string, number>();
+    for (const row of input.confirmedOrders) {
+      const code = normalizedProductCode(row.productCode);
+      if (!code) continue;
+      orders.set(code, row.quantity);
+      fallbackProductCodes.set(code, row.productCode.trim());
+    }
+    const codes = new Set([...net.keys(), ...orders.keys()]);
     const productRows = codes.size ? await bounded({ companyId: ctx.companyId, entityName: "Products", projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }], scope: { product: { values: [...codes] } } }) : [];
-    const productNames = new Map(productRows.map((row) => [String(row.productCode ?? "").trim(), String(row.productName ?? row.productCode ?? "").trim()]));
-    if (input.confirmedOrders.some((order) => !productNames.has(order.productCode))) throw new BadRequestException("One or more confirmed-order products are unavailable in RIE.");
-    return { targetDate: input.targetDate, fromDate: input.fromDate, toDate: input.toDate, calendarDaysInPeriod: days, products: [...codes].map((code) => { const demand = (Math.max(0, net.get(code) ?? 0) / days) * 7 / input.visitsPerWeek; const vehicleStock = stock.get(code) ?? null; const safetyStock = 0; return { productCode: code, productName: productNames.get(code) ?? code, estimatedCustomerDemand: demand, confirmedOrderQuantity: orders.get(code) ?? 0, safetyStock, vehicleStock, suggestedQuantity: demand + (orders.get(code) ?? 0) - safetyStock - (vehicleStock ?? 0) }; }), calculatedAt: new Date().toISOString() };
+    const productMeta = new Map(productRows.map((row) => {
+      const rawCode = String(row.productCode ?? "").trim();
+      const code = normalizedProductCode(rawCode);
+      return [code, { productCode: rawCode || code, productName: String(row.productName ?? row.productCode ?? code).trim() || rawCode || code }] as const;
+    }).filter(([code]) => !!code));
+    if (input.confirmedOrders.some((order) => !productMeta.has(normalizedProductCode(order.productCode)))) throw new BadRequestException("One or more confirmed-order products are unavailable in RIE.");
+    return { targetDate: input.targetDate, fromDate: input.fromDate, toDate: input.toDate, calendarDaysInPeriod: days, products: [...codes].map((code) => { const demand = (Math.max(0, net.get(code) ?? 0) / days) * 7 / input.visitsPerWeek; const vehicleStock = stock.get(code) ?? null; const safetyStock = 0; const meta = productMeta.get(code); return { productCode: meta?.productCode ?? fallbackProductCodes.get(code) ?? code, productName: meta?.productName ?? fallbackProductCodes.get(code) ?? code, estimatedCustomerDemand: demand, confirmedOrderQuantity: orders.get(code) ?? 0, safetyStock, vehicleStock, suggestedQuantity: demand + (orders.get(code) ?? 0) - safetyStock - (vehicleStock ?? 0) }; }), calculatedAt: new Date().toISOString() };
   }
 }

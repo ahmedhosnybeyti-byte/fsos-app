@@ -13,13 +13,13 @@ const user = {
   orgUnitId: null,
 } as const;
 
-const calculate = async (netQuantity: number, confirmedOrderQuantity = 0, vehicleStock = 0) => {
+const calculate = async (netQuantity: number, confirmedOrderQuantity = 0, vehicleStock = 0, netProductCode = "P-1") => {
   let netQuery: Record<string, unknown> | undefined;
   const facade = {
     hasCanonicalEntitySources: async () => true,
     querySmartLoadingNetQuantities: async (query: Record<string, unknown>) => {
       netQuery = query;
-      return [{ productCode: "P-1", netQuantity }];
+      return [{ productCode: netProductCode, netQuantity }];
     },
     queryCanonicalRecords: async (query: { entityName: string; aggregates?: readonly { as: string }[] }) => {
       if (query.entityName === "Customers") return { records: [{ customerCode: "C-1" }], page: { hasMore: false } };
@@ -57,6 +57,22 @@ test("Sales Rep demand uses period net quantity and preserves orders and vehicle
   assert.deepEqual(netQuery?.customerCodes, ["C-1"]);
   assert.equal(netQuery?.fromDate, "2026-09-01");
   assert.equal(netQuery?.toDate, "2026-09-07");
+});
+
+test("Smart Loading returns a non-empty recommendation when PostgreSQL normalizes the eligible product code", async () => {
+  const { result } = await calculate(80, 10, 5, "p-1");
+  const recommendations = result.products.filter((product) => product.suggestedQuantity > 0);
+
+  assert.equal(recommendations.length, 1);
+  assert.deepEqual(recommendations[0], {
+    productCode: "P-1",
+    productName: "Product 1",
+    estimatedCustomerDemand: 80,
+    confirmedOrderQuantity: 10,
+    safetyStock: 0,
+    vehicleStock: 5,
+    suggestedQuantity: 85,
+  });
 });
 
 test("Sales Rep clamps only the completed period net quantity", async () => {
