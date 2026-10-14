@@ -5,6 +5,40 @@ import { CustomerSimilarityService } from "./customer-similarity.service";
 const page = (records: Record<string, unknown>[]) => ({ records, page: { limit: 0, offset: 0, hasMore: false } });
 const user = { companyId: "company-1", roleCode: "ADMIN", email: "admin@example.com" } as any;
 
+test("customer similarity category values are company-scoped metadata for every dashboard role", async () => {
+  const calls: any[] = [];
+  const rie = {
+    hasCanonicalEntitySources: async () => true,
+    queryCanonicalRecords: async (query: any) => {
+      calls.push(query);
+      return query.companyId === "company-1"
+        ? page([{ value: " Biscuits " }, { value: "Juice" }, { value: "Biscuits" }, { value: "" }, { value: null }])
+        : page([{ value: "Other company category" }]);
+    },
+  };
+  const service = new CustomerSimilarityService(rie as any);
+  const companyOneRoles = ["COMPANY_ADMIN", "MANAGER", "SUPERVISOR", "SALES_REP"];
+
+  for (const roleCode of companyOneRoles) {
+    const result = await service.categoryValues({ companyId: "company-1", roleCode, email: `${roleCode.toLowerCase()}@example.com` } as any);
+    assert.deepEqual(result, { values: ["Biscuits", "Juice"] });
+  }
+  assert.deepEqual(
+    await service.categoryValues({ companyId: "company-2", roleCode: "SALES_REP", email: "rep@other.example.com" } as any),
+    { values: ["Other company category"] },
+  );
+
+  assert.equal(calls.length, 5);
+  for (const query of calls) {
+    assert.equal(query.entityName, "Products");
+    assert.deepEqual(query.projection, [{ field: "Category", as: "value" }]);
+    assert.deepEqual(query.groupBy, [{ field: "Category" }]);
+    assert.deepEqual(query.pagination, { limit: 300 });
+    assert.equal("requestingUser" in query, false);
+  }
+  assert.deepEqual(calls.map((query) => query.companyId), ["company-1", "company-1", "company-1", "company-1", "company-2"]);
+});
+
 test("customer similarity keeps sales features and clustering parity while RIE aggregates the fact join", async () => {
   const calls: any[] = [];
   const rie = {

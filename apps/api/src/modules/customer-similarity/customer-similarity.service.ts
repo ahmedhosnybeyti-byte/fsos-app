@@ -253,15 +253,18 @@ export class CustomerSimilarityService {
     const ctx = this.rieContext(user);
     await this.assertSources(ctx, ["Products"], "Products");
     const productsResult = await this.rieFacade.queryCanonicalRecords({
-      ...ctx,
+      // Products is a company-wide master entity: it has no RouteID, so the
+      // category metadata lookup must retain company isolation without adding
+      // a route-hierarchy predicate meant for operational facts.
+      companyId: ctx.companyId,
       entityName: "Products",
-      projection: [{ field: "Category" }],
+      projection: [{ field: "Category", as: "value" }],
       groupBy: [{ field: "Category" }],
       pagination: { limit: 300 },
     });
     const values = new Set<string>();
     for (const row of productsResult.records) {
-      const v = String(row.Category ?? "").trim();
+      const v = String(row.value ?? "").trim();
       if (v) values.add(v);
     }
     return { values: Array.from(values).sort((a, b) => a.localeCompare(b)) };
