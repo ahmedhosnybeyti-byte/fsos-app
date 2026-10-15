@@ -8,6 +8,7 @@ test("Water Cash Van discovery requires at least one target type while legacy re
   assert.equal(visitCopilotGoogleSearchRequestSchema.safeParse({ lat: 24.7, lon: 46.6, radiusMeters: 2000, discoveryProfile: "WATER_CASH_VAN", waterTargetTypes: [] }).success, false);
   const parsed = visitCopilotGoogleSearchRequestSchema.parse({ lat: 24.7, lon: 46.6, radiusMeters: 2000, discoveryProfile: "WATER_CASH_VAN", waterTargetTypes: ["RESTAURANTS"] });
   assert.deepEqual(parsed.waterTargetTypes, ["RESTAURANTS"]);
+  assert.equal(visitCopilotGoogleSearchRequestSchema.safeParse({ lat: 24.7, lon: 46.6, radiusMeters: 2000, discoveryProfile: "WATER_CASH_VAN", waterTargetTypes: ["RESIDENTIAL_COMPLEXES"] }).success, false);
 });
 
 test("Google Nearby Search sends the selected circle and channel types as a hard restriction", async () => {
@@ -106,6 +107,50 @@ test("Water Cash Van uses one Nearby Search with selected primary types and no T
     assert.equal(requests[0]?.body.rankPreference, "DISTANCE");
     assert.equal(new Set(result.places.map((place) => place.externalKey)).size, result.places.length);
     assert.equal(result.places.length, 19);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Water Cash Van keeps only exact selected Google categories and assigns display categories", async () => {
+  const originalFetch = globalThis.fetch;
+  let includedPrimaryTypes: string[] = [];
+  globalThis.fetch = async (_input, init) => {
+    includedPrimaryTypes = (JSON.parse(String(init?.body)) as { includedPrimaryTypes: string[] }).includedPrimaryTypes;
+    return new Response(JSON.stringify({ places: [
+      { id: "storage", displayName: { text: "Storage" }, primaryType: "storage", location: { latitude: 24.7, longitude: 46.6 } },
+      { id: "shipping", displayName: { text: "Shipping" }, primaryType: "shipping_service", location: { latitude: 24.7, longitude: 46.6 } },
+      { id: "supplier", displayName: { text: "Broad Supplier" }, primaryType: "supplier", location: { latitude: 24.7, longitude: 46.6 } },
+      { id: "hospital", displayName: { text: "Hospital" }, primaryType: "hospital", location: { latitude: 24.7, longitude: 46.6 } },
+      { id: "dentist", displayName: { text: "Dentist" }, primaryType: "dentist", location: { latitude: 24.7, longitude: 46.6 } },
+      { id: "hotel", displayName: { text: "Hotel" }, primaryType: "hotel", location: { latitude: 24.7, longitude: 46.6 } },
+      { id: "apartment", displayName: { text: "Apartment" }, primaryType: "apartment_complex", location: { latitude: 24.7, longitude: 46.6 } },
+      { id: "studio", displayName: { text: "Studio" }, primaryType: "lodging", location: { latitude: 24.7, longitude: 46.6 } },
+      { id: "wedding", displayName: { text: "Wedding Hall" }, primaryType: "wedding_venue", location: { latitude: 24.7, longitude: 46.6 } },
+      { id: "gym", displayName: { text: "Gym" }, primaryType: "gym", location: { latitude: 24.7, longitude: 46.6 } },
+    ] }), { status: 200 });
+  };
+
+  try {
+    const result = await new GooglePlacesProvider("test-key").search({
+      lat: 24.7,
+      lon: 46.6,
+      radiusMeters: 2000,
+      channel: "Cash Van",
+      discoveryProfile: "WATER_CASH_VAN",
+      waterTargetTypes: ["WAREHOUSES_LOGISTICS", "MEDICAL", "HOTELS", "WEDDING_EVENTS", "GYMS_SPORTS_CLUBS"],
+    });
+    assert.deepEqual(includedPrimaryTypes, ["storage", "shipping_service", "hospital", "general_hospital", "medical_center", "hotel", "resort_hotel", "extended_stay_hotel", "wedding_venue", "banquet_hall", "event_venue", "convention_center", "gym", "fitness_center", "sports_club", "sports_complex"]);
+    assert.equal(includedPrimaryTypes.includes("supplier"), false);
+    assert.equal(includedPrimaryTypes.includes("transportation_service"), false);
+    assert.deepEqual(result.places.map((place) => [place.externalKey, place.businessType]), [
+      ["storage", "WAREHOUSES_LOGISTICS"],
+      ["shipping", "WAREHOUSES_LOGISTICS"],
+      ["hospital", "MEDICAL"],
+      ["hotel", "HOTELS"],
+      ["wedding", "WEDDING_EVENTS"],
+      ["gym", "GYMS_SPORTS_CLUBS"],
+    ]);
   } finally {
     globalThis.fetch = originalFetch;
   }

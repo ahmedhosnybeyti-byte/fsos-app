@@ -33,14 +33,13 @@ const WATER_TARGET_TAG_FILTERS: Record<VisitCopilotWaterTargetType, readonly str
   CATERING: ['[craft="caterer"]'],
   MOSQUES: ['[amenity="place_of_worship"][religion="muslim"]'],
   EDUCATION: ['[amenity~"^(school|college|university)$"]'],
-  MEDICAL: ['[amenity~"^(hospital|clinic)$"]'],
-  HOTELS: ['[tourism~"^(hotel|hostel|guest_house|motel|apartment)$"]'],
+  MEDICAL: ['[amenity="hospital"]'],
+  HOTELS: ['[tourism~"^(hotel|resort)$"]'],
   FACTORIES: ['[man_made="works"]'],
   WAREHOUSES_LOGISTICS: ['[building="warehouse"]', '[office="logistics"]'],
   OFFICES_BUSINESS_CENTERS: ['[office]'],
   WEDDING_EVENTS: ['[amenity="events_venue"]'],
   GYMS_SPORTS_CLUBS: ['[leisure~"^(fitness_centre|sports_centre)$"]'],
-  RESIDENTIAL_COMPLEXES: ['[building~"^(apartments|residential)$"]'],
   WHOLESALE_SUPPLIERS: ['[shop~"^(wholesale|trade)$"]'],
   SUPERMARKETS_GROCERIES: ['[shop~"^(convenience|supermarket|general|grocery)$"]'],
 };
@@ -57,13 +56,34 @@ type OverpassElement = {
 
 type OverpassResponse = { elements?: OverpassElement[] };
 
+function waterTargetForTags(selected: readonly VisitCopilotWaterTargetType[], tags: Record<string, string>): VisitCopilotWaterTargetType | null {
+  for (const target of selected) {
+    const matches = target === "RESTAURANTS" ? /^(restaurant|fast_food)$/.test(tags.amenity ?? "")
+      : target === "CATERING" ? tags.craft === "caterer"
+        : target === "MOSQUES" ? tags.amenity === "place_of_worship" && tags.religion === "muslim"
+          : target === "EDUCATION" ? /^(school|college|university)$/.test(tags.amenity ?? "")
+            : target === "MEDICAL" ? tags.amenity === "hospital"
+              : target === "HOTELS" ? /^(hotel|resort)$/.test(tags.tourism ?? "")
+                : target === "FACTORIES" ? tags.man_made === "works"
+                  : target === "WAREHOUSES_LOGISTICS" ? tags.building === "warehouse" || tags.office === "logistics"
+                    : target === "OFFICES_BUSINESS_CENTERS" ? Boolean(tags.office)
+                      : target === "WEDDING_EVENTS" ? tags.amenity === "events_venue"
+                        : target === "GYMS_SPORTS_CLUBS" ? /^(fitness_centre|sports_centre)$/.test(tags.leisure ?? "")
+                          : target === "WHOLESALE_SUPPLIERS" ? /^(wholesale|trade)$/.test(tags.shop ?? "")
+                            : /^(convenience|supermarket|general|grocery)$/.test(tags.shop ?? "");
+    if (matches) return target;
+  }
+  return null;
+}
+
 export class OverpassProvider implements ProspectDiscoveryProvider {
   readonly id = "OSM" as const;
 
   async search(params: DiscoverySearchParams): Promise<{ places: DiscoveredPlace[]; warnings: string[] }> {
     const { category } = categoryForChannel(params.channel);
+    const selectedWaterTargets = [...new Set(params.waterTargetTypes ?? [])];
     const tagFilters = params.discoveryProfile === "WATER_CASH_VAN"
-      ? [...new Set((params.waterTargetTypes ?? []).flatMap((target) => WATER_TARGET_TAG_FILTERS[target]))]
+      ? [...new Set(selectedWaterTargets.flatMap((target) => WATER_TARGET_TAG_FILTERS[target]))]
       : CATEGORY_TAG_FILTERS[category];
     if (tagFilters.length === 0) return { places: [], warnings: ["اختر نوع عميل واحدًا على الأقل لتوزيع مياه كاش فان."] };
     const around = `around:${Math.round(params.radiusMeters)},${params.lat},${params.lon}`;
@@ -102,6 +122,8 @@ export class OverpassProvider implements ProspectDiscoveryProvider {
     const places: DiscoveredPlace[] = [];
     for (const el of data.elements ?? []) {
       const tags = el.tags ?? {};
+      const waterTarget = params.discoveryProfile === "WATER_CASH_VAN" ? waterTargetForTags(selectedWaterTargets, tags) : null;
+      if (params.discoveryProfile === "WATER_CASH_VAN" && !waterTarget) continue;
       // A nameless POI is useless to a rep knocking on doors — skip it.
       const name = (tags.name ?? "").trim();
       if (name === "" || typeof el.id !== "number" || typeof el.type !== "string" || el.type === "") continue;
@@ -118,7 +140,7 @@ export class OverpassProvider implements ProspectDiscoveryProvider {
         lon,
         address,
         phone: tags.phone ?? tags["contact:phone"] ?? null,
-        businessType: null,
+        businessType: waterTarget,
         sizeBand: null,
         activity: null,
       });

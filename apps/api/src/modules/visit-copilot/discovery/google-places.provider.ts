@@ -48,14 +48,13 @@ const WATER_TARGET_PRIMARY_TYPES: Record<VisitCopilotWaterTargetType, readonly s
   CATERING: ["catering_service"],
   MOSQUES: ["mosque"],
   EDUCATION: ["school", "primary_school", "secondary_school", "university", "educational_institution"],
-  MEDICAL: ["hospital", "general_hospital", "medical_center", "medical_clinic"],
-  HOTELS: ["hotel", "resort_hotel", "extended_stay_hotel", "lodging"],
+  MEDICAL: ["hospital", "general_hospital", "medical_center"],
+  HOTELS: ["hotel", "resort_hotel", "extended_stay_hotel"],
   FACTORIES: ["manufacturer"],
-  WAREHOUSES_LOGISTICS: ["storage", "supplier", "transportation_service"],
+  WAREHOUSES_LOGISTICS: ["storage", "shipping_service"],
   OFFICES_BUSINESS_CENTERS: ["corporate_office", "business_center", "coworking_space"],
   WEDDING_EVENTS: ["wedding_venue", "banquet_hall", "event_venue", "convention_center"],
   GYMS_SPORTS_CLUBS: ["gym", "fitness_center", "sports_club", "sports_complex"],
-  RESIDENTIAL_COMPLEXES: ["housing_complex", "apartment_complex"],
   WHOLESALE_SUPPLIERS: ["wholesaler", "supplier", "warehouse_store"],
   SUPERMARKETS_GROCERIES: ["supermarket", "grocery_store", "convenience_store", "food_store"],
 };
@@ -86,13 +85,17 @@ type PlacesSearchResponse = {
 
 type GooglePlaceRow = NonNullable<PlacesSearchResponse["places"]>[number];
 
-function hasAllowedWaterPrimaryType(allowed: ReadonlySet<string>, primaryType: string | undefined): boolean {
-  if (!primaryType) return false;
-  if (allowed.has(primaryType)) return true;
-  return (allowed.has("restaurant") && primaryType.endsWith("_restaurant")) || (allowed.has("hotel") && primaryType.endsWith("_hotel"));
+function waterTargetForPrimaryType(selected: readonly VisitCopilotWaterTargetType[], primaryType: string | undefined): VisitCopilotWaterTargetType | null {
+  if (!primaryType) return null;
+  for (const target of selected) {
+    const allowed = WATER_TARGET_PRIMARY_TYPES[target];
+    if (allowed.includes(primaryType)) return target;
+    if (target === "RESTAURANTS" && primaryType.endsWith("_restaurant")) return target;
+  }
+  return null;
 }
 
-function discoveredPlace(place: GooglePlaceRow): DiscoveredPlace | null {
+function discoveredWaterPlace(place: GooglePlaceRow, target: VisitCopilotWaterTargetType): DiscoveredPlace | null {
   const lat = place.location?.latitude;
   const lon = place.location?.longitude;
   if (typeof place.id !== "string" || place.id === "" || typeof lat !== "number" || typeof lon !== "number") return null;
@@ -103,7 +106,7 @@ function discoveredPlace(place: GooglePlaceRow): DiscoveredPlace | null {
     lon,
     address: place.formattedAddress ?? null,
     phone: place.nationalPhoneNumber ?? null,
-    businessType: businessTypeFromGooglePrimaryType(place.primaryType),
+    businessType: target,
     sizeBand: null,
     activity: { rating: typeof place.rating === "number" ? place.rating : null, userRatingCount: typeof place.userRatingCount === "number" ? place.userRatingCount : null, weeklyOpenHours: weeklyOpenHours(place.regularOpeningHours) },
     photo: place.photos?.[0]?.name ? { resourceName: place.photos[0].name, attribution: place.photos[0].authorAttributions?.map((author) => author.displayName).filter(Boolean).join(", ") || null } : null,
@@ -207,10 +210,10 @@ export class GooglePlacesProvider implements ProspectDiscoveryProvider {
     try { data = await response.json() as PlacesSearchResponse; } catch { return { places: [], warnings: ["رد غير مفهوم من Google Places — حاول تاني."] }; }
 
     const places = new Map<string, DiscoveredPlace>();
-    const allowedPrimaryTypes = new Set(primaryTypes);
     for (const place of data.places ?? []) {
-      if (!hasAllowedWaterPrimaryType(allowedPrimaryTypes, place.primaryType)) continue;
-      const mapped = discoveredPlace(place);
+      const target = waterTargetForPrimaryType(selected, place.primaryType);
+      if (!target) continue;
+      const mapped = discoveredWaterPlace(place, target);
       if (mapped) places.set(mapped.externalKey, mapped);
     }
     return { places: [...places.values()], warnings: [] };

@@ -12,6 +12,7 @@ import {
   type CreateLostOpportunityExclusion,
   type LostOpportunityExclusionScope,
   type VisitCopilotDiscoveryQuery,
+  type VisitCopilotDiscoveryProfile,
   type VisitCopilotGoogleSearchRequest,
   type VisitCopilotPeriod,
   type VisitCopilotPeriodRange,
@@ -372,6 +373,17 @@ interface DiscoveryStats {
   }[];
   repChannel: string | null;
   centroid: LatLon | null;
+}
+
+export function usesChannelMatchForDiscovery(profile: VisitCopilotDiscoveryProfile): boolean {
+  return profile !== "WATER_CASH_VAN";
+}
+
+export function discoveryProspectReason(channelMatch: boolean, distanceKm: number | null): string {
+  if (channelMatch && distanceKm !== null) return `قناته مطابقة لقناتك وعلى بعد ${distanceKm} كم من مركز عملائك.`;
+  if (channelMatch) return "قناته مطابقة لقناتك.";
+  if (distanceKm !== null) return `قريب من مركز عملائك (${distanceKm} كم).`;
+  return "عميل محتمل جديد.";
 }
 
 interface DailyBriefBuild {
@@ -2124,7 +2136,7 @@ export class VisitCopilotService {
     }
     const allCustomerPoints: LatLon[] = stats.customers.filter((c) => c.lat !== null && c.lon !== null).map((c) => ({ lat: c.lat!, lon: c.lon! }));
     const materialized = await this.prospectService.materializeScan({
-      companyId: user.companyId!, userId: user.userId, source: provider.id, canonicalChannel: stats.repChannel,
+      companyId: user.companyId!, userId: user.userId, source: provider.id, canonicalChannel: body.discoveryProfile === "WATER_CASH_VAN" ? null : stats.repChannel,
       marketSegment: taxonomy.segment, places, customerPoints: allCustomerPoints, minimumScore: body.minimumScore,
     });
     const photoUrls = new Map<string, { url: string; attribution: string | null }>();
@@ -2137,7 +2149,7 @@ export class VisitCopilotService {
     await this.buildMissingProductFit(user, materialized.prospects, warnings, stats.repChannel);
     const enriched = await this.prisma.prospect.findMany({ where: { id: { in: materialized.prospects.map((prospect) => prospect.id) } }, include: { intelligenceProfile: { select: { businessClassification: true, productFitInsights: true } } } });
     const nearbyBestSellers = await this.buildNearbyBestSellers(user, stats.range, enriched, stats.repChannel, warnings);
-    return { found: materialized.found, newCount: materialized.newCount, prospects: this.scoreProspects(enriched, stats, photoUrls, nearbyBestSellers).sort((a, b) => b.priorityScore - a.priorityScore), warnings, dailyRemaining };
+    return { found: materialized.found, newCount: materialized.newCount, prospects: this.scoreProspects(enriched, stats, photoUrls, nearbyBestSellers, body.discoveryProfile).sort((a, b) => b.priorityScore - a.priorityScore), warnings, dailyRemaining };
     const found = places.length;
 
     // A place within ~100m of an existing customer IS that customer — skip.
@@ -2563,11 +2575,11 @@ export class VisitCopilotService {
   //     rep-customer centroid;
   //   priorityScore 0-100 = 50% min-max-normalized expectedOrderValue +
   //     50% successProbability.
-  private scoreProspects(prospects: Array<Prospect & { intelligenceProfile?: { businessClassification: unknown; productFitInsights: unknown } | null }>, stats: DiscoveryStats, photoUrls = new Map<string, { url: string; attribution: string | null }>(), nearbyBestSellers = new Map<string, { products: ScoredProspect["nearbyBestSellers"]; customerCount: number }>()): ScoredProspect[] {
+  private scoreProspects(prospects: Array<Prospect & { intelligenceProfile?: { businessClassification: unknown; productFitInsights: unknown } | null }>, stats: DiscoveryStats, photoUrls = new Map<string, { url: string; attribution: string | null }>(), nearbyBestSellers = new Map<string, { products: ScoredProspect["nearbyBestSellers"]; customerCount: number }>(), discoveryProfile: VisitCopilotDiscoveryProfile = "REP_CHANNEL"): ScoredProspect[] {
     const base = prospects.map((p) => {
       const hasCoords = p.lat !== null && p.lon !== null && isSaneCoordinate(p.lat, p.lon);
       const distanceKm = hasCoords && stats.centroid ? round2(haversineKm({ lat: p.lat!, lon: p.lon! }, stats.centroid)) : null;
-      const channelMatch = p.channel !== null && p.channel.trim() !== "" && stats.repChannel !== null && channelsLooselyMatch(p.channel, stats.repChannel);
+      const channelMatch = usesChannelMatchForDiscovery(discoveryProfile) && p.channel !== null && p.channel.trim() !== "" && stats.repChannel !== null && channelsLooselyMatch(p.channel, stats.repChannel);
       const proximity = distanceKm === null ? 0 : 0.3 * Math.max(0, 1 - distanceKm / PROXIMITY_DECAY_KM);
       return {
         p,
@@ -2585,16 +2597,7 @@ export class VisitCopilotService {
     const eovMax = eovs.length > 0 ? Math.max(...eovs) : 0;
 
     return base.map((b) => {
-      let reason: string;
-      if (b.channelMatch && b.distanceKm !== null) {
-        reason = `قناته مطابقة لقناتك وعلى بعد ${b.distanceKm} كم من مركز عملائك.`;
-      } else if (b.channelMatch) {
-        reason = "قناته مطابقة لقناتك.";
-      } else if (b.distanceKm !== null) {
-        reason = `قريب من مركز عملائك (${b.distanceKm} كم).`;
-      } else {
-        reason = "عميل محتمل جديد.";
-      }
+      const reason = discoveryProspectReason(b.channelMatch, b.distanceKm);
       return {
         id: b.p.id,
         source: b.p.source,

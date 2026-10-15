@@ -114,7 +114,6 @@ const WATER_TARGET_OPTIONS: Array<{ id: VisitCopilotWaterTargetType; ar: string;
   { id: "OFFICES_BUSINESS_CENTERS", ar: "شركات ومكاتب ومراكز أعمال", en: "Companies, offices and business centers" },
   { id: "WEDDING_EVENTS", ar: "قاعات أفراح وفعاليات", en: "Wedding and event venues" },
   { id: "GYMS_SPORTS_CLUBS", ar: "جيم ونوادي رياضية", en: "Gyms and sports clubs" },
-  { id: "RESIDENTIAL_COMPLEXES", ar: "مجمعات سكنية", en: "Residential complexes" },
   { id: "WHOLESALE_SUPPLIERS", ar: "تجار جملة وموردون", en: "Wholesalers and suppliers" },
   { id: "SUPERMARKETS_GROCERIES", ar: "سوبرماركت وتموينات", en: "Supermarkets and groceries" },
 ];
@@ -546,15 +545,24 @@ function VisitCopilotScreen() {
     // The discovery surface is deliberately scoped to the most recent
     // explicit discovery search. Existing stored prospects belong to other
     // searches/scopes and must not leak into this radius' red markers/list.
-    return latestGoogleProspects.sort((a, b) => prospectSort === "CATALOG_FIT"
+    const scoped = discoveryProfile === "WATER_CASH_VAN"
+      ? latestGoogleProspects.filter((prospect) => waterTargetTypes.includes(prospect.businessType as VisitCopilotWaterTargetType))
+      : latestGoogleProspects;
+    return [...scoped].sort((a, b) => prospectSort === "CATALOG_FIT"
       ? (b.catalogFitScore ?? -1) - (a.catalogFitScore ?? -1)
       : b.priorityScore - a.priorityScore);
-  }, [latestGoogleProspects, prospectSort]);
+  }, [discoveryProfile, latestGoogleProspects, prospectSort, waterTargetTypes]);
   const prospectGroups = useMemo(() => {
+    if (discoveryProfile === "WATER_CASH_VAN") {
+      return WATER_TARGET_OPTIONS
+        .filter((option) => waterTargetTypes.includes(option.id))
+        .map((option) => ({ key: option.id, label: locale === "ar" ? option.ar : option.en, prospects: discoveryProspects.filter((prospect) => prospect.businessType === option.id) }))
+        .filter((group) => group.prospects.length > 0);
+    }
     const groups = [{ key: "HOTELS", label: t("copilot.businessHotels"), prospects: [] as typeof discoveryProspects }, { key: "RESTAURANTS", label: t("copilot.businessRestaurants"), prospects: [] as typeof discoveryProspects }, { key: "CAFES", label: t("copilot.businessCafes"), prospects: [] as typeof discoveryProspects }, { key: "OTHER", label: t("copilot.businessOther"), prospects: [] as typeof discoveryProspects }];
     for (const prospect of discoveryProspects) groups[prospect.businessType === "hotel" ? 0 : prospect.businessType === "restaurant" ? 1 : prospect.businessType === "cafe" || prospect.businessType === "coffee_shop" ? 2 : 3]!.prospects.push(prospect);
     return groups.filter((group) => group.prospects.length > 0);
-  }, [discoveryProspects, t]);
+  }, [discoveryProfile, discoveryProspects, locale, t, waterTargetTypes]);
 
   function createProspectVisit(prospectId: string, scheduledFor: string) {
     if (!scheduledFor || prospectVisitMutation.isPending) return;
@@ -791,7 +799,9 @@ function VisitCopilotScreen() {
                             {prospect.photo?.url && <div className="w-16 shrink-0"><img src={prospect.photo.url} alt={prospect.name} loading="lazy" className="h-16 w-16 rounded-md object-cover" />{prospect.photo.attribution && <p className="mt-1 text-[10px] text-muted-foreground">{t("copilot.photoAttribution", { attribution: prospect.photo.attribution })}</p>}</div>}
                             <div>
                               <p className="font-semibold">{prospect.name}</p>
-                              <p className="text-xs text-muted-foreground">{prospect.businessType ?? t("copilot.businessTypeUnavailable")}</p>
+                              <p className="text-xs text-muted-foreground">{discoveryProfile === "WATER_CASH_VAN"
+                                ? WATER_TARGET_OPTIONS.find((option) => option.id === prospect.businessType)?.[locale] ?? t("copilot.businessTypeUnavailable")
+                                : prospect.businessType ?? t("copilot.businessTypeUnavailable")}</p>
                               {prospect.address && <p className="text-xs text-muted-foreground">{prospect.address}</p>}
                               {prospect.distanceKm !== null && prospect.distanceKm !== undefined && <p className="text-xs text-muted-foreground">{prospect.distanceKm.toFixed(1)} km</p>}
                               {scheduledDate && <Badge variant="outline" className="mt-1 border-emerald-500/50 text-emerald-700 dark:text-emerald-300">مجدولة: {scheduledDate}</Badge>}
