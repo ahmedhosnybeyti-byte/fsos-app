@@ -2042,7 +2042,8 @@ export class VisitCopilotService {
     // A double tap / network retry reaches this service at most once while the
     // same request is still running; the quota reservation remains atomic for
     // separate requests and across API instances.
-    const key = `${user.userId}:${body.lat.toFixed(6)}:${body.lon.toFixed(6)}:${body.radiusMeters}`;
+    const profileKey = `${body.discoveryProfile}:${[...body.waterTargetTypes].sort().join(",")}`;
+    const key = `${user.userId}:${body.lat.toFixed(6)}:${body.lon.toFixed(6)}:${body.radiusMeters}:${profileKey}`;
     const active = this.discoverySearchesInFlight.get(key);
     if (active) return active;
     const work = this.discoverySearchImpl(user, body);
@@ -2099,7 +2100,14 @@ export class VisitCopilotService {
     if (!matched) warnings.push("قناة عملائك غير معروفة — تم البحث بفئات التجارة التقليدية.");
 
     const dailyRemaining = await this.reserveDiscoveryQuota(user);
-    const searchResult = await provider.search({ lat: body.lat, lon: body.lon, radiusMeters: body.radiusMeters, channel: stats.repChannel });
+    const searchResult = await provider.search({
+      lat: body.lat,
+      lon: body.lon,
+      radiusMeters: body.radiusMeters,
+      channel: stats.repChannel,
+      discoveryProfile: body.discoveryProfile,
+      waterTargetTypes: body.waterTargetTypes,
+    });
     warnings.push(...searchResult.warnings);
     // Google locationRestriction is the upstream hard boundary, but enforce
     // it again from returned coordinates before any persistence or response.

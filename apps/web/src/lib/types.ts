@@ -1639,7 +1639,26 @@ export interface VisitCopilotGoogleSearchRequest {
   lat: number;
   lon: number;
   radiusMeters: number;
+  discoveryProfile?: VisitCopilotDiscoveryProfile;
+  waterTargetTypes?: VisitCopilotWaterTargetType[];
 }
+
+export type VisitCopilotDiscoveryProfile = "REP_CHANNEL" | "WATER_CASH_VAN";
+export type VisitCopilotWaterTargetType =
+  | "RESTAURANTS"
+  | "CATERING"
+  | "MOSQUES"
+  | "EDUCATION"
+  | "MEDICAL"
+  | "HOTELS"
+  | "FACTORIES"
+  | "WAREHOUSES_LOGISTICS"
+  | "OFFICES_BUSINESS_CENTERS"
+  | "WEDDING_EVENTS"
+  | "GYMS_SPORTS_CLUBS"
+  | "RESIDENTIAL_COMPLEXES"
+  | "WHOLESALE_SUPPLIERS"
+  | "SUPERMARKETS_GROCERIES";
 
 export interface VisitCopilotGoogleSearchResult {
   found: number;

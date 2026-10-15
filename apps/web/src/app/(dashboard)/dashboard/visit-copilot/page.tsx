@@ -34,6 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
@@ -42,10 +43,13 @@ import type {
   VisitCopilotChatMessage,
   VisitCopilotDiscoveryCustomer,
   VisitCopilotDiscoveryLimit,
+  VisitCopilotDiscoveryProfile,
+  VisitCopilotGoogleSearchRequest,
   VisitCopilotPeriod,
   VisitCopilotPlanMode,
   VisitCopilotPlanResult,
   VisitCopilotProspect,
+  VisitCopilotWaterTargetType,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { formatDynamicNumbers, formatPercentage, formatWholeNumber } from "@/lib/number-format";
@@ -97,6 +101,73 @@ function MapLoadingFallback() {
 
 const GOOGLE_SEARCH_RADIUS_METERS = 2000;
 const GOOGLE_RADIUS_OPTIONS = [1000, 2000, 3000, 5000] as const;
+
+const WATER_TARGET_OPTIONS: Array<{ id: VisitCopilotWaterTargetType; ar: string; en: string }> = [
+  { id: "RESTAURANTS", ar: "مطاعم", en: "Restaurants" },
+  { id: "CATERING", ar: "شركات إعاشة ومطابخ مركزية", en: "Catering and central kitchens" },
+  { id: "MOSQUES", ar: "مساجد", en: "Mosques" },
+  { id: "EDUCATION", ar: "مدارس وجامعات", en: "Schools and universities" },
+  { id: "MEDICAL", ar: "مستشفيات ومراكز طبية", en: "Hospitals and medical centers" },
+  { id: "HOTELS", ar: "فنادق وسكن فندقي", en: "Hotels and serviced lodging" },
+  { id: "FACTORIES", ar: "مصانع", en: "Factories" },
+  { id: "WAREHOUSES_LOGISTICS", ar: "مستودعات ولوجستيات", en: "Warehouses and logistics" },
+  { id: "OFFICES_BUSINESS_CENTERS", ar: "شركات ومكاتب ومراكز أعمال", en: "Companies, offices and business centers" },
+  { id: "WEDDING_EVENTS", ar: "قاعات أفراح وفعاليات", en: "Wedding and event venues" },
+  { id: "GYMS_SPORTS_CLUBS", ar: "جيم ونوادي رياضية", en: "Gyms and sports clubs" },
+  { id: "RESIDENTIAL_COMPLEXES", ar: "مجمعات سكنية", en: "Residential complexes" },
+  { id: "WHOLESALE_SUPPLIERS", ar: "تجار جملة وموردون", en: "Wholesalers and suppliers" },
+  { id: "SUPERMARKETS_GROCERIES", ar: "سوبرماركت وتموينات", en: "Supermarkets and groceries" },
+];
+
+function DiscoveryTargetMultiSelect({ locale, selected, onChange }: { locale: "ar" | "en"; selected: VisitCopilotWaterTargetType[]; onChange: (next: VisitCopilotWaterTargetType[]) => void }) {
+  const [search, setSearch] = useState("");
+  const labelFor = (option: (typeof WATER_TARGET_OPTIONS)[number]) => locale === "ar" ? option.ar : option.en;
+  const normalizedSearch = search.trim().toLocaleLowerCase();
+  const visible = WATER_TARGET_OPTIONS.filter((option) => labelFor(option).toLocaleLowerCase().includes(normalizedSearch));
+  const allVisibleSelected = visible.length > 0 && visible.every((option) => selected.includes(option.id));
+  const selectedLabels = WATER_TARGET_OPTIONS.filter((option) => selected.includes(option.id)).map(labelFor);
+  const summary = selected.length === 0
+    ? (locale === "ar" ? "اختر نوعًا واحدًا على الأقل" : "Select at least one type")
+    : selected.length === WATER_TARGET_OPTIONS.length
+      ? (locale === "ar" ? "كل الأنواع" : "All types")
+      : selected.length <= 2
+        ? selectedLabels.join("، ")
+        : (locale === "ar" ? `${selected.length} أنواع محددة` : `${selected.length} types selected`);
+  const toggle = (id: VisitCopilotWaterTargetType) => onChange(selected.includes(id) ? selected.filter((value) => value !== id) : [...selected, id]);
+  const toggleVisible = () => onChange(allVisibleSelected
+    ? selected.filter((id) => !visible.some((option) => option.id === id))
+    : [...new Set([...selected, ...visible.map((option) => option.id)])]);
+
+  return (
+    <Label className="grid min-w-0 gap-1.5 text-xs">
+      {locale === "ar" ? "أنواع العملاء المستهدفين" : "Target customer types"}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button type="button" variant="outline" className="h-10 min-w-0 justify-between gap-2 font-normal">
+            <span className="truncate">{summary}</span>
+            <ChevronDown className="h-4 w-4 shrink-0" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" className="w-[min(24rem,calc(100vw-2rem))] space-y-2 p-3">
+          <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={locale === "ar" ? "بحث..." : "Search..."} onKeyDown={(event) => event.stopPropagation()} />
+          <div className="flex gap-2">
+            <Button type="button" size="sm" variant="ghost" onClick={toggleVisible}>{locale === "ar" ? "تحديد الكل" : "Select all"}</Button>
+            <Button type="button" size="sm" variant="ghost" onClick={() => onChange([])}>{locale === "ar" ? "مسح" : "Clear"}</Button>
+          </div>
+          <div className="max-h-64 space-y-1 overflow-y-auto overscroll-contain">
+            {visible.map((option) => (
+              <label key={option.id} className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-secondary">
+                <input type="checkbox" checked={selected.includes(option.id)} onChange={() => toggle(option.id)} />
+                <span className="min-w-0 flex-1">{labelFor(option)}</span>
+              </label>
+            ))}
+            {visible.length === 0 && <p className="px-2 py-3 text-sm text-muted-foreground">{locale === "ar" ? "لا توجد نتائج" : "No results"}</p>}
+          </div>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </Label>
+  );
+}
 
 const PERIODS: { value: VisitCopilotPeriod; labelKey: "copilot.period1m" | "copilot.period3m" | "copilot.period6m" | "copilot.period12m" | "copilot.periodCustom" }[] = [
   { value: "1m", labelKey: "copilot.period1m" },
@@ -184,6 +255,8 @@ function VisitCopilotScreen() {
   const [discoveryCenterMode, setDiscoveryCenterMode] = useState<"gps" | "manual">("gps");
   const [discoveryCenter, setDiscoveryCenter] = useState<{ lat: number; lng: number } | null>(null);
   const [discoveryRadiusMeters, setDiscoveryRadiusMeters] = useState<number>(GOOGLE_SEARCH_RADIUS_METERS);
+  const [discoveryProfile, setDiscoveryProfile] = useState<VisitCopilotDiscoveryProfile>("REP_CHANNEL");
+  const [waterTargetTypes, setWaterTargetTypes] = useState<VisitCopilotWaterTargetType[]>([]);
   // A new scan supersedes every previous scan, including a slower response
   // that finishes after the user has changed centre or radius.
   const latestGoogleSearchId = useRef(0);
@@ -330,7 +403,7 @@ function VisitCopilotScreen() {
   });
 
   const googleSearchMutation = useMutation({
-    mutationFn: ({ searchId: _searchId, ...request }: { searchId: number; lat: number; lon: number; radiusMeters: number; salesRepId?: string }) => visitCopilotApi.googleSearch(request),
+    mutationFn: ({ searchId: _searchId, ...request }: VisitCopilotGoogleSearchRequest & { searchId: number; salesRepId?: string }) => visitCopilotApi.googleSearch(request),
     onSuccess: (data, variables) => {
       if (variables.searchId !== latestGoogleSearchId.current) return;
       // disabled:true means no Places API key server-side — surface the
@@ -419,11 +492,20 @@ function VisitCopilotScreen() {
   function searchGoogleAround() {
     if (googleSearchMutation.isPending) return;
     if (!discoveryCenter) { toast.error(discoveryCenterMode === "manual" ? "اضغط على الخريطة أولًا لتحديد مركز البحث." : "حدّد موقعك الحالي أولًا."); return; }
+    if (discoveryProfile === "WATER_CASH_VAN" && waterTargetTypes.length === 0) { toast.error(locale === "ar" ? "اختر نوع عميل واحدًا على الأقل." : "Select at least one customer type."); return; }
     const searchId = latestGoogleSearchId.current + 1;
     latestGoogleSearchId.current = searchId;
     setLatestGoogleProspects([]);
     setSelectedDiscoveryProspectId(null);
-    googleSearchMutation.mutate({ searchId, lat: discoveryCenter.lat, lon: discoveryCenter.lng, radiusMeters: discoveryRadiusMeters, salesRepId: salesRepId || undefined });
+    googleSearchMutation.mutate({
+      searchId,
+      lat: discoveryCenter.lat,
+      lon: discoveryCenter.lng,
+      radiusMeters: discoveryRadiusMeters,
+      discoveryProfile,
+      waterTargetTypes: discoveryProfile === "WATER_CASH_VAN" ? waterTargetTypes : [],
+      salesRepId: salesRepId || undefined,
+    });
   }
 
   function sendChat(text: string) {
@@ -611,11 +693,27 @@ function VisitCopilotScreen() {
                   variant="secondary"
                   className="h-11 gap-2 max-md:h-10 max-md:flex-1 max-md:px-3 max-md:text-xs"
                   onClick={searchGoogleAround}
-                  disabled={googleSearchMutation.isPending || discoveryQuery.isLoading || !discoveryCenter || (discoveryLimitQuery.data?.remaining ?? 0) === 0}
+                  disabled={googleSearchMutation.isPending || discoveryQuery.isLoading || !discoveryCenter || (discoveryLimitQuery.data?.remaining ?? 0) === 0 || (discoveryProfile === "WATER_CASH_VAN" && waterTargetTypes.length === 0)}
                 >
                   {googleSearchMutation.isPending ? <Spinner className="h-4 w-4" /> : <LocateFixed className="h-4 w-4" />}
                   اكتشف الفرص داخل هذا النطاق
                 </Button>
+              </div>
+
+              <div className="grid max-w-3xl gap-3 rounded-lg border border-border bg-muted/20 p-3 sm:grid-cols-2">
+                <Label className="grid gap-1.5 text-xs">
+                  {locale === "ar" ? "نوع الاستكشاف" : "Discovery type"}
+                  <Select value={discoveryProfile} onValueChange={(value) => { setDiscoveryProfile(value as VisitCopilotDiscoveryProfile); setLatestGoogleProspects([]); setSelectedDiscoveryProspectId(null); }}>
+                    <SelectTrigger className="h-10 w-full"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="REP_CHANNEL">{locale === "ar" ? "حسب قناة المندوب" : "By sales rep channel"}</SelectItem>
+                      <SelectItem value="WATER_CASH_VAN">{locale === "ar" ? "توزيع مياه كاش فان" : "Water Cash Van distribution"}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Label>
+                {discoveryProfile === "WATER_CASH_VAN" && (
+                  <DiscoveryTargetMultiSelect locale={locale} selected={waterTargetTypes} onChange={(next) => { setWaterTargetTypes(next); setLatestGoogleProspects([]); setSelectedDiscoveryProspectId(null); }} />
+                )}
               </div>
 
               <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 p-3 text-sm">

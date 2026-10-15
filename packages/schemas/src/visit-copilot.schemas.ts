@@ -129,18 +129,47 @@ export const VISIT_COPILOT_DISCOVERY_LIMITS = {
   allowedRadiusMeters: [1000, 2000, 3000, 5000] as const,
 };
 
-export const visitCopilotGoogleSearchRequestSchema = z.object({
-  lat: z.number().min(-90).max(90),
-  lon: z.number().min(-180).max(180),
-  radiusMeters: z.coerce
-    .number()
-    .int()
-    .positive()
-    .max(VISIT_COPILOT_DISCOVERY_LIMITS.maxRadiusMeters, `أقصى نصف قطر للبحث ${VISIT_COPILOT_DISCOVERY_LIMITS.maxRadiusMeters} متر`)
-    .default(VISIT_COPILOT_DISCOVERY_LIMITS.defaultRadiusMeters)
-    .refine((value) => (VISIT_COPILOT_DISCOVERY_LIMITS.allowedRadiusMeters as readonly number[]).includes(value), "Radius must be 1, 2, 3, or 5 km"),
-  minimumScore: z.coerce.number().min(0).max(100).optional(),
-});
+export const visitCopilotDiscoveryProfileSchema = z.enum(["REP_CHANNEL", "WATER_CASH_VAN"]);
+export type VisitCopilotDiscoveryProfile = z.infer<typeof visitCopilotDiscoveryProfileSchema>;
+
+export const visitCopilotWaterTargetTypeSchema = z.enum([
+  "RESTAURANTS",
+  "CATERING",
+  "MOSQUES",
+  "EDUCATION",
+  "MEDICAL",
+  "HOTELS",
+  "FACTORIES",
+  "WAREHOUSES_LOGISTICS",
+  "OFFICES_BUSINESS_CENTERS",
+  "WEDDING_EVENTS",
+  "GYMS_SPORTS_CLUBS",
+  "RESIDENTIAL_COMPLEXES",
+  "WHOLESALE_SUPPLIERS",
+  "SUPERMARKETS_GROCERIES",
+]);
+export type VisitCopilotWaterTargetType = z.infer<typeof visitCopilotWaterTargetTypeSchema>;
+
+export const visitCopilotGoogleSearchRequestSchema = z
+  .object({
+    lat: z.number().min(-90).max(90),
+    lon: z.number().min(-180).max(180),
+    radiusMeters: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(VISIT_COPILOT_DISCOVERY_LIMITS.maxRadiusMeters, `أقصى نصف قطر للبحث ${VISIT_COPILOT_DISCOVERY_LIMITS.maxRadiusMeters} متر`)
+      .default(VISIT_COPILOT_DISCOVERY_LIMITS.defaultRadiusMeters)
+      .refine((value) => (VISIT_COPILOT_DISCOVERY_LIMITS.allowedRadiusMeters as readonly number[]).includes(value), "Radius must be 1, 2, 3, or 5 km"),
+    minimumScore: z.coerce.number().min(0).max(100).optional(),
+    discoveryProfile: visitCopilotDiscoveryProfileSchema.default("REP_CHANNEL"),
+    waterTargetTypes: z.array(visitCopilotWaterTargetTypeSchema).max(visitCopilotWaterTargetTypeSchema.options.length).default([]),
+  })
+  .superRefine((value, ctx) => {
+    if (value.discoveryProfile === "WATER_CASH_VAN" && value.waterTargetTypes.length === 0) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["waterTargetTypes"], message: "اختر نوع عميل واحدًا على الأقل لتوزيع مياه كاش فان" });
+    }
+  });
 export type VisitCopilotGoogleSearchRequest = z.infer<typeof visitCopilotGoogleSearchRequestSchema>;
 
 // PATCH /visit-copilot/prospects/:id/status — mirrors the Prisma

@@ -4,6 +4,7 @@
 // company's own key) and all the FSOS post-processing (existing-customer
 // exclusion, Prospect upserts, scoring) stays provider-agnostic.
 
+import type { VisitCopilotDiscoveryProfile, VisitCopilotWaterTargetType } from "@field-sales-os/schemas";
 import { taxonomyForCanonicalChannel } from "../../prospects/prospect-taxonomy";
 
 export interface DiscoveredPlace {
@@ -27,6 +28,8 @@ export interface DiscoverySearchParams {
   lon: number;
   radiusMeters: number;
   channel: string | null;
+  discoveryProfile?: VisitCopilotDiscoveryProfile;
+  waterTargetTypes?: readonly VisitCopilotWaterTargetType[];
 }
 
 export interface ProspectDiscoveryProvider {

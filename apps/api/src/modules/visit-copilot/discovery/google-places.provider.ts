@@ -6,6 +6,7 @@ import {
   type ProspectDiscoveryProvider,
 } from "./discovery-provider.interface";
 import { businessTypeFromGooglePrimaryType } from "../../prospects/prospect-taxonomy";
+import type { VisitCopilotWaterTargetType } from "@field-sales-os/schemas";
 
 // Google Places Nearby Search (New) provider — the original Phase 2
 // implementation moved out of visit-copilot.service.ts unchanged, with one
@@ -42,6 +43,23 @@ const CATEGORY_PRIMARY_TYPES: Record<DiscoveryCategory, readonly string[]> = {
   wholesale: ["wholesaler", "warehouse_store"],
 };
 
+const WATER_TARGET_PRIMARY_TYPES: Record<VisitCopilotWaterTargetType, readonly string[]> = {
+  RESTAURANTS: ["restaurant"],
+  CATERING: ["catering_service"],
+  MOSQUES: ["mosque"],
+  EDUCATION: ["school", "primary_school", "secondary_school", "university", "educational_institution"],
+  MEDICAL: ["hospital", "general_hospital", "medical_center", "medical_clinic"],
+  HOTELS: ["hotel", "resort_hotel", "extended_stay_hotel", "lodging"],
+  FACTORIES: ["manufacturer"],
+  WAREHOUSES_LOGISTICS: ["storage", "supplier", "transportation_service"],
+  OFFICES_BUSINESS_CENTERS: ["corporate_office", "business_center", "coworking_space"],
+  WEDDING_EVENTS: ["wedding_venue", "banquet_hall", "event_venue", "convention_center"],
+  GYMS_SPORTS_CLUBS: ["gym", "fitness_center", "sports_club", "sports_complex"],
+  RESIDENTIAL_COMPLEXES: ["housing_complex", "apartment_complex"],
+  WHOLESALE_SUPPLIERS: ["wholesaler", "supplier", "warehouse_store"],
+  SUPERMARKETS_GROCERIES: ["supermarket", "grocery_store", "convenience_store", "food_store"],
+};
+
 function hasAllowedPrimaryType(category: DiscoveryCategory, primaryType: string | undefined): boolean {
   if (!primaryType) return false;
   if (CATEGORY_PRIMARY_TYPES[category].includes(primaryType)) return true;
@@ -66,6 +84,32 @@ type PlacesSearchResponse = {
   }[];
 };
 
+type GooglePlaceRow = NonNullable<PlacesSearchResponse["places"]>[number];
+
+function hasAllowedWaterPrimaryType(allowed: ReadonlySet<string>, primaryType: string | undefined): boolean {
+  if (!primaryType) return false;
+  if (allowed.has(primaryType)) return true;
+  return (allowed.has("restaurant") && primaryType.endsWith("_restaurant")) || (allowed.has("hotel") && primaryType.endsWith("_hotel"));
+}
+
+function discoveredPlace(place: GooglePlaceRow): DiscoveredPlace | null {
+  const lat = place.location?.latitude;
+  const lon = place.location?.longitude;
+  if (typeof place.id !== "string" || place.id === "" || typeof lat !== "number" || typeof lon !== "number") return null;
+  return {
+    externalKey: place.id,
+    name: place.displayName?.text?.trim() || place.primaryType || "غير معروف",
+    lat,
+    lon,
+    address: place.formattedAddress ?? null,
+    phone: place.nationalPhoneNumber ?? null,
+    businessType: businessTypeFromGooglePrimaryType(place.primaryType),
+    sizeBand: null,
+    activity: { rating: typeof place.rating === "number" ? place.rating : null, userRatingCount: typeof place.userRatingCount === "number" ? place.userRatingCount : null, weeklyOpenHours: weeklyOpenHours(place.regularOpeningHours) },
+    photo: place.photos?.[0]?.name ? { resourceName: place.photos[0].name, attribution: place.photos[0].authorAttributions?.map((author) => author.displayName).filter(Boolean).join(", ") || null } : null,
+  };
+}
+
 export class GooglePlacesProvider implements ProspectDiscoveryProvider {
   readonly id = "GOOGLE" as const;
 
@@ -76,6 +120,10 @@ export class GooglePlacesProvider implements ProspectDiscoveryProvider {
     // no key is stored, so this only fires on a decrypt-to-empty edge case.
     if (this.apiKey.trim() === "") {
       return { places: [], warnings: ["مفتاح Google Places مش متسجل للشركة"] };
+    }
+
+    if (params.discoveryProfile === "WATER_CASH_VAN") {
+      return this.searchWaterCashVan(params);
     }
 
     const { category } = categoryForChannel(params.channel);
@@ -130,6 +178,40 @@ export class GooglePlacesProvider implements ProspectDiscoveryProvider {
         activity: { rating: typeof pl.rating === "number" ? pl.rating : null, userRatingCount: typeof pl.userRatingCount === "number" ? pl.userRatingCount : null, weeklyOpenHours: weeklyOpenHours(pl.regularOpeningHours) },
         photo: pl.photos?.[0]?.name ? { resourceName: pl.photos[0].name, attribution: pl.photos[0].authorAttributions?.map((author) => author.displayName).filter(Boolean).join(", ") || null } : null,
       });
+    }
+    return { places: [...places.values()], warnings: [] };
+  }
+
+  private async searchWaterCashVan(params: DiscoverySearchParams): Promise<{ places: DiscoveredPlace[]; warnings: string[] }> {
+    const selected = [...new Set(params.waterTargetTypes ?? [])];
+    if (selected.length === 0) return { places: [], warnings: ["اختر نوع عميل واحدًا على الأقل لتوزيع مياه كاش فان."] };
+
+    const primaryTypes = [...new Set(selected.flatMap((target) => WATER_TARGET_PRIMARY_TYPES[target]))];
+    let response: globalThis.Response;
+    try {
+      response = await fetch(GOOGLE_PLACES_URL, {
+        method: "POST",
+        headers: { "content-type": "application/json", "X-Goog-Api-Key": this.apiKey, "X-Goog-FieldMask": GOOGLE_PLACES_FIELD_MASK },
+        body: JSON.stringify({
+        maxResultCount: GOOGLE_MAX_RESULT_COUNT,
+        includedPrimaryTypes: primaryTypes,
+        rankPreference: "DISTANCE",
+        locationRestriction: locationRestriction(params),
+        }),
+      });
+    } catch {
+      return { places: [], warnings: ["تعذر الاتصال بـ Google Places — حاول تاني."] };
+    }
+    if (!response.ok) return { places: [], warnings: [`فشل طلب Google Places (${response.status}) — حاول تاني أو راجع مفتاح الـ API.`] };
+    let data: PlacesSearchResponse;
+    try { data = await response.json() as PlacesSearchResponse; } catch { return { places: [], warnings: ["رد غير مفهوم من Google Places — حاول تاني."] }; }
+
+    const places = new Map<string, DiscoveredPlace>();
+    const allowedPrimaryTypes = new Set(primaryTypes);
+    for (const place of data.places ?? []) {
+      if (!hasAllowedWaterPrimaryType(allowedPrimaryTypes, place.primaryType)) continue;
+      const mapped = discoveredPlace(place);
+      if (mapped) places.set(mapped.externalKey, mapped);
     }
     return { places: [...places.values()], warnings: [] };
   }

@@ -5,6 +5,7 @@ import {
   type DiscoverySearchParams,
   type ProspectDiscoveryProvider,
 } from "./discovery-provider.interface";
+import type { VisitCopilotWaterTargetType } from "@field-sales-os/schemas";
 
 // Default discovery provider: OpenStreetMap via the public Overpass API —
 // free, no key, no signup, so every company gets "search around me" out of
@@ -27,6 +28,23 @@ const CATEGORY_TAG_FILTERS: Record<DiscoveryCategory, string[]> = {
   wholesale: ['[shop~"^(wholesale|trade)$"]'],
 };
 
+const WATER_TARGET_TAG_FILTERS: Record<VisitCopilotWaterTargetType, readonly string[]> = {
+  RESTAURANTS: ['[amenity~"^(restaurant|fast_food)$"]'],
+  CATERING: ['[craft="caterer"]'],
+  MOSQUES: ['[amenity="place_of_worship"][religion="muslim"]'],
+  EDUCATION: ['[amenity~"^(school|college|university)$"]'],
+  MEDICAL: ['[amenity~"^(hospital|clinic)$"]'],
+  HOTELS: ['[tourism~"^(hotel|hostel|guest_house|motel|apartment)$"]'],
+  FACTORIES: ['[man_made="works"]'],
+  WAREHOUSES_LOGISTICS: ['[building="warehouse"]', '[office="logistics"]'],
+  OFFICES_BUSINESS_CENTERS: ['[office]'],
+  WEDDING_EVENTS: ['[amenity="events_venue"]'],
+  GYMS_SPORTS_CLUBS: ['[leisure~"^(fitness_centre|sports_centre)$"]'],
+  RESIDENTIAL_COMPLEXES: ['[building~"^(apartments|residential)$"]'],
+  WHOLESALE_SUPPLIERS: ['[shop~"^(wholesale|trade)$"]'],
+  SUPERMARKETS_GROCERIES: ['[shop~"^(convenience|supermarket|general|grocery)$"]'],
+};
+
 type OverpassElement = {
   type?: string;
   id?: number;
@@ -44,8 +62,12 @@ export class OverpassProvider implements ProspectDiscoveryProvider {
 
   async search(params: DiscoverySearchParams): Promise<{ places: DiscoveredPlace[]; warnings: string[] }> {
     const { category } = categoryForChannel(params.channel);
+    const tagFilters = params.discoveryProfile === "WATER_CASH_VAN"
+      ? [...new Set((params.waterTargetTypes ?? []).flatMap((target) => WATER_TARGET_TAG_FILTERS[target]))]
+      : CATEGORY_TAG_FILTERS[category];
+    if (tagFilters.length === 0) return { places: [], warnings: ["اختر نوع عميل واحدًا على الأقل لتوزيع مياه كاش فان."] };
     const around = `around:${Math.round(params.radiusMeters)},${params.lat},${params.lon}`;
-    const unionClauses = CATEGORY_TAG_FILTERS[category].map((filter) => `nwr(${around})${filter};`).join("");
+    const unionClauses = tagFilters.map((filter) => `nwr(${around})${filter};`).join("");
     const query = `[out:json][timeout:15];(${unionClauses});out center ${OVERPASS_MAX_RESULTS};`;
 
     // Overpass is a shared free service — degrade to warning + empty on any
