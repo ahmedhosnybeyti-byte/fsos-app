@@ -20,11 +20,30 @@ const TEAM_FOLLOW_UP_ROLES = new Set(["COMPANY_ADMIN", "MANAGER", "SUPERVISOR"])
 export class OpportunityRadarService {
   constructor(private readonly prisma: PrismaService) {}
 
+  async policy(user: AuthenticatedUser & { companyId: string }) {
+    const policy = await this.prisma.opportunityRadarPolicy.findUnique({
+      where: { companyId: user.companyId },
+      select: { mode: true },
+    });
+    return { mode: policy?.mode ?? "STANDARD" };
+  }
+
   async list(user: AuthenticatedUser & { companyId: string }, query: OpportunityRadarListQuery) {
-    const visibleUserIds = await this.visibleUserIds(user);
+    const [visibleUserIds, radarPolicy] = await Promise.all([
+      this.visibleUserIds(user),
+      this.prisma.opportunityRadarPolicy.findUnique({ where: { companyId: user.companyId }, select: { mode: true } }),
+    ]);
+    const eventFirst = radarPolicy?.mode === "EVENT_FIRST_WATER";
     const now = new Date();
     const purchaseActNowUntil = new Date(now.getTime() + 7 * 86_400_000);
     const eventOrOpeningActNowUntil = new Date(now.getTime() + 30 * 86_400_000);
+    const eventRangeUntil = query.timeRange === "NEXT_30_DAYS"
+      ? new Date(now.getTime() + 30 * 86_400_000)
+      : query.timeRange === "NEXT_6_MONTHS"
+        ? new Date(now.getTime() + 183 * 86_400_000)
+        : query.timeRange === "NEXT_12_MONTHS"
+          ? new Date(now.getTime() + 366 * 86_400_000)
+          : null;
     const regionAliases = query.region ? geoAliases("region", query.region) : [];
     const cityAliases = query.city ? geoAliases("city", query.city) : [];
     const where: Prisma.CompanyOpportunityWhereInput = {
@@ -38,9 +57,15 @@ export class OpportunityRadarService {
       ],
       ...(query.status ? { status: query.status } : {}),
       marketOpportunity: {
+        reviewStatus: "VERIFIED",
         ...(regionAliases.length ? { region: { in: regionAliases, mode: "insensitive" } } : {}),
         ...(cityAliases.length ? { city: { in: cityAliases, mode: "insensitive" } } : {}),
+        ...(eventFirst && query.eventCategory ? { eventCategory: query.eventCategory } : {}),
         ...(query.type && query.view === "ALL" ? { opportunityType: query.type } : {}),
+        ...(eventFirst && query.view === "ALL" && query.type === "EVENT" ? {
+          status: "OPEN",
+          opportunityDate: { gte: now, ...(eventRangeUntil ? { lte: eventRangeUntil } : {}) },
+        } : {}),
         ...(query.view === "ACT_NOW" ? {
           status: "OPEN",
           OR: [
@@ -62,7 +87,12 @@ export class OpportunityRadarService {
         where,
         skip,
         take: query.pageSize,
-        orderBy: [{ marketOpportunity: { deadlineAt: { sort: "asc", nulls: "last" } } }, { updatedAt: "desc" }],
+        orderBy: eventFirst && query.view === "ALL" && query.type === "EVENT" ? [
+          { marketOpportunity: { priorityRank: "desc" } },
+          { marketOpportunity: { contractingDeadlineAt: { sort: "asc", nulls: "last" } } },
+          { marketOpportunity: { opportunityDate: { sort: "asc", nulls: "last" } } },
+          { updatedAt: "desc" },
+        ] : [{ marketOpportunity: { deadlineAt: { sort: "asc", nulls: "last" } } }, { updatedAt: "desc" }],
         select: {
           id: true,
           status: true,
@@ -86,6 +116,10 @@ export class OpportunityRadarService {
               id: true, vertical: true, opportunityType: true, title: true, organization: true,
               description: true, whyRelevant: true, country: true, region: true, city: true,
               location: true, publishedAt: true, opportunityDate: true, deadlineAt: true,
+              eventCategory: true, venueName: true, venueAddress: true, locationKind: true,
+              mapUrl: true, mapLinkKind: true, eventEndAt: true, dateLabel: true,
+              contractingDeadlineAt: true, priorityRank: true, reviewStatus: true,
+              reviewNote: true, waterDemandStatus: true, contactRole: true, nextAction: true,
               status: true, confidence: true, phone: true, whatsapp: true, email: true,
               contactUrl: true, sourceUrl: true, secondarySourceUrl: true, sourceName: true,
               lastVerifiedAt: true,
@@ -112,11 +146,13 @@ export class OpportunityRadarService {
     const visibleUserIds = await this.visibleUserIds(user);
     const regionAliases = query.region ? geoAliases("region", query.region) : [];
     const visibleWhere = {
+      reviewStatus: "VERIFIED" as const,
+      ...(query.type ? { opportunityType: query.type } : {}),
       companyOpportunities: {
         some: { companyId: user.companyId, ...this.visibilityWhere(user, visibleUserIds) },
       },
     } satisfies Prisma.MarketOpportunityWhereInput;
-    const [regionRows, cityRows] = await this.prisma.$transaction([
+    const [regionRows, cityRows, categoryRows] = await this.prisma.$transaction([
       this.prisma.marketOpportunity.groupBy({
         by: ["region"],
         where: visibleWhere,
@@ -130,10 +166,16 @@ export class OpportunityRadarService {
         },
         orderBy: { city: "asc" },
       }),
+      this.prisma.marketOpportunity.groupBy({
+        by: ["eventCategory"],
+        where: { ...visibleWhere, opportunityType: "EVENT", eventCategory: { not: null } },
+        orderBy: { eventCategory: "asc" },
+      }),
     ]);
     return {
       regions: groupGeoOptions("region", regionRows.map((row) => row.region)),
       cities: groupGeoOptions("city", cityRows.map((row) => row.city)),
+      eventCategories: categoryRows.map((row) => row.eventCategory).filter((value): value is string => Boolean(value)),
     };
   }
 

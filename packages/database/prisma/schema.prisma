@@ -262,6 +262,7 @@ model Company {
   prospects     Prospect[]
   prospectVisitIntents ProspectVisitIntent[]
   companyOpportunities CompanyOpportunity[]
+  opportunityRadarPolicy OpportunityRadarPolicy?
   lostOpportunityExclusions LostOpportunityExclusion[]
   routeAssignments UserRouteAssignment[]
   activityEvents UserActivityEvent[]
@@ -1183,6 +1184,25 @@ enum OpportunityConfidence {
   LOW
 }
 
+enum OpportunityReviewStatus {
+  VERIFIED
+  NEEDS_VERIFICATION
+  HOLD_POSTPONED
+  HOLD_RECHECK
+}
+
+enum OpportunityLocationKind {
+  PRECISE
+  SEARCH_ONLY
+  MULTI_VENUE
+  UNKNOWN
+}
+
+enum OpportunityRadarMode {
+  STANDARD
+  EVENT_FIRST_WATER
+}
+
 enum CompanyOpportunityStatus {
   NEW
   REVIEWED
@@ -1199,21 +1219,37 @@ enum CompanyOpportunityStatus {
 // tenant without copying market facts into tenant rows.
 model MarketOpportunity {
   id                 String                  @id @default(cuid())
+  externalKey        String?                 @unique @map("external_key")
   vertical           String
   opportunityType    MarketOpportunityType   @map("opportunity_type")
   title              String
   organization       String
+  eventCategory      String?                 @map("event_category")
   description        String                  @db.Text
   whyRelevant        String                  @map("why_relevant") @db.Text
   country            String
   region             String?
   city               String?
   location           String?
+  venueName          String?                 @map("venue_name")
+  venueAddress       String?                 @map("venue_address")
+  locationKind       OpportunityLocationKind? @map("location_kind")
+  mapUrl             String?                 @map("map_url")
+  mapLinkKind        String?                 @map("map_link_kind")
   publishedAt        DateTime?               @map("published_at")
   opportunityDate    DateTime?               @map("opportunity_date")
+  eventEndAt         DateTime?               @map("event_end_at")
+  dateLabel          String?                 @map("date_label")
   deadlineAt         DateTime?               @map("deadline_at")
+  contractingDeadlineAt DateTime?            @map("contracting_deadline_at")
   status             MarketOpportunityStatus @default(OPEN)
   confidence         OpportunityConfidence
+  priorityRank       Int                     @default(0) @map("priority_rank")
+  reviewStatus       OpportunityReviewStatus @default(VERIFIED) @map("review_status")
+  reviewNote         String?                 @map("review_note") @db.Text
+  waterDemandStatus  String?                 @map("water_demand_status")
+  contactRole        String?                 @map("contact_role")
+  nextAction         String?                 @map("next_action") @db.Text
   phone              String?
   whatsapp           String?
   email              String?
@@ -1221,16 +1257,50 @@ model MarketOpportunity {
   sourceUrl          String                  @map("source_url")
   secondarySourceUrl String?                 @map("secondary_source_url")
   sourceName         String                  @map("source_name")
+  sourceMetadata     Json?                   @map("source_metadata")
   lastVerifiedAt     DateTime                @map("last_verified_at")
   createdAt          DateTime                @default(now()) @map("created_at")
   updatedAt          DateTime                @updatedAt @map("updated_at")
 
   companyOpportunities CompanyOpportunity[]
+  revisions           MarketOpportunityRevision[]
 
-  @@unique([sourceUrl, title])
+  @@unique([sourceUrl, title, opportunityDate])
   @@index([vertical, opportunityType, status, deadlineAt], map: "market_opportunities_filter_idx")
   @@index([status, opportunityDate], map: "market_opportunities_status_date_idx")
+  @@index([vertical, reviewStatus, opportunityType, status, priorityRank, opportunityDate], map: "market_opportunities_event_first_idx")
   @@map("market_opportunities")
+}
+
+model MarketOpportunityRevision {
+  id                    String   @id @default(cuid())
+  marketOpportunityId   String   @map("market_opportunity_id")
+  changeType            String   @map("change_type")
+  sourceUrl             String   @map("source_url")
+  verificationUrl       String?  @map("verification_url")
+  verifiedAt            DateTime @map("verified_at")
+  snapshot              Json
+  changedFields         Json?    @map("changed_fields")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  marketOpportunity MarketOpportunity @relation(fields: [marketOpportunityId], references: [id], onDelete: Cascade)
+
+  @@index([marketOpportunityId, createdAt], map: "market_opportunity_revisions_history_idx")
+  @@map("market_opportunity_revisions")
+}
+
+// Company-level presentation policy. The default preserves the established
+// purchase-first behavior; water distributors opt into Event-First explicitly.
+model OpportunityRadarPolicy {
+  id        String               @id @default(cuid())
+  companyId String               @unique @map("company_id")
+  mode      OpportunityRadarMode @default(STANDARD)
+  createdAt DateTime             @default(now()) @map("created_at")
+  updatedAt DateTime             @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("opportunity_radar_policies")
 }
 
 model CompanyOpportunity {

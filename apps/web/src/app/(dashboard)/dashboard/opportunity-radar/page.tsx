@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, CalendarClock, CheckCircle2, ExternalLink, EyeOff, MapPin, MapPinned, Radar, RotateCcw, Save, ShoppingCart, Star, UserRound, UsersRound } from "lucide-react";
-import type { CompanyOpportunityStatus, MarketOpportunityType, OpportunityTeamFollowUpStatus } from "@field-sales-os/schemas";
+import type { CompanyOpportunityStatus, MarketOpportunityType, OpportunityTeamFollowUpStatus, OpportunityTimeRange } from "@field-sales-os/schemas";
 import { toast } from "sonner";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { opportunityRadarApi, visitCopilotApi, type OpportunityAssignee, type OpportunityRadarItem, type OpportunityTeamFollowUpResponse } from "@/lib/api";
@@ -34,13 +34,17 @@ const STATUS_VARIANTS: Record<CompanyOpportunityStatus, "default" | "secondary" 
   NEW: "default", REVIEWED: "secondary", CONTACTED: "warning", QUALIFIED: "success", WON: "success", LOST: "destructive", EXPIRED: "outline",
 };
 const todayIsoDate = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Riyadh" });
+const TIME_RANGE_LABELS: Record<OpportunityTimeRange, string> = { ALL_FUTURE: "كل الفعاليات القادمة", NEXT_30_DAYS: "خلال 30 يومًا", NEXT_6_MONTHS: "خلال 6 أشهر", NEXT_12_MONTHS: "خلال 12 شهرًا" };
 
 export default function OpportunityRadarPage() {
   const { user, isLoading: authLoading } = useRequireAuth(["SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN"]);
   const [tab, setTab] = useState<RadarTab>("PURCHASE");
+  const [policyApplied, setPolicyApplied] = useState(false);
   const [page, setPage] = useState(1);
   const [region, setRegion] = useState<string>();
   const [city, setCity] = useState<string>();
+  const [eventCategory, setEventCategory] = useState<string>();
+  const [timeRange, setTimeRange] = useState<OpportunityTimeRange>("NEXT_12_MONTHS");
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const [teamAssigneeId, setTeamAssigneeId] = useState<string>();
@@ -49,22 +53,32 @@ export default function OpportunityRadarPage() {
   const [teamTo, setTeamTo] = useState("");
   const [teamPage, setTeamPage] = useState(1);
   const canFollowTeam = user?.role.code === "COMPANY_ADMIN" || user?.role.code === "MANAGER" || user?.role.code === "SUPERVISOR";
+  const radarPolicy = useQuery({ queryKey: ["opportunity-radar", "policy"], queryFn: opportunityRadarApi.policy, enabled: !!user });
+  useEffect(() => {
+    if (policyApplied || (!radarPolicy.data && !radarPolicy.isError)) return;
+    if (radarPolicy.data?.mode === "EVENT_FIRST_WATER") setTab("EVENT");
+    setPolicyApplied(true);
+  }, [policyApplied, radarPolicy.data, radarPolicy.isError]);
+  const eventFirst = radarPolicy.data?.mode === "EVENT_FIRST_WATER";
+  const orderedTabs = eventFirst ? [TABS[1]!, TABS[0]!, ...TABS.slice(2)] : TABS;
   const query = {
     ...(tab === "ACT_NOW" ? { view: "ACT_NOW" as const } : { view: "ALL" as const, type: tab === "TEAM_FOLLOW_UP" ? "PURCHASE" as const : tab }),
     region,
     city,
+    timeRange: eventFirst && tab === "EVENT" ? timeRange : "NEXT_12_MONTHS" as const,
+    ...(eventFirst && tab === "EVENT" ? { eventCategory } : {}),
     favoriteOnly,
     visibility: showHidden ? "HIDDEN" as const : "VISIBLE" as const,
     page,
     pageSize: 20,
   };
-  const opportunities = useQuery({ queryKey: ["opportunity-radar", query], queryFn: () => opportunityRadarApi.list(query), enabled: !!user && tab !== "TEAM_FOLLOW_UP" });
-  const locations = useQuery({ queryKey: ["opportunity-radar", "locations", region], queryFn: () => opportunityRadarApi.locations({ region }), enabled: !!user && tab !== "TEAM_FOLLOW_UP" });
+  const opportunities = useQuery({ queryKey: ["opportunity-radar", query], queryFn: () => opportunityRadarApi.list(query), enabled: !!user && policyApplied && tab !== "TEAM_FOLLOW_UP" });
+  const locations = useQuery({ queryKey: ["opportunity-radar", "locations", region, tab], queryFn: () => opportunityRadarApi.locations({ region, type: tab === "EVENT" || tab === "PURCHASE" || tab === "PROACTIVE" ? tab : undefined }), enabled: !!user && policyApplied && tab !== "TEAM_FOLLOW_UP" });
   const assignees = useQuery({ queryKey: ["opportunity-radar", "assignees"], queryFn: opportunityRadarApi.assignees, enabled: !!user });
   const teamQuery = { assignedToUserId: teamAssigneeId, status: teamStatus, from: teamFrom || undefined, to: teamTo || undefined, page: teamPage, pageSize: 20 };
   const teamFollowUp = useQuery({ queryKey: ["opportunity-radar", "team-follow-up", teamQuery], queryFn: () => opportunityRadarApi.teamFollowUp(teamQuery), enabled: !!user && canFollowTeam && tab === "TEAM_FOLLOW_UP" });
 
-  if (authLoading || !user) return <div className="flex min-h-[50vh] items-center justify-center"><Spinner className="h-6 w-6" /></div>;
+  if (authLoading || !user || !policyApplied) return <div className="flex min-h-[50vh] items-center justify-center"><Spinner className="h-6 w-6" /></div>;
 
   return <div className="space-y-6" dir="rtl">
     <section className="glass-hero relative overflow-hidden p-5 sm:p-7">
@@ -76,7 +90,7 @@ export default function OpportunityRadarPage() {
 
     <Tabs value={tab} onValueChange={(value) => { setTab(value as RadarTab); setPage(1); }}>
       <TabsList className="grid h-auto w-full grid-cols-2 gap-1 p-1 sm:inline-grid sm:w-auto sm:grid-cols-5">
-        {TABS.filter((item) => item.value !== "TEAM_FOLLOW_UP" || canFollowTeam).map((item) => <TabsTrigger key={item.value} value={item.value} className="min-h-10">{item.label}</TabsTrigger>)}
+        {orderedTabs.filter((item) => item.value !== "TEAM_FOLLOW_UP" || canFollowTeam).map((item) => <TabsTrigger key={item.value} value={item.value} className="min-h-10">{item.label}</TabsTrigger>)}
       </TabsList>
     </Tabs>
 
@@ -109,6 +123,12 @@ export default function OpportunityRadarPage() {
           <SelectContent><SelectItem value="ALL">جميع المدن</SelectItem>{locations.data?.cities.map((item) => <SelectItem key={item.key} value={item.key}>{item.label}</SelectItem>)}</SelectContent>
         </Select>
       </label>
+      {eventFirst && tab === "EVENT" && <label className="min-w-48 flex-1 space-y-1.5 text-xs font-medium">نوع الفعالية
+        <Select value={eventCategory ?? "ALL"} onValueChange={(value) => { setEventCategory(value === "ALL" ? undefined : value); setPage(1); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ALL">جميع الأنواع</SelectItem>{locations.data?.eventCategories.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
+      </label>}
+      {eventFirst && tab === "EVENT" && <label className="min-w-48 flex-1 space-y-1.5 text-xs font-medium">الفترة
+        <Select value={timeRange} onValueChange={(value) => { setTimeRange(value as OpportunityTimeRange); setPage(1); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.entries(TIME_RANGE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select>
+      </label>}
       <Button type="button" variant={favoriteOnly ? "default" : "outline"} onClick={() => { setFavoriteOnly((value) => !value); setPage(1); }}><Star className={favoriteOnly ? "h-4 w-4 fill-current" : "h-4 w-4"} />المفضلة فقط</Button>
       <Button type="button" variant={showHidden ? "secondary" : "outline"} onClick={() => { setShowHidden((value) => !value); setPage(1); }}><EyeOff className="h-4 w-4" />{showHidden ? "العودة للفرص" : "عرض المخفية"}</Button>
     </div>
@@ -181,7 +201,7 @@ function OpportunityCard({ item, assignees, canUnassign, currentUserId }: { item
   const contact = primaryContact(item);
   const mapLocation = opportunityMapLocation(item);
   const sourceHref = safeExternalUrl(market.sourceUrl);
-  const importantDate = market.deadlineAt ?? market.opportunityDate ?? market.publishedAt;
+  const importantDate = market.contractingDeadlineAt ?? market.deadlineAt ?? market.opportunityDate ?? market.publishedAt;
   const eventTiming = market.opportunityType === "EVENT" ? eventProximity(market.opportunityDate) : null;
   const update = useMutation({
     mutationFn: (input: Parameters<typeof opportunityRadarApi.update>[1]) => opportunityRadarApi.update(item.id, input),
@@ -211,10 +231,11 @@ function OpportunityCard({ item, assignees, canUnassign, currentUserId }: { item
   return <Card className="card-lift overflow-hidden">
     <CardHeader className="space-y-3">
       <div className="flex flex-wrap items-start justify-between gap-3"><div><CardTitle className="leading-7">{market.title}</CardTitle><p className="mt-1 flex items-center gap-1.5 text-sm text-muted-foreground"><Building2 className="h-4 w-4" />{market.organization}</p></div><div className="flex flex-wrap gap-2"><Badge variant="outline">{market.vertical}</Badge>{eventTiming && <Badge variant={eventTiming.urgent ? "destructive" : "warning"}>{eventTiming.label}</Badge>}<Badge variant={market.status === "OPEN" ? "success" : "secondary"}>السوق: {MARKET_STATUS_LABELS[market.status]}</Badge><Badge variant={STATUS_VARIANTS[item.status]}>الشركة: {COMPANY_OPPORTUNITY_STATUS_LABELS[item.status]}</Badge><Badge variant={market.confidence === "HIGH" ? "success" : market.confidence === "MEDIUM" ? "warning" : "secondary"}>ثقة {CONFIDENCE_LABELS[market.confidence]}</Badge></div></div>
-      <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{mapLocation.label || "الموقع غير محدد"}{!mapLocation.precise && market.city ? " — الموقع الدقيق غير متحقق" : ""}</span>{importantDate && <span className="flex items-center gap-1"><CalendarClock className="h-3.5 w-3.5" />{market.deadlineAt ? "الموعد النهائي" : market.opportunityDate ? "تاريخ الفرصة" : "تاريخ النشر"}: {formatDate(importantDate, "ar-SA")}</span>}</div>
+      <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground"><span className="flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{mapLocation.label || "الموقع غير محدد"}{!mapLocation.precise && market.city ? " — نتيجة بحث وليست دبوس موقع متحققًا" : ""}</span>{importantDate && <span className="flex items-center gap-1"><CalendarClock className="h-3.5 w-3.5" />{market.contractingDeadlineAt ? "آخر موعد للتعاقد" : market.deadlineAt ? "الموعد النهائي" : market.opportunityDate ? "تاريخ الفرصة" : "تاريخ النشر"}: {market.opportunityType === "EVENT" && market.eventEndAt && market.opportunityDate ? `${formatDate(market.opportunityDate, "ar-SA")} – ${formatDate(market.eventEndAt, "ar-SA")}` : formatDate(importantDate, "ar-SA")}</span>}{market.eventCategory && <span>{market.eventCategory}</span>}</div>
     </CardHeader>
     <CardContent className="space-y-4">
       <div className="rounded-xl border border-primary/15 bg-primary/[.04] p-3"><p className="text-xs font-semibold text-primary">لماذا هي فرصة؟</p><p className="mt-1 text-sm leading-6">{market.whyRelevant}</p></div>
+      {market.opportunityType === "EVENT" && <div className="rounded-xl border border-cyan-500/20 bg-cyan-500/[.05] p-3 text-xs leading-5"><p className="font-semibold">إشارة Event-First</p><p className="mt-1 text-muted-foreground">{market.waterDemandStatus ?? "احتياج مياه محتمل؛ لا يوجد طلب شراء مثبت."}</p>{market.contactRole && <p className="mt-1">جهة البدء المقترحة: {market.contactRole}</p>}{market.nextAction && <p className="mt-1">التحرك التالي: {market.nextAction}</p>}</div>}
       <p className="text-sm leading-6 text-muted-foreground">{market.description}</p>
       {item.assignedTo?.id === currentUserId && <div className="flex flex-wrap items-end gap-2 rounded-xl border border-ai/20 bg-ai/[.04] p-3">
         <Button size="sm" disabled={schedule.isPending || item.scheduledVisitFor?.slice(0, 10) === todayIsoDate()} onClick={() => schedule.mutate(todayIsoDate())}>أضف اليوم</Button>
@@ -224,7 +245,7 @@ function OpportunityCard({ item, assignees, canUnassign, currentUserId }: { item
       </div>}
       <div className="grid gap-3 sm:grid-cols-2"><label className="space-y-1.5 text-xs font-medium">حالة الشركة<Select value={item.status} onValueChange={(status) => update.mutate({ status: status as CompanyOpportunityStatus })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.entries(COMPANY_OPPORTUNITY_STATUS_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></label><label className="space-y-1.5 text-xs font-medium">المسؤول<Select value={item.assignedTo?.id ?? "UNASSIGNED"} onValueChange={(value) => update.mutate({ assignedToUserId: value === "UNASSIGNED" ? null : value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{canUnassign && <SelectItem value="UNASSIGNED">غير معين</SelectItem>}{assignees.map((person) => <SelectItem key={person.id} value={person.id}>{person.fullName}</SelectItem>)}</SelectContent></Select></label></div>
       <div className="grid gap-3 sm:grid-cols-2"><label className="space-y-1.5 text-xs font-medium">ملاحظات<textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={4000} className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" /></label><label className="space-y-1.5 text-xs font-medium">النتيجة<textarea value={outcome} onChange={(event) => setOutcome(event.target.value)} maxLength={2000} className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" /></label></div>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4"><div className="flex flex-wrap gap-3 text-xs">{contact && <a href={contact.href} target={contact.href.startsWith("http") ? "_blank" : undefined} rel="noreferrer" className="text-primary underline-offset-4 hover:underline">{contact.label}: {contact.value}</a>}{mapLocation.href && <a href={mapLocation.href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"><MapPinned className="h-3.5 w-3.5" />فتح الموقع</a>}{sourceHref && <a href={sourceHref} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline">المصدر: {market.sourceName}<ExternalLink className="h-3.5 w-3.5" /></a>}<span className="text-muted-foreground">آخر تحقق: {formatDate(market.lastVerifiedAt, "ar-SA")}</span>{item.contactedAt && <span className="text-muted-foreground">تم التواصل: {formatDate(item.contactedAt, "ar-SA")}</span>}{item.assignedTo && <span className="flex items-center gap-1 text-muted-foreground"><UserRound className="h-3.5 w-3.5" />{item.assignedTo.fullName}</span>}</div><div className="flex flex-wrap gap-2"><Button size="sm" variant="ghost" disabled={preference.isPending} onClick={() => preference.mutate({ isFavorite: !item.isFavorite })}><Star className={item.isFavorite ? "h-4 w-4 fill-current text-amber-500" : "h-4 w-4"} />{item.isFavorite ? "إزالة من المفضلة" : "إضافة للمفضلة"}</Button><Button size="sm" variant="ghost" disabled={preference.isPending} onClick={() => preference.mutate({ isHidden: !item.isHidden })}>{item.isHidden ? <RotateCcw className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}{item.isHidden ? "استرجاع" : "إخفاء"}</Button><Button size="sm" variant="outline" disabled={update.isPending} onClick={() => update.mutate({ notes, outcome })}>{update.isPending ? <Spinner className="h-4 w-4" /> : <Save className="h-4 w-4" />}حفظ</Button></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 pt-4"><div className="flex flex-wrap gap-3 text-xs">{contact && <a href={contact.href} target={contact.href.startsWith("http") ? "_blank" : undefined} rel="noreferrer" className="text-primary underline-offset-4 hover:underline">{contact.label}: {contact.value}</a>}{mapLocation.href && <a href={mapLocation.href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"><MapPinned className="h-3.5 w-3.5" />{mapLocation.precise ? "فتح الموقع" : "بحث الخريطة"}</a>}{sourceHref && <a href={sourceHref} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline">المصدر: {market.sourceName}<ExternalLink className="h-3.5 w-3.5" /></a>}<span className="text-muted-foreground">آخر تحقق: {formatDate(market.lastVerifiedAt, "ar-SA")}</span>{item.contactedAt && <span className="text-muted-foreground">تم التواصل: {formatDate(item.contactedAt, "ar-SA")}</span>}{item.assignedTo && <span className="flex items-center gap-1 text-muted-foreground"><UserRound className="h-3.5 w-3.5" />{item.assignedTo.fullName}</span>}</div><div className="flex flex-wrap gap-2"><Button size="sm" variant="ghost" disabled={preference.isPending} onClick={() => preference.mutate({ isFavorite: !item.isFavorite })}><Star className={item.isFavorite ? "h-4 w-4 fill-current text-amber-500" : "h-4 w-4"} />{item.isFavorite ? "إزالة من المفضلة" : "إضافة للمفضلة"}</Button><Button size="sm" variant="ghost" disabled={preference.isPending} onClick={() => preference.mutate({ isHidden: !item.isHidden })}>{item.isHidden ? <RotateCcw className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}{item.isHidden ? "استرجاع" : "إخفاء"}</Button><Button size="sm" variant="outline" disabled={update.isPending} onClick={() => update.mutate({ notes, outcome })}>{update.isPending ? <Spinner className="h-4 w-4" /> : <Save className="h-4 w-4" />}حفظ</Button></div></div>
     </CardContent>
   </Card>;
 }

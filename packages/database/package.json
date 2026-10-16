@@ -10,6 +10,7 @@
     "migrate:deploy": "prisma migrate deploy",
     "seed": "tsx prisma/seed.ts",
     "seed:demo": "tsx prisma/seed.demo.ts",
+    "import:water-events": "tsx prisma/import-water-event-first.ts",
     "studio": "prisma studio",
     "typecheck": "tsc --noEmit"
   },

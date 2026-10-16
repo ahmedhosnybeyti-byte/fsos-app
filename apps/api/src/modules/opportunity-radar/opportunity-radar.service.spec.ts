@@ -9,7 +9,7 @@ const companyAdmin = { ...manager, userId: "admin-1", roleCode: "COMPANY_ADMIN" 
 const supervisor = { ...manager, userId: "supervisor-1", roleCode: "SUPERVISOR" } as const;
 const rep = { ...manager, userId: "rep-1", roleCode: "SALES_REP" } as const;
 
-function fixture(options: { existing?: unknown } = {}) {
+function fixture(options: { existing?: unknown; policyMode?: "STANDARD" | "EVENT_FIRST_WATER" } = {}) {
   const calls: Record<string, unknown>[] = [];
   const prisma: Record<string, unknown> & { $transaction?: (operations: Promise<unknown>[] | ((client: unknown) => Promise<unknown>)) => Promise<unknown> } = {
     user: { findMany: async (args: unknown) => { calls.push({ userFindMany: args }); return [{ id: "admin-1", employee: null }, { id: "manager-1", employee: { id: "employee-manager", managerId: null } }, { id: "supervisor-1", employee: { id: "employee-supervisor", managerId: "employee-manager" } }, { id: "rep-1", employee: { id: "employee-rep", managerId: "employee-supervisor" } }]; } },
@@ -21,6 +21,9 @@ function fixture(options: { existing?: unknown } = {}) {
     },
     marketOpportunity: {
       groupBy: async (args: unknown) => { calls.push({ groupBy: args }); return []; },
+    },
+    opportunityRadarPolicy: {
+      findUnique: async (args: unknown) => { calls.push({ policyFindUnique: args }); return options.policyMode ? { mode: options.policyMode } : null; },
     },
     opportunityRadarPreference: {
       upsert: async (args: unknown) => { calls.push({ preferenceUpsert: args }); return { isFavorite: true, isHidden: false }; },
@@ -35,7 +38,7 @@ function fixture(options: { existing?: unknown } = {}) {
 }
 
 function listQuery(overrides: Partial<OpportunityRadarListQuery> = {}): OpportunityRadarListQuery {
-  return { view: "ALL", favoriteOnly: false, visibility: "VISIBLE", page: 1, pageSize: 20, ...overrides };
+  return { view: "ALL", timeRange: "NEXT_12_MONTHS", favoriteOnly: false, visibility: "VISIBLE", page: 1, pageSize: 20, ...overrides };
 }
 
 test("Opportunity Radar gives Company Admin and Manager company-wide visibility", async () => {
@@ -47,6 +50,13 @@ test("Opportunity Radar gives Company Admin and Manager company-wide visibility"
     assert.equal(count.where.OR, undefined);
     assert.equal(count.where.assignedToUserId, undefined);
   }
+});
+
+test("Opportunity Radar keeps companies standard unless they have an explicit Event-First policy", async () => {
+  const { service, calls } = fixture();
+  assert.deepEqual(await service.policy(manager as never), { mode: "STANDARD" });
+  const find = calls.find((call) => "policyFindUnique" in call)?.policyFindUnique as { where: Record<string, unknown> };
+  assert.equal(find.where.companyId, "company-1");
 });
 
 test("Opportunity Radar lets Supervisors see unassigned opportunities and their hierarchy only", async () => {
@@ -96,6 +106,30 @@ test("Opportunity Radar applies bilingual geography and personal preference filt
     { userPreferences: { some: { userId: "manager-1", isHidden: true } } },
     { userPreferences: { some: { userId: "manager-1", isFavorite: true } } },
   ]);
+});
+
+test("Opportunity Radar defaults event views to verified future events within twelve months", async () => {
+  const { service, calls } = fixture({ policyMode: "EVENT_FIRST_WATER" });
+  await service.list(manager as never, listQuery({ type: "EVENT", timeRange: "NEXT_12_MONTHS" }));
+  const count = calls.find((call) => "count" in call)?.count as { where: Record<string, unknown> };
+  const market = count.where.marketOpportunity as Record<string, unknown>;
+  assert.equal(market.reviewStatus, "VERIFIED");
+  assert.equal(market.opportunityType, "EVENT");
+  assert.equal(market.status, "OPEN");
+  const date = market.opportunityDate as { gte: Date; lte: Date };
+  assert.ok(date.gte instanceof Date);
+  assert.ok(date.lte instanceof Date);
+  assert.ok(date.lte.getTime() - date.gte.getTime() >= 365 * 86_400_000);
+});
+
+test("Opportunity Radar preserves standard event behavior for companies without the water policy", async () => {
+  const { service, calls } = fixture();
+  await service.list(manager as never, listQuery({ type: "EVENT", timeRange: "NEXT_12_MONTHS", eventCategory: "رياضة" }));
+  const count = calls.find((call) => "count" in call)?.count as { where: Record<string, unknown> };
+  const market = count.where.marketOpportunity as Record<string, unknown>;
+  assert.equal(market.eventCategory, undefined);
+  assert.equal(market.opportunityDate, undefined);
+  assert.equal(market.status, undefined);
 });
 
 test("Opportunity Radar persists favorite and hidden state only for the current user after tenant-scope validation", async () => {

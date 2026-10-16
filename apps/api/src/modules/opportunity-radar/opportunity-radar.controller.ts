@@ -27,6 +27,13 @@ const OPERATIONAL_ROLES = ["SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN"
 export class OpportunityRadarController {
   constructor(private readonly service: OpportunityRadarService) {}
 
+  @Get("policy")
+  @Auth(...OPERATIONAL_ROLES)
+  policy(@CurrentUser() user: AuthenticatedUser) {
+    this.requireCompany(user);
+    return this.service.policy(user);
+  }
+
   @Get()
   @Auth(...OPERATIONAL_ROLES)
   list(

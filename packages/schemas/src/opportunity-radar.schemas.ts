@@ -8,6 +8,10 @@ export const COMPANY_OPPORTUNITY_STATUSES = ["NEW", "REVIEWED", "CONTACTED", "QU
 export const companyOpportunityStatusSchema = z.enum(COMPANY_OPPORTUNITY_STATUSES);
 export type CompanyOpportunityStatus = z.infer<typeof companyOpportunityStatusSchema>;
 
+export const OPPORTUNITY_TIME_RANGES = ["ALL_FUTURE", "NEXT_30_DAYS", "NEXT_6_MONTHS", "NEXT_12_MONTHS"] as const;
+export const opportunityTimeRangeSchema = z.enum(OPPORTUNITY_TIME_RANGES);
+export type OpportunityTimeRange = z.infer<typeof opportunityTimeRangeSchema>;
+
 const queryBoolean = z.union([z.boolean(), z.enum(["true", "false"])])
   .transform((value) => value === true || value === "true");
 
@@ -17,6 +21,8 @@ export const opportunityRadarListQuerySchema = z.object({
   status: companyOpportunityStatusSchema.optional(),
   region: z.string().trim().min(1).max(512).optional(),
   city: z.string().trim().min(1).max(512).optional(),
+  eventCategory: z.string().trim().min(1).max(200).optional(),
+  timeRange: opportunityTimeRangeSchema.default("NEXT_12_MONTHS"),
   favoriteOnly: queryBoolean.default(false),
   visibility: z.enum(["VISIBLE", "HIDDEN"]).default("VISIBLE"),
   page: z.coerce.number().int().min(1).default(1),
@@ -26,6 +32,7 @@ export type OpportunityRadarListQuery = z.infer<typeof opportunityRadarListQuery
 
 export const opportunityRadarLocationsQuerySchema = z.object({
   region: z.string().trim().min(1).max(512).optional(),
+  type: marketOpportunityTypeSchema.optional(),
 });
 export type OpportunityRadarLocationsQuery = z.infer<typeof opportunityRadarLocationsQuerySchema>;
 

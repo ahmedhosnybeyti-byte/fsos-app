@@ -2,7 +2,7 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 import { eventProximity, opportunityLocation, opportunityMapLocation, primaryContact, safeExternalUrl } from "./opportunity-radar";
 
-const marketOpportunity = { city: "الرياض", region: "منطقة الرياض", country: "السعودية", location: null, whatsapp: null, email: null, phone: "+966 11 000 0000", contactUrl: null };
+const marketOpportunity = { city: "الرياض", region: "منطقة الرياض", country: "السعودية", location: null, venueName: null, locationKind: null, mapUrl: null, mapLinkKind: null, whatsapp: null, email: null, phone: "+966 11 000 0000", contactUrl: null };
 const rawItem = { marketOpportunity };
 const item = rawItem as never;
 
@@ -30,4 +30,10 @@ test("Opportunity Radar opens Maps only for a source-backed precise location", (
   const cityOnly = opportunityMapLocation(item as never);
   assert.equal(cityOnly.precise, false);
   assert.equal(cityOnly.href, null);
+});
+
+test("Opportunity Radar keeps source-provided Maps search links explicitly non-precise", () => {
+  const search = opportunityMapLocation({ ...rawItem, marketOpportunity: { ...marketOpportunity, location: "جدة سوبردوم", venueName: "جدة سوبردوم", locationKind: "SEARCH_ONLY", mapLinkKind: "Google Maps SEARCH", mapUrl: "https://www.google.com/maps/search/?api=1&query=Jeddah+Superdome" } } as never);
+  assert.equal(search.precise, false);
+  assert.match(search.href ?? "", /google\.com\/maps\/search/);
 });

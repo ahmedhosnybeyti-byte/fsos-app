@@ -43,14 +43,17 @@ export function opportunityLocation(item: OpportunityRadarItem): string {
 
 export function opportunityMapLocation(item: OpportunityRadarItem): { label: string; href: string | null; precise: boolean } {
   const market = item.marketOpportunity;
+  const providedMapUrl = safeExternalUrl(market.mapUrl);
+  const searchOnly = market.locationKind === "SEARCH_ONLY" || market.mapLinkKind?.toLowerCase().includes("search");
   const preciseLocation = market.location?.trim();
   const context = [market.city, market.region, market.country].filter((value): value is string => !!value?.trim());
+  if (providedMapUrl) return { label: market.venueName?.trim() || preciseLocation || context.join("، "), href: providedMapUrl, precise: !searchOnly && market.locationKind === "PRECISE" };
   if (!preciseLocation) return { label: context.join("، "), href: null, precise: false };
   const query = [preciseLocation, ...context].join(", ");
   return {
     label: preciseLocation,
     href: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`,
-    precise: true,
+    precise: market.locationKind == null || market.locationKind === "PRECISE",
   };
 }
 

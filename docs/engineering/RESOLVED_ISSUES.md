@@ -281,3 +281,11 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Fix:** One specialized canonical current-state query now applies company/hierarchy plus date, Pending/due-date, and optional customer scope before returning a single aggregate row. It preserves all-status date totals, exact Pending overdue semantics, JavaScript Number/isFinite coercion, distinct blank-customer handling, oldest due date, wording, and source fallbacks.
 - **Commit:** This local commit.
 - **Regression-prevention rule:** Production-wired Collections aggregates must not call `getEntityRecords("Collections")` or materialize facts in Node. Keep status/date/customer predicates in coordinated parameterized PostgreSQL and return only compact aggregates.
+
+## Opportunity Radar — water opportunities were not Event-First
+
+- **Symptom/evidence:** The shared Opportunity Radar opened on purchase notices, lacked event category and time-horizon filters, treated Maps search results as precise destinations, and had no auditable way to merge revised schedules without duplicating company workflow rows.
+- **Root cause:** The market opportunity contract stored only a single event date and generic location, while ingestion identity depended on source URL and title. Event verification state, venue-link precision, prioritization, and source revisions were not represented.
+- **Fix:** Extend the existing `MarketOpportunity` / `CompanyOpportunity` engine with verified Event-First metadata, stable external keys, revision history, database-side event filtering and ordering, and a dry-run-by-default idempotent water-event importer. Only independently verified additions are eligible for activation; duplicate records reuse their current market/company rows, while postponement closes the shared market fact without deleting assignments, preferences, notes, outcomes, or visit intents.
+- **Commit:** This local commit.
+- **Regression-prevention rule:** Water event ingestion must remain dry-run by default, tenant-explicit, and idempotent. Never activate an unverified workbook candidate, infer a precise map pin from a search URL, or replace a `CompanyOpportunity` when the underlying event is a duplicate or schedule revision.
