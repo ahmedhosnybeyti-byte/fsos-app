@@ -118,7 +118,7 @@ test("Opportunity Radar defaults event views to verified future events within tw
   assert.deepEqual(market.reviewStatus, { in: ["VERIFIED", "NEEDS_VERIFICATION"] });
   assert.equal(market.opportunityType, "EVENT");
   assert.equal(market.status, "OPEN");
-  const ranges = market.OR as Array<{ opportunityDate: { gte?: Date; gt?: Date; lte: Date } }>;
+  const ranges = ((market.AND as Array<{ OR: Array<{ opportunityDate: { gte?: Date; gt?: Date; lte: Date } }> }>)[0]!.OR);
   assert.equal(ranges.length, 3);
   assert.ok(ranges[0]!.opportunityDate.gte instanceof Date);
   assert.ok(ranges[2]!.opportunityDate.lte instanceof Date);
@@ -175,12 +175,28 @@ test("Event-First multi-select filters stay in PostgreSQL and use disjoint date 
   const market = count.where.marketOpportunity as Record<string, unknown>;
   assert.deepEqual(market.eventCategory, { in: ["رياضة", "معرض"] });
   assert.deepEqual(market.reviewStatus, { in: ["NEEDS_VERIFICATION"] });
-  const ranges = market.OR as Array<{ opportunityDate: { gte?: Date; gt?: Date; lte?: Date } }>;
+  const ranges = ((market.AND as Array<{ OR: Array<{ opportunityDate: { gte?: Date; gt?: Date; lte?: Date } }> }>)[0]!.OR);
   assert.equal(ranges.length, 2);
   assert.ok(ranges[0]!.opportunityDate.gte instanceof Date);
   assert.ok(ranges[0]!.opportunityDate.lte instanceof Date);
   assert.ok(ranges[1]!.opportunityDate.gt instanceof Date);
   assert.equal(ranges[1]!.opportunityDate.lte, undefined);
+});
+
+test("Event-First period buckets use the relevant date across purchase and act-now tabs", async () => {
+  const purchase = fixture({ policyMode: "EVENT_FIRST_WATER" });
+  await purchase.service.list(manager as never, listQuery({ type: "PURCHASE", timeRange: undefined, timeRanges: ["NEXT_30_DAYS"] }));
+  const purchaseCount = purchase.calls.find((call) => "count" in call)?.count as { where: Record<string, unknown> };
+  const purchaseMarket = purchaseCount.where.marketOpportunity as { AND: Array<{ OR: Array<Record<string, unknown>> }> };
+  assert.ok("deadlineAt" in purchaseMarket.AND[0]!.OR[0]!);
+
+  const actNow = fixture({ policyMode: "EVENT_FIRST_WATER" });
+  await actNow.service.list(manager as never, listQuery({ view: "ACT_NOW", timeRange: undefined, timeRanges: ["DAYS_31_TO_183"] }));
+  const actNowCount = actNow.calls.find((call) => "count" in call)?.count as { where: Record<string, unknown> };
+  const actNowMarket = actNowCount.where.marketOpportunity as { AND: Array<{ OR: Array<Record<string, unknown>> }>; OR: Array<Record<string, unknown>> };
+  assert.ok("deadlineAt" in actNowMarket.AND[0]!.OR[0]!);
+  assert.ok("opportunityDate" in actNowMarket.AND[0]!.OR[1]!);
+  assert.equal(actNowMarket.OR.length, 3);
 });
 
 test("Event-First location options include candidates without changing standard companies", async () => {

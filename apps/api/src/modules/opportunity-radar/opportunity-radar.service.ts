@@ -47,12 +47,18 @@ export class OpportunityRadarService {
           : query.timeRange === "NEXT_12_MONTHS" ? ["NEXT_30_DAYS", "DAYS_31_TO_183", "DAYS_184_TO_366"] as const
             : undefined;
     const timeRanges = query.timeRanges ?? legacyTimeRanges;
-    const timeRangeOr: Prisma.MarketOpportunityWhereInput[] = timeRanges?.map((range) => ({
-      opportunityDate: range === "NEXT_30_DAYS" ? { gte: now, lte: day30 }
+    const dateRange = (range: NonNullable<typeof timeRanges>[number]) => range === "NEXT_30_DAYS" ? { gte: now, lte: day30 }
         : range === "DAYS_31_TO_183" ? { gt: day30, lte: day183 }
           : range === "DAYS_184_TO_366" ? { gt: day183, lte: day366 }
-            : { gt: day366 },
-    })) ?? [];
+            : { gt: day366 };
+    const timeRangeOr: Prisma.MarketOpportunityWhereInput[] = (timeRanges ?? []).flatMap((range) => query.view === "ACT_NOW"
+      ? [
+          { opportunityType: "PURCHASE", deadlineAt: dateRange(range) },
+          { opportunityType: { in: ["EVENT", "PROACTIVE"] }, opportunityDate: dateRange(range) },
+        ]
+      : query.type === "PURCHASE"
+        ? [{ deadlineAt: dateRange(range) }]
+        : [{ opportunityDate: dateRange(range) }]);
     const aliases = (kind: "region" | "city", values: string[] | undefined) => [...new Set((values ?? []).flatMap((value) => geoAliases(kind, value)))];
     const regionAliases = aliases("region", query.regions);
     const cityAliases = aliases("city", query.cities);
@@ -74,9 +80,10 @@ export class OpportunityRadarService {
         ...(cityAliases.length ? { city: { in: cityAliases, mode: "insensitive" } } : {}),
         ...(eventFirst && query.eventCategories?.length ? { eventCategory: { in: query.eventCategories } } : {}),
         ...(query.type && query.view === "ALL" ? { opportunityType: query.type } : {}),
+        ...(eventFirst && timeRangeOr.length ? { AND: [{ OR: timeRangeOr }] } : {}),
         ...(eventFirst && query.view === "ALL" && query.type === "EVENT" ? {
           status: "OPEN",
-          ...(timeRangeOr.length ? { OR: timeRangeOr } : { opportunityDate: { gte: now } }),
+          ...(timeRangeOr.length ? {} : { opportunityDate: { gte: now } }),
         } : {}),
         ...(query.view === "ACT_NOW" ? {
           status: "OPEN",
@@ -184,7 +191,7 @@ export class OpportunityRadarService {
       }),
       this.prisma.marketOpportunity.groupBy({
         by: ["eventCategory"],
-        where: { ...visibleWhere, opportunityType: "EVENT", eventCategory: { not: null } },
+        where: { ...visibleWhere, eventCategory: { not: null } },
         orderBy: { eventCategory: "asc" },
       }),
     ]);

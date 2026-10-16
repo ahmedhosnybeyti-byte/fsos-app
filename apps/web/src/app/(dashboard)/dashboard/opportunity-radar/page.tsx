@@ -54,7 +54,7 @@ export default function OpportunityRadarPage() {
   const [regions, setRegions] = useState<string[]>([]);
   const [cities, setCities] = useState<string[]>([]);
   const [eventCategories, setEventCategories] = useState<string[]>([]);
-  const [timeRanges, setTimeRanges] = useState<OpportunityTimeBucket[]>(["NEXT_30_DAYS", "DAYS_31_TO_183", "DAYS_184_TO_366"]);
+  const [timeRanges, setTimeRanges] = useState<OpportunityTimeBucket[]>([]);
   const [dataQualities, setDataQualities] = useState<OpportunityDataQuality[]>([]);
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
@@ -76,7 +76,7 @@ export default function OpportunityRadarPage() {
     ...(tab === "ACT_NOW" ? { view: "ACT_NOW" as const } : { view: "ALL" as const, type: tab === "TEAM_FOLLOW_UP" ? "PURCHASE" as const : tab }),
     regions: regions.length ? regions : undefined,
     cities: cities.length ? cities : undefined,
-    ...(eventFirst && tab === "EVENT" ? {
+    ...(eventFirst ? {
       eventCategories: eventCategories.length ? eventCategories : undefined,
       timeRanges: timeRanges.length ? timeRanges : undefined,
       dataQualities: dataQualities.length ? dataQualities : undefined,
@@ -132,9 +132,9 @@ export default function OpportunityRadarPage() {
     <div className="glass-card flex flex-col gap-3 p-4 lg:flex-row lg:items-end">
       <MultiSelectFilter label="المنطقة" allLabel="جميع المناطق" values={regions} options={(locations.data?.regions ?? []).map((item) => ({ value: item.key, label: item.label }))} onChange={(values) => { setRegions(values); setPage(1); }} />
       <MultiSelectFilter label="المدينة" allLabel="جميع المدن" values={cities} options={(locations.data?.cities ?? []).map((item) => ({ value: item.key, label: item.label }))} onChange={(values) => { setCities(values); setPage(1); }} />
-      {eventFirst && tab === "EVENT" && <MultiSelectFilter label="نوع الفعالية" allLabel="جميع الأنواع" values={eventCategories} options={(locations.data?.eventCategories ?? []).map((value) => ({ value, label: value }))} onChange={(values) => { setEventCategories(values); setPage(1); }} />}
-      {eventFirst && tab === "EVENT" && <MultiSelectFilter label="الفترة" allLabel="كل الفترات" values={timeRanges} options={TIME_BUCKET_OPTIONS} onChange={(values) => { setTimeRanges(values as OpportunityTimeBucket[]); setPage(1); }} />}
-      {eventFirst && tab === "EVENT" && <MultiSelectFilter label="حالة البيانات" allLabel="كل حالات البيانات" values={dataQualities} options={DATA_QUALITY_OPTIONS} onChange={(values) => { setDataQualities(values as OpportunityDataQuality[]); setPage(1); }} />}
+      {eventFirst && <MultiSelectFilter label="تصنيف الفرصة" allLabel="جميع التصنيفات" values={eventCategories} options={(locations.data?.eventCategories ?? []).map((value) => ({ value, label: value }))} onChange={(values) => { setEventCategories(values); setPage(1); }} />}
+      {eventFirst && <MultiSelectFilter label="الفترة" allLabel="كل الفترات" values={timeRanges} options={TIME_BUCKET_OPTIONS} onChange={(values) => { setTimeRanges(values as OpportunityTimeBucket[]); setPage(1); }} />}
+      {eventFirst && <MultiSelectFilter label="حالة البيانات" allLabel="كل حالات البيانات" values={dataQualities} options={DATA_QUALITY_OPTIONS} onChange={(values) => { setDataQualities(values as OpportunityDataQuality[]); setPage(1); }} />}
       <Button type="button" variant={favoriteOnly ? "default" : "outline"} onClick={() => { setFavoriteOnly((value) => !value); setPage(1); }}><Star className={favoriteOnly ? "h-4 w-4 fill-current" : "h-4 w-4"} />المفضلة فقط</Button>
       <Button type="button" variant={showHidden ? "secondary" : "outline"} onClick={() => { setShowHidden((value) => !value); setPage(1); }}><EyeOff className="h-4 w-4" />{showHidden ? "العودة للفرص" : "عرض المخفية"}</Button>
     </div>
