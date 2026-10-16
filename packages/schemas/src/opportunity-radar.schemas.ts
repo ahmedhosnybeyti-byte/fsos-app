@@ -29,6 +29,22 @@ export const opportunityRadarLocationsQuerySchema = z.object({
 });
 export type OpportunityRadarLocationsQuery = z.infer<typeof opportunityRadarLocationsQuerySchema>;
 
+export const OPPORTUNITY_TEAM_FOLLOW_UP_STATUSES = ["ASSIGNED", "SCHEDULED", "VISITED", "AGREED", "ORDERED", "UNSUCCESSFUL"] as const;
+export const opportunityTeamFollowUpStatusSchema = z.enum(OPPORTUNITY_TEAM_FOLLOW_UP_STATUSES);
+export type OpportunityTeamFollowUpStatus = z.infer<typeof opportunityTeamFollowUpStatusSchema>;
+export const opportunityTeamFollowUpQuerySchema = z.object({
+  assignedToUserId: z.string().trim().min(1).max(200).optional(),
+  status: opportunityTeamFollowUpStatusSchema.optional(),
+  from: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  to: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(50).default(20),
+}).refine((value) => !value.from || !value.to || value.from <= value.to, {
+  message: "from must not be after to",
+  path: ["from"],
+});
+export type OpportunityTeamFollowUpQuery = z.infer<typeof opportunityTeamFollowUpQuerySchema>;
+
 export const updateOpportunityRadarPreferenceSchema = z.object({
   isFavorite: z.boolean().optional(),
   isHidden: z.boolean().optional(),

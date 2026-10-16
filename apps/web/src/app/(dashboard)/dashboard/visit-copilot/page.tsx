@@ -15,6 +15,7 @@ import {
   LocateFixed,
   Map,
   Search,
+  Save,
   Send,
   Sparkles,
   Square,
@@ -41,6 +42,7 @@ import { Switch } from "@/components/ui/switch";
 import { Daily360SummaryModal } from "@/components/visit-copilot/daily-360-summary-modal";
 import type {
   VisitCopilotChatMessage,
+  VisitCopilotCustomer,
   VisitCopilotDiscoveryCustomer,
   VisitCopilotDiscoveryLimit,
   VisitCopilotDiscoveryProfile,
@@ -236,6 +238,7 @@ function VisitCopilotScreen() {
   // from the plan list, or prospect from the Discovery map).
   const [selectedCode, setSelectedCode] = useState<string | null>(null);
   const [selectedProspectId, setSelectedProspectId] = useState<string | null>(null);
+  const [expandedRadarOpportunityId, setExpandedRadarOpportunityId] = useState<string | null>(null);
   // A successful /plan call overrides the brief's customer order + travel
   // estimates until the period changes (the plan was computed for it).
   const [plan, setPlan] = useState<VisitCopilotPlanResult | null>(null);
@@ -299,7 +302,7 @@ function VisitCopilotScreen() {
   const mapCustomers = useMemo<VisitCopilotDiscoveryCustomer[]>(
     () =>
       (dailyRouteCustomers ?? [])
-        .filter((customer) => !customer.isProspect && customer.lat !== null && customer.lon !== null)
+        .filter((customer) => !customer.isProspect && !customer.isRadarOpportunity && customer.lat !== null && customer.lon !== null)
         .map((customer) => ({
           customerCode: customer.customerCode,
           name: customer.customerName,
@@ -447,6 +450,7 @@ function VisitCopilotScreen() {
     setPlan(null);
     setSelectedCode(null);
     setSelectedProspectId(null);
+    setExpandedRadarOpportunityId(null);
     setChatMessages([]);
   }
 
@@ -978,7 +982,9 @@ function VisitCopilotScreen() {
                     {customers.map((c) => (
                       <li key={c.customerCode}>
                         <button
-                          onClick={() => c.isProspect && c.prospectId ? openProspectVisit(c.prospectId) : openVisit(c.customerCode)}
+                          onClick={() => c.isRadarOpportunity && c.companyOpportunityId
+                            ? setExpandedRadarOpportunityId((current) => current === c.companyOpportunityId ? null : c.companyOpportunityId!)
+                            : c.isProspect && c.prospectId ? openProspectVisit(c.prospectId) : openVisit(c.customerCode)}
                           className="flex w-full items-center gap-3 px-1 py-3 text-start transition-colors hover:bg-secondary/50 max-md:gap-2 max-md:py-2"
                         >
                           <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary text-sm font-semibold max-md:h-7 max-md:w-7 max-md:text-xs">
@@ -987,22 +993,24 @@ function VisitCopilotScreen() {
                           <span className="min-w-0 flex-1">
                             <span className="block truncate text-sm font-medium max-md:text-[13px]">{c.customerName}</span>
                             {c.isProspect && <Badge variant="outline" className="mt-1 border-amber-500/50 text-[10px] text-amber-700 dark:text-amber-300">فرصة جديدة</Badge>}
-                            <span className="block text-xs text-muted-foreground">
+                            {c.isRadarOpportunity && <Badge variant="outline" className="mt-1 border-cyan-500/50 text-[10px] text-cyan-700 dark:text-cyan-300">فرصة من الرادار</Badge>}
+                            {!c.isRadarOpportunity && <span className="block text-xs text-muted-foreground">
                               {t("copilot.avgOrder", { value: c.avgOrderValue.toLocaleString() })}
-                            </span>
+                            </span>}
                           </span>
                           <Badge variant="secondary" className="shrink-0">
                             {c.channel}
                           </Badge>
-                          <span
+                          {!c.isRadarOpportunity && <span
                             className={cn(
                               "flex h-8 w-10 shrink-0 items-center justify-center rounded-md text-xs font-bold max-md:h-7 max-md:w-8 max-md:text-[11px]",
                               priorityBadgeClass(c.priorityScore),
                             )}
                           >
                             {Math.round(c.priorityScore)}
-                          </span>
+                          </span>}
                         </button>
+                        {c.isRadarOpportunity && c.companyOpportunityId === expandedRadarOpportunityId && c.radarOpportunity && <RadarRouteOpportunity customer={c} directionsLabel={t("copilot.directions")} />}
                       </li>
                     ))}
                   </ul>
@@ -1273,6 +1281,48 @@ function VisitCopilotScreen() {
       </>}
     </div>
   );
+}
+
+function RadarRouteOpportunity({ customer, directionsLabel }: { customer: VisitCopilotCustomer; directionsLabel: string }) {
+  const queryClient = useQueryClient();
+  const details = customer.radarOpportunity!;
+  const [result, setResult] = useState<"VISITED" | "AGREED" | "ORDERED" | "UNSUCCESSFUL">("VISITED");
+  const [outcome, setOutcome] = useState(details.outcome ?? "");
+  const [notes, setNotes] = useState(details.notes ?? "");
+  const [orderValue, setOrderValue] = useState(details.orderValue?.toString() ?? "");
+  const [orderQuantity, setOrderQuantity] = useState(details.orderQuantity?.toString() ?? "");
+  const save = useMutation({
+    mutationFn: () => visitCopilotApi.recordRadarOpportunityResult(customer.visitIntentId!, {
+      result,
+      outcome: outcome || null,
+      notes: notes || null,
+      orderValue: result === "ORDERED" && orderValue !== "" ? Number(orderValue) : null,
+      orderQuantity: result === "ORDERED" && orderQuantity !== "" ? Number(orderQuantity) : null,
+    }),
+    onSuccess: async () => {
+      toast.success("تم حفظ نتيجة زيارة فرصة الرادار");
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["visit-copilot", "daily-brief"] }),
+        queryClient.invalidateQueries({ queryKey: ["opportunity-radar"] }),
+      ]);
+    },
+    onError: (error) => toast.error(error instanceof ApiError ? error.message : "تعذر حفظ نتيجة الزيارة"),
+  });
+  const orderMissing = result === "ORDERED" && orderValue === "" && orderQuantity === "";
+  return <div className="mb-3 space-y-3 rounded-lg border border-cyan-500/20 bg-cyan-500/[.04] p-3 text-sm">
+    <p className="font-medium">{details.organization}</p>
+    <p className="text-muted-foreground">{details.description}</p>
+    <p><span className="font-medium">سبب الفرصة: </span>{details.whyRelevant}</p>
+    <p className="text-xs text-muted-foreground">{details.locationLabel || "الموقع غير محدد"}{!details.preciseLocation && details.locationLabel ? " — الموقع الدقيق غير متحقق" : ""}</p>
+    {details.directionsUrl && <Button size="sm" variant="outline" onClick={() => window.open(details.directionsUrl!, "_blank", "noopener,noreferrer")}>{directionsLabel}</Button>}
+    <div className="grid gap-2 border-t border-border/60 pt-3 sm:grid-cols-2">
+      <label className="space-y-1 text-xs font-medium">نتيجة الزيارة<Select value={result} onValueChange={(value) => setResult(value as typeof result)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="VISITED">تمت الزيارة</SelectItem><SelectItem value="AGREED">تم الاتفاق</SelectItem><SelectItem value="ORDERED">تمت طلبية</SelectItem><SelectItem value="UNSUCCESSFUL">لم تنجح</SelectItem></SelectContent></Select></label>
+      <label className="space-y-1 text-xs font-medium">النتيجة<textarea value={outcome} onChange={(event) => setOutcome(event.target.value)} maxLength={2000} className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
+      <label className="space-y-1 text-xs font-medium">الملاحظات<textarea value={notes} onChange={(event) => setNotes(event.target.value)} maxLength={4000} className="min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" /></label>
+      {result === "ORDERED" && <div className="grid grid-cols-2 gap-2"><label className="space-y-1 text-xs font-medium">قيمة الطلبية<Input type="number" min="0" step="0.01" value={orderValue} onChange={(event) => setOrderValue(event.target.value)} /></label><label className="space-y-1 text-xs font-medium">الكمية<Input type="number" min="0" step="0.001" value={orderQuantity} onChange={(event) => setOrderQuantity(event.target.value)} /></label></div>}
+    </div>
+    <Button size="sm" disabled={!customer.visitIntentId || save.isPending || orderMissing} onClick={() => save.mutate()}>{save.isPending ? <Spinner className="h-4 w-4" /> : <Save className="h-4 w-4" />}حفظ نتيجة الزيارة</Button>
+  </div>;
 }
 
 function BriefStat({ label, value, muted }: { label: string; value: string; muted?: boolean }) {

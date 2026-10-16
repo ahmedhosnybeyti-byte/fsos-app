@@ -1,6 +1,6 @@
 import { Body, Controller, ForbiddenException, Get, Param, Patch, Post, Query } from "@nestjs/common";
 import { ApiTags } from "@nestjs/swagger";
-import { createProspectVisitIntentSchema, prospectVisitIntentListQuerySchema, updateProspectVisitIntentStatusSchema, type CreateProspectVisitIntentInput, type ProspectVisitIntentListQuery, type UpdateProspectVisitIntentStatusInput } from "@field-sales-os/schemas";
+import { createProspectVisitIntentSchema, prospectVisitIntentListQuerySchema, radarOpportunityVisitResultSchema, updateProspectVisitIntentStatusSchema, type CreateProspectVisitIntentInput, type ProspectVisitIntentListQuery, type RadarOpportunityVisitResultInput, type UpdateProspectVisitIntentStatusInput } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
 import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
@@ -17,4 +17,6 @@ export class ProspectVisitIntentController {
   list(@CurrentUser() user: AuthenticatedUser, @Query(new ZodValidationPipe(prospectVisitIntentListQuerySchema)) query: ProspectVisitIntentListQuery) { if (!user.companyId) throw new ForbiddenException(); return this.service.list(user, query); }
   @Patch(":id/status") @Auth()
   updateStatus(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Body(new ZodValidationPipe(updateProspectVisitIntentStatusSchema)) body: UpdateProspectVisitIntentStatusInput) { if (!user.companyId) throw new ForbiddenException(); return this.service.updateStatus(user, id, body); }
+  @Patch(":id/radar-result") @Auth()
+  recordRadarResult(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Body(new ZodValidationPipe(radarOpportunityVisitResultSchema)) body: RadarOpportunityVisitResultInput) { if (!user.companyId) throw new ForbiddenException(); return this.service.recordRadarResult(user, id, body); }
 }

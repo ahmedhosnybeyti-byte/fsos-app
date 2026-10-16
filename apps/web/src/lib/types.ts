@@ -1450,6 +1450,22 @@ export interface VisitCopilotCustomer {
   priorityScore: number;
   isProspect?: boolean;
   prospectId?: string;
+  isRadarOpportunity?: boolean;
+  companyOpportunityId?: string;
+  visitIntentId?: string;
+  radarOpportunity?: {
+    title: string;
+    organization: string;
+    description: string;
+    whyRelevant: string;
+    locationLabel: string;
+    preciseLocation: boolean;
+    directionsUrl: string | null;
+    notes: string | null;
+    outcome: string | null;
+    orderValue: number | null;
+    orderQuantity: number | null;
+  };
 }
 
 export interface VisitCopilotDailyBrief {

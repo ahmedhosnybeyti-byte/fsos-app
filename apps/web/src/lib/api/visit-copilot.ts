@@ -76,6 +76,17 @@ export const visitCopilotApi = {
   createProspectVisit: (body: { prospectId: string; scheduledFor: string }) =>
     apiFetch("/prospect-visits", { method: "POST", body }),
 
+  scheduleRadarOpportunity: (body: { companyOpportunityId: string; scheduledFor: string }) =>
+    apiFetch("/prospect-visits", { method: "POST", body }),
+
+  recordRadarOpportunityResult: (id: string, body: {
+    result: "VISITED" | "AGREED" | "ORDERED" | "UNSUCCESSFUL";
+    outcome?: string | null;
+    notes?: string | null;
+    orderValue?: number | null;
+    orderQuantity?: number | null;
+  }) => apiFetch(`/prospect-visits/${encodeURIComponent(id)}/radar-result`, { method: "PATCH", body }),
+
   routeOpportunities: (params: PeriodParams & RepScope) =>
     apiFetch<VisitCopilotRouteOpportunities>("/visit-copilot/route-opportunities", {
       query: { period: params.period, from: params.from, to: params.to, salesRepId: params.salesRepId },

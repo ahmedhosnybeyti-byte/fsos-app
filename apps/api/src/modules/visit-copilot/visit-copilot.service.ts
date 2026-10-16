@@ -42,6 +42,7 @@ import { ProductFitService } from "../prospects/product-fit.service";
 import { NEED_TAXONOMY_VERSION } from "../prospects/need-taxonomy";
 import { taxonomyForCanonicalChannel } from "../prospects/prospect-taxonomy";
 import { auditMemory } from "../../common/observability/memory-audit";
+import { scheduledRouteIntentWhere } from "./scheduled-route-intents";
 
 // AI Visit Copilot — Phase 1. Decision-support screen for the field rep:
 // today's visit plan + a per-customer pre-visit briefing that must be
@@ -142,6 +143,22 @@ export interface DailyBriefCustomer {
   priorityScore: number;
   isProspect?: boolean;
   prospectId?: string;
+  isRadarOpportunity?: boolean;
+  companyOpportunityId?: string;
+  visitIntentId?: string;
+  radarOpportunity?: {
+    title: string;
+    organization: string;
+    description: string;
+    whyRelevant: string;
+    locationLabel: string;
+    preciseLocation: boolean;
+    directionsUrl: string | null;
+    notes: string | null;
+    outcome: string | null;
+    orderValue: number | null;
+    orderQuantity: number | null;
+  };
 }
 
 export interface DailyBriefResult {
@@ -756,11 +773,50 @@ export class VisitCopilotService {
     // day plan so counts, route ordering, distance/time and the UI all use
     // the same persistence-backed list.
     const scheduledProspects = await this.prisma.prospectVisitIntent.findMany({
-      where: { companyId: user.companyId!, assignedToUserId: user.userId, scheduledFor: new Date(`${todayIso}T00:00:00.000Z`), status: "PLANNED" },
-      include: { prospect: true },
+      where: scheduledRouteIntentWhere(user.companyId!, user.userId, todayIso),
+      include: { prospect: true, companyOpportunity: { include: { marketOpportunity: true } } },
       orderBy: { createdAt: "asc" },
     });
     for (const intent of scheduledProspects) {
+      if (intent.companyOpportunity) {
+        const opportunity = intent.companyOpportunity.marketOpportunity;
+        const preciseLocation = opportunity.location?.trim() ?? "";
+        const locationContext = [opportunity.city, opportunity.region, opportunity.country]
+          .filter((value): value is string => Boolean(value?.trim()));
+        const locationLabel = preciseLocation || locationContext.join("، ");
+        const directionsQuery = preciseLocation ? [preciseLocation, ...locationContext].join(", ") : null;
+        entries.push({
+          customerCode: `radar:${intent.companyOpportunity.id}`,
+          customerName: opportunity.title,
+          lat: null,
+          lon: null,
+          visitSequence: null,
+          channel: opportunity.vertical,
+          avgOrderValue: 0,
+          lastVisitDate: null,
+          priorityScore: 0,
+          isRadarOpportunity: true,
+          companyOpportunityId: intent.companyOpportunity.id,
+          visitIntentId: intent.id,
+          radarOpportunity: {
+            title: opportunity.title,
+            organization: opportunity.organization,
+            description: opportunity.description,
+            whyRelevant: opportunity.whyRelevant,
+            locationLabel,
+            preciseLocation: Boolean(preciseLocation),
+            directionsUrl: directionsQuery
+              ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(directionsQuery)}`
+              : null,
+            notes: intent.companyOpportunity.notes,
+            outcome: intent.companyOpportunity.outcome,
+            orderValue: intent.companyOpportunity.orderValue === null ? null : Number(intent.companyOpportunity.orderValue),
+            orderQuantity: intent.companyOpportunity.orderQuantity === null ? null : Number(intent.companyOpportunity.orderQuantity),
+          },
+        });
+        continue;
+      }
+      if (!intent.prospect) continue;
       const lat = intent.prospect.lat;
       const lon = intent.prospect.lon;
       const hasCoords = lat !== null && lon !== null && isSaneCoordinate(lat, lon);
@@ -775,7 +831,7 @@ export class VisitCopilotService {
         lastVisitDate: null,
         priorityScore: 0,
         isProspect: true,
-        prospectId: intent.prospectId,
+        prospectId: intent.prospect.id,
       });
     }
 
@@ -816,8 +872,8 @@ export class VisitCopilotService {
       ...ctx,
       useActualBaselineVisits: true,
       selectedDate: todayIso,
-      customerCodes: entries.filter((entry) => !entry.isProspect).map((entry) => entry.customerCode),
-      customerNames: new Map(entries.filter((entry) => !entry.isProspect).map((entry) => [entry.customerCode, entry.customerName])),
+      customerCodes: entries.filter((entry) => !entry.isProspect && !entry.isRadarOpportunity).map((entry) => entry.customerCode),
+      customerNames: new Map(entries.filter((entry) => !entry.isProspect && !entry.isRadarOpportunity).map((entry) => [entry.customerCode, entry.customerName])),
     });
 
     const result: DailyBriefResult = {

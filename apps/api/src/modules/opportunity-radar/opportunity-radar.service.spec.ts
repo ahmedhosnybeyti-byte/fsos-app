@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { NotFoundException } from "@nestjs/common";
+import { ForbiddenException, NotFoundException } from "@nestjs/common";
 import type { OpportunityRadarListQuery } from "@field-sales-os/schemas";
 import { OpportunityRadarService } from "./opportunity-radar.service";
 
@@ -11,7 +11,7 @@ const rep = { ...manager, userId: "rep-1", roleCode: "SALES_REP" } as const;
 
 function fixture(options: { existing?: unknown } = {}) {
   const calls: Record<string, unknown>[] = [];
-  const prisma = {
+  const prisma: Record<string, unknown> & { $transaction?: (operations: Promise<unknown>[] | ((client: unknown) => Promise<unknown>)) => Promise<unknown> } = {
     user: { findMany: async (args: unknown) => { calls.push({ userFindMany: args }); return [{ id: "admin-1", employee: null }, { id: "manager-1", employee: { id: "employee-manager", managerId: null } }, { id: "supervisor-1", employee: { id: "employee-supervisor", managerId: "employee-manager" } }, { id: "rep-1", employee: { id: "employee-rep", managerId: "employee-supervisor" } }]; } },
     companyOpportunity: {
       count: async (args: unknown) => { calls.push({ count: args }); return 1; },
@@ -25,8 +25,12 @@ function fixture(options: { existing?: unknown } = {}) {
     opportunityRadarPreference: {
       upsert: async (args: unknown) => { calls.push({ preferenceUpsert: args }); return { isFavorite: true, isHidden: false }; },
     },
-    $transaction: async (operations: Promise<unknown>[]) => Promise.all(operations),
+    prospectVisitIntent: {
+      updateMany: async (args: unknown) => { calls.push({ intentUpdateMany: args }); return { count: 1 }; },
+    },
   };
+  prisma.$transaction = async (operations: Promise<unknown>[] | ((client: unknown) => Promise<unknown>)) =>
+    typeof operations === "function" ? operations(prisma) : Promise.all(operations);
   return { service: new OpportunityRadarService(prisma as never), calls };
 }
 
@@ -126,4 +130,38 @@ test("Opportunity Radar never updates a company opportunity outside the viewer t
   const find = calls.find((call) => "findFirst" in call)?.findFirst as { where: Record<string, unknown> };
   assert.equal(find.where.companyId, "company-1");
   assert.equal(calls.some((call) => "update" in call), false);
+});
+
+test("Opportunity Radar records the assigning manager and cancels the prior assignee's planned stop", async () => {
+  const { service, calls } = fixture({ existing: { id: "company-opportunity-1", assignedToUserId: "rep-1", contactedAt: null } });
+  await service.update(manager as never, "company-opportunity-1", { assignedToUserId: "supervisor-1" });
+
+  const cancel = calls.find((call) => "intentUpdateMany" in call)?.intentUpdateMany as { where: Record<string, unknown>; data: Record<string, unknown> };
+  assert.deepEqual(cancel.where, {
+    companyId: "company-1",
+    companyOpportunityId: "company-opportunity-1",
+    assignedToUserId: "rep-1",
+    status: "PLANNED",
+  });
+  assert.equal(cancel.data.status, "CANCELLED");
+  const update = calls.find((call) => "update" in call)?.update as { data: Record<string, unknown> };
+  assert.equal(update.data.assignedToUserId, "supervisor-1");
+  assert.equal(update.data.assignedByUserId, "manager-1");
+  assert.ok(update.data.assignedAt instanceof Date);
+});
+
+test("Team follow-up keeps hierarchy scope and requires structured order evidence", async () => {
+  const { service, calls } = fixture();
+  await service.teamFollowUp(supervisor as never, { status: "ORDERED", page: 1, pageSize: 20 });
+  const countCalls = calls.filter((call) => "count" in call).map((call) => call.count) as Array<{ where: Record<string, unknown> }>;
+  const filtered = countCalls[0]!.where.AND as Array<Record<string, unknown>>;
+  assert.equal(filtered[0]!.companyId, "company-1");
+  assert.deepEqual(filtered[0]!.assignedToUserId, { in: ["supervisor-1", "rep-1"] });
+  assert.equal(filtered[1]!.status, "WON");
+  assert.deepEqual(filtered[1]!.OR, [{ orderValue: { not: null } }, { orderQuantity: { not: null } }]);
+});
+
+test("Sales representatives cannot open management team follow-up", async () => {
+  const { service } = fixture();
+  await assert.rejects(() => service.teamFollowUp(rep as never, { page: 1, pageSize: 20 }), ForbiddenException);
 });

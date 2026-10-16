@@ -3,10 +3,12 @@ import { ApiTags } from "@nestjs/swagger";
 import {
   opportunityRadarListQuerySchema,
   opportunityRadarLocationsQuerySchema,
+  opportunityTeamFollowUpQuerySchema,
   updateCompanyOpportunitySchema,
   updateOpportunityRadarPreferenceSchema,
   type OpportunityRadarListQuery,
   type OpportunityRadarLocationsQuery,
+  type OpportunityTeamFollowUpQuery,
   type UpdateCompanyOpportunityInput,
   type UpdateOpportunityRadarPreferenceInput,
 } from "@field-sales-os/schemas";
@@ -50,6 +52,16 @@ export class OpportunityRadarController {
   ) {
     this.requireCompany(user);
     return this.service.listLocations(user, query);
+  }
+
+  @Get("team-follow-up")
+  @Auth("SUPERVISOR", "MANAGER", "COMPANY_ADMIN")
+  teamFollowUp(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query(new ZodValidationPipe(opportunityTeamFollowUpQuerySchema)) query: OpportunityTeamFollowUpQuery,
+  ) {
+    this.requireCompany(user);
+    return this.service.teamFollowUp(user, query);
   }
 
   @Patch(":id/preference")

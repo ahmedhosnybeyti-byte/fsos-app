@@ -498,6 +498,7 @@ model User {
   activityRiskState UserRiskState?
   activityDailySummaries UserActivityDailySummary[]
   assignedCompanyOpportunities CompanyOpportunity[] @relation("CompanyOpportunityAssignedTo")
+  companyOpportunityAssignments CompanyOpportunity[] @relation("CompanyOpportunityAssignedBy")
   opportunityRadarPreferences OpportunityRadarPreference[]
 
   @@index([companyId])
@@ -1238,16 +1239,22 @@ model CompanyOpportunity {
   marketOpportunityId String                   @map("market_opportunity_id")
   status              CompanyOpportunityStatus @default(NEW)
   assignedToUserId    String?                  @map("assigned_to_user_id")
+  assignedByUserId    String?                  @map("assigned_by_user_id")
+  assignedAt          DateTime?                @map("assigned_at")
   contactedAt         DateTime?                @map("contacted_at")
   notes               String?                  @db.Text
   outcome             String?                  @db.Text
+  orderValue          Decimal?                 @map("order_value") @db.Decimal(18, 2)
+  orderQuantity       Decimal?                 @map("order_quantity") @db.Decimal(18, 3)
   createdAt           DateTime                 @default(now()) @map("created_at")
   updatedAt           DateTime                 @updatedAt @map("updated_at")
 
   company           Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
   marketOpportunity MarketOpportunity @relation(fields: [marketOpportunityId], references: [id], onDelete: Cascade)
   assignedTo        User?             @relation("CompanyOpportunityAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  assignedBy        User?             @relation("CompanyOpportunityAssignedBy", fields: [assignedByUserId], references: [id], onDelete: SetNull)
   userPreferences   OpportunityRadarPreference[]
+  visitIntents      ProspectVisitIntent[]
 
   @@unique([companyId, marketOpportunityId])
   @@index([companyId, status, updatedAt], map: "company_opportunities_status_idx")
@@ -1335,20 +1342,24 @@ model Prospect {
 model ProspectVisitIntent {
   id               String                    @id @default(cuid())
   companyId        String                    @map("company_id")
-  prospectId       String                    @map("prospect_id")
+  prospectId       String?                   @map("prospect_id")
+  companyOpportunityId String?               @map("company_opportunity_id")
   assignedToUserId String                    @map("assigned_to_user_id")
   scheduledFor     DateTime                  @map("scheduled_for") @db.Date
   status           ProspectVisitIntentStatus @default(PLANNED)
+  completedAt      DateTime?                 @map("completed_at")
   createdByUserId  String                    @map("created_by_user_id")
   createdAt        DateTime                  @default(now()) @map("created_at")
   updatedAt        DateTime                  @updatedAt @map("updated_at")
 
   company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  prospect   Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  prospect   Prospect? @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  companyOpportunity CompanyOpportunity? @relation(fields: [companyOpportunityId], references: [id], onDelete: Cascade)
   assignedTo User     @relation("ProspectVisitIntentAssignedTo", fields: [assignedToUserId], references: [id], onDelete: Restrict)
   createdBy  User     @relation("ProspectVisitIntentCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
 
   @@unique([prospectId, assignedToUserId, scheduledFor])
+  @@unique([companyOpportunityId])
   @@index([companyId, assignedToUserId, scheduledFor])
   @@index([companyId, scheduledFor, status])
   @@map("prospect_visit_intents")

@@ -3,6 +3,8 @@ import type { Prisma } from "@field-sales-os/database";
 import type {
   OpportunityRadarListQuery,
   OpportunityRadarLocationsQuery,
+  OpportunityTeamFollowUpQuery,
+  OpportunityTeamFollowUpStatus,
   UpdateCompanyOpportunityInput,
   UpdateOpportunityRadarPreferenceInput,
 } from "@field-sales-os/schemas";
@@ -12,6 +14,7 @@ import { geoAliases, groupGeoOptions } from "./opportunity-geo";
 
 const COMPANY_WIDE_ROLES = new Set(["COMPANY_ADMIN", "MANAGER"]);
 const ACTIONABLE_STATUSES = ["NEW", "REVIEWED", "CONTACTED", "QUALIFIED"] as const;
+const TEAM_FOLLOW_UP_ROLES = new Set(["COMPANY_ADMIN", "MANAGER", "SUPERVISOR"]);
 
 @Injectable()
 export class OpportunityRadarService {
@@ -72,6 +75,12 @@ export class OpportunityRadarService {
             select: { isFavorite: true, isHidden: true },
           },
           assignedTo: { select: { id: true, fullName: true, email: true } },
+          assignedBy: { select: { id: true, fullName: true, email: true } },
+          visitIntents: {
+            where: { assignedToUserId: user.userId, status: "PLANNED" },
+            take: 1,
+            select: { scheduledFor: true },
+          },
           marketOpportunity: {
             select: {
               id: true, vertical: true, opportunityType: true, title: true, organization: true,
@@ -86,10 +95,11 @@ export class OpportunityRadarService {
       }),
     ]);
     return {
-      items: items.map(({ userPreferences, ...item }) => ({
+      items: items.map(({ userPreferences, visitIntents, ...item }) => ({
         ...item,
         isFavorite: userPreferences[0]?.isFavorite ?? false,
         isHidden: userPreferences[0]?.isHidden ?? false,
+        scheduledVisitFor: visitIntents[0]?.scheduledFor ?? null,
       })),
       page: query.page,
       pageSize: query.pageSize,
@@ -136,6 +146,68 @@ export class OpportunityRadarService {
     });
   }
 
+  async teamFollowUp(user: AuthenticatedUser & { companyId: string }, query: OpportunityTeamFollowUpQuery) {
+    if (!TEAM_FOLLOW_UP_ROLES.has(user.roleCode)) throw new ForbiddenException("Team follow-up requires a management role");
+    const visibleUserIds = await this.visibleUserIds(user);
+    if (query.assignedToUserId && !visibleUserIds.includes(query.assignedToUserId)) {
+      throw new ForbiddenException("Assignee is outside your organizational scope");
+    }
+    const visitDate = query.from || query.to ? {
+      scheduledFor: {
+        ...(query.from ? { gte: new Date(`${query.from}T00:00:00.000Z`) } : {}),
+        ...(query.to ? { lte: new Date(`${query.to}T00:00:00.000Z`) } : {}),
+      },
+    } : null;
+    const baseWhere: Prisma.CompanyOpportunityWhereInput = {
+      companyId: user.companyId,
+      assignedToUserId: { in: query.assignedToUserId ? [query.assignedToUserId] : visibleUserIds },
+      ...(visitDate ? { visitIntents: { some: visitDate } } : {}),
+    };
+    const where: Prisma.CompanyOpportunityWhereInput = query.status
+      ? { AND: [baseWhere, this.teamFollowUpStatusWhere(query.status)] }
+      : baseWhere;
+    const executedWhere: Prisma.CompanyOpportunityWhereInput = { ...baseWhere, visitIntents: { some: { ...(visitDate ?? {}), status: "COMPLETED" } } };
+    const orderedWhere: Prisma.CompanyOpportunityWhereInput = {
+      ...executedWhere,
+      status: "WON",
+      OR: [{ orderValue: { not: null } }, { orderQuantity: { not: null } }],
+    };
+    const skip = (query.page - 1) * query.pageSize;
+    const [total, items, assigned, executed, ordered] = await this.prisma.$transaction([
+      this.prisma.companyOpportunity.count({ where }),
+      this.prisma.companyOpportunity.findMany({
+        where,
+        skip,
+        take: query.pageSize,
+        orderBy: { updatedAt: "desc" },
+        select: {
+          id: true, status: true, notes: true, outcome: true, orderValue: true, orderQuantity: true, updatedAt: true,
+          assignedTo: { select: { id: true, fullName: true, email: true } },
+          marketOpportunity: { select: { title: true, organization: true } },
+          visitIntents: { take: 1, select: { id: true, scheduledFor: true, completedAt: true, status: true } },
+        },
+      }),
+      this.prisma.companyOpportunity.count({ where: baseWhere }),
+      this.prisma.companyOpportunity.count({ where: executedWhere }),
+      this.prisma.companyOpportunity.count({ where: orderedWhere }),
+    ]);
+    return {
+      items: items.map(({ visitIntents, ...item }) => {
+        const visit = visitIntents[0] ?? null;
+        return {
+          ...item,
+          visitDate: visit?.completedAt ?? visit?.scheduledFor ?? null,
+          followUpStatus: this.resolveTeamFollowUpStatus(item.status, visit?.status, item.orderValue, item.orderQuantity),
+        };
+      }),
+      summary: { assigned, executed, ordered },
+      page: query.page,
+      pageSize: query.pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / query.pageSize)),
+    };
+  }
+
   async update(user: AuthenticatedUser & { companyId: string }, id: string, input: UpdateCompanyOpportunityInput) {
     const visibleUserIds = await this.visibleUserIds(user);
     const existing = await this.prisma.companyOpportunity.findFirst({
@@ -153,17 +225,41 @@ export class OpportunityRadarService {
       }
     }
 
-    return this.prisma.companyOpportunity.update({
+    const assignmentChanged = input.assignedToUserId !== undefined && input.assignedToUserId !== existing.assignedToUserId;
+    const updateOpportunity = (client: Pick<PrismaService, "companyOpportunity">) => client.companyOpportunity.update({
       where: { id: existing.id },
       data: {
         ...(input.status !== undefined ? { status: input.status } : {}),
         ...(input.assignedToUserId !== undefined ? { assignedToUserId: input.assignedToUserId } : {}),
+        ...(assignmentChanged ? {
+          assignedByUserId: input.assignedToUserId ? user.userId : null,
+          assignedAt: input.assignedToUserId ? new Date() : null,
+        } : {}),
         ...(input.contactedAt !== undefined ? { contactedAt: input.contactedAt ? new Date(input.contactedAt) : null } : {}),
         ...(input.status === "CONTACTED" && input.contactedAt === undefined && !existing.contactedAt ? { contactedAt: new Date() } : {}),
         ...(input.notes !== undefined ? { notes: input.notes || null } : {}),
         ...(input.outcome !== undefined ? { outcome: input.outcome || null } : {}),
       },
-      select: { id: true, status: true, contactedAt: true, notes: true, outcome: true, updatedAt: true, assignedTo: { select: { id: true, fullName: true, email: true } } },
+      select: {
+        id: true, status: true, contactedAt: true, notes: true, outcome: true, updatedAt: true,
+        assignedTo: { select: { id: true, fullName: true, email: true } },
+        assignedBy: { select: { id: true, fullName: true, email: true } },
+      },
+    });
+    if (!assignmentChanged) return updateOpportunity(this.prisma);
+    return this.prisma.$transaction(async (transaction) => {
+      if (existing.assignedToUserId) {
+        await transaction.prospectVisitIntent.updateMany({
+          where: {
+            companyId: user.companyId,
+            companyOpportunityId: existing.id,
+            assignedToUserId: existing.assignedToUserId,
+            status: "PLANNED",
+          },
+          data: { status: "CANCELLED" },
+        });
+      }
+      return updateOpportunity(transaction as unknown as PrismaService);
     });
   }
 
@@ -199,6 +295,29 @@ export class OpportunityRadarService {
     if (COMPANY_WIDE_ROLES.has(user.roleCode)) return {};
     if (user.roleCode === "SALES_REP") return { assignedToUserId: user.userId };
     return { OR: [{ assignedToUserId: null }, { assignedToUserId: { in: visibleUserIds } }] };
+  }
+
+  private teamFollowUpStatusWhere(status: OpportunityTeamFollowUpStatus): Prisma.CompanyOpportunityWhereInput {
+    if (status === "ASSIGNED") return { visitIntents: { none: { status: { in: ["PLANNED", "COMPLETED"] } } } };
+    if (status === "SCHEDULED") return { visitIntents: { some: { status: "PLANNED" } } };
+    if (status === "VISITED") return { status: "CONTACTED", visitIntents: { some: { status: "COMPLETED" } } };
+    if (status === "AGREED") return { status: "QUALIFIED", visitIntents: { some: { status: "COMPLETED" } } };
+    if (status === "ORDERED") return { status: "WON", visitIntents: { some: { status: "COMPLETED" } }, OR: [{ orderValue: { not: null } }, { orderQuantity: { not: null } }] };
+    return { status: "LOST", visitIntents: { some: { status: "COMPLETED" } } };
+  }
+
+  private resolveTeamFollowUpStatus(
+    status: string,
+    visitStatus: string | undefined,
+    orderValue: unknown,
+    orderQuantity: unknown,
+  ): OpportunityTeamFollowUpStatus {
+    if (status === "LOST" && visitStatus === "COMPLETED") return "UNSUCCESSFUL";
+    if (status === "WON" && visitStatus === "COMPLETED" && (orderValue !== null || orderQuantity !== null)) return "ORDERED";
+    if (status === "QUALIFIED" && visitStatus === "COMPLETED") return "AGREED";
+    if (status === "CONTACTED" && visitStatus === "COMPLETED") return "VISITED";
+    if (visitStatus === "PLANNED") return "SCHEDULED";
+    return "ASSIGNED";
   }
 
   private async visibleUserIds(user: AuthenticatedUser & { companyId: string }): Promise<string[]> {
