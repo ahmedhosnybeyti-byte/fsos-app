@@ -113,7 +113,7 @@ test("Opportunity Radar defaults event views to verified future events within tw
   await service.list(manager as never, listQuery({ type: "EVENT", timeRange: "NEXT_12_MONTHS" }));
   const count = calls.find((call) => "count" in call)?.count as { where: Record<string, unknown> };
   const market = count.where.marketOpportunity as Record<string, unknown>;
-  assert.equal(market.reviewStatus, "VERIFIED");
+  assert.deepEqual(market.reviewStatus, { in: ["VERIFIED", "NEEDS_VERIFICATION"] });
   assert.equal(market.opportunityType, "EVENT");
   assert.equal(market.status, "OPEN");
   const date = market.opportunityDate as { gte: Date; lte: Date };

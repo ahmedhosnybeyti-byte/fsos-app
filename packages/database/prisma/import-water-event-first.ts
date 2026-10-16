@@ -10,6 +10,7 @@ import {
   candidateWhyRelevant,
   deterministicCompanyOpportunityId,
   deterministicOpportunityId,
+  isImportableWaterEvent,
   opportunityConfidence,
   opportunityLocationKind,
   parseIsoDateOnly,
@@ -56,7 +57,7 @@ function jsonObject(value: unknown): Prisma.InputJsonObject {
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonObject;
 }
 
-function marketData(candidate: WaterEventCandidate) {
+function marketData(candidate: WaterEventCandidate, verified: boolean) {
   const contact = candidateContact(candidate);
   const start = parseIsoDateOnly(candidate.start_date_raw);
   if (!start) throw new Error(`${candidate.candidate_id}: invalid start date`);
@@ -85,7 +86,7 @@ function marketData(candidate: WaterEventCandidate) {
     status: "OPEN" as const,
     confidence: opportunityConfidence(candidate),
     priorityRank: waterEventPriority(candidate),
-    reviewStatus: "VERIFIED" as const,
+    reviewStatus: verified ? "VERIFIED" as const : "NEEDS_VERIFICATION" as const,
     reviewNote: candidate.review_note,
     waterDemandStatus: candidate.water_order_status,
     contactRole: candidate.buyer_or_contact_role,
@@ -207,8 +208,9 @@ async function main() {
       let updatedToHold = 0;
       let identicalIgnored = 0;
       for (const candidate of manifest.candidates) {
-        if (candidate.outcome === "ADD_VERIFIED") {
-          const data = marketData(candidate);
+        if (isImportableWaterEvent(candidate.outcome)) {
+          const verified = candidate.outcome === "ADD_VERIFIED";
+          const data = marketData(candidate, verified);
           const existing = await tx.marketOpportunity.findUnique({ where: { externalKey: candidateExternalKey(candidate) }, select: { id: true, sourceMetadata: true } });
           const unchanged = existing && sourceFingerprint(existing.sourceMetadata) === candidateFingerprint(candidate);
           const market = existing
@@ -217,12 +219,13 @@ async function main() {
           const companyId = deterministicCompanyOpportunityId(candidate, args.companyId!);
           const companyLink = await tx.companyOpportunity.findUnique({ where: { companyId_marketOpportunityId: { companyId: args.companyId!, marketOpportunityId: market.id } }, select: { id: true } });
           if (!companyLink) await tx.companyOpportunity.create({ data: { id: companyId, companyId: args.companyId!, marketOpportunityId: market.id, status: "NEW" } });
-          if (!unchanged) await tx.marketOpportunityRevision.create({ data: { id: revisionId(candidate, existing ? "VERIFIED_REFRESH" : "VERIFIED_IMPORT"), marketOpportunityId: market.id, changeType: existing ? "VERIFIED_REFRESH" : "VERIFIED_IMPORT", sourceUrl: candidate.event_source_url, verificationUrl: candidate.verification_url, verifiedAt: data.lastVerifiedAt, snapshot: jsonObject(data) } });
+          const changeType = verified ? (existing ? "VERIFIED_REFRESH" : "VERIFIED_IMPORT") : (existing ? "CANDIDATE_REFRESH" : "CANDIDATE_IMPORT");
+          if (!unchanged) await tx.marketOpportunityRevision.create({ data: { id: revisionId(candidate, changeType), marketOpportunityId: market.id, changeType, sourceUrl: candidate.event_source_url, verificationUrl: candidate.verification_url, verifiedAt: data.lastVerifiedAt, snapshot: jsonObject(data) } });
           if (!existing) inserted += 1;
           else if (unchanged) identicalIgnored += 1;
         } else if (candidate.outcome === "DUPLICATE_VERIFIED") {
           const id = candidate.existing_market_opportunity_id!;
-          const data = marketData(candidate);
+          const data = marketData(candidate, true);
           const existing = await tx.marketOpportunity.findUniqueOrThrow({ where: { id }, select: { sourceMetadata: true } });
           if (sourceFingerprint(existing.sourceMetadata) === candidateFingerprint(candidate)) identicalIgnored += 1;
           else {

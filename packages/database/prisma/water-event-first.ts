@@ -13,6 +13,10 @@ export const WATER_EVENT_OUTCOMES = [
 
 export type WaterEventOutcome = (typeof WATER_EVENT_OUTCOMES)[number];
 
+export function isImportableWaterEvent(outcome: WaterEventOutcome): boolean {
+  return ["ADD_VERIFIED", "NEEDS_SOURCE_VERIFICATION", "NEEDS_END_DATE_REVIEW", "HOLD_RECHECK"].includes(outcome);
+}
+
 export type WaterEventCandidate = {
   candidate_id: string;
   title: string;
@@ -156,11 +160,12 @@ export function summarizeWaterEventManifest(manifest: WaterEventManifest) {
   return {
     total: manifest.candidates.length,
     activeAdditions: counts.ADD_VERIFIED,
+    candidateAdditions: counts.NEEDS_SOURCE_VERIFICATION + counts.NEEDS_END_DATE_REVIEW + counts.HOLD_RECHECK,
     verifiedDuplicates: counts.DUPLICATE_VERIFIED,
     trustedHoldUpdates: counts.UPDATE_EXISTING_HOLD,
     needsVerification: counts.NEEDS_SOURCE_VERIFICATION + counts.NEEDS_END_DATE_REVIEW,
     needsEndDateReview: counts.NEEDS_END_DATE_REVIEW,
-    heldWithoutImport: counts.HOLD_POSTPONED + counts.HOLD_RECHECK,
+    heldWithoutImport: counts.HOLD_POSTPONED,
     expiredOrConflicting: counts.EXPIRED_SOURCE_CONFLICT,
     counts,
   };

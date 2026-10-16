@@ -57,7 +57,7 @@ export class OpportunityRadarService {
       ],
       ...(query.status ? { status: query.status } : {}),
       marketOpportunity: {
-        reviewStatus: "VERIFIED",
+        reviewStatus: eventFirst ? { in: ["VERIFIED", "NEEDS_VERIFICATION"] } : "VERIFIED",
         ...(regionAliases.length ? { region: { in: regionAliases, mode: "insensitive" } } : {}),
         ...(cityAliases.length ? { city: { in: cityAliases, mode: "insensitive" } } : {}),
         ...(eventFirst && query.eventCategory ? { eventCategory: query.eventCategory } : {}),

@@ -22,11 +22,12 @@ test("Event-First manifest accounts for every workbook candidate exactly once", 
   assert.deepEqual(summarizeWaterEventManifest(manifest), {
     total: 64,
     activeAdditions: 13,
+    candidateAdditions: 46,
     verifiedDuplicates: 2,
     trustedHoldUpdates: 1,
     needsVerification: 45,
     needsEndDateReview: 6,
-    heldWithoutImport: 2,
+    heldWithoutImport: 1,
     expiredOrConflicting: 1,
     counts: {
       ADD_VERIFIED: 13, DUPLICATE_VERIFIED: 2, UPDATE_EXISTING_HOLD: 1,
