@@ -12,3 +12,10 @@ test("Visits remains navigable for company and hierarchy management roles", () =
     assert.equal(nav.some((item) => item.href === "/dashboard/visit-efficiency"), true, `${roleCode} should retain Visits navigation`);
   }
 });
+
+test("Opportunity Radar is present for every operational company role", () => {
+  for (const roleCode of ["COMPANY_ADMIN", "MANAGER", "SUPERVISOR", "SALES_REP"]) {
+    const nav = buildCompanyNavItems({ featureAccess: {}, t: t as never, groupLabels, roleCode });
+    assert.equal(nav.some((item) => item.href === "/dashboard/opportunity-radar"), true, roleCode);
+  }
+});

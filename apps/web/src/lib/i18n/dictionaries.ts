@@ -39,6 +39,7 @@ export type TranslationKey =
   | "nav.geoEngine"
   | "nav.fsos360"
   | "nav.visitCopilot"
+  | "nav.opportunityRadar"
   | "nav.team"
   | "nav.employees"
   | "nav.settings"
@@ -1565,6 +1566,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "nav.fsos360": "FSOS 360",
     "nav.geoEngine": "محرك الخرائط الذكي",
     "nav.visitCopilot": "مساعد الزيارات",
+    "nav.opportunityRadar": "رادار الفرص",
     "nav.team": "الفريق",
     "nav.employees": "الموظفون",
     "nav.settings": "الإعدادات",
@@ -3029,6 +3031,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "nav.fsos360": "FSOS 360",
     "nav.geoEngine": "Geo Intelligence Engine",
     "nav.visitCopilot": "Visit Copilot",
+    "nav.opportunityRadar": "Opportunity Radar",
     "nav.team": "Team",
     "nav.employees": "Employees",
     "nav.settings": "Settings",

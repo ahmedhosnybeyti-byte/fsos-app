@@ -31,3 +31,4 @@ export * from "./geo-engine";
 export * from "./fsos-360";
 export * from "./dashboard-performance";
 export * from "./user-activity";
+export * from "./opportunity-radar";

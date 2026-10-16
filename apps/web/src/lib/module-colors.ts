@@ -17,6 +17,7 @@ export type ModuleColorKey =
   | "visitEfficiency"
   | "customerLocations"
   | "visitCopilot"
+  | "opportunityRadar"
   | "teamPerformance"
   | "sgi"
   | "team"
@@ -41,6 +42,7 @@ export const MODULE_BADGE_CLASSES: Record<ModuleColorKey, string> = {
   visitEfficiency: "bg-teal-500/15 text-teal-600 dark:bg-teal-400/15 dark:text-teal-300",
   customerLocations: "bg-lime-500/15 text-lime-600 dark:bg-lime-400/15 dark:text-lime-300",
   visitCopilot: "bg-yellow-500/15 text-yellow-600 dark:bg-yellow-400/15 dark:text-yellow-300",
+  opportunityRadar: "bg-cyan-500/15 text-cyan-700 dark:bg-cyan-400/15 dark:text-cyan-300",
   teamPerformance: "bg-green-500/15 text-green-600 dark:bg-green-400/15 dark:text-green-300",
   sgi: "bg-pink-500/15 text-pink-600 dark:bg-pink-400/15 dark:text-pink-300",
   team: "bg-orange-500/15 text-orange-600 dark:bg-orange-400/15 dark:text-orange-300",

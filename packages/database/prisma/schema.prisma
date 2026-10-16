@@ -261,6 +261,7 @@ model Company {
   salesCalendarDays SalesCalendar[]
   prospects     Prospect[]
   prospectVisitIntents ProspectVisitIntent[]
+  companyOpportunities CompanyOpportunity[]
   lostOpportunityExclusions LostOpportunityExclusion[]
   routeAssignments UserRouteAssignment[]
   activityEvents UserActivityEvent[]
@@ -496,6 +497,7 @@ model User {
   activitySubjectEvents UserActivityEvent[] @relation("UserActivitySubject")
   activityRiskState UserRiskState?
   activityDailySummaries UserActivityDailySummary[]
+  assignedCompanyOpportunities CompanyOpportunity[] @relation("CompanyOpportunityAssignedTo")
 
   @@index([companyId])
   @@index([orgUnitId])
@@ -1159,6 +1161,96 @@ enum ProspectVisitIntentStatus {
   PLANNED
   COMPLETED
   CANCELLED
+}
+
+enum MarketOpportunityType {
+  PURCHASE
+  EVENT
+  PROACTIVE
+}
+
+enum MarketOpportunityStatus {
+  OPEN
+  CLOSED
+  EXPIRED
+}
+
+enum OpportunityConfidence {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum CompanyOpportunityStatus {
+  NEW
+  REVIEWED
+  CONTACTED
+  QUALIFIED
+  WON
+  LOST
+  EXPIRED
+}
+
+// Opportunity Radar keeps externally discovered market facts separate from
+// each company's private workflow. A later ingestion job can upsert this
+// source-backed record, then create one CompanyOpportunity per eligible
+// tenant without copying market facts into tenant rows.
+model MarketOpportunity {
+  id                 String                  @id @default(cuid())
+  vertical           String
+  opportunityType    MarketOpportunityType   @map("opportunity_type")
+  title              String
+  organization       String
+  description        String                  @db.Text
+  whyRelevant        String                  @map("why_relevant") @db.Text
+  country            String
+  region             String?
+  city               String?
+  location           String?
+  publishedAt        DateTime?               @map("published_at")
+  opportunityDate    DateTime?               @map("opportunity_date")
+  deadlineAt         DateTime?               @map("deadline_at")
+  status             MarketOpportunityStatus @default(OPEN)
+  confidence         OpportunityConfidence
+  phone              String?
+  whatsapp           String?
+  email              String?
+  contactUrl         String?                 @map("contact_url")
+  sourceUrl          String                  @map("source_url")
+  secondarySourceUrl String?                 @map("secondary_source_url")
+  sourceName         String                  @map("source_name")
+  lastVerifiedAt     DateTime                @map("last_verified_at")
+  createdAt          DateTime                @default(now()) @map("created_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
+
+  companyOpportunities CompanyOpportunity[]
+
+  @@unique([sourceUrl, title])
+  @@index([vertical, opportunityType, status, deadlineAt], map: "market_opportunities_filter_idx")
+  @@index([status, opportunityDate], map: "market_opportunities_status_date_idx")
+  @@map("market_opportunities")
+}
+
+model CompanyOpportunity {
+  id                  String                   @id @default(cuid())
+  companyId           String                   @map("company_id")
+  marketOpportunityId String                   @map("market_opportunity_id")
+  status              CompanyOpportunityStatus @default(NEW)
+  assignedToUserId    String?                  @map("assigned_to_user_id")
+  contactedAt         DateTime?                @map("contacted_at")
+  notes               String?                  @db.Text
+  outcome             String?                  @db.Text
+  createdAt           DateTime                 @default(now()) @map("created_at")
+  updatedAt           DateTime                 @updatedAt @map("updated_at")
+
+  company           Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  marketOpportunity MarketOpportunity @relation(fields: [marketOpportunityId], references: [id], onDelete: Cascade)
+  assignedTo        User?             @relation("CompanyOpportunityAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, marketOpportunityId])
+  @@index([companyId, status, updatedAt], map: "company_opportunities_status_idx")
+  @@index([companyId, assignedToUserId, status], map: "company_opportunities_assignee_idx")
+  @@map("company_opportunities")
 }
 
 // Customer Discovery (AI Visit Copilot Phase 2) — potential customers, from

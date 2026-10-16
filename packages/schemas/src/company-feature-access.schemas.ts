@@ -9,6 +9,7 @@ export const companyScreenRegistry = [
   { featureKey: "files", route: "/dashboard/files", arabicLabel: "الملفات", englishLabel: "Files", navigationGroup: "data", icon: "FileSpreadsheet" },
   { featureKey: "assistant", route: "/dashboard/assistant", arabicLabel: "المساعد", englishLabel: "Assistant", navigationGroup: "aiInsights", icon: "Bot" },
   { featureKey: "visit-copilot", route: "/dashboard/visit-copilot", arabicLabel: "مساعد الزيارات", englishLabel: "Visit Copilot", navigationGroup: "aiInsights", icon: "Compass" },
+  { featureKey: "opportunity-radar", route: "/dashboard/opportunity-radar", arabicLabel: "رادار الفرص", englishLabel: "Opportunity Radar", navigationGroup: "aiInsights", icon: "Radar" },
   { featureKey: "smart-loading", route: "/dashboard/smart-loading", arabicLabel: "التحميل الذكي", englishLabel: "Smart Loading", navigationGroup: "aiInsights", icon: "PackagePlus" },
   { featureKey: "analysis-studio", route: "/dashboard/analysis-studio", arabicLabel: "استوديو التحليل", englishLabel: "Analysis Studio", navigationGroup: "aiInsights", icon: "Sparkles" },
   { featureKey: "heatmap", route: "/dashboard/heatmap", arabicLabel: "الخريطة الحرارية", englishLabel: "Heatmap", navigationGroup: "aiInsights", icon: "Flame" },

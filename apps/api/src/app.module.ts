@@ -49,6 +49,7 @@ import { SmartLoadingModule } from "./modules/smart-loading/smart-loading.module
 import { UserActivityModule } from "./modules/user-activity/user-activity.module";
 import { DashboardPerformanceModule } from "./modules/dashboard-performance/dashboard-performance.module";
 import { ProspectsModule } from "./modules/prospects/prospects.module";
+import { OpportunityRadarModule } from "./modules/opportunity-radar/opportunity-radar.module";
 
 @Module({
   imports: [
@@ -100,6 +101,7 @@ import { ProspectsModule } from "./modules/prospects/prospects.module";
     UserActivityModule,
     DashboardPerformanceModule,
     ProspectsModule,
+    OpportunityRadarModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
