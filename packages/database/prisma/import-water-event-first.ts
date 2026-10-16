@@ -252,7 +252,7 @@ async function main() {
         throw new Error(`Preservation invariant failed: ${JSON.stringify({ beforeRows: before.companyRows.length, afterRows: after.companyRows.length, beforePreferences: before.preferences, afterPreferences: after.preferences, beforeVisits: before.visits, afterVisits: after.visits, changedRowIds })}`);
       }
       return { inserted, duplicates, updatedToHold, identicalIgnored };
-    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 60_000 });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 180_000 });
     console.log(JSON.stringify({ mode: "APPLY", result, planned: summarizeWaterEventManifest(manifest), preservationVerified: true }, null, 2));
   } finally {
     await prisma.$disconnect();
