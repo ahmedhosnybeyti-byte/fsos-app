@@ -1,4 +1,4 @@
-import type { CompanyOpportunityStatus, MarketOpportunityType, OpportunityRadarListQuery, OpportunityTeamFollowUpQuery, OpportunityTeamFollowUpStatus, UpdateCompanyOpportunityInput, UpdateOpportunityRadarPreferenceInput } from "@field-sales-os/schemas";
+import type { CompanyOpportunityStatus, MarketOpportunityType, OpportunityRadarListQuery, OpportunityRadarLocationsQuery, OpportunityTeamFollowUpQuery, OpportunityTeamFollowUpStatus, UpdateCompanyOpportunityInput, UpdateOpportunityRadarPreferenceInput } from "@field-sales-os/schemas";
 import { apiFetch } from "../api-client";
 
 export type OpportunityConfidence = "HIGH" | "MEDIUM" | "LOW";
@@ -61,7 +61,7 @@ export type OpportunityTeamFollowUpResponse = {
 export const opportunityRadarApi = {
   policy: () => apiFetch<OpportunityRadarPolicy>("/opportunity-radar/policy"),
   list: (query: OpportunityRadarListQuery) => apiFetch<OpportunityRadarResponse>("/opportunity-radar", { query }),
-  locations: (query: { region?: string; type?: MarketOpportunityType }) => apiFetch<OpportunityLocationsResponse>("/opportunity-radar/locations", { query }),
+  locations: (query: OpportunityRadarLocationsQuery) => apiFetch<OpportunityLocationsResponse>("/opportunity-radar/locations", { query }),
   assignees: () => apiFetch<OpportunityAssignee[]>("/opportunity-radar/assignees"),
   teamFollowUp: (query: OpportunityTeamFollowUpQuery) => apiFetch<OpportunityTeamFollowUpResponse>("/opportunity-radar/team-follow-up", { query }),
   update: (id: string, input: UpdateCompanyOpportunityInput) => apiFetch(`/opportunity-radar/${id}`, { method: "PATCH", body: input }),

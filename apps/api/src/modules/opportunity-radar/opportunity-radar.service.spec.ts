@@ -95,13 +95,15 @@ test("Opportunity Radar applies type-specific act-now horizons without a generic
 
 test("Opportunity Radar applies bilingual geography and personal preference filters in the database query", async () => {
   const { service, calls } = fixture();
-  await service.list(manager as never, listQuery({ region: "riyadh-region", city: "jeddah", favoriteOnly: true, visibility: "HIDDEN" }));
+  await service.list(manager as never, listQuery({ regions: ["riyadh-region", "makkah-region"], cities: ["jeddah", "madinah"], favoriteOnly: true, visibility: "HIDDEN" }));
   const count = calls.find((call) => "count" in call)?.count as { where: Record<string, unknown> };
   const market = count.where.marketOpportunity as { region: { in: string[] }; city: { in: string[] } };
   assert.ok(market.region.in.includes("الرياض"));
   assert.ok(market.region.in.includes("riyadh"));
+  assert.ok(market.region.in.includes("مكة المكرمة"));
   assert.ok(market.city.in.includes("جدة"));
   assert.ok(market.city.in.includes("jeddah"));
+  assert.ok(market.city.in.includes("المدينة المنورة"));
   assert.deepEqual(count.where.AND, [
     { userPreferences: { some: { userId: "manager-1", isHidden: true } } },
     { userPreferences: { some: { userId: "manager-1", isFavorite: true } } },
@@ -116,15 +118,16 @@ test("Opportunity Radar defaults event views to verified future events within tw
   assert.deepEqual(market.reviewStatus, { in: ["VERIFIED", "NEEDS_VERIFICATION"] });
   assert.equal(market.opportunityType, "EVENT");
   assert.equal(market.status, "OPEN");
-  const date = market.opportunityDate as { gte: Date; lte: Date };
-  assert.ok(date.gte instanceof Date);
-  assert.ok(date.lte instanceof Date);
-  assert.ok(date.lte.getTime() - date.gte.getTime() >= 365 * 86_400_000);
+  const ranges = market.OR as Array<{ opportunityDate: { gte?: Date; gt?: Date; lte: Date } }>;
+  assert.equal(ranges.length, 3);
+  assert.ok(ranges[0]!.opportunityDate.gte instanceof Date);
+  assert.ok(ranges[2]!.opportunityDate.lte instanceof Date);
+  assert.ok(ranges[2]!.opportunityDate.lte.getTime() - ranges[0]!.opportunityDate.gte!.getTime() >= 365 * 86_400_000);
 });
 
 test("Opportunity Radar preserves standard event behavior for companies without the water policy", async () => {
   const { service, calls } = fixture();
-  await service.list(manager as never, listQuery({ type: "EVENT", timeRange: "NEXT_12_MONTHS", eventCategory: "رياضة" }));
+  await service.list(manager as never, listQuery({ type: "EVENT", timeRange: "NEXT_12_MONTHS", eventCategories: ["رياضة"] }));
   const count = calls.find((call) => "count" in call)?.count as { where: Record<string, unknown> };
   const market = count.where.marketOpportunity as Record<string, unknown>;
   assert.equal(market.eventCategory, undefined);
@@ -150,12 +153,46 @@ test("Opportunity Radar never writes a personal preference outside the viewer te
 
 test("Opportunity Radar location options retain tenant and hierarchy scope before database grouping", async () => {
   const { service, calls } = fixture();
-  await service.listLocations(supervisor as never, { region: "riyadh-region" });
+  await service.listLocations(supervisor as never, { regions: ["riyadh-region", "makkah-region"] });
   const groups = calls.filter((call) => "groupBy" in call).map((call) => call.groupBy) as Array<{ where: Record<string, unknown> }>;
   const firstScope = (groups[0]!.where.companyOpportunities as { some: Record<string, unknown> }).some;
   assert.equal(firstScope.companyId, "company-1");
   assert.deepEqual(firstScope.OR, [{ assignedToUserId: null }, { assignedToUserId: { in: ["supervisor-1", "rep-1"] } }]);
   assert.ok(((groups[1]!.where.region as { in: string[] }).in).includes("riyadh"));
+  assert.ok(((groups[1]!.where.region as { in: string[] }).in).includes("مكة المكرمة"));
+});
+
+test("Event-First multi-select filters stay in PostgreSQL and use disjoint date buckets", async () => {
+  const { service, calls } = fixture({ policyMode: "EVENT_FIRST_WATER" });
+  await service.list(manager as never, listQuery({
+    type: "EVENT",
+    eventCategories: ["رياضة", "معرض"],
+    dataQualities: ["NEEDS_VERIFICATION"],
+    timeRange: undefined,
+    timeRanges: ["NEXT_30_DAYS", "AFTER_12_MONTHS"],
+  }));
+  const count = calls.find((call) => "count" in call)?.count as { where: Record<string, unknown> };
+  const market = count.where.marketOpportunity as Record<string, unknown>;
+  assert.deepEqual(market.eventCategory, { in: ["رياضة", "معرض"] });
+  assert.deepEqual(market.reviewStatus, { in: ["NEEDS_VERIFICATION"] });
+  const ranges = market.OR as Array<{ opportunityDate: { gte?: Date; gt?: Date; lte?: Date } }>;
+  assert.equal(ranges.length, 2);
+  assert.ok(ranges[0]!.opportunityDate.gte instanceof Date);
+  assert.ok(ranges[0]!.opportunityDate.lte instanceof Date);
+  assert.ok(ranges[1]!.opportunityDate.gt instanceof Date);
+  assert.equal(ranges[1]!.opportunityDate.lte, undefined);
+});
+
+test("Event-First location options include candidates without changing standard companies", async () => {
+  const water = fixture({ policyMode: "EVENT_FIRST_WATER" });
+  await water.service.listLocations(manager as never, { type: "EVENT" });
+  const waterGroup = water.calls.find((call) => "groupBy" in call)?.groupBy as { where: Record<string, unknown> };
+  assert.deepEqual(waterGroup.where.reviewStatus, { in: ["VERIFIED", "NEEDS_VERIFICATION"] });
+
+  const standard = fixture();
+  await standard.service.listLocations(manager as never, { type: "EVENT" });
+  const standardGroup = standard.calls.find((call) => "groupBy" in call)?.groupBy as { where: Record<string, unknown> };
+  assert.equal(standardGroup.where.reviewStatus, "VERIFIED");
 });
 
 test("Opportunity Radar never updates a company opportunity outside the viewer tenant and hierarchy scope", async () => {

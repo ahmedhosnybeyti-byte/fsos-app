@@ -12,6 +12,19 @@ export const OPPORTUNITY_TIME_RANGES = ["ALL_FUTURE", "NEXT_30_DAYS", "NEXT_6_MO
 export const opportunityTimeRangeSchema = z.enum(OPPORTUNITY_TIME_RANGES);
 export type OpportunityTimeRange = z.infer<typeof opportunityTimeRangeSchema>;
 
+export const OPPORTUNITY_TIME_BUCKETS = ["NEXT_30_DAYS", "DAYS_31_TO_183", "DAYS_184_TO_366", "AFTER_12_MONTHS"] as const;
+export const opportunityTimeBucketSchema = z.enum(OPPORTUNITY_TIME_BUCKETS);
+export type OpportunityTimeBucket = z.infer<typeof opportunityTimeBucketSchema>;
+
+export const OPPORTUNITY_DATA_QUALITIES = ["VERIFIED", "NEEDS_VERIFICATION"] as const;
+export const opportunityDataQualitySchema = z.enum(OPPORTUNITY_DATA_QUALITIES);
+export type OpportunityDataQuality = z.infer<typeof opportunityDataQualitySchema>;
+
+const queryArray = <T extends z.ZodTypeAny>(item: T, max = 50) => z.preprocess(
+  (value) => value === undefined ? undefined : (Array.isArray(value) ? value : [value]),
+  z.array(item).min(1).max(max).optional(),
+);
+
 const queryBoolean = z.union([z.boolean(), z.enum(["true", "false"])])
   .transform((value) => value === true || value === "true");
 
@@ -19,10 +32,13 @@ export const opportunityRadarListQuerySchema = z.object({
   type: marketOpportunityTypeSchema.optional(),
   view: z.enum(["ALL", "ACT_NOW"]).default("ALL"),
   status: companyOpportunityStatusSchema.optional(),
-  region: z.string().trim().min(1).max(512).optional(),
-  city: z.string().trim().min(1).max(512).optional(),
-  eventCategory: z.string().trim().min(1).max(200).optional(),
-  timeRange: opportunityTimeRangeSchema.default("NEXT_12_MONTHS"),
+  regions: queryArray(z.string().trim().min(1).max(512)),
+  cities: queryArray(z.string().trim().min(1).max(512)),
+  eventCategories: queryArray(z.string().trim().min(1).max(200)),
+  timeRanges: queryArray(opportunityTimeBucketSchema, OPPORTUNITY_TIME_BUCKETS.length),
+  dataQualities: queryArray(opportunityDataQualitySchema, OPPORTUNITY_DATA_QUALITIES.length),
+  // Kept for older clients during the rollout. New UI uses the disjoint timeRanges buckets.
+  timeRange: opportunityTimeRangeSchema.optional(),
   favoriteOnly: queryBoolean.default(false),
   visibility: z.enum(["VISIBLE", "HIDDEN"]).default("VISIBLE"),
   page: z.coerce.number().int().min(1).default(1),
@@ -31,7 +47,7 @@ export const opportunityRadarListQuerySchema = z.object({
 export type OpportunityRadarListQuery = z.infer<typeof opportunityRadarListQuerySchema>;
 
 export const opportunityRadarLocationsQuerySchema = z.object({
-  region: z.string().trim().min(1).max(512).optional(),
+  regions: queryArray(z.string().trim().min(1).max(512)),
   type: marketOpportunityTypeSchema.optional(),
 });
 export type OpportunityRadarLocationsQuery = z.infer<typeof opportunityRadarLocationsQuerySchema>;

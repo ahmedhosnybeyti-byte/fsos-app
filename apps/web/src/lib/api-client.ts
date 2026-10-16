@@ -21,7 +21,7 @@ interface RequestOptions {
   method?: "GET" | "POST" | "PATCH" | "DELETE";
   body?: unknown;
   formData?: FormData;
-  query?: Record<string, string | number | boolean | undefined>;
+  query?: Record<string, string | number | boolean | readonly (string | number | boolean)[] | undefined>;
   signal?: AbortSignal;
 }
 
@@ -52,7 +52,11 @@ async function request(url: string, options: RequestOptions): Promise<{ response
 
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const url = new URL(apiUrl(path));
-  if (options.query) for (const [key, value] of Object.entries(options.query)) if (value !== undefined) url.searchParams.set(key, String(value));
+  if (options.query) for (const [key, value] of Object.entries(options.query)) {
+    if (value === undefined) continue;
+    if (Array.isArray(value)) value.forEach((item) => url.searchParams.append(key, String(item)));
+    else url.searchParams.set(key, String(value));
+  }
 
   let result = await request(url.toString(), options);
   const canRefresh = result.response.status === 401 && !["/auth/login", "/auth/register", "/auth/refresh", "/auth/logout"].includes(path);

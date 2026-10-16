@@ -37,15 +37,25 @@ export class OpportunityRadarService {
     const now = new Date();
     const purchaseActNowUntil = new Date(now.getTime() + 7 * 86_400_000);
     const eventOrOpeningActNowUntil = new Date(now.getTime() + 30 * 86_400_000);
-    const eventRangeUntil = query.timeRange === "NEXT_30_DAYS"
-      ? new Date(now.getTime() + 30 * 86_400_000)
-      : query.timeRange === "NEXT_6_MONTHS"
-        ? new Date(now.getTime() + 183 * 86_400_000)
-        : query.timeRange === "NEXT_12_MONTHS"
-          ? new Date(now.getTime() + 366 * 86_400_000)
-          : null;
-    const regionAliases = query.region ? geoAliases("region", query.region) : [];
-    const cityAliases = query.city ? geoAliases("city", query.city) : [];
+    const day = 86_400_000;
+    const day30 = new Date(now.getTime() + 30 * day);
+    const day183 = new Date(now.getTime() + 183 * day);
+    const day366 = new Date(now.getTime() + 366 * day);
+    const legacyTimeRanges = query.timeRange === "ALL_FUTURE" ? undefined
+      : query.timeRange === "NEXT_30_DAYS" ? ["NEXT_30_DAYS"] as const
+        : query.timeRange === "NEXT_6_MONTHS" ? ["NEXT_30_DAYS", "DAYS_31_TO_183"] as const
+          : query.timeRange === "NEXT_12_MONTHS" ? ["NEXT_30_DAYS", "DAYS_31_TO_183", "DAYS_184_TO_366"] as const
+            : undefined;
+    const timeRanges = query.timeRanges ?? legacyTimeRanges;
+    const timeRangeOr: Prisma.MarketOpportunityWhereInput[] = timeRanges?.map((range) => ({
+      opportunityDate: range === "NEXT_30_DAYS" ? { gte: now, lte: day30 }
+        : range === "DAYS_31_TO_183" ? { gt: day30, lte: day183 }
+          : range === "DAYS_184_TO_366" ? { gt: day183, lte: day366 }
+            : { gt: day366 },
+    })) ?? [];
+    const aliases = (kind: "region" | "city", values: string[] | undefined) => [...new Set((values ?? []).flatMap((value) => geoAliases(kind, value)))];
+    const regionAliases = aliases("region", query.regions);
+    const cityAliases = aliases("city", query.cities);
     const where: Prisma.CompanyOpportunityWhereInput = {
       companyId: user.companyId,
       ...this.visibilityWhere(user, visibleUserIds),
@@ -57,14 +67,16 @@ export class OpportunityRadarService {
       ],
       ...(query.status ? { status: query.status } : {}),
       marketOpportunity: {
-        reviewStatus: eventFirst ? { in: ["VERIFIED", "NEEDS_VERIFICATION"] } : "VERIFIED",
+        reviewStatus: eventFirst
+          ? { in: query.dataQualities ?? ["VERIFIED", "NEEDS_VERIFICATION"] }
+          : "VERIFIED",
         ...(regionAliases.length ? { region: { in: regionAliases, mode: "insensitive" } } : {}),
         ...(cityAliases.length ? { city: { in: cityAliases, mode: "insensitive" } } : {}),
-        ...(eventFirst && query.eventCategory ? { eventCategory: query.eventCategory } : {}),
+        ...(eventFirst && query.eventCategories?.length ? { eventCategory: { in: query.eventCategories } } : {}),
         ...(query.type && query.view === "ALL" ? { opportunityType: query.type } : {}),
         ...(eventFirst && query.view === "ALL" && query.type === "EVENT" ? {
           status: "OPEN",
-          opportunityDate: { gte: now, ...(eventRangeUntil ? { lte: eventRangeUntil } : {}) },
+          ...(timeRangeOr.length ? { OR: timeRangeOr } : { opportunityDate: { gte: now } }),
         } : {}),
         ...(query.view === "ACT_NOW" ? {
           status: "OPEN",
@@ -143,10 +155,14 @@ export class OpportunityRadarService {
   }
 
   async listLocations(user: AuthenticatedUser & { companyId: string }, query: OpportunityRadarLocationsQuery) {
-    const visibleUserIds = await this.visibleUserIds(user);
-    const regionAliases = query.region ? geoAliases("region", query.region) : [];
+    const [visibleUserIds, radarPolicy] = await Promise.all([
+      this.visibleUserIds(user),
+      this.prisma.opportunityRadarPolicy.findUnique({ where: { companyId: user.companyId }, select: { mode: true } }),
+    ]);
+    const eventFirst = radarPolicy?.mode === "EVENT_FIRST_WATER";
+    const regionAliases = [...new Set((query.regions ?? []).flatMap((region) => geoAliases("region", region)))];
     const visibleWhere = {
-      reviewStatus: "VERIFIED" as const,
+      reviewStatus: eventFirst ? { in: ["VERIFIED", "NEEDS_VERIFICATION"] as const } : "VERIFIED" as const,
       ...(query.type ? { opportunityType: query.type } : {}),
       companyOpportunities: {
         some: { companyId: user.companyId, ...this.visibilityWhere(user, visibleUserIds) },

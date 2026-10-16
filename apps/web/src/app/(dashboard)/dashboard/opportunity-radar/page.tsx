@@ -2,8 +2,8 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, CalendarClock, CheckCircle2, ExternalLink, EyeOff, MapPin, MapPinned, Radar, RotateCcw, Save, ShoppingCart, Star, UserRound, UsersRound } from "lucide-react";
-import type { CompanyOpportunityStatus, MarketOpportunityType, OpportunityTeamFollowUpStatus, OpportunityTimeRange } from "@field-sales-os/schemas";
+import { Building2, CalendarClock, CheckCircle2, ChevronDown, ExternalLink, EyeOff, MapPin, MapPinned, Radar, RotateCcw, Save, ShoppingCart, Star, UserRound, UsersRound } from "lucide-react";
+import type { CompanyOpportunityStatus, MarketOpportunityType, OpportunityDataQuality, OpportunityTeamFollowUpStatus, OpportunityTimeBucket } from "@field-sales-os/schemas";
 import { toast } from "sonner";
 import { useRequireAuth } from "@/hooks/use-require-auth";
 import { opportunityRadarApi, visitCopilotApi, type OpportunityAssignee, type OpportunityRadarItem, type OpportunityTeamFollowUpResponse } from "@/lib/api";
@@ -13,6 +13,7 @@ import { formatDate } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -34,17 +35,27 @@ const STATUS_VARIANTS: Record<CompanyOpportunityStatus, "default" | "secondary" 
   NEW: "default", REVIEWED: "secondary", CONTACTED: "warning", QUALIFIED: "success", WON: "success", LOST: "destructive", EXPIRED: "outline",
 };
 const todayIsoDate = () => new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Riyadh" });
-const TIME_RANGE_LABELS: Record<OpportunityTimeRange, string> = { ALL_FUTURE: "كل الفعاليات القادمة", NEXT_30_DAYS: "خلال 30 يومًا", NEXT_6_MONTHS: "خلال 6 أشهر", NEXT_12_MONTHS: "خلال 12 شهرًا" };
+const TIME_BUCKET_OPTIONS: Array<{ value: OpportunityTimeBucket; label: string }> = [
+  { value: "NEXT_30_DAYS", label: "خلال 30 يومًا" },
+  { value: "DAYS_31_TO_183", label: "من 31 يومًا إلى 6 أشهر" },
+  { value: "DAYS_184_TO_366", label: "من 6 إلى 12 شهرًا" },
+  { value: "AFTER_12_MONTHS", label: "بعد 12 شهرًا" },
+];
+const DATA_QUALITY_OPTIONS: Array<{ value: OpportunityDataQuality; label: string }> = [
+  { value: "VERIFIED", label: "بيانات مكتملة ومتحققة" },
+  { value: "NEEDS_VERIFICATION", label: "تحتاج استكمال أو تحقق" },
+];
 
 export default function OpportunityRadarPage() {
   const { user, isLoading: authLoading } = useRequireAuth(["SALES_REP", "SUPERVISOR", "MANAGER", "COMPANY_ADMIN"]);
   const [tab, setTab] = useState<RadarTab>("PURCHASE");
   const [policyApplied, setPolicyApplied] = useState(false);
   const [page, setPage] = useState(1);
-  const [region, setRegion] = useState<string>();
-  const [city, setCity] = useState<string>();
-  const [eventCategory, setEventCategory] = useState<string>();
-  const [timeRange, setTimeRange] = useState<OpportunityTimeRange>("NEXT_12_MONTHS");
+  const [regions, setRegions] = useState<string[]>([]);
+  const [cities, setCities] = useState<string[]>([]);
+  const [eventCategories, setEventCategories] = useState<string[]>([]);
+  const [timeRanges, setTimeRanges] = useState<OpportunityTimeBucket[]>(["NEXT_30_DAYS", "DAYS_31_TO_183", "DAYS_184_TO_366"]);
+  const [dataQualities, setDataQualities] = useState<OpportunityDataQuality[]>([]);
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [showHidden, setShowHidden] = useState(false);
   const [teamAssigneeId, setTeamAssigneeId] = useState<string>();
@@ -63,17 +74,25 @@ export default function OpportunityRadarPage() {
   const orderedTabs = eventFirst ? [TABS[1]!, TABS[0]!, ...TABS.slice(2)] : TABS;
   const query = {
     ...(tab === "ACT_NOW" ? { view: "ACT_NOW" as const } : { view: "ALL" as const, type: tab === "TEAM_FOLLOW_UP" ? "PURCHASE" as const : tab }),
-    region,
-    city,
-    timeRange: eventFirst && tab === "EVENT" ? timeRange : "NEXT_12_MONTHS" as const,
-    ...(eventFirst && tab === "EVENT" ? { eventCategory } : {}),
+    regions: regions.length ? regions : undefined,
+    cities: cities.length ? cities : undefined,
+    ...(eventFirst && tab === "EVENT" ? {
+      eventCategories: eventCategories.length ? eventCategories : undefined,
+      timeRanges: timeRanges.length ? timeRanges : undefined,
+      dataQualities: dataQualities.length ? dataQualities : undefined,
+    } : {}),
     favoriteOnly,
     visibility: showHidden ? "HIDDEN" as const : "VISIBLE" as const,
     page,
     pageSize: 20,
   };
   const opportunities = useQuery({ queryKey: ["opportunity-radar", query], queryFn: () => opportunityRadarApi.list(query), enabled: !!user && policyApplied && tab !== "TEAM_FOLLOW_UP" });
-  const locations = useQuery({ queryKey: ["opportunity-radar", "locations", region, tab], queryFn: () => opportunityRadarApi.locations({ region, type: tab === "EVENT" || tab === "PURCHASE" || tab === "PROACTIVE" ? tab : undefined }), enabled: !!user && policyApplied && tab !== "TEAM_FOLLOW_UP" });
+  const locations = useQuery({ queryKey: ["opportunity-radar", "locations", regions, tab], queryFn: () => opportunityRadarApi.locations({ regions: regions.length ? regions : undefined, type: tab === "EVENT" || tab === "PURCHASE" || tab === "PROACTIVE" ? tab : undefined }), enabled: !!user && policyApplied && tab !== "TEAM_FOLLOW_UP" });
+  useEffect(() => {
+    if (!locations.data) return;
+    const available = new Set(locations.data.cities.map((item) => item.key));
+    setCities((current) => current.filter((value) => available.has(value)));
+  }, [locations.data]);
   const assignees = useQuery({ queryKey: ["opportunity-radar", "assignees"], queryFn: opportunityRadarApi.assignees, enabled: !!user });
   const teamQuery = { assignedToUserId: teamAssigneeId, status: teamStatus, from: teamFrom || undefined, to: teamTo || undefined, page: teamPage, pageSize: 20 };
   const teamFollowUp = useQuery({ queryKey: ["opportunity-radar", "team-follow-up", teamQuery], queryFn: () => opportunityRadarApi.teamFollowUp(teamQuery), enabled: !!user && canFollowTeam && tab === "TEAM_FOLLOW_UP" });
@@ -111,24 +130,11 @@ export default function OpportunityRadarPage() {
       onPage={setTeamPage}
     /> : <>
     <div className="glass-card flex flex-col gap-3 p-4 lg:flex-row lg:items-end">
-      <label className="min-w-52 flex-1 space-y-1.5 text-xs font-medium">المنطقة
-        <Select value={region ?? "ALL"} onValueChange={(value) => { setRegion(value === "ALL" ? undefined : value); setCity(undefined); setPage(1); }}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent><SelectItem value="ALL">جميع المناطق</SelectItem>{locations.data?.regions.map((item) => <SelectItem key={item.key} value={item.key}>{item.label}</SelectItem>)}</SelectContent>
-        </Select>
-      </label>
-      <label className="min-w-52 flex-1 space-y-1.5 text-xs font-medium">المدينة
-        <Select value={city ?? "ALL"} onValueChange={(value) => { setCity(value === "ALL" ? undefined : value); setPage(1); }}>
-          <SelectTrigger><SelectValue /></SelectTrigger>
-          <SelectContent><SelectItem value="ALL">جميع المدن</SelectItem>{locations.data?.cities.map((item) => <SelectItem key={item.key} value={item.key}>{item.label}</SelectItem>)}</SelectContent>
-        </Select>
-      </label>
-      {eventFirst && tab === "EVENT" && <label className="min-w-48 flex-1 space-y-1.5 text-xs font-medium">نوع الفعالية
-        <Select value={eventCategory ?? "ALL"} onValueChange={(value) => { setEventCategory(value === "ALL" ? undefined : value); setPage(1); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ALL">جميع الأنواع</SelectItem>{locations.data?.eventCategories.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
-      </label>}
-      {eventFirst && tab === "EVENT" && <label className="min-w-48 flex-1 space-y-1.5 text-xs font-medium">الفترة
-        <Select value={timeRange} onValueChange={(value) => { setTimeRange(value as OpportunityTimeRange); setPage(1); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{Object.entries(TIME_RANGE_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select>
-      </label>}
+      <MultiSelectFilter label="المنطقة" allLabel="جميع المناطق" values={regions} options={(locations.data?.regions ?? []).map((item) => ({ value: item.key, label: item.label }))} onChange={(values) => { setRegions(values); setPage(1); }} />
+      <MultiSelectFilter label="المدينة" allLabel="جميع المدن" values={cities} options={(locations.data?.cities ?? []).map((item) => ({ value: item.key, label: item.label }))} onChange={(values) => { setCities(values); setPage(1); }} />
+      {eventFirst && tab === "EVENT" && <MultiSelectFilter label="نوع الفعالية" allLabel="جميع الأنواع" values={eventCategories} options={(locations.data?.eventCategories ?? []).map((value) => ({ value, label: value }))} onChange={(values) => { setEventCategories(values); setPage(1); }} />}
+      {eventFirst && tab === "EVENT" && <MultiSelectFilter label="الفترة" allLabel="كل الفترات" values={timeRanges} options={TIME_BUCKET_OPTIONS} onChange={(values) => { setTimeRanges(values as OpportunityTimeBucket[]); setPage(1); }} />}
+      {eventFirst && tab === "EVENT" && <MultiSelectFilter label="حالة البيانات" allLabel="كل حالات البيانات" values={dataQualities} options={DATA_QUALITY_OPTIONS} onChange={(values) => { setDataQualities(values as OpportunityDataQuality[]); setPage(1); }} />}
       <Button type="button" variant={favoriteOnly ? "default" : "outline"} onClick={() => { setFavoriteOnly((value) => !value); setPage(1); }}><Star className={favoriteOnly ? "h-4 w-4 fill-current" : "h-4 w-4"} />المفضلة فقط</Button>
       <Button type="button" variant={showHidden ? "secondary" : "outline"} onClick={() => { setShowHidden((value) => !value); setPage(1); }}><EyeOff className="h-4 w-4" />{showHidden ? "العودة للفرص" : "عرض المخفية"}</Button>
     </div>
@@ -141,6 +147,27 @@ export default function OpportunityRadarPage() {
     </> : <div className="glass-card p-8 text-center"><Radar className="mx-auto h-10 w-10 text-muted-foreground" /><h2 className="mt-4 text-lg font-semibold">لا توجد فرص في هذا العرض</h2><p className="mt-1 text-sm text-muted-foreground">لا توجد فرص مطابقة للفلاتر الحالية ضمن نطاق صلاحياتك.</p></div>}
     </>}
   </div>;
+}
+
+function MultiSelectFilter({ label, allLabel, values, options, onChange }: {
+  label: string;
+  allLabel: string;
+  values: string[];
+  options: Array<{ value: string; label: string }>;
+  onChange: (values: string[]) => void;
+}) {
+  const selectedLabels = options.filter((option) => values.includes(option.value)).map((option) => option.label);
+  const summary = values.length === 0 ? allLabel : values.length === 1 ? selectedLabels[0] : `${values.length} اختيارات`;
+  return <label className="min-w-48 flex-1 space-y-1.5 text-xs font-medium">{label}
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild><Button type="button" variant="outline" className="w-full justify-between bg-background font-normal"><span className="truncate">{summary}</span><ChevronDown className="h-4 w-4 shrink-0 opacity-60" /></Button></DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="max-h-72 min-w-[var(--radix-dropdown-menu-trigger-width)] overflow-y-auto" onCloseAutoFocus={(event) => event.preventDefault()}>
+        <DropdownMenuItem onSelect={() => onChange([])}>{allLabel}</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        {options.map((option) => <DropdownMenuCheckboxItem key={option.value} checked={values.includes(option.value)} onCheckedChange={(checked) => onChange(checked ? [...values, option.value] : values.filter((value) => value !== option.value))} onSelect={(event) => event.preventDefault()}>{option.label}</DropdownMenuCheckboxItem>)}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  </label>;
 }
 
 function TeamFollowUpPanel({
