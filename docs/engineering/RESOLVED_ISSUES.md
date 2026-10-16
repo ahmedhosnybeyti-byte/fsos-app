@@ -2,6 +2,14 @@
 
 This is durable engineering history. A **RESOLVED** item is historical evidence, not a permanent assumption. It may be reopened only when new measurements prove a regression; cite that new evidence before changing the previous design.
 
+## Prospect discovery — duplicate provider identities for one nearby place
+
+- **Symptom/evidence:** Google returned `Hygienic Paper Company` twice with different Place IDs about 48 metres apart, so both rows survived the existing provider-key dedupe. The same gap could occur across Google and OSM because provider source is part of the database uniqueness key.
+- **Root cause:** Discovery deduplicated only by `externalKey` within a provider and had no strict semantic/geographic guard before persistence or presentation.
+- **Fix:** Preserve provider-key dedupe, then collapse only exactly normalized names within 100 metres in the incoming batch and against company-scoped, geographically bounded existing prospects across providers. Different normalized names remain separate and no fuzzy matching or schema change is used.
+- **Commit:** This fix commit.
+- **Regression-prevention rule:** Prospect semantic dedupe must require both an exactly normalized name and a distance of at most 100 metres. Keep candidate lookup company- and geography-scoped; never replace it with fuzzy names or a full company prospect read.
+
 ## SGI manager hierarchy-scope bypass
 
 - **Symptom:** A Manager could receive company-wide SGI situations, targets, and rep statistics; a Manager-triggered recalculation could also persist a partial hierarchy snapshot as the latest shared company report.
