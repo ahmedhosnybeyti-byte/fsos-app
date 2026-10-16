@@ -51,7 +51,7 @@ export class OpportunityRadarService {
         : range === "DAYS_31_TO_183" ? { gt: day30, lte: day183 }
           : range === "DAYS_184_TO_366" ? { gt: day183, lte: day366 }
             : { gt: day366 };
-    const timeRangeOr: Prisma.MarketOpportunityWhereInput[] = (timeRanges ?? []).flatMap((range) => query.view === "ACT_NOW"
+    const timeRangeOr: Prisma.MarketOpportunityWhereInput[] = (timeRanges ?? []).flatMap((range): Prisma.MarketOpportunityWhereInput[] => query.view === "ACT_NOW"
       ? [
           { opportunityType: "PURCHASE", deadlineAt: dateRange(range) },
           { opportunityType: { in: ["EVENT", "PROACTIVE"] }, opportunityDate: dateRange(range) },
