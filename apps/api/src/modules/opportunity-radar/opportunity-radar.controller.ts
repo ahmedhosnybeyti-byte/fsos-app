@@ -2,9 +2,13 @@ import { Body, Controller, ForbiddenException, Get, Param, Patch, Query } from "
 import { ApiTags } from "@nestjs/swagger";
 import {
   opportunityRadarListQuerySchema,
+  opportunityRadarLocationsQuerySchema,
   updateCompanyOpportunitySchema,
+  updateOpportunityRadarPreferenceSchema,
   type OpportunityRadarListQuery,
+  type OpportunityRadarLocationsQuery,
   type UpdateCompanyOpportunityInput,
+  type UpdateOpportunityRadarPreferenceInput,
 } from "@field-sales-os/schemas";
 import { Auth } from "../../common/decorators/auth.decorator";
 import { CompanyScreen } from "../../common/decorators/company-screen.decorator";
@@ -36,6 +40,27 @@ export class OpportunityRadarController {
   assignees(@CurrentUser() user: AuthenticatedUser) {
     this.requireCompany(user);
     return this.service.listAssignees(user);
+  }
+
+  @Get("locations")
+  @Auth(...OPERATIONAL_ROLES)
+  locations(
+    @CurrentUser() user: AuthenticatedUser,
+    @Query(new ZodValidationPipe(opportunityRadarLocationsQuerySchema)) query: OpportunityRadarLocationsQuery,
+  ) {
+    this.requireCompany(user);
+    return this.service.listLocations(user, query);
+  }
+
+  @Patch(":id/preference")
+  @Auth(...OPERATIONAL_ROLES)
+  updatePreference(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param("id") id: string,
+    @Body(new ZodValidationPipe(updateOpportunityRadarPreferenceSchema)) body: UpdateOpportunityRadarPreferenceInput,
+  ) {
+    this.requireCompany(user);
+    return this.service.updatePreference(user, id, body);
   }
 
   @Patch(":id")

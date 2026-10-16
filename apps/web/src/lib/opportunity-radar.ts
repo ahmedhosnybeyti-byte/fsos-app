@@ -41,6 +41,19 @@ export function opportunityLocation(item: OpportunityRadarItem): string {
   return [market.city, market.region, market.country].filter(Boolean).join("، ");
 }
 
+export function opportunityMapLocation(item: OpportunityRadarItem): { label: string; href: string | null; precise: boolean } {
+  const market = item.marketOpportunity;
+  const preciseLocation = market.location?.trim();
+  const context = [market.city, market.region, market.country].filter((value): value is string => !!value?.trim());
+  if (!preciseLocation) return { label: context.join("، "), href: null, precise: false };
+  const query = [preciseLocation, ...context].join(", ");
+  return {
+    label: preciseLocation,
+    href: `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`,
+    precise: true,
+  };
+}
+
 export function primaryContact(item: OpportunityRadarItem): { label: string; value: string; href: string } | null {
   const market = item.marketOpportunity;
   if (market.whatsapp) return { label: "واتساب معلن", value: market.whatsapp, href: `https://wa.me/${market.whatsapp.replace(/\D/g, "")}` };

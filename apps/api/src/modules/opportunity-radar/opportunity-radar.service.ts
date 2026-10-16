@@ -1,8 +1,14 @@
 import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { Prisma } from "@field-sales-os/database";
-import type { OpportunityRadarListQuery, UpdateCompanyOpportunityInput } from "@field-sales-os/schemas";
+import type {
+  OpportunityRadarListQuery,
+  OpportunityRadarLocationsQuery,
+  UpdateCompanyOpportunityInput,
+  UpdateOpportunityRadarPreferenceInput,
+} from "@field-sales-os/schemas";
 import { PrismaService } from "../../common/prisma/prisma.service";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
+import { geoAliases, groupGeoOptions } from "./opportunity-geo";
 
 const COMPANY_WIDE_ROLES = new Set(["COMPANY_ADMIN", "MANAGER"]);
 const ACTIONABLE_STATUSES = ["NEW", "REVIEWED", "CONTACTED", "QUALIFIED"] as const;
@@ -16,11 +22,21 @@ export class OpportunityRadarService {
     const now = new Date();
     const purchaseActNowUntil = new Date(now.getTime() + 7 * 86_400_000);
     const eventOrOpeningActNowUntil = new Date(now.getTime() + 30 * 86_400_000);
+    const regionAliases = query.region ? geoAliases("region", query.region) : [];
+    const cityAliases = query.city ? geoAliases("city", query.city) : [];
     const where: Prisma.CompanyOpportunityWhereInput = {
       companyId: user.companyId,
       ...this.visibilityWhere(user, visibleUserIds),
+      AND: [
+        query.visibility === "HIDDEN"
+          ? { userPreferences: { some: { userId: user.userId, isHidden: true } } }
+          : { userPreferences: { none: { userId: user.userId, isHidden: true } } },
+        ...(query.favoriteOnly ? [{ userPreferences: { some: { userId: user.userId, isFavorite: true } } }] : []),
+      ],
       ...(query.status ? { status: query.status } : {}),
       marketOpportunity: {
+        ...(regionAliases.length ? { region: { in: regionAliases, mode: "insensitive" } } : {}),
+        ...(cityAliases.length ? { city: { in: cityAliases, mode: "insensitive" } } : {}),
         ...(query.type && query.view === "ALL" ? { opportunityType: query.type } : {}),
         ...(query.view === "ACT_NOW" ? {
           status: "OPEN",
@@ -51,6 +67,10 @@ export class OpportunityRadarService {
           notes: true,
           outcome: true,
           updatedAt: true,
+          userPreferences: {
+            where: { userId: user.userId },
+            select: { isFavorite: true, isHidden: true },
+          },
           assignedTo: { select: { id: true, fullName: true, email: true } },
           marketOpportunity: {
             select: {
@@ -65,7 +85,46 @@ export class OpportunityRadarService {
         },
       }),
     ]);
-    return { items, page: query.page, pageSize: query.pageSize, total, totalPages: Math.max(1, Math.ceil(total / query.pageSize)) };
+    return {
+      items: items.map(({ userPreferences, ...item }) => ({
+        ...item,
+        isFavorite: userPreferences[0]?.isFavorite ?? false,
+        isHidden: userPreferences[0]?.isHidden ?? false,
+      })),
+      page: query.page,
+      pageSize: query.pageSize,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / query.pageSize)),
+    };
+  }
+
+  async listLocations(user: AuthenticatedUser & { companyId: string }, query: OpportunityRadarLocationsQuery) {
+    const visibleUserIds = await this.visibleUserIds(user);
+    const regionAliases = query.region ? geoAliases("region", query.region) : [];
+    const visibleWhere = {
+      companyOpportunities: {
+        some: { companyId: user.companyId, ...this.visibilityWhere(user, visibleUserIds) },
+      },
+    } satisfies Prisma.MarketOpportunityWhereInput;
+    const [regionRows, cityRows] = await this.prisma.$transaction([
+      this.prisma.marketOpportunity.groupBy({
+        by: ["region"],
+        where: visibleWhere,
+        orderBy: { region: "asc" },
+      }),
+      this.prisma.marketOpportunity.groupBy({
+        by: ["city"],
+        where: {
+          ...visibleWhere,
+          ...(regionAliases.length ? { region: { in: regionAliases, mode: "insensitive" as const } } : {}),
+        },
+        orderBy: { city: "asc" },
+      }),
+    ]);
+    return {
+      regions: groupGeoOptions("region", regionRows.map((row) => row.region)),
+      cities: groupGeoOptions("city", cityRows.map((row) => row.city)),
+    };
   }
 
   async listAssignees(user: AuthenticatedUser & { companyId: string }) {
@@ -105,6 +164,34 @@ export class OpportunityRadarService {
         ...(input.outcome !== undefined ? { outcome: input.outcome || null } : {}),
       },
       select: { id: true, status: true, contactedAt: true, notes: true, outcome: true, updatedAt: true, assignedTo: { select: { id: true, fullName: true, email: true } } },
+    });
+  }
+
+  async updatePreference(
+    user: AuthenticatedUser & { companyId: string },
+    id: string,
+    input: UpdateOpportunityRadarPreferenceInput,
+  ) {
+    const visibleUserIds = await this.visibleUserIds(user);
+    const existing = await this.prisma.companyOpportunity.findFirst({
+      where: { id, companyId: user.companyId, ...this.visibilityWhere(user, visibleUserIds) },
+      select: { id: true },
+    });
+    if (!existing) throw new NotFoundException("Opportunity was not found in your company scope");
+
+    return this.prisma.opportunityRadarPreference.upsert({
+      where: { userId_companyOpportunityId: { userId: user.userId, companyOpportunityId: existing.id } },
+      create: {
+        userId: user.userId,
+        companyOpportunityId: existing.id,
+        isFavorite: input.isFavorite ?? false,
+        isHidden: input.isHidden ?? false,
+      },
+      update: {
+        ...(input.isFavorite !== undefined ? { isFavorite: input.isFavorite } : {}),
+        ...(input.isHidden !== undefined ? { isHidden: input.isHidden } : {}),
+      },
+      select: { isFavorite: true, isHidden: true },
     });
   }
 

@@ -498,6 +498,7 @@ model User {
   activityRiskState UserRiskState?
   activityDailySummaries UserActivityDailySummary[]
   assignedCompanyOpportunities CompanyOpportunity[] @relation("CompanyOpportunityAssignedTo")
+  opportunityRadarPreferences OpportunityRadarPreference[]
 
   @@index([companyId])
   @@index([orgUnitId])
@@ -1246,11 +1247,32 @@ model CompanyOpportunity {
   company           Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
   marketOpportunity MarketOpportunity @relation(fields: [marketOpportunityId], references: [id], onDelete: Cascade)
   assignedTo        User?             @relation("CompanyOpportunityAssignedTo", fields: [assignedToUserId], references: [id], onDelete: SetNull)
+  userPreferences   OpportunityRadarPreference[]
 
   @@unique([companyId, marketOpportunityId])
   @@index([companyId, status, updatedAt], map: "company_opportunities_status_idx")
   @@index([companyId, assignedToUserId, status], map: "company_opportunities_assignee_idx")
   @@map("company_opportunities")
+}
+
+// Personal Opportunity Radar state. This never mutates or removes the shared
+// MarketOpportunity fact or another user's company workflow state.
+model OpportunityRadarPreference {
+  id                   String   @id @default(cuid())
+  userId               String   @map("user_id")
+  companyOpportunityId String   @map("company_opportunity_id")
+  isFavorite           Boolean  @default(false) @map("is_favorite")
+  isHidden             Boolean  @default(false) @map("is_hidden")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  companyOpportunity CompanyOpportunity @relation(fields: [companyOpportunityId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, companyOpportunityId])
+  @@index([userId, isHidden, companyOpportunityId], map: "opportunity_radar_preferences_hidden_idx")
+  @@index([userId, isFavorite, companyOpportunityId], map: "opportunity_radar_preferences_favorite_idx")
+  @@map("opportunity_radar_preferences")
 }
 
 // Customer Discovery (AI Visit Copilot Phase 2) — potential customers, from

@@ -1,4 +1,4 @@
-import type { CompanyOpportunityStatus, MarketOpportunityType, OpportunityRadarListQuery, UpdateCompanyOpportunityInput } from "@field-sales-os/schemas";
+import type { CompanyOpportunityStatus, MarketOpportunityType, OpportunityRadarListQuery, UpdateCompanyOpportunityInput, UpdateOpportunityRadarPreferenceInput } from "@field-sales-os/schemas";
 import { apiFetch } from "../api-client";
 
 export type OpportunityConfidence = "HIGH" | "MEDIUM" | "LOW";
@@ -11,6 +11,8 @@ export type OpportunityRadarItem = {
   notes: string | null;
   outcome: string | null;
   updatedAt: string;
+  isFavorite: boolean;
+  isHidden: boolean;
   assignedTo: OpportunityAssignee | null;
   marketOpportunity: {
     id: string; vertical: string; opportunityType: MarketOpportunityType; title: string; organization: string;
@@ -23,9 +25,13 @@ export type OpportunityRadarItem = {
 };
 
 export type OpportunityRadarResponse = { items: OpportunityRadarItem[]; page: number; pageSize: number; total: number; totalPages: number };
+export type OpportunityGeoOption = { key: string; label: string };
+export type OpportunityLocationsResponse = { regions: OpportunityGeoOption[]; cities: OpportunityGeoOption[] };
 
 export const opportunityRadarApi = {
   list: (query: OpportunityRadarListQuery) => apiFetch<OpportunityRadarResponse>("/opportunity-radar", { query }),
+  locations: (query: { region?: string }) => apiFetch<OpportunityLocationsResponse>("/opportunity-radar/locations", { query }),
   assignees: () => apiFetch<OpportunityAssignee[]>("/opportunity-radar/assignees"),
   update: (id: string, input: UpdateCompanyOpportunityInput) => apiFetch(`/opportunity-radar/${id}`, { method: "PATCH", body: input }),
+  updatePreference: (id: string, input: UpdateOpportunityRadarPreferenceInput) => apiFetch(`/opportunity-radar/${id}/preference`, { method: "PATCH", body: input }),
 };
