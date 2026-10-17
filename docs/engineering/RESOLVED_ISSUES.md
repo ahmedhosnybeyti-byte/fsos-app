@@ -2,6 +2,14 @@
 
 This is durable engineering history. A **RESOLVED** item is historical evidence, not a permanent assumption. It may be reopened only when new measurements prove a regression; cite that new evidence before changing the previous design.
 
+## Employee Excel export — RIE request budget exhaustion
+
+- **Symptom/evidence:** Production `GET /api/v1/companies/me/employees/:id/export` returned 500 after the seventh entity read; Railway recorded `RiePostgresExecutionBudgetExceededError` at 24 PostgreSQL executions.
+- **Root cause:** The export called the legacy entity reader once per sheet, and each materialized sheet repeated active-file, version, and row reads, so a fixed 15-sheet export could not fit the request budget.
+- **Fix:** Keep authorization and target-employee hierarchy identity unchanged, but read canonical sheets through the existing one-statement PostgreSQL scalable query contract; Sales Calendar retains its dedicated-table path.
+- **Commit:** This fix commit.
+- **Regression-prevention rule:** Multi-sheet exports must use scoped PostgreSQL query contracts and remain within the fixed request execution budget; never raise or bypass the budget to accommodate per-sheet metadata fan-out.
+
 ## Prospect discovery — duplicate provider identities for one nearby place
 
 - **Symptom/evidence:** Google returned `Hygienic Paper Company` twice with different Place IDs about 48 metres apart, so both rows survived the existing provider-key dedupe. The same gap could occur across Google and OSM because provider source is part of the database uniqueness key.

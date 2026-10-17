@@ -4,6 +4,7 @@ import { RieFacade } from "../rie/rie-facade.service";
 import { normalizeHeader } from "../files/dataset-query.util";
 import { auditMemory } from "../../common/observability/memory-audit";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
+import { IMPORT_TEMPLATES } from "../import-validation/import-templates.data";
 
 // Per-Employee Scoped Excel Export (2026-07-27) — built as the concrete
 // mitigation for the data-leak risk flagged when the GPT Action pivoted to
@@ -103,16 +104,6 @@ function parseDateBound(value: string | undefined, edge: "start" | "end"): Date 
   if (edge === "end") parsed.setHours(23, 59, 59, 999);
   else parsed.setHours(0, 0, 0, 0);
   return parsed;
-}
-
-function withinDateRange(value: unknown, from: Date | null, to: Date | null): boolean {
-  if (!from && !to) return true;
-  if (value === null || value === undefined || value === "") return false;
-  const parsed = new Date(String(value));
-  if (Number.isNaN(parsed.getTime())) return false;
-  if (from && parsed < from) return false;
-  if (to && parsed > to) return false;
-  return true;
 }
 
 export interface EmployeeExportSheet {
@@ -227,26 +218,52 @@ export class EmployeeExportService {
     const fromDate = parseDateBound(dateRange?.fromDate, "start");
     const toDate = parseDateBound(dateRange?.toDate, "end");
 
+    const templateByEntity = new Map(IMPORT_TEMPLATES.map((template) => [template.entity, template]));
     const sheets: EmployeeExportSheet[] = [];
     for (const spec of EXPORT_SHEETS) {
-      const result = await this.rieFacade.getEntityRecords(spec.entityName, {
-        companyId,
-        ...(spec.scoped ? { requestingUser: scopedIdentity } : {}),
-      });
-
-      let rows = result.records as Record<string, unknown>[];
-      if (spec.dateField && (fromDate || toDate)) {
-        const actualField = result.fields.find((f) => normalizeHeader(f) === normalizeHeader(spec.dateField!));
-        rows = actualField ? rows.filter((r) => withinDateRange(r[actualField], fromDate, toDate)) : [];
+      // Sales Calendar lives in its dedicated PostgreSQL table, so retain
+      // its existing provider path. Every other export sheet is canonical
+      // current-state data and can use the one-statement scalable contract.
+      // The previous getEntityRecords fan-out spent files + versions + rows
+      // executions per sheet and inevitably crossed the fixed 24-execution
+      // request budget before all 15 sheets were read.
+      if (spec.entityName === "Sales Calendar") {
+        const result = await this.rieFacade.getEntityRecords(spec.entityName, { companyId });
+        sheets.push({
+          sheetName: spec.sheetName,
+          entityName: spec.entityName,
+          scoped: spec.scoped,
+          available: result.available,
+          rowCount: result.records.length,
+          fields: [...result.fields],
+          rows: result.records as Record<string, unknown>[],
+        });
+        continue;
       }
 
+      const fields = templateByEntity.get(spec.entityName)?.fields.map((field) => field.name) ?? [];
+      const routeField = fields.find((field) => normalizeHeader(field) === normalizeHeader("RouteID"));
+      const result = await this.rieFacade.queryCanonicalRecords({
+        companyId,
+        entityName: spec.entityName,
+        projection: fields.map((field) => ({ field })),
+        ...(spec.scoped ? { requestingUser: scopedIdentity } : {}),
+        ...(spec.scoped && routeField ? { hierarchyRoute: { field: routeField } } : {}),
+        ...(spec.dateField && (fromDate || toDate)
+          ? { scope: { date: { field: spec.dateField, ...(fromDate ? { from: fromDate.getTime() } : {}), ...(toDate ? { to: toDate.getTime() } : {}) } } }
+          : {}),
+        // This is the endpoint's final, already company/hierarchy/date-
+        // scoped export result, not an intermediate raw fact read.
+        unboundedFinalResult: true,
+      });
+      const rows = result.records as Record<string, unknown>[];
       sheets.push({
         sheetName: spec.sheetName,
         entityName: spec.entityName,
         scoped: spec.scoped,
-        available: result.available,
+        available: rows.length > 0,
         rowCount: rows.length,
-        fields: [...result.fields],
+        fields,
         rows,
       });
     }
