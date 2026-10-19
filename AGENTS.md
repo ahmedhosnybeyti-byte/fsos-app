@@ -61,3 +61,11 @@ After an important verified engineering fix, update `RESOLVED_ISSUES.md` with th
     - response time
     - RAM impact when applicable
     - absence of dangerous Full Reads
+
+
+## Murshidak mandatory engineering gates
+
+- Before substantive changes to backend, APIs, PostgreSQL/Prisma, RIE, integrations, ERP/SFA operations, or frontend data-fetching paths, use the `murshidak-system-design` skill at `.agents/skills/murshidak-system-design/SKILL.md`. Apply a proportional, evidence-based review and report `System Design Gate: PASS / WARN / BLOCK`.
+- For new frontend screens or substantial visual changes, ALSO use `.codex/skills/murshidak-ui-design-system/SKILL.md` and `docs/design/MURSHIDAK_UI_DESIGN_SYSTEM.md`; do not replace or bypass their approved visual system.
+- For a trivial UI text/style-only or documentation change with no architectural impact, the system-design gate can be a one-line no-impact check. Avoid unnecessary extra tool calls and tests.
+- Respect existing company isolation, default `ANALYSIS_ONLY`, explicit `SFA` permissions, unchanged Excel/RIE behavior, and production/deployment restrictions. Do not override existing repository-specific instructions; resolve conflicts explicitly.
