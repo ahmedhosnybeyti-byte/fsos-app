@@ -9,11 +9,19 @@ import { CompanyScreenAccessGuard } from "@/components/company-screen-access-gua
 import { buildCompanyNavItems } from "@/lib/company-screen-registry";
 import { useTranslation } from "@/components/translation-provider";
 import { Spinner } from "@/components/ui/spinner";
+import { useQuery } from "@tanstack/react-query";
+import { getCompanyFeatureAccessState } from "@field-sales-os/schemas";
+import { sfaSetupApi } from "@/lib/api/sfa-setup";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useRequireAuth();
   const router = useRouter();
   const { t } = useTranslation();
+  const canSetup = user?.role.code === "COMPANY_ADMIN" && !!user.companyId
+    && getCompanyFeatureAccessState(user.featureAccess, "sfa-setup") === "ENABLED"
+    && ["sfa.access", "company.manage"].every((permission) => user.permissions?.includes(permission));
+  const operatingMode = useQuery({ queryKey: ["sfa-mode", user?.companyId], queryFn: sfaSetupApi.mode,
+    enabled: canSetup, retry: false, refetchOnWindowFocus: false });
   const isSuperAdmin = user?.role.code === "SUPER_ADMIN";
   const mustChangePassword = user?.mustChangePassword === true;
 
@@ -25,7 +33,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   if (isLoading || !user || isSuperAdmin || mustChangePassword) return <div className="flex min-h-screen items-center justify-center"><Spinner className="h-6 w-6" /></div>;
 
   const navItems: NavItem[] = [
-    ...buildCompanyNavItems({ featureAccess: user.featureAccess, t, roleCode: user.role.code, groupLabels: { data: t("group.data"), aiInsights: t("group.aiInsights"), customersTerritory: t("group.customersTerritory"), team: t("group.team"), system: t("group.system") } }),
+    ...buildCompanyNavItems({ featureAccess: user.featureAccess, t, roleCode: user.role.code, groupLabels: { data: t("group.data"), aiInsights: t("group.aiInsights"), customersTerritory: t("group.customersTerritory"), team: t("group.team"), system: t("group.system") } })
+      .filter((item) => item.featureKey !== "sfa-setup" || (canSetup && operatingMode.data?.operatingMode === "SFA")),
   ];
 
   return <AppShell navItems={navItems} user={user}><CompanyScreenAccessGuard user={user}>{children}</CompanyScreenAccessGuard></AppShell>;

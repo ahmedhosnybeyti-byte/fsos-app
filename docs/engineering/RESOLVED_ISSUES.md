@@ -2,6 +2,30 @@
 
 This is durable engineering history. A **RESOLVED** item is historical evidence, not a permanent assumption. It may be reopened only when new measurements prove a regression; cite that new evidence before changing the previous design.
 
+## SFA release verification — Windows standalone packaging and backup isolation
+
+- **Symptom:** Windows standalone packaging failed with EPERM on pnpm symlinks, and the default Docker context could include temporary verification files and newly created database backups.
+- **Root cause:** Windows symlink restrictions do not represent the Linux build environment; backup/temporary directories were not excluded from Docker context.
+- **Fix:** Verified the unchanged web build and assembled standalone runtime on the official Node 22 Slim filesystem on ext4. Excluded `.local-backups`, `.tmp*` and local verification tooling from Docker context, and database backups from Git. Added a read-only logical backup/isolated PostgreSQL 18 restore drill with ACL restrictions and authenticated encryption.
+- **Commit:** This local commit; not deployed.
+- **Regression-prevention rule:** A successful compile is insufficient: verify Linux standalone packaging and runtime. Never put database backups or test fixtures in release build context or Git.
+
+## Local PostgreSQL restore drill — daemon pipe wait
+
+- **Symptom:** The local PostgreSQL server became ready, but PowerShell stalled before starting `pg_restore`.
+- **Root cause:** Awaiting `pg_ctl start` through a native pipeline retained daemon pipe handles beyond the launcher lifetime.
+- **Fix:** Launch hidden and wait explicitly for the launcher process instead of its server tree/pipes. Reused the completed dump; the real PostgreSQL 18 restore, parity check and encryption roundtrip passed.
+- **Commit:** This local commit; not deployed.
+- **Regression-prevention rule:** Background-server startup helpers must wait for the launcher only, use an explicit readiness check, and stop the isolated server after verification.
+
+## Access Control — registered but ungranted capabilities missing from editor
+
+- **Symptom:** A newly registered `sfa.access` capability could not be selected in Super Admin because no role had it yet.
+- **Root cause:** The editor built its permission choices solely from the union of permissions already assigned to roles.
+- **Fix:** Read the existing Permission registry through a Super Admin-only bounded catalogue endpoint and merge those codes into the existing editor. No role grants are created by discovery. Isolated API checks verified explicit granting and immediate revocation.
+- **Commit:** This local commit; not deployed. The later real backup/restore gate passed.
+- **Regression-prevention rule:** Capability discovery must include unassigned registered permissions; never grant a permission just to make it visible in administration.
+
 ## Employee Excel export — RIE request budget exhaustion
 
 - **Symptom/evidence:** Production `GET /api/v1/companies/me/employees/:id/export` returned 500 after the seventh entity read; Railway recorded `RiePostgresExecutionBudgetExceededError` at 24 PostgreSQL executions.

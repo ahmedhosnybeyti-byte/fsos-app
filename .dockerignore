@@ -1,4 +1,9 @@
 node_modules
+.local-backups
+.tmp*
+.codex
+.agents
+_rie-pg-test
 .pnpm-store
 dist
 build

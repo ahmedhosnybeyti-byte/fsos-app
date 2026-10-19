@@ -43,6 +43,7 @@ export type TranslationKey =
   | "nav.team"
   | "nav.employees"
   | "nav.settings"
+  | "nav.sfaSetup"
   | "nav.account"
   | "admin.nav.dashboard"
   | "admin.nav.users"
@@ -1570,6 +1571,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "nav.team": "الفريق",
     "nav.employees": "الموظفون",
     "nav.settings": "الإعدادات",
+    "nav.sfaSetup": "تجهيز التشغيل",
     "nav.account": "الحساب",
     "admin.nav.dashboard": "لوحة الإدارة",
     "admin.nav.users": "المستخدمون",
@@ -3035,6 +3037,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "nav.team": "Team",
     "nav.employees": "Employees",
     "nav.settings": "Settings",
+    "nav.sfaSetup": "Operations setup",
     "nav.account": "Account",
     "admin.nav.dashboard": "Dashboard",
     "admin.nav.users": "Users",

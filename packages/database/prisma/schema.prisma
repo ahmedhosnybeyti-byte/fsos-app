@@ -240,6 +240,7 @@ model Company {
   status    CompanyStatus @default(ACTIVE)
   featureAccess Json? @map("feature_access")
   operatingSettings CompanyOperatingSettings?
+  warehouses Warehouse[]
   maxExcelUploadSizeMb Int? @map("max_excel_upload_size_mb")
   // Captured at signup — see CompanyAccountType. Nullable for pre-existing
   // companies created before this field was added.
@@ -285,6 +286,22 @@ model Company {
 
 // Missing settings deliberately means ANALYSIS_ONLY for existing companies.
 // Kept separate so legacy Company reads do not acquire a new scalar column.
+model Warehouse {
+  id        String   @id @default(cuid())
+  companyId String   @map("company_id")
+  code      String
+  name      String
+  address   String?
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, code])
+  @@index([companyId, isActive, id])
+  @@map("warehouses")
+}
+
 model CompanyOperatingSettings {
   companyId     String               @id @map("company_id")
   operatingMode CompanyOperatingMode @default(ANALYSIS_ONLY) @map("operating_mode")

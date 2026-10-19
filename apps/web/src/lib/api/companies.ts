@@ -13,6 +13,8 @@ export type UpdateCompanyProfileBody = UpdateCompanyProfileInput & {
 };
 
 export const companiesApi = {
+  operatingSettings: (id: string) => apiFetch<{ operatingMode: import("@field-sales-os/schemas").CompanyOperatingMode }>(`/companies/${id}/operating-settings`),
+  updateOperatingSettings: (id: string, operatingMode: import("@field-sales-os/schemas").CompanyOperatingMode) => apiFetch<{ operatingMode: import("@field-sales-os/schemas").CompanyOperatingMode }>(`/companies/${id}/operating-settings`, { method: "PATCH", body: { operatingMode } }),
   me: () => apiFetch<Company>("/companies/me"),
   updateMe: (input: { name?: string }) => apiFetch<Company>("/companies/me", { method: "PATCH", body: input }),
   list: (page: number, pageSize = 20, search?: string) =>

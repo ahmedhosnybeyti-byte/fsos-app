@@ -24,6 +24,11 @@ export class RolesService {
 
   list() { return this.prisma.role.findMany({ orderBy: { code: "asc" } }); }
 
+  permissionCatalogue() {
+    // Small platform reference registry, including capabilities not granted yet.
+    return this.prisma.permission.findMany({ select: { code: true, description: true }, orderBy: { code: "asc" }, take: 200 });
+  }
+
   async listWithPermissions() {
     const roles = await this.prisma.role.findMany({ orderBy: { code: "asc" }, include: { rolePermissions: { include: { permission: true } } } });
     return roles.map((role) => ({ id: role.id, code: role.code, name: role.name, description: role.description, permissions: role.rolePermissions.map((rp) => rp.permission.code) }));

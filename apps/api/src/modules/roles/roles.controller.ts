@@ -22,6 +22,11 @@ export class RolesController {
   @Permissions("access_control.view")
   permissionsMatrix() { return this.rolesService.listWithPermissions(); }
 
+  @Get("permission-catalogue")
+  @Auth("SUPER_ADMIN")
+  @Permissions("access_control.view")
+  permissionCatalogue() { return this.rolesService.permissionCatalogue(); }
+
   @Patch(":roleCode/permissions")
   @Auth("SUPER_ADMIN")
   @Permissions("access_control.manage")

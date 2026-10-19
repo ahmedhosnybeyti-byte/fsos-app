@@ -51,6 +51,7 @@ import { UserActivityModule } from "./modules/user-activity/user-activity.module
 import { DashboardPerformanceModule } from "./modules/dashboard-performance/dashboard-performance.module";
 import { ProspectsModule } from "./modules/prospects/prospects.module";
 import { OpportunityRadarModule } from "./modules/opportunity-radar/opportunity-radar.module";
+import { SfaSetupModule } from "./modules/sfa-setup/sfa-setup.module";
 
 @Module({
   imports: [
@@ -103,6 +104,7 @@ import { OpportunityRadarModule } from "./modules/opportunity-radar/opportunity-
     DashboardPerformanceModule,
     ProspectsModule,
     OpportunityRadarModule,
+    SfaSetupModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

@@ -1,4 +1,5 @@
 # Dependencies
+.local-backups/
 node_modules/
 .pnpm-store/
 
