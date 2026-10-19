@@ -99,3 +99,4 @@ export type {
   SmartLoadingVehicleStockUnavailableSession,
   SmartLoadingSession,
 } from "./smart-loading.schemas";
+export * from "./company-operating-settings.schemas";

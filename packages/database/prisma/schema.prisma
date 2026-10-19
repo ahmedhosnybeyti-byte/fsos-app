@@ -44,6 +44,11 @@ enum CompanyAccountType {
   INDEPENDENT
 }
 
+enum CompanyOperatingMode {
+  ANALYSIS_ONLY
+  SFA
+}
+
 // The lifecycle events that move a Company between CompanyStatus states
 // (Phase 2's "Lifecycle Events" diagram). Recorded via the existing
 // AuditLog table (action: "company.lifecycle.<event>") rather than a new
@@ -234,6 +239,7 @@ model Company {
   slug      String        @unique
   status    CompanyStatus @default(ACTIVE)
   featureAccess Json? @map("feature_access")
+  operatingSettings CompanyOperatingSettings?
   maxExcelUploadSizeMb Int? @map("max_excel_upload_size_mb")
   // Captured at signup — see CompanyAccountType. Nullable for pre-existing
   // companies created before this field was added.
@@ -275,6 +281,19 @@ model Company {
   smartLoadingLastSaleSnapshotRoutes SmartLoadingLastSaleSnapshotRoute[]
 
   @@map("companies")
+}
+
+// Missing settings deliberately means ANALYSIS_ONLY for existing companies.
+// Kept separate so legacy Company reads do not acquire a new scalar column.
+model CompanyOperatingSettings {
+  companyId     String               @id @map("company_id")
+  operatingMode CompanyOperatingMode @default(ANALYSIS_ONLY) @map("operating_mode")
+  createdAt     DateTime             @default(now()) @map("created_at")
+  updatedAt     DateTime             @updatedAt @map("updated_at")
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@map("company_operating_settings")
 }
 
 // Phase 2 — Company Profile: the *editable operational data* (Logo, Country,

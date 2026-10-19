@@ -7,6 +7,8 @@ import {
   updateCompanySchema,
   updateCompanyProfileSchema,
   updateCompanyFeatureAccessSchema,
+  updateCompanyOperatingSettingsSchema,
+  type UpdateCompanyOperatingSettingsInput,
   type CompanyLifecycleEvent,
   type CreatePlatformCompanyInput,
   type UpdateCompanyInput,
@@ -19,11 +21,35 @@ import { SkipSubscriptionCheck } from "../../common/decorators/skip-subscription
 import { ZodValidationPipe } from "../../common/pipes/zod-validation.pipe";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { CompaniesService } from "./companies.service";
+import { CompanyOperatingSettingsService } from "./company-operating-settings.service";
 
 @ApiTags("companies")
 @Controller("companies")
 export class CompaniesController {
-  constructor(private readonly companiesService: CompaniesService) {}
+  constructor(private readonly companiesService: CompaniesService, private readonly operatingSettings: CompanyOperatingSettingsService) {}
+
+  @Get("me/operating-settings")
+  @Auth()
+  @SkipSubscriptionCheck()
+  getMyOperatingSettings(@CurrentUser() user: AuthenticatedUser) {
+    if (!user.companyId) throw new ForbiddenException("A company context is required");
+    return this.operatingSettings.get(user.companyId);
+  }
+
+  @Get(":id/operating-settings")
+  @Auth("SUPER_ADMIN")
+  @SkipSubscriptionCheck()
+  getOperatingSettings(@Param("id") id: string) {
+    return this.operatingSettings.get(id);
+  }
+
+  @Patch(":id/operating-settings")
+  @Auth("SUPER_ADMIN")
+  @SkipSubscriptionCheck()
+  updateOperatingSettings(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string,
+    @Body(new ZodValidationPipe(updateCompanyOperatingSettingsSchema)) body: UpdateCompanyOperatingSettingsInput) {
+    return this.operatingSettings.update(id, body, user);
+  }
 
   // Any authenticated user needs their own company's basic info (dashboard
   // header, name) even if the subscription itself is inactive.

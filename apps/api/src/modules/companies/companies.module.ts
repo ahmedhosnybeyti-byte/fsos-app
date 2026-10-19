@@ -4,6 +4,7 @@ import { GovernanceModule } from "../governance/governance.module";
 import { SubscriptionsModule } from "../subscriptions/subscriptions.module";
 import { CompaniesService } from "./companies.service";
 import { CompaniesController } from "./companies.controller";
+import { CompanyOperatingSettingsService } from "./company-operating-settings.service";
 import { BranchesController } from "./branches.controller";
 import { OrgUnitTypesService } from "./org-unit-types.service";
 import { OrgUnitTypesController } from "./org-unit-types.controller";
@@ -13,7 +14,7 @@ import { UserActivityModule } from "../user-activity/user-activity.module";
 
 @Module({
   imports: [AuditLogModule, GovernanceModule, SubscriptionsModule, UserActivityModule],
-  providers: [CompaniesService, OrgUnitTypesService, OrgUnitsService],
+  providers: [CompaniesService, CompanyOperatingSettingsService, OrgUnitTypesService, OrgUnitsService],
   controllers: [CompaniesController, BranchesController, OrgUnitTypesController, OrgUnitsController],
   exports: [CompaniesService, OrgUnitsService, OrgUnitTypesService],
 })

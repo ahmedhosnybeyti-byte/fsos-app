@@ -9,6 +9,7 @@ import { JwtAuthGuard } from "./common/guards/jwt-auth.guard";
 import { RolesGuard } from "./common/guards/roles.guard";
 import { PermissionsGuard } from "./common/guards/permissions.guard";
 import { CompanyScreenAccessGuard } from "./common/guards/company-screen-access.guard";
+import { SfaAccessGuard } from "./common/guards/sfa-access.guard";
 import { SubscriptionActiveGuard } from "./common/guards/subscription-active.guard";
 import { RequiresPaidPlanGuard } from "./common/guards/requires-paid-plan.guard";
 import { AuthModule } from "./modules/auth/auth.module";
@@ -112,6 +113,7 @@ import { OpportunityRadarModule } from "./modules/opportunity-radar/opportunity-
     { provide: APP_GUARD, useClass: RolesGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_GUARD, useClass: CompanyScreenAccessGuard },
+    { provide: APP_GUARD, useClass: SfaAccessGuard },
     { provide: APP_GUARD, useClass: SubscriptionActiveGuard },
     // Opt-in: only routes marked @RequiresPaidPlan() are affected — narrows
     // "TRIAL or ACTIVE" (above) to "ACTIVE only" for spend-triggering or

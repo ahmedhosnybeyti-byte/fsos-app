@@ -40,6 +40,7 @@ test("archives a company without deleting it and allows activation again", async
         },
       },
       refreshToken: { updateMany: async (input: unknown) => { refreshTokenUpdates.push(input); } },
+      user: { updateMany: async () => ({ count: 1 }) },
     } as never,
     { record: async () => undefined } as never,
     {} as never,
