@@ -62,6 +62,9 @@ const CHAT_MAX_TOKENS = 700;
 const AVERAGE_SPEED_KMH = 30;
 const MINUTES_PER_VISIT = 15;
 const FALLBACK_WORKING_DAYS_PER_MONTH = 26;
+// The daily plan is Customers.VisitDay: a documented recurring weekly plan,
+// so the next planned stop for a customer is the same weekday next week.
+const WEEKLY_VISIT_CYCLE_DAYS = 7;
 const TOP_PRODUCTS_LIMIT = 5;
 const MISSING_PRODUCTS_LIMIT = 5;
 // "ملخص اليوم 360°" — the one bounded AI call gets a hard timeout; on abort
@@ -173,10 +176,6 @@ export interface DailyBriefResult {
   customers: DailyBriefCustomer[];
   warnings: string[];
   lostOpportunityResult: LostOpportunityResult;
-}
-
-export function expectedRouteSales(customers: readonly Pick<DailyBriefCustomer, "avgOrderValue">[]): number {
-  return round2(customers.reduce((sum, customer) => sum + customer.avgOrderValue, 0));
 }
 
 export interface BriefingProduct {
@@ -686,7 +685,7 @@ export class VisitCopilotService {
     const aggregate = (entityName: string, input: Omit<Parameters<RieFacade["queryCanonicalRecords"]>[0], "companyId" | "requestingUser" | "entityName" | "pagination">) =>
       this.rieFacade.queryCanonicalRecords({ ...ctx, entityName, ...input, pagination: { limit: 5_000 } });
     const customerScope = { customer: { values: customerCodes } };
-    const [invoiceHistory, invoicePeriod, salesPeriod, pendingCollections, bouncedCollections, visitHistory, targets, calendar] = await Promise.all([
+    const [invoiceHistory, invoicePeriod, salesPeriod, pendingCollections, bouncedCollections, visitHistory, targets, routeExpectedSales, calendar] = await Promise.all([
       aggregate("Invoices", { projection: [{ field: "CustomerCode", as: "customerCode" }], groupBy: [{ field: "CustomerCode" }], scope: customerScope, aggregates: [{ op: "maxText", field: "InvoiceDate", as: "lastInvoiceDate" }] }),
       aggregate("Invoices", { projection: [{ field: "CustomerCode", as: "customerCode" }], groupBy: [{ field: "CustomerCode" }], scope: { ...customerScope, date: { field: "InvoiceDate", from: range.from, to: range.to } }, aggregates: [{ op: "count", field: "InvoiceNo", as: "invoiceCount" }] }),
       aggregate("Invoice Items", { projection: [{ field: "CustomerCode", source: "invoice", as: "customerCode" }], groupBy: [{ field: "CustomerCode", source: "invoice" }], joins: [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }], hierarchyRoute: { field: "RouteID", source: "invoice" }, scope: { ...customerScope, customer: { values: customerCodes, source: "invoice" }, date: { field: "InvoiceDate", source: "invoice", from: range.from, to: range.to } }, aggregates: [{ op: "sum", field: "LineTotal", as: "sales" }] }),
@@ -694,6 +693,7 @@ export class VisitCopilotService {
       aggregate("Collections", { projection: [{ field: "CustomerCode", as: "customerCode" }], groupBy: [{ field: "CustomerCode" }], scope: { ...customerScope, fields: [{ field: "Status", values: ["Bounced"] }] }, aggregates: [{ op: "sum", field: "Amount", as: "exposure" }] }),
       aggregate("Visits", { projection: [{ field: "CustomerCode", as: "customerCode" }], groupBy: [{ field: "CustomerCode" }], scope: customerScope, aggregates: [{ op: "maxText", field: "VisitDate", as: "lastVisitDate" }] }),
       aggregate("Targets", { projection: [], scope: { fields: [{ field: "Year", values: [String(year)] }, { field: "Month", values: [String(month)] }] }, aggregates: [{ op: "count", as: "targetRows" }, { op: "sum", field: "SalesTarget", as: "salesTarget" }] }),
+      this.rieFacade.queryVisitCopilotRouteExpectedSales({ ...ctx, customerCodes, from: range.from, to: range.to, planDate: todayIso, visitCycleDays: WEEKLY_VISIT_CYCLE_DAYS }),
       this.prisma.salesCalendar.findMany({ where: { companyId: user.companyId!, calendarDate: { gte: new Date(`${monthStart}T00:00:00.000Z`), lt: new Date(`${nextMonthStart}T00:00:00.000Z`) } }, select: { calendarDate: true, workingDay: true } }),
     ]);
     for (const result of [invoiceHistory, invoicePeriod, salesPeriod, pendingCollections, bouncedCollections, visitHistory, targets]) if (result.page.hasMore) throw new BadRequestException("نتيجة Daily Brief المجمعة تجاوزت الحد المدعوم.");
@@ -882,10 +882,10 @@ export class VisitCopilotService {
       isWorkingDay,
       visitCount: entries.length,
       dailyTargetSales,
-      // The route forecast is solely the historical average invoice value
-      // for each planned customer. Lost Opportunities remain a separate
-      // product-level recommendation and never change this route forecast.
-      expectedSalesTotal: expectedRouteSales(entries),
+      // PostgreSQL computes each product's net daily consumption × the
+      // documented weekly VisitDay cycle × its effective approved price.
+      // Lost Opportunities never influence this card.
+      expectedSalesTotal: round2(routeExpectedSales.expectedSalesTotal),
       estimatedDistanceKm,
       estimatedDurationMin,
       customers: entries,

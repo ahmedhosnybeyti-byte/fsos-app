@@ -535,6 +535,21 @@ export interface RieVisitCopilotLostOpportunitiesResult {
   rows: RieVisitCopilotLostOpportunityRow[];
 }
 
+/** Per-customer historical sales expectation for the customers on one Visit
+ * Copilot day plan. The calculation remains entirely in PostgreSQL. */
+export interface RieVisitCopilotRouteExpectedSalesQuery extends EntityQueryContext {
+  customerCodes: readonly string[];
+  from: string;
+  to: string;
+  /** The selected Visit Copilot plan date; it selects the effective price. */
+  planDate: string;
+  /** Customers.VisitDay is the current recurring weekly plan. */
+  visitCycleDays: number;
+}
+export interface RieVisitCopilotRouteExpectedSalesResult {
+  expectedSalesTotal: number;
+}
+
 /** Product-grain stale-purchase evidence; Product × Customer stays inside SQL. */
 export interface RieStalePurchasesQuery extends EntityQueryContext {
   /** Routes holding active vehicle inventory for the current session. */

@@ -2,12 +2,18 @@ import { strict as assert } from "node:assert";
 import test from "node:test";
 import { expectedRouteSales, VisitCopilotService } from "./visit-copilot.service";
 
-test("daily expected sales is the historical route forecast only", () => {
+test("daily expected sales divides each planned customer's net historical sales by its actual visits", () => {
   assert.equal(expectedRouteSales([
-    { avgOrderValue: 100 },
-    { avgOrderValue: 200 },
-    { avgOrderValue: 0 },
-  ]), 300);
+    { netSales: 12_000, visitCount: 8 },
+  ]), 1_500);
+});
+
+test("daily expected sales sums planned customers and excludes zero-visit customers", () => {
+  assert.equal(expectedRouteSales([
+    { netSales: 12_000, visitCount: 8 },
+    { netSales: 3_000, visitCount: 2 },
+    { netSales: 9_999, visitCount: 0 },
+  ]), 3_000);
 });
 
 test("Visit Copilot retains canonical management identities and Sales Rep restrictions", async () => {
@@ -33,6 +39,7 @@ test("Visit Copilot enters a bounded RIE request plan for its direct and fan-out
       return execute();
     },
     queryCanonicalRecords: async () => ({ records: [], page: { hasMore: false } }),
+    queryVisitCopilotRouteExpectedSales: async () => ({ expectedSalesTotal: 0 }),
   };
   const prisma = {
     salesCalendar: { findMany: async () => [] },
@@ -100,6 +107,7 @@ test("discovery reuses the daily-route aggregates instead of repeating full enti
       }
       return { records: [], page: { hasMore: false } };
     },
+    queryVisitCopilotRouteExpectedSales: async () => ({ expectedSalesTotal: 0 }),
   };
   const prisma = {
     salesCalendar: { findMany: async () => [] },

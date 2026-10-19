@@ -314,3 +314,34 @@ test("Visit Copilot calculates final lost opportunities in PostgreSQL within com
   assert.ok(captured?.values?.includes("r-1"));
   assert.ok(captured?.values?.includes("c-1"));
 });
+
+test("Visit Copilot route expected sales stays PostgreSQL-first and excludes Lost Opportunities", async () => {
+  let captured: { strings?: readonly string[]; values?: readonly unknown[] } | undefined;
+  const service = new RieScalableQueryService({
+    $queryRaw: async (query: typeof captured) => {
+      captured = query;
+      return [{ expectedSalesTotal: 3_000 }];
+    },
+  } as never, { resolveAllowedRouteIds: async () => new Set(["R-1"]) } as never);
+
+  const result = await service.queryVisitCopilotRouteExpectedSales({
+    companyId: "company-1",
+    requestingUser: { roleCode: "MANAGER", email: "manager@example.com" },
+    customerCodes: ["C-1", "C-2"],
+    from: "2026-07-01",
+    to: "2026-09-30",
+  });
+
+  assert.equal(result.expectedSalesTotal, 3_000);
+  const sql = captured?.strings?.join(" ") ?? "";
+  assert.match(sql, /invoice_sales AS MATERIALIZED/);
+  assert.match(sql, /return_sales AS MATERIALIZED/);
+  assert.match(sql, /actual_visits AS MATERIALIZED/);
+  assert.match(sql, /actual_visits\.visit_count > 0/);
+  assert.match(sql, /invoice_status IN \('confirmed', 'posted'\)/);
+  assert.match(sql, /return_status IN \('confirmed', 'approved'\)/);
+  assert.doesNotMatch(sql, /opportunit/);
+  assert.ok(captured?.values?.includes("r-1"));
+  assert.ok(captured?.values?.includes("c-1"));
+  assert.ok(captured?.values?.includes("2026-07-01"));
+});
