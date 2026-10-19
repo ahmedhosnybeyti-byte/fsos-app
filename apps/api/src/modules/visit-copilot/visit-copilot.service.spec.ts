@@ -1,19 +1,56 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { expectedRouteSales, VisitCopilotService } from "./visit-copilot.service";
+import { VisitCopilotService } from "./visit-copilot.service";
+import type { RieVisitCopilotRouteExpectedSalesQuery } from "../rie/scalable-query.types";
 
-test("daily expected sales divides each planned customer's net historical sales by its actual visits", () => {
-  assert.equal(expectedRouteSales([
-    { netSales: 12_000, visitCount: 8 },
-  ]), 1_500);
+function expectedSalesFixture(expectedSalesTotal: number, withCustomer = true) {
+  const queries: RieVisitCopilotRouteExpectedSalesQuery[] = [];
+  const service = new VisitCopilotService({
+    runPlannedRequest: async <T>(_options: unknown, execute: () => Promise<T>) => execute(),
+    queryCanonicalRecords: async (query: { entityName: string; aggregates?: Array<{ as: string }> }) => ({
+      records: query.entityName === "Customers" && withCustomer
+        ? [{ CustomerCode: "C-1", CustomerName: "Customer", VisitSequence: 1 }]
+        : query.entityName === "Invoices" && query.aggregates?.some(({ as }) => as === "invoiceCount")
+          ? [{ customerCode: "C-1", invoiceCount: 1 }]
+          : query.entityName === "Invoice Items" ? [{ customerCode: "C-1", sales: 99_999 }] : [],
+      page: { hasMore: false },
+    }),
+    queryVisitCopilotRouteExpectedSales: async (query: RieVisitCopilotRouteExpectedSalesQuery) => {
+      queries.push(query);
+      return { expectedSalesTotal };
+    },
+  } as never, {} as never, {
+    salesCalendar: { findMany: async () => [] },
+    prospectVisitIntent: { findMany: async () => [] },
+  } as never, {} as never, {
+    detect: async () => ({ opportunities: [{ expectedSales: 50_000 }] }),
+  } as never, {} as never, {} as never);
+  const user = { companyId: "company", userId: "rep", roleCode: "SALES_REP", email: "rep@example.com" };
+  const query = { period: "custom" as const, from: "2026-07-01", to: "2026-07-28", date: "2026-08-04" };
+  return { service, queries, user, query };
+}
+
+test("daily expected sales uses the scoped SQL forecast, selected price date and weekly cycle", async () => {
+  const { service, queries, user, query } = expectedSalesFixture(700.126);
+  const result = await service.dailyBrief(user as never, query);
+
+  assert.equal(result.expectedSalesTotal, 700.13);
+  assert.equal(result.customers[0]?.avgOrderValue, 99_999);
+  assert.deepEqual(queries, [{
+    companyId: "company",
+    requestingUser: { roleCode: "SALES_REP", email: "rep@example.com" },
+    customerCodes: ["C-1"], from: query.from, to: query.to,
+    planDate: query.date, visitCycleDays: 7,
+  }]);
 });
 
-test("daily expected sales sums planned customers and excludes zero-visit customers", () => {
-  assert.equal(expectedRouteSales([
-    { netSales: 12_000, visitCount: 8 },
-    { netSales: 3_000, visitCount: 2 },
-    { netSales: 9_999, visitCount: 0 },
-  ]), 3_000);
+test("daily expected sales keeps zero for an empty plan without adding Lost Opportunities", async () => {
+  const { service, queries, user, query } = expectedSalesFixture(0, false);
+  const result = await service.dailyBrief(user as never, query);
+
+  assert.equal(result.expectedSalesTotal, 0);
+  assert.equal(result.visitCount, 0);
+  assert.deepEqual(queries[0]?.customerCodes, []);
 });
 
 test("Visit Copilot retains canonical management identities and Sales Rep restrictions", async () => {

@@ -3,6 +3,8 @@ import test from "node:test";
 import { RieScalableQueryService } from "./scalable-query.service";
 import { runWithRieRequestContext, setRieTelemetryTestSink } from "../../common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
+import type { Prisma } from "@field-sales-os/database";
+import type { RieVisitCopilotRouteExpectedSalesQuery } from "./scalable-query.types";
 
 const scalableQueryInput = () => ({
   companyId: "company-1",
@@ -330,18 +332,104 @@ test("Visit Copilot route expected sales stays PostgreSQL-first and excludes Los
     customerCodes: ["C-1", "C-2"],
     from: "2026-07-01",
     to: "2026-09-30",
+    planDate: "2026-10-06",
+    visitCycleDays: 7,
   });
 
   assert.equal(result.expectedSalesTotal, 3_000);
   const sql = captured?.strings?.join(" ") ?? "";
-  assert.match(sql, /invoice_sales AS MATERIALIZED/);
-  assert.match(sql, /return_sales AS MATERIALIZED/);
-  assert.match(sql, /actual_visits AS MATERIALIZED/);
-  assert.match(sql, /actual_visits\.visit_count > 0/);
+  assert.match(sql, /invoice_quantities AS MATERIALIZED/);
+  assert.match(sql, /return_quantities AS MATERIALIZED/);
+  assert.match(sql, /effective_prices AS MATERIALIZED/);
+  assert.match(sql, /net\.net_quantity \/ GREATEST/);
   assert.match(sql, /invoice_status IN \('confirmed', 'posted'\)/);
   assert.match(sql, /return_status IN \('confirmed', 'approved'\)/);
-  assert.doesNotMatch(sql, /opportunit/);
+  assert.doesNotMatch(sql, /opportunit|actual_visits/);
   assert.ok(captured?.values?.includes("r-1"));
   assert.ok(captured?.values?.includes("c-1"));
   assert.ok(captured?.values?.includes("2026-07-01"));
+  assert.ok(captured?.values?.includes("2026-10-06"));
+  assert.ok(captured?.values?.includes(7));
+});
+
+test("route expected sales validates its contract and skips SQL for an empty customer scope", async () => {
+  let executions = 0;
+  const service = new RieScalableQueryService({
+    $queryRaw: async () => { executions++; return []; },
+  } as never, { resolveAllowedRouteIds: async () => null } as never);
+  const input: RieVisitCopilotRouteExpectedSalesQuery = {
+    companyId: "company", customerCodes: [], from: "2026-07-01", to: "2026-07-28",
+    planDate: "2026-08-04", visitCycleDays: 7,
+  };
+  assert.deepEqual(await service.queryVisitCopilotRouteExpectedSales(input), { expectedSalesTotal: 0 });
+  for (const visitCycleDays of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
+    await assert.rejects(service.queryVisitCopilotRouteExpectedSales({ ...input, visitCycleDays }), /positive visit cycle/);
+  }
+  await assert.rejects(service.queryVisitCopilotRouteExpectedSales({ ...input, planDate: "invalid" }), /invalid date/);
+  await assert.rejects(service.queryVisitCopilotRouteExpectedSales({ ...input, companyId: " " }), /requires companyId/);
+  assert.equal(executions, 0);
+});
+
+// Characterizes the current forecast, not a final business approval of its formula.
+test("route forecast SQL preserves net weekly demand, effective prices and tenant/route scope", {
+  skip: process.env.RIE_TEST_PGLITE_MODULE ? false : "Set RIE_TEST_PGLITE_MODULE for in-memory SQL validation",
+}, async (t) => {
+  interface MemoryPostgres {
+    exec(sql: string): Promise<unknown>;
+    query(sql: string, values?: unknown[]): Promise<{ rows: unknown[] }>;
+    close(): Promise<void>;
+  }
+  const { PGlite } = require(process.env.RIE_TEST_PGLITE_MODULE!) as { PGlite: new () => MemoryPostgres };
+  const db = new PGlite();
+  t.after(() => db.close());
+  await db.exec(`CREATE TEMP TABLE rie_canonical_entity_rows (
+    id text PRIMARY KEY, company_id text NOT NULL, entity_name text NOT NULL,
+    entity_key text NOT NULL, precedence bigint NOT NULL DEFAULT 1,
+    data jsonb NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
+  )`);
+  let sequence = 0;
+  const insert = (entity: string, data: Record<string, unknown>, company = "company") => db.query(
+    "INSERT INTO rie_canonical_entity_rows (id, company_id, entity_name, entity_key, data) VALUES ($1, $2, $3, $1, $4::jsonb)",
+    [`row-${++sequence}`, company, entity, JSON.stringify(data)],
+  );
+  for (const company of ["company", "other-company"]) {
+    for (const [customer, route] of [["C-1", "R-1"], ["C-2", "R-2"]]) {
+      await insert("Customers", { CustomerCode: customer, RouteID: route, DefaultPriceListCode: "PL" }, company);
+      await insert("Invoices", { InvoiceNo: customer, CustomerCode: customer, RouteID: route, InvoiceDate: "2026-07-01", InvoiceStatus: "Confirmed" }, company);
+      await insert("Invoice Items", { InvoiceNo: customer, ProductCode: "P", Unit: "case", Quantity: 300 }, company);
+      await insert("Returns", { ReturnNo: customer, CustomerCode: customer, RouteID: route, ReturnDate: "2026-07-28", Status: "Approved" }, company);
+      await insert("Return Items", { ReturnNo: customer, ProductCode: "P", Unit: "case", Quantity: 20 }, company);
+    }
+    await insert("Price List", { PriceListCode: "PL", ProductCode: "P", Unit: "case", Status: "Active", StartDate: "2026-01-01", EndDate: "2026-07-31", PriceAfterVAT: 8 }, company);
+    await insert("Price List", { PriceListCode: "PL", ProductCode: "P", Unit: "case", Status: "Active", StartDate: "2026-08-01", PriceAfterVAT: 10 }, company);
+    await insert("Price List", { PriceListCode: "PL", ProductCode: "P", Unit: "case", Status: "Active", StartDate: "2026-09-01", PriceAfterVAT: 99 }, company);
+  }
+  for (const [invoiceNo, date, status] of [["cancelled", "2026-07-01", "Cancelled"], ["outside", "2026-06-30", "Confirmed"]]) {
+    await insert("Invoices", { InvoiceNo: invoiceNo, CustomerCode: "C-1", RouteID: "R-1", InvoiceDate: date, InvoiceStatus: status });
+    await insert("Invoice Items", { InvoiceNo: invoiceNo, ProductCode: "P", Unit: "case", Quantity: 999 });
+  }
+  await insert("Returns", { ReturnNo: "pending", CustomerCode: "C-1", RouteID: "R-1", ReturnDate: "2026-07-01", Status: "Pending" });
+  await insert("Return Items", { ReturnNo: "pending", ProductCode: "P", Unit: "case", Quantity: 999 });
+  let allowed: Set<string> | null = new Set(["r-1"]);
+  const service = new RieScalableQueryService({
+    $queryRaw: async (sql: Prisma.Sql) => (await db.query(sql.text, sql.values)).rows,
+  } as never, { resolveAllowedRouteIds: async () => allowed } as never);
+  const input: RieVisitCopilotRouteExpectedSalesQuery = {
+    companyId: "company", requestingUser: { roleCode: "MANAGER", email: "manager@example.com" },
+    customerCodes: ["C-1", "C-2"], from: "2026-07-01", to: "2026-07-28", planDate: "2026-08-04", visitCycleDays: 7,
+  };
+  const total = async (overrides: Partial<RieVisitCopilotRouteExpectedSalesQuery> = {}) =>
+    (await service.queryVisitCopilotRouteExpectedSales({ ...input, ...overrides })).expectedSalesTotal;
+  assert.equal(await total(), 700); // (300 - 20) / 28 days * 7 days * 10
+  assert.equal(await total({ planDate: "2026-07-31" }), 560);
+  assert.equal(await total({ visitCycleDays: 14 }), 1_400);
+  assert.equal(await total({ from: "2026-07-01", to: "2026-07-01" }), 21_000);
+  assert.equal(await total({ companyId: "missing-company" }), 0);
+  allowed = new Set();
+  assert.equal(await total(), 0);
+  allowed = null;
+  assert.equal(await total(), 1_400);
+  assert.equal(await total({ customerCodes: ["C-1"] }), 700);
+  await insert("Price List", { PriceListCode: "PL", ProductCode: "P", Unit: "case", Status: "Active", StartDate: "2026-08-02", PriceAfterVAT: 10.5 });
+  assert.equal(await total({ customerCodes: ["C-1"] }), 735);
 });
