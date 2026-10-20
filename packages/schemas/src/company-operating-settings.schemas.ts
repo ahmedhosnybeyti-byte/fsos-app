@@ -29,7 +29,7 @@ export const companyModuleRegistry = [
   { key: "analytics", arabicLabel: "التحليلات وExcel وRIE والتقارير", englishLabel: "Analytics, Excel, RIE and reports", delivery: "AVAILABLE", modes: ["ANALYSIS_ONLY", "SFA", "FULL_ERP"] },
   { key: "operations-setup", arabicLabel: "تجهيز التشغيل والمستودعات الأساسية", englishLabel: "Operations setup and warehouse registry", delivery: "AVAILABLE", modes: ["SFA", "FULL_ERP"] },
   { key: "field-sales", arabicLabel: "دورة الزيارات والبيع التشغيلي الكاملة", englishLabel: "Complete operational visits and field sales cycle", delivery: "DEFERRED", modes: ["SFA", "FULL_ERP"] },
-  { key: "warehouse", arabicLabel: "المخزون: أصناف ودفعات وأرصدة افتتاحية فقط", englishLabel: "Inventory: products, batches and opening stock only", delivery: "PARTIAL", modes: ["SFA", "FULL_ERP"] },
+  { key: "warehouse", arabicLabel: "المستودع: أصناف واستلام وFEFO وحجز وتجهيز وصرف", englishLabel: "Warehouse: products, receiving, FEFO, reservations, picking and dispatch", delivery: "PARTIAL", modes: ["SFA", "FULL_ERP"] },
   { key: "purchasing", arabicLabel: "المشتريات والموردون", englishLabel: "Purchasing and suppliers", delivery: "DEFERRED", modes: ["FULL_ERP"] },
   { key: "accounting", arabicLabel: "الحسابات والأستاذ العام", englishLabel: "Accounting and general ledger", delivery: "DEFERRED", modes: ["FULL_ERP"] },
   { key: "invoicing", arabicLabel: "ترحيل الفواتير والمرتجعات", englishLabel: "Invoice and return posting", delivery: "DEFERRED", modes: ["FULL_ERP"] },

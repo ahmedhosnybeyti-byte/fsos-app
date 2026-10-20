@@ -12,7 +12,7 @@ const productFields = Prisma.sql`p.id,p.code,p.barcode,p.name,p.base_unit AS "ba
   p.handling_notes AS "handlingNotes",p.is_active AS "isActive",p.version`;
 const movementFields = Prisma.sql`m.id,p.name AS "productName",b.code AS "batchCode",m.kind,m.quantity::text,
   p.base_unit AS "baseUnit",m.input_quantity::text AS "inputQuantity",m.input_unit AS "inputUnit",m.conversion_factor AS "conversionFactor",
-  m.reference,m.reason,to_char(m.created_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",m.reversal_of AS "reversalOf",
+  m.reserved_delta::text AS "reservedDelta",m.in_transit_delta::text AS "inTransitDelta",m.reference,m.reason,to_char(m.created_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",m.reversal_of AS "reversalOf",
   EXISTS(SELECT 1 FROM wms_movements r WHERE r.company_id=m.company_id AND r.reversal_of=m.id) AS reversed`;
 function parse<T>(schema: ZodType<T,ZodTypeDef,unknown>, input: unknown): T {
   const result=schema.safeParse(input);
@@ -25,6 +25,13 @@ function page<T>(items: T[], value: number) { return { items: items.slice(0,page
 @Injectable()
 export class WmsService {
   constructor(private readonly prisma: PrismaService, private readonly audit: AuditLogService) {}
+
+  /** Shared server boundary for operational modules; never accept tenant from input. */
+  authorizedRead(user: AuthenticatedUser, warehouse: string) { return this.scope(this.prisma,user,warehouse); }
+  authorizedTransaction<T>(user: AuthenticatedUser,warehouse: string,permission: string,work:(tx:Prisma.TransactionClient,company:string)=>Promise<T>) {
+    this.company(user,permission);
+    return this.mutation(async tx=>work(tx,await this.scope(tx,user,warehouse,true)));
+  }
 
   private company(user: AuthenticatedUser, permission = "wms.read") {
     if (!user.companyId || user.roleCode === "SUPER_ADMIN" || !["sfa.access","wms.read",permission].every(p => user.permissions?.includes(p)))
@@ -70,14 +77,14 @@ export class WmsService {
   async summary(user: AuthenticatedUser, warehouse: string, input: unknown) {
     const { horizon }=parse(wmsStockQuerySchema,input); const company=await this.scope(this.prisma,user,warehouse);
     const rows=await this.prisma.$queryRaw<WmsSummary[]>(Prisma.sql`WITH stock AS MATERIALIZED (
-      SELECT s.physical,s.available,s.reserved,s.quarantined,s.expired,s.days_remaining,s.product_id,s.base_unit
+      SELECT s.physical,s.available,s.reserved,s.quarantined,s.in_transit,s.expired,s.days_remaining,s.product_id,s.base_unit
       FROM wms_inventory_state s
-      WHERE s.company_id=${company} AND s.warehouse_id=${warehouse} AND s.physical>0
+      WHERE s.company_id=${company} AND s.warehouse_id=${warehouse} AND (s.physical>0 OR s.in_transit>0)
     ), units AS (SELECT base_unit AS "baseUnit",sum(physical)::text AS physical,sum(available)::text AS available,
-      sum(reserved)::text AS reserved,sum(quarantined)::text AS quarantined,sum(expired)::text AS expired FROM stock GROUP BY base_unit)
+      sum(reserved)::text AS reserved,sum(quarantined)::text AS quarantined,sum(expired)::text AS expired,sum(in_transit)::text AS "inTransit" FROM stock GROUP BY base_unit)
     SELECT COALESCE((SELECT jsonb_agg(units ORDER BY "baseUnit") FROM units),'[]'::jsonb) AS units,
-      count(*) FILTER(WHERE days_remaining>0 AND days_remaining<=${horizon})::int AS "nearExpiryBatches",
-      count(*) FILTER(WHERE days_remaining<=0)::int AS "expiredBatches",count(DISTINCT product_id)::int AS "stockedProducts",
+      count(*) FILTER(WHERE physical>0 AND days_remaining>0 AND days_remaining<=${horizon})::int AS "nearExpiryBatches",
+      count(*) FILTER(WHERE physical>0 AND days_remaining<=0)::int AS "expiredBatches",count(DISTINCT product_id) FILTER(WHERE physical>0)::int AS "stockedProducts",
       to_char(CURRENT_TIMESTAMP AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "asOf" FROM stock`);
     return rows[0]!;
   }
@@ -88,9 +95,9 @@ export class WmsService {
       AND (position(lower(${search}) in lower(p.name))>0 OR position(lower(${search}) in lower(p.code))>0 OR p.barcode=${search})
       ORDER BY p.id LIMIT ${pageSize+1} OFFSET ${(n-1)*pageSize}
     ) SELECT p.*,COALESCE(s.physical,0)::text AS physical,COALESCE(s.available,0)::text AS available,
-      COALESCE(s.reserved,0)::text AS reserved,COALESCE(s.quarantined,0)::text AS quarantined
+      COALESCE(s.reserved,0)::text AS reserved,COALESCE(s.quarantined,0)::text AS quarantined,COALESCE(s.in_transit,0)::text AS "inTransit"
       FROM products p LEFT JOIN (
-        SELECT s.product_id,sum(s.physical) AS physical,sum(s.available) AS available,sum(s.reserved) AS reserved,sum(s.quarantined) AS quarantined
+        SELECT s.product_id,sum(s.physical) AS physical,sum(s.available) AS available,sum(s.reserved) AS reserved,sum(s.quarantined) AS quarantined,sum(s.in_transit) AS in_transit
         FROM wms_inventory_state s WHERE s.company_id=${company} AND s.warehouse_id=${warehouse}
         AND s.product_id IN (SELECT id FROM products) GROUP BY s.product_id
       ) s ON s.product_id=p.id ORDER BY p.id`),n);
@@ -99,15 +106,15 @@ export class WmsService {
     const { page:n,productId,nearExpiry,horizon }=parse(wmsStockQuerySchema,input); const company=await this.scope(this.prisma,user,warehouse);
     return page(await this.prisma.$queryRaw<WmsBatch[]>(Prisma.sql`WITH lots AS MATERIALIZED (
       SELECT b.id,b.product_id,b.code,b.production_date,b.expiry_date,b.is_quarantined,
-        COALESCE(s.physical,0) AS physical,COALESCE(s.reserved,0) AS reserved,COALESCE(s.quarantined,0) AS quarantined
+        COALESCE(s.physical,0) AS physical,COALESCE(s.reserved,0) AS reserved,COALESCE(s.quarantined,0) AS quarantined,COALESCE(s.in_transit,0) AS in_transit
       FROM wms_batches b LEFT JOIN wms_positions s ON s.company_id=${company} AND s.warehouse_id=${warehouse} AND s.batch_id=b.id
-      WHERE b.company_id=${company} ${productId ? Prisma.sql`AND b.product_id=${productId}` : Prisma.sql`AND s.physical>0`}
+      WHERE b.company_id=${company} ${productId ? Prisma.sql`AND b.product_id=${productId}` : Prisma.sql`AND (s.physical>0 OR s.in_transit>0)`}
       ${nearExpiry === "true" ? Prisma.sql`AND s.physical>0 AND b.expiry_date>(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date
         AND b.expiry_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date+${horizon}::int` : Prisma.empty}
       ORDER BY b.expiry_date ASC NULLS LAST,b.id LIMIT ${pageSize+1} OFFSET ${(n-1)*pageSize}
     ) SELECT b.id,b.product_id AS "productId",p.name AS "productName",p.base_unit AS "baseUnit",b.code,
       to_char(b.production_date,'YYYY-MM-DD') AS "productionDate",to_char(b.expiry_date,'YYYY-MM-DD') AS "expiryDate",b.is_quarantined AS "isQuarantined",
-      b.physical::text, b.reserved::text,b.quarantined::text,
+      b.physical::text, b.reserved::text,b.quarantined::text,b.in_transit::text AS "inTransit",
       (CASE WHEN b.expiry_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date OR b.is_quarantined OR NOT p.is_active THEN 0
         ELSE b.physical-b.reserved-b.quarantined END)::text AS available,
       b.expiry_date-(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date AS "daysRemaining",
@@ -119,7 +126,7 @@ export class WmsService {
   async movements(user: AuthenticatedUser, warehouse: string, input: unknown) {
     const { page:n }=parse(wmsPageSchema,input); const company=await this.scope(this.prisma,user,warehouse);
     return page(await this.prisma.$queryRaw<WmsMovement[]>(Prisma.sql`WITH movements AS MATERIALIZED (
-      SELECT id,company_id,batch_id,kind,quantity,input_quantity,input_unit,conversion_factor,reference,reason,created_at,reversal_of
+      SELECT id,company_id,batch_id,kind,quantity,input_quantity,input_unit,conversion_factor,reference,reason,created_at,reversal_of,reserved_delta,in_transit_delta
       FROM wms_movements WHERE company_id=${company} AND warehouse_id=${warehouse}
       ORDER BY created_at DESC,id DESC LIMIT ${pageSize+1} OFFSET ${(n-1)*pageSize}
     ) SELECT ${movementFields} FROM movements m

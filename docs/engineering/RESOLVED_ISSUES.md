@@ -370,3 +370,24 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Regression-prevention rule:** Every durable audit of a newly created tenant
   or resource must use the same transaction as that resource. Never suppress an
   audit error or publish through an independent connection before commit.
+
+## WMS — duplicate reservation/dispatch and premature custody boundary
+
+- **Symptom:** Before Phase 02, Smart Loading proposals had no authoritative
+  reservation/picking/dispatch path. Treating a proposal or dispatch as accepted
+  recipient custody would misstate stock ownership.
+- **Root cause:** Analytical suggestions and foundational opening balances did
+  not supply operational document states, reserved/transit effects or acceptance.
+- **Fix:** Add bounded typed receipt/load documents, exact SQL FEFO allocations,
+  stable product/position locks, versioned transitions, immutable command/event
+  history and stock deltas. Commit workflow, quantities and audit atomically;
+  dispatch enters transit, only the named recipient accepts custody.
+- **Commit:** Independent local WMS Phase 02 commit containing this entry, based
+  on company-mode integration commit `624321d`.
+- **Verification:** Isolated SQL, native independent-connection races, 43 actual
+  HTTP admission tests, full mobile workflow and eight theme/locale/viewport
+  renders; see [WMS_PHASE02.md](WMS_PHASE02.md) and its final quality evidence.
+- **Regression-prevention rule:** Re-evaluate current expiry/quarantine/customer
+  policy at reservation through dispatch/acceptance. Never reserve from a proposal
+  alone, reserve beyond free stock, silently correct a posted entry, infer custody
+  from dispatch, or separate a new operational resource from its transaction audit.

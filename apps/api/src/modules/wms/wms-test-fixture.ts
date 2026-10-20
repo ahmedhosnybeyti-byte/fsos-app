@@ -21,10 +21,14 @@ export async function wmsFixture(db:any) {
   await db.exec(wmsFixtureSql);
   await db.exec(readFileSync("packages/database/prisma/migrations/20261019120000_sfa_warehouses/migration.sql","utf8"));
   await db.exec(readFileSync("packages/database/prisma/migrations/20261020100000_wms_phase01/migration.sql","utf8"));
+  await db.exec(readFileSync("packages/database/prisma/migrations/20261020150000_wms_phase02/migration.sql","utf8"));
   await db.exec(wmsWarehouseSql);
   return wmsAdapter(db);
 }
 export function wmsAdapter(db:any,failAudit=false) {
+  const prisma=wmsPersistence(db,failAudit);return new WmsService(prisma,new AuditLogService(prisma));
+}
+export function wmsPersistence(db:any,failAudit=false) {
   function adapter(connection:any):any {
     const run=async (sql:any,...values:any[])=>{
       const q=Array.isArray(sql)?Prisma.sql(sql as unknown as TemplateStringsArray,...values):sql;
@@ -41,5 +45,5 @@ export function wmsAdapter(db:any,failAudit=false) {
     };
     return tx;
   }
-  const prisma=adapter(db); return new WmsService(prisma,new AuditLogService(prisma));
+  return adapter(db);
 }

@@ -1,5 +1,7 @@
 "use client";
 
+import { SmartLoadingWarehouseBridge } from "@/components/wms/smart-loading-bridge";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
@@ -738,6 +740,8 @@ export function SmartLoadingScreen({
         </div>
         </div>
       </header>
+
+      {!managementView && <SmartLoadingWarehouseBridge targetDate={targetDate} proposals={rows.map(row=>({productCode:row.product.productCode,productName:row.product.productName,quantity:row.suggested}))}/>}
 
       {managementView && (
         <div className="-my-2 grid items-stretch gap-3 md:grid-cols-3">

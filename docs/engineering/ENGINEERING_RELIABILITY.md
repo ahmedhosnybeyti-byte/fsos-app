@@ -142,3 +142,19 @@ atomicity and audit-failure rollback; actual scoped query plans and eight browse
 theme/locale/viewport combinations were captured in excluded `.quality/wms/`.
 This is a local phase acceptance, not Linux packaging, mixed-load capacity,
 backup-custody verification, deployment permission or Production migration approval.
+
+## WMS Phase 02 local evidence (2026-10-20)
+
+See [WMS_PHASE02.md](WMS_PHASE02.md) for the complete contract, new additive
+migration, capabilities, native runner, existing-company preview and Demo integration
+plan. The initial quality gate passed 516 checks with four typechecks; the standalone
+isolated SQL gate passed 93, without failures/skips/TODOs. Independent native
+PostgreSQL connections additionally proved competing reservations, idempotent
+receipt/dispatch/acceptance, cancellation and rollback after a stock effect.
+Forty-three actual local HTTP checks covered all operation permissions and tenant,
+warehouse, mode and screen admission. A real mobile receiving-to-custody journey
+and eight actual theme/locale/viewport renders passed. Scoped query plans and
+result sizes are recorded; these are local samples, not capacity certification.
+Final WMS-only gate against `624321d` passed 517 checks and four typechecks;
+see the handoff and `.quality/changed.json`. No Production data,
+activation, push, deployment or Production migration was performed.

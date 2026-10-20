@@ -3,6 +3,7 @@ import test from "node:test";
 import { Reflector } from "@nestjs/core";
 import { ForbiddenException } from "@nestjs/common";
 import { WmsController } from "./wms.controller";
+import { WmsOperationsController } from "./wms-operations.controller";
 import { SfaAccessGuard } from "../../common/guards/sfa-access.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { CompanyScreenAccessGuard } from "../../common/guards/company-screen-access.guard";
@@ -13,9 +14,9 @@ test("every WMS API fails closed for missing mode, company screen, operation per
   const reflector=new Reflector();
   for(const [method,extra] of Object.entries(operations)){
     const context=(user:any)=>({getClass:()=>WmsController,getHandler:()=>WmsController.prototype[method as keyof WmsController],switchToHttp:()=>({getRequest:()=>({user,body:{companyId:"forged",warehouse:"other"}})})} as never);
-    for(const mode of [undefined,"ANALYSIS_ONLY","SFA"]){
+    for(const mode of [undefined,"ANALYSIS_ONLY","SFA","FULL_ERP"]){
       const guard=new SfaAccessGuard(reflector,{companyOperatingSettings:{findUnique:async()=>mode?{operatingMode:mode}:null}} as never);
-      if(mode==="SFA")assert.equal(await guard.canActivate(context(wmsUser())),true);
+      if(mode==="SFA"||mode==="FULL_ERP")assert.equal(await guard.canActivate(context(wmsUser())),true);
       else await assert.rejects(guard.canActivate(context(wmsUser())),ForbiddenException);
     }
     const guard=new SfaAccessGuard(reflector,{companyOperatingSettings:{findUnique:async()=>({operatingMode:"SFA"})}} as never);
@@ -29,6 +30,23 @@ test("every WMS API fails closed for missing mode, company screen, operation per
     const role=new RolesGuard(reflector,{record:async()=>{}} as never);
     if(method.startsWith("access"))await assert.rejects(role.canActivate(context(wmsUser("a","clerk-a","SALES_REP"))),ForbiddenException);
     else assert.equal(await role.canActivate(context(wmsUser("a","clerk-a","SALES_REP"))),true);
+  }
+});
+
+test("every receiving/loading endpoint retains mode, screen and tenant admission including direct command API",async()=>{
+  const reflector=new Reflector();
+  for(const method of ["command","receipts","receipt","loads","load","fefo","recipients","policies","policy"] as const){
+    const context=(user:any)=>({getClass:()=>WmsOperationsController,getHandler:()=>WmsOperationsController.prototype[method],switchToHttp:()=>({getRequest:()=>({user})})} as never);
+    const user={...wmsUser(),permissions:[...wmsPermissions,"wms.policy.manage"]};
+    for(const mode of [undefined,"ANALYSIS_ONLY","SFA","FULL_ERP"]){const guard=new SfaAccessGuard(reflector,{companyOperatingSettings:{findUnique:async()=>mode?{operatingMode:mode}:null}} as never);
+      if(mode==="SFA"||mode==="FULL_ERP")assert.equal(await guard.canActivate(context(user)),true);else await assert.rejects(guard.canActivate(context(user)),ForbiddenException);
+    }
+    for(const missing of ["sfa.access","wms.read",...(method==="policy"?["wms.policy.manage"]:[])]){
+      const guard=new SfaAccessGuard(reflector,{companyOperatingSettings:{findUnique:async()=>({operatingMode:"SFA"})}} as never);
+      await assert.rejects(guard.canActivate(context({...user,permissions:user.permissions.filter(p=>p!==missing)})),ForbiddenException);
+    }
+    const screen=new CompanyScreenAccessGuard(reflector,{company:{findUnique:async()=>({featureAccess:{"warehouse-core":"HIDDEN"}})}} as never);
+    await assert.rejects(screen.canActivate(context(user)),ForbiddenException);
   }
 });
 test("WMS controller forwards authenticated actor and actual warehouse path, never body company scope",()=>{
