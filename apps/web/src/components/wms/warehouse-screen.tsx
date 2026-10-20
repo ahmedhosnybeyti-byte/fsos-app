@@ -3,7 +3,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useMutation,useQuery,useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Boxes, ClipboardList, PackagePlus, Pencil, Plus, RefreshCw, ShieldCheck, Warehouse } from "lucide-react";
-import { getCompanyFeatureAccessState, type WmsWarehouse } from "@field-sales-os/schemas";
+import { supportsSfaOperations, getCompanyFeatureAccessState, type WmsWarehouse } from "@field-sales-os/schemas";
 import { useAuth } from "@/hooks/use-auth";
 import { useTranslation } from "@/components/translation-provider";
 import { sfaSetupApi } from "@/lib/api/sfa-setup";
@@ -23,7 +23,7 @@ export function WarehouseScreen() {
   const allowed=!!company&&user?.role.code!=="SUPER_ADMIN"&&getCompanyFeatureAccessState(user?.featureAccess,"warehouse-core")==="ENABLED"
     &&["sfa.access","wms.read"].every(p=>user?.permissions?.includes(p));
   const mode=useQuery({queryKey:["sfa-mode",company],queryFn:sfaSetupApi.mode,enabled:allowed,...queryOptions});
-  const enabled=allowed&&mode.data?.operatingMode==="SFA";
+  const enabled=allowed&&supportsSfaOperations(mode.data?.operatingMode);
   const [warehouse,setWarehouse]=useState<WmsWarehouse|null>(null);
   const [pickerPage,setPickerPage]=useState(1); const [pickerInput,setPickerInput]=useState(""); const [pickerSearch,setPickerSearch]=useState("");
   const warehouses=useQuery({queryKey:["wms",company,"warehouses",pickerPage,pickerSearch],queryFn:()=>wmsApi.warehouses(pickerPage,pickerSearch),enabled,...queryOptions});

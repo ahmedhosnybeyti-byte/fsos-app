@@ -18,6 +18,8 @@ import { canSubmitCompanyDetails, getCompanyDetailsViewState } from "@/lib/admin
 import { useTranslation } from "@/components/translation-provider";
 import { useAuth } from "@/hooks/use-auth";
 
+import { CompanyOperatingModeField } from "@/components/company-operating-mode-field";
+
 const accessLabels: Record<CompanyScreenAccessState, string> = { ENABLED: "مفعّلة", LOCKED: "ظاهرة ومجمّدة", HIDDEN: "مخفية" };
 
 export default function AdminCompanyDetailsPage() {
@@ -55,11 +57,9 @@ export default function AdminCompanyDetailsPage() {
   const filteredLaunchCodeUsers = data.users.filter((user) => `${user.fullName} ${user.email}`.toLowerCase().includes(launchCodeSearch.trim().toLowerCase()));
   return <div className="space-y-6">
     <section className="glass-card space-y-4 p-4">
-      <h2 className="font-semibold">{locale === "ar" ? "وضع تشغيل الشركة" : "Company operating mode"}</h2>
-      <p className="text-sm text-muted-foreground">{locale === "ar" ? "تفعيل SFA لا يمنح صلاحيات ولا يُظهر الشاشة تلقائيًا. يجب أيضًا تفعيل تجهيز التشغيل ضمن صلاحيات الشاشات ومنح الدور صلاحية sfa.access من إدارة الصلاحيات. التحكم الحالي بالأدوار عام؛ بوابة الشركة والشاشة تبقى مستقلة." : "SFA mode does not grant permissions or reveal screens. Also enable Operations setup below and grant sfa.access through existing role access control. Role grants are global; company and screen gates remain independent."}</p>
+      <h2 className="font-semibold">{locale === "ar" ? "نظام تشغيل الشركة" : "Company operating system"}</h2>
       {operatingQuery.isPending ? <Spinner className="h-4 w-4" /> : operatingQuery.isError ? <p role="alert" className="text-sm text-destructive">{locale === "ar" ? "تعذر تحميل وضع التشغيل." : "Could not load operating mode."}</p> : <>
-        <Label htmlFor="company-operating-mode">{locale === "ar" ? "وضع التشغيل" : "Operating mode"}</Label>
-        <Select value={operatingMode} disabled={operatingMutation.isPending} onValueChange={(value) => setOperatingMode(value as CompanyOperatingMode)}><SelectTrigger id="company-operating-mode" className="w-full sm:w-72"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="ANALYSIS_ONLY">Analysis Only</SelectItem><SelectItem value="SFA">SFA</SelectItem></SelectContent></Select>
+        <CompanyOperatingModeField value={operatingMode} onChange={(mode) => { setOperatingMode(mode); operatingMutation.reset(); }} disabled={operatingMutation.isPending} featureAccess={featureQuery.data?.featureAccess} />
         <Button disabled={operatingMutation.isPending || operatingMode === operatingQuery.data.operatingMode} onClick={() => operatingMutation.mutate()}>{operatingMutation.isPending ? (locale === "ar" ? "جارٍ الحفظ…" : "Saving…") : (locale === "ar" ? "حفظ وضع التشغيل" : "Save operating mode")}</Button>
       </>}
       {operatingMutation.isError && <p role="alert" className="text-sm text-destructive">{locale === "ar" ? "تعذر حفظ وضع التشغيل." : "Could not save operating mode."}</p>}

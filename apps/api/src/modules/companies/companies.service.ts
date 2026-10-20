@@ -148,12 +148,12 @@ export class CompaniesService {
     // never leaves behind.
     const configured = await tx.company.update({ where: { id: company.id }, data: { status: "CONFIGURING" } });
 
-    // Phase 9 Platform Event — fire-and-forget, never blocks provisioning.
+    // Keep the durable event audit in the caller's provisioning transaction.
     await this.platformEventsService.emit("CompanyCreated", {
       companyId: configured.id,
       entityType: "Company",
       entityId: configured.id,
-    });
+    }, tx);
 
     return { company: configured, branch: defaultBranch };
   }
@@ -163,6 +163,9 @@ export class CompaniesService {
     try {
       const result = await this.prisma.$transaction(async (tx) => {
         const company = await tx.company.create({ data: { name: input.name, slug: input.slug, status: input.initialStatus, maxExcelUploadSizeMb: 100, featureAccess: NEW_COMPANY_FEATURE_ACCESS } });
+        // Atomic with provisioning and audit. Missing legacy input stays Analytics.
+        const operatingMode = input.operatingMode ?? "ANALYSIS_ONLY";
+        await tx.companyOperatingSettings.create({ data: { companyId: company.id, operatingMode } });
         await tx.companyProfile.create({ data: { companyId: company.id } });
         const region = await this.orgUnitsService.ensureDefaultRegion(company.id, tx);
         await this.orgUnitsService.create(company.id, { type: "BRANCH", code: "MAIN", name: "Main Branch", parentId: region.id }, tx);
@@ -170,7 +173,7 @@ export class CompaniesService {
         if (!role) throw new NotFoundException("COMPANY_ADMIN role not found");
         const admin = await tx.user.create({ data: { companyId: company.id, roleId: role.id, email: input.adminEmail, fullName: input.adminFullName, passwordHash: await argon2.hash(temporaryPassword), mustChangePassword: true }, select: { id: true, email: true, fullName: true, mustChangePassword: true } });
         const subscription = await this.subscriptionsService.createInitialSubscription(company.id, tx, input.initialPlanCode);
-        await this.auditLogService.record({ companyId: company.id, userId: actorUserId, action: "company.create", entityType: "Company", entityId: company.id, metadata: { after: { name: company.name, slug: company.slug, status: company.status } } }, tx);
+        await this.auditLogService.record({ companyId: company.id, userId: actorUserId, action: "company.create", entityType: "Company", entityId: company.id, metadata: { after: { name: company.name, slug: company.slug, status: company.status, operatingMode } } }, tx);
         await this.auditLogService.record({ companyId: company.id, userId: actorUserId, action: "user.create", entityType: "User", entityId: admin.id, metadata: { roleCode: "COMPANY_ADMIN", mustChangePassword: true } }, tx);
         await this.auditLogService.record({ companyId: company.id, userId: actorUserId, action: "subscription.create", entityType: "Subscription", entityId: subscription.id, metadata: { planCode: subscription.plan.code, status: subscription.status } }, tx);
         return { company, admin, subscription };

@@ -44,7 +44,7 @@ export class OrgUnitsService {
         companyId,
         entityType: "OrgUnit",
         entityId: created.id,
-      });
+      }, tx);
       return created;
     } catch (err) {
       if (isUniqueConstraintError(err, "code")) {

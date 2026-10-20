@@ -4,7 +4,7 @@ import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ClipboardCheck, Pencil, Plus, Warehouse } from "lucide-react";
-import { createWarehouseSchema, getCompanyFeatureAccessState, type SetupItemKey, type SfaWarehouse } from "@field-sales-os/schemas";
+import { createWarehouseSchema, supportsSfaOperations, getCompanyFeatureAccessState, type SetupItemKey, type SfaWarehouse } from "@field-sales-os/schemas";
 import { useAuth } from "@/hooks/use-auth";
 import { useTranslation } from "@/components/translation-provider";
 import { sfaSetupApi } from "@/lib/api/sfa-setup";
@@ -31,7 +31,7 @@ export function SfaSetupScreen({ preview = false }: { preview?: boolean }) {
     && getCompanyFeatureAccessState(user.featureAccess, "sfa-setup") === "ENABLED"
     && ["sfa.access", "company.manage"].every((permission) => user.permissions?.includes(permission));
   const mode = useQuery({ queryKey: ["sfa-mode", companyId], queryFn: sfaSetupApi.mode, enabled: !preview && allowed, retry: false, refetchOnWindowFocus: false });
-  const enabled = preview ? previewAllowed : allowed && mode.data?.operatingMode === "SFA";
+  const enabled = preview ? previewAllowed : allowed && supportsSfaOperations(mode.data?.operatingMode);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");

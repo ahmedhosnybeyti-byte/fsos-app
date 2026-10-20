@@ -10,7 +10,7 @@ import { buildCompanyNavItems } from "@/lib/company-screen-registry";
 import { useTranslation } from "@/components/translation-provider";
 import { Spinner } from "@/components/ui/spinner";
 import { useQuery } from "@tanstack/react-query";
-import { getCompanyFeatureAccessState } from "@field-sales-os/schemas";
+import { supportsSfaOperations, getCompanyFeatureAccessState } from "@field-sales-os/schemas";
 import { sfaSetupApi } from "@/lib/api/sfa-setup";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
@@ -35,8 +35,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const navItems: NavItem[] = [
     ...buildCompanyNavItems({ featureAccess: user.featureAccess, t, roleCode: user.role.code, groupLabels: { data: t("group.data"), aiInsights: t("group.aiInsights"), customersTerritory: t("group.customersTerritory"), team: t("group.team"), system: t("group.system") } })
-      .filter((item) => item.featureKey !== "sfa-setup" || (canSetup && operatingMode.data?.operatingMode === "SFA"))
-      .filter((item) => item.featureKey !== "warehouse-core" || (operatingMode.data?.operatingMode === "SFA" && ["sfa.access","wms.read"].every(p => user.permissions?.includes(p)))),
+      .filter((item) => item.featureKey !== "sfa-setup" || (canSetup && supportsSfaOperations(operatingMode.data?.operatingMode)))
+      .filter((item) => item.featureKey !== "warehouse-core" || (supportsSfaOperations(operatingMode.data?.operatingMode) && ["sfa.access","wms.read"].every(p => user.permissions?.includes(p)))),
   ];
 
   return <AppShell navItems={navItems} user={user}><CompanyScreenAccessGuard user={user}>{children}</CompanyScreenAccessGuard></AppShell>;

@@ -350,3 +350,23 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
   replace a balance. Keep tenant/warehouse scope, exact SQL conversion, command
   deduplication and audit in one transaction; correct through an explicit reversal.
   Future issue/reserve paths must reject expired, quarantined or insufficient stock.
+
+## Create Company — event audit escaped the provisioning transaction
+
+- **Symptom:** The real Super Admin Create Company API returned 500 with
+  `audit_logs_company_id_fkey` while creating the default Region/Branch.
+- **Root cause:** Organizational creation accepted the provisioning transaction,
+  but its platform event audit used the root Prisma connection. That connection
+  could not see the new uncommitted company. Durable audit failures correctly
+  propagated, so the entire creation failed.
+- **Fix:** Platform events accept an optional caller transaction. Organizational
+  creation and the provisioning CompanyCreated event pass it to durable audit.
+  Company operating mode is also persisted in the same provisioning transaction.
+- **Commit:** Local company operating modes commit containing this entry, based
+  on `6b6f21a`; no push or Production operation.
+- **Verification:** Focused transaction-client regression, 511-test quality gate
+  with four passing typechecks, real browser creation/edit and isolated native
+  PostgreSQL audit-failure rollback. See [COMPANY_OPERATING_MODES.md](COMPANY_OPERATING_MODES.md).
+- **Regression-prevention rule:** Every durable audit of a newly created tenant
+  or resource must use the same transaction as that resource. Never suppress an
+  audit error or publish through an independent connection before commit.

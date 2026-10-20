@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ForbiddenException, NotFoundException } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
-import { updateCompanyOperatingSettingsSchema } from "@field-sales-os/schemas";
+import { updateCompanyOperatingSettingsSchema, type CompanyOperatingMode } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { ROLES_KEY } from "../../common/decorators/roles.decorator";
 import { CompaniesController } from "./companies.controller";
@@ -10,13 +10,13 @@ import { CompanyOperatingSettingsService } from "./company-operating-settings.se
 
 const admin = { roleCode: "SUPER_ADMIN", userId: "platform-admin" } as AuthenticatedUser;
 function fixture() {
-  const settings = new Map<string, { operatingMode: "ANALYSIS_ONLY" | "SFA" }>();
+  const settings = new Map<string, { operatingMode: CompanyOperatingMode }>();
   const writes: unknown[] = [], audits: unknown[] = [];
   const tx = {
     company: { findUnique: async ({ where }: { where: { id: string } }) => ["company-a", "company-b"].includes(where.id) ? { id: where.id } : null },
     companyOperatingSettings: {
       findUnique: async ({ where }: { where: { companyId: string } }) => settings.get(where.companyId) ?? null,
-      upsert: async (query: { where: { companyId: string }; create: { companyId: string; operatingMode: "ANALYSIS_ONLY" | "SFA" }; update: { operatingMode: "ANALYSIS_ONLY" | "SFA" } }) => {
+      upsert: async (query: { where: { companyId: string }; create: { companyId: string; operatingMode: CompanyOperatingMode }; update: { operatingMode: CompanyOperatingMode } }) => {
         writes.push(query);
         const value = { operatingMode: query.update.operatingMode };
         settings.set(query.where.companyId, value);
@@ -36,6 +36,19 @@ test("companies without settings remain analysis-only without creating settings"
   assert.equal(settings.size, 0);
   assert.deepEqual(writes, []);
   await assert.rejects(service.get("missing"), NotFoundException);
+});
+
+test("Full ERP upgrade and downgrade touch only the target settings and audited mode", async () => {
+  const { service, settings, writes, audits } = fixture();
+  settings.set("company-b", { operatingMode: "SFA" });
+  for (const operatingMode of ["FULL_ERP", "SFA", "ANALYSIS_ONLY", "FULL_ERP"] as const) {
+    assert.deepEqual(await service.update("company-a", { operatingMode }, admin), { operatingMode });
+    assert.deepEqual(await service.get("company-b"), { operatingMode: "SFA" });
+  }
+  assert.equal(writes.length, 4); assert.equal(audits.length, 4);
+  for (const roleCode of ["COMPANY_ADMIN", "SALES_REP"] as const) {
+    await assert.rejects(service.update("company-b", { operatingMode: "FULL_ERP" }, { ...admin, roleCode }), ForbiddenException);
+  }
 });
 
 test("platform changes are tenant-specific, transactional and audited; repeated mode is a no-op", async () => {

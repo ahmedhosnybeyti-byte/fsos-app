@@ -1,11 +1,13 @@
 import { z } from "zod";
 import { companyStatusSchema, orgUnitStatusSchema } from "./enums";
+import { companyOperatingModeSchema } from "./company-operating-settings.schemas";
 
 export const createPlatformCompanySchema = z.object({
   name: z.string().trim().min(2).max(120),
   slug: z.string().trim().min(2).max(120).transform((value) => value.toLowerCase()).pipe(z.string().regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)),
   initialStatus: z.enum(["ACTIVE", "SUSPENDED"]).default("ACTIVE"),
   initialPlanCode: z.string().trim().min(1).max(80),
+  operatingMode: companyOperatingModeSchema.default("ANALYSIS_ONLY"),
   adminFullName: z.string().trim().min(2).max(120),
   adminEmail: z.string().trim().email().transform((value) => value.toLowerCase()),
 });

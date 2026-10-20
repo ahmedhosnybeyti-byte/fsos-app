@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from "@nestjs/common";
 import { PATH_METADATA } from "@nestjs/common/constants";
 import { Reflector } from "@nestjs/core";
-import { SFA_ACCESS_PERMISSION } from "@field-sales-os/schemas";
+import { SFA_ACCESS_PERMISSION, supportsSfaOperations } from "@field-sales-os/schemas";
 import { SFA_PERMISSIONS_KEY } from "../decorators/requires-sfa.decorator";
 import { PrismaService } from "../prisma";
 import type { AuthenticatedUser } from "../types/authenticated-user";
@@ -33,7 +33,7 @@ export class SfaAccessGuard implements CanActivate {
     const settings = await this.prisma.companyOperatingSettings.findUnique({
       where: { companyId: user.companyId }, select: { operatingMode: true },
     });
-    if (settings?.operatingMode !== "SFA") throw new ForbiddenException("SFA is not enabled for your company");
+    if (!supportsSfaOperations(settings?.operatingMode)) throw new ForbiddenException("SFA is not enabled for your company");
     return true;
   }
 }

@@ -47,6 +47,7 @@ enum CompanyAccountType {
 enum CompanyOperatingMode {
   ANALYSIS_ONLY
   SFA
+  FULL_ERP
 }
 
 // The lifecycle events that move a Company between CompanyStatus states

@@ -86,3 +86,12 @@ test("reserved SFA routes fail closed if permission metadata is missing", async 
   await assert.rejects(guard.canActivate(context(UnmarkedSfaController, UnmarkedSfaController.prototype.read)), /metadata is required/);
   assert.deepEqual(calls, []);
 });
+
+test("Full ERP retains dual admission and downgrade revokes access without trusting client mode", async () => {
+  const { guard, state } = fixture("FULL_ERP");
+  assert.equal(await guard.canActivate(context(SfaTestController, SfaTestController.prototype.read)), true);
+  await assert.rejects(guard.canActivate(context(SfaTestController, SfaTestController.prototype.read,
+    { ...actor, permissions: ["sfa.access"] })), ForbiddenException);
+  state.mode = "ANALYSIS_ONLY";
+  await assert.rejects(guard.canActivate(context(SfaTestController, SfaTestController.prototype.read)), ForbiddenException);
+});

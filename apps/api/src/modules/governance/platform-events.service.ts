@@ -3,6 +3,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import type { Prisma } from "@field-sales-os/database";
 import type { PlatformEventName } from "@field-sales-os/schemas";
 import { AuditLogService } from "../audit-log/audit-log.service";
+import type { PrismaTx } from "../../common/prisma";
 
 export interface PlatformEventPayload {
   companyId: string;
@@ -22,8 +23,8 @@ export interface PlatformEventPayload {
 // Deliberately NOT a message broker: the constitution itself says platforms
 // should adopt this "whenever possible" as groundwork for a *future*
 // event-driven architecture, not that a broker must exist today. Emitting
-// is fire-and-forget and defensively wrapped — it can never throw back into
-// the caller, exactly like AuditLogService.record().
+// Listener failures are contained. Durable audit failures propagate, and a
+// caller-owned transaction must also own the event's audit write.
 @Injectable()
 export class PlatformEventsService {
   private readonly logger = new Logger(PlatformEventsService.name);
@@ -37,7 +38,7 @@ export class PlatformEventsService {
     this.emitter.on(eventName, handler);
   }
 
-  async emit(eventName: PlatformEventName, payload: PlatformEventPayload) {
+  async emit(eventName: PlatformEventName, payload: PlatformEventPayload, tx?: PrismaTx) {
     try {
       this.emitter.emit(eventName, payload);
     } catch (err) {
@@ -51,6 +52,6 @@ export class PlatformEventsService {
       entityType: payload.entityType,
       entityId: payload.entityId,
       metadata: payload.metadata,
-    });
+    }, tx);
   }
 }
