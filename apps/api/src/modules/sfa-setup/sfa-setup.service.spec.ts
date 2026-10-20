@@ -8,19 +8,21 @@ test("checklist probes existing tenant-scoped active registries and never treats
   const queries: unknown[] = [];
   let present = false;
   const probe = async (query: unknown) => { queries.push(query); return present ? { id: "record" } : null; };
-  const service = new SfaSetupService({ employee: { findFirst: probe }, warehouse: { findFirst: probe } } as never, {} as never);
+  const service = new SfaSetupService({ employee: { findFirst: probe }, warehouse: { findFirst: probe }, wmsProduct: { findFirst: probe }, wmsMovement: { findFirst: probe } } as never, {} as never);
   const empty = await service.checklist("company-a");
   assert.deepEqual(empty.items.map((item) => [item.key, item.status]), [
-    ["products", "NOT_AVAILABLE"], ["customers", "NOT_AVAILABLE"], ["prices", "NOT_AVAILABLE"],
-    ["employees", "MISSING"], ["warehouses", "MISSING"], ["openingBalances", "NOT_AVAILABLE"],
+    ["products", "MISSING"], ["customers", "NOT_AVAILABLE"], ["prices", "NOT_AVAILABLE"],
+    ["employees", "MISSING"], ["warehouses", "MISSING"], ["openingBalances", "MISSING"],
   ]);
   assert.deepEqual(queries, [
     { where: { companyId: "company-a", status: "ACTIVE" }, select: { id: true } },
     { where: { companyId: "company-a", isActive: true }, select: { id: true } },
+    { where: { companyId: "company-a", isActive: true }, select: { id: true } },
+    { where: { companyId: "company-a", kind: "OPENING", reversedBy: { none: {} } }, select: { id: true } },
   ]);
   present = true;
   const populated = await service.checklist("company-b");
-  assert.equal(populated.items.filter((item) => item.status === "PRESENT").length, 2);
+  assert.equal(populated.items.filter((item) => item.status === "PRESENT").length, 4);
 });
 
 test("warehouse list is SQL-filtered, projected and bounded with one lookahead row", async () => {

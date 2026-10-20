@@ -241,6 +241,7 @@ model Company {
   featureAccess Json? @map("feature_access")
   operatingSettings CompanyOperatingSettings?
   warehouses Warehouse[]
+  wmsProducts WmsProduct[]
   maxExcelUploadSizeMb Int? @map("max_excel_upload_size_mb")
   // Captured at signup — see CompanyAccountType. Nullable for pre-existing
   // companies created before this field was added.
@@ -296,10 +297,117 @@ model Warehouse {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  wmsAccess WmsWarehouseAccess[]
+  wmsPositions WmsPosition[]
 
+  @@unique([companyId, id])
   @@unique([companyId, code])
   @@index([companyId, isActive, id])
   @@map("warehouses")
+}
+
+// CHECK constraints, immutable-ledger triggers, view and posting functions are
+// maintained in 20261020100000_wms_phase01; do not replace them with db push.
+model WmsProduct {
+  id String @id @default(cuid())
+  companyId String @map("company_id")
+  code String
+  barcode String?
+  name String
+  baseUnit String @default("PIECE") @map("base_unit")
+  piecesPerCarton Int @default(1) @map("pieces_per_carton")
+  trackBatches Boolean @default(false) @map("track_batches")
+  trackExpiry Boolean @default(false) @map("track_expiry")
+  sensitiveHandling Boolean @default(false) @map("sensitive_handling")
+  handlingNotes String? @map("handling_notes")
+  isActive Boolean @default(true) @map("is_active")
+  version Int @default(1)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamp(3)
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  batches WmsBatch[]
+  @@unique([companyId,id])
+  @@unique([companyId,code])
+  @@unique([companyId,barcode])
+  @@index([companyId,isActive,id], map: "wms_products_company_active_id")
+  @@map("wms_products")
+}
+
+model WmsBatch {
+  id String @id @default(cuid())
+  companyId String @map("company_id")
+  productId String @map("product_id")
+  code String
+  productionDate DateTime? @map("production_date") @db.Date
+  expiryDate DateTime? @map("expiry_date") @db.Date
+  isQuarantined Boolean @default(false) @map("is_quarantined")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  product WmsProduct @relation(fields: [companyId,productId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  positions WmsPosition[]
+  @@unique([companyId,id])
+  @@unique([companyId,productId,id])
+  @@unique([companyId,productId,code])
+  @@index([companyId,productId,expiryDate,id], map: "wms_batches_company_product_expiry")
+  @@index([companyId,expiryDate,id], map: "wms_batches_company_expiry")
+  @@map("wms_batches")
+}
+
+model WmsWarehouseAccess {
+  companyId String @map("company_id")
+  warehouseId String @map("warehouse_id")
+  userId String @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  warehouse Warehouse @relation(fields: [companyId,warehouseId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  user User @relation(fields: [companyId,userId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  @@id([companyId,warehouseId,userId])
+  @@index([companyId,userId,warehouseId], map: "wms_access_company_user_warehouse")
+  @@map("wms_warehouse_access")
+}
+
+model WmsPosition {
+  companyId String @map("company_id")
+  warehouseId String @map("warehouse_id")
+  batchId String @map("batch_id")
+  physical Decimal @default(0) @db.Decimal(24,6)
+  reserved Decimal @default(0) @db.Decimal(24,6)
+  quarantined Decimal @default(0) @db.Decimal(24,6)
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamp(3)
+  warehouse Warehouse @relation(fields: [companyId,warehouseId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  batch WmsBatch @relation(fields: [companyId,batchId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  movements WmsMovement[]
+  @@id([companyId,warehouseId,batchId])
+  @@map("wms_positions")
+}
+
+model WmsMovement {
+  id String @id @default(cuid())
+  companyId String @map("company_id")
+  warehouseId String @map("warehouse_id")
+  batchId String @map("batch_id")
+  kind String
+  quantity Decimal @db.Decimal(24,6)
+  quarantineDelta Decimal @default(0) @map("quarantine_delta") @db.Decimal(24,6)
+  inputQuantity Decimal @map("input_quantity") @db.Decimal(24,6)
+  inputUnit String @map("input_unit")
+  conversionFactor Int @map("conversion_factor")
+  reference String
+  reason String
+  idempotencyKey String @map("idempotency_key")
+  command Json
+  reversalOf String? @map("reversal_of")
+  actorId String @map("actor_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  position WmsPosition @relation(fields: [companyId,warehouseId,batchId], references: [companyId,warehouseId,batchId], onDelete: Restrict, onUpdate: NoAction)
+  actor User @relation(fields: [companyId,actorId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  original WmsMovement? @relation("WmsReversal", fields: [companyId,reversalOf], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  reversedBy WmsMovement[] @relation("WmsReversal")
+  @@unique([companyId,id])
+  @@unique([companyId,idempotencyKey])
+  @@unique([companyId,reversalOf])
+  @@unique([companyId,warehouseId,batchId,kind,reference])
+  @@index([companyId,warehouseId,createdAt(sort: Desc),id(sort: Desc)], map: "wms_movements_company_warehouse_created")
+  @@index([companyId,batchId], map: "wms_movements_company_batch")
+  @@map("wms_movements")
 }
 
 model CompanyOperatingSettings {
@@ -537,7 +645,10 @@ model User {
   assignedCompanyOpportunities CompanyOpportunity[] @relation("CompanyOpportunityAssignedTo")
   companyOpportunityAssignments CompanyOpportunity[] @relation("CompanyOpportunityAssignedBy")
   opportunityRadarPreferences OpportunityRadarPreference[]
+  wmsWarehouseAccess WmsWarehouseAccess[]
+  wmsMovements WmsMovement[]
 
+  @@unique([companyId, id])
   @@index([companyId])
   @@index([orgUnitId])
   @@map("users")

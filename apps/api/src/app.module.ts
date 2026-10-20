@@ -52,6 +52,7 @@ import { DashboardPerformanceModule } from "./modules/dashboard-performance/dash
 import { ProspectsModule } from "./modules/prospects/prospects.module";
 import { OpportunityRadarModule } from "./modules/opportunity-radar/opportunity-radar.module";
 import { SfaSetupModule } from "./modules/sfa-setup/sfa-setup.module";
+import { WmsModule } from "./modules/wms/wms.module";
 
 @Module({
   imports: [
@@ -105,6 +106,7 @@ import { SfaSetupModule } from "./modules/sfa-setup/sfa-setup.module";
     ProspectsModule,
     OpportunityRadarModule,
     SfaSetupModule,
+    WmsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

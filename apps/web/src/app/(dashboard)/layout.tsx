@@ -21,7 +21,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     && getCompanyFeatureAccessState(user.featureAccess, "sfa-setup") === "ENABLED"
     && ["sfa.access", "company.manage"].every((permission) => user.permissions?.includes(permission));
   const operatingMode = useQuery({ queryKey: ["sfa-mode", user?.companyId], queryFn: sfaSetupApi.mode,
-    enabled: canSetup, retry: false, refetchOnWindowFocus: false });
+    enabled: canSetup || (!!user?.companyId && getCompanyFeatureAccessState(user.featureAccess,"warehouse-core") === "ENABLED"
+      && ["sfa.access","wms.read"].every(p => user.permissions?.includes(p))), retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false });
   const isSuperAdmin = user?.role.code === "SUPER_ADMIN";
   const mustChangePassword = user?.mustChangePassword === true;
 
@@ -34,7 +35,8 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const navItems: NavItem[] = [
     ...buildCompanyNavItems({ featureAccess: user.featureAccess, t, roleCode: user.role.code, groupLabels: { data: t("group.data"), aiInsights: t("group.aiInsights"), customersTerritory: t("group.customersTerritory"), team: t("group.team"), system: t("group.system") } })
-      .filter((item) => item.featureKey !== "sfa-setup" || (canSetup && operatingMode.data?.operatingMode === "SFA")),
+      .filter((item) => item.featureKey !== "sfa-setup" || (canSetup && operatingMode.data?.operatingMode === "SFA"))
+      .filter((item) => item.featureKey !== "warehouse-core" || (operatingMode.data?.operatingMode === "SFA" && ["sfa.access","wms.read"].every(p => user.permissions?.includes(p)))),
   ];
 
   return <AppShell navItems={navItems} user={user}><CompanyScreenAccessGuard user={user}>{children}</CompanyScreenAccessGuard></AppShell>;

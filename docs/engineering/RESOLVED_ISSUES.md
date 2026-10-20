@@ -330,3 +330,23 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - **Fix:** Extend the existing `MarketOpportunity` / `CompanyOpportunity` engine with verified Event-First metadata, stable external keys, revision history, database-side event filtering and ordering, and a dry-run-by-default idempotent water-event importer. Only independently verified additions are eligible for activation; duplicate records reuse their current market/company rows, while postponement closes the shared market fact without deleting assignments, preferences, notes, outcomes, or visit intents.
 - **Commit:** This local commit.
 - **Regression-prevention rule:** Water event ingestion must remain dry-run by default, tenant-explicit, and idempotent. Never activate an unverified workbook candidate, infer a precise map pin from a search URL, or replace a `CompanyOpportunity` when the underlying event is a duplicate or schedule revision.
+
+## WMS Phase 01 — duplicate opening and silent stock correction prevention
+
+- **Symptom/risk:** A new operational opening path can double-post on retries or
+  concurrent commands, and a balance-only correction can lose its audit trail.
+- **Root cause:** The earlier warehouse registry had no authoritative stock
+  tables or transaction/idempotency contract; Excel facts are analytical inputs.
+- **Fix:** Add typed operational product/lot/position/movement tables, scoped
+  PostgreSQL posting/reversal functions, unique company/idempotency and business
+  references, product/position locks, immutable movements, exact decimals and
+  same-transaction audit. Existing setup now reads real product/opening existence.
+- **Commit:** Uncommitted WMS Phase 01 working tree based on `37931df`; no push.
+- **Verification:** 497 regression checks/typechecks passed; native PostgreSQL
+  independent-connection duplicate/reversal/race and audit rollback checks passed;
+  22 local HTTP security checks and real browser posting/reversal passed. See
+  [WMS_PHASE01.md](WMS_PHASE01.md) for measured scope and local evidence.
+- **Regression-prevention rule:** Never update a posted stock movement or silently
+  replace a balance. Keep tenant/warehouse scope, exact SQL conversion, command
+  deduplication and audit in one transaction; correct through an explicit reversal.
+  Future issue/reserve paths must reject expired, quarantined or insufficient stock.

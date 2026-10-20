@@ -101,3 +101,4 @@ export type {
 } from "./smart-loading.schemas";
 export * from "./company-operating-settings.schemas";
 export * from "./sfa-setup.schemas";
+export * from "./wms.schemas";

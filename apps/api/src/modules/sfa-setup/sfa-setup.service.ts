@@ -11,17 +11,19 @@ export class SfaSetupService {
 
   async checklist(companyId: string): Promise<CompanySetupChecklist> {
     // Indexed existence probes, not roster/fact loads. No canonical or Excel dependency.
-    const [employee, warehouse] = await Promise.all([
+    const [employee, warehouse, product, opening] = await Promise.all([
       this.prisma.employee.findFirst({ where: { companyId, status: "ACTIVE" }, select: { id: true } }),
       this.prisma.warehouse.findFirst({ where: { companyId, isActive: true }, select: { id: true } }),
+      this.prisma.wmsProduct.findFirst({ where: { companyId, isActive: true }, select: { id: true } }),
+      this.prisma.wmsMovement.findFirst({ where: { companyId, kind: "OPENING", reversedBy: { none: {} } }, select: { id: true } }),
     ]);
     return { items: [
-      { key: "products", status: "NOT_AVAILABLE" },
+      { key: "products", status: product ? "PRESENT" : "MISSING" },
       { key: "customers", status: "NOT_AVAILABLE" },
       { key: "prices", status: "NOT_AVAILABLE" },
       { key: "employees", status: employee ? "PRESENT" : "MISSING" },
       { key: "warehouses", status: warehouse ? "PRESENT" : "MISSING" },
-      { key: "openingBalances", status: "NOT_AVAILABLE" },
+      { key: "openingBalances", status: opening ? "PRESENT" : "MISSING" },
     ] };
   }
 

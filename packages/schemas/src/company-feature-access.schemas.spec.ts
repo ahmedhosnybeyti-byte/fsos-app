@@ -28,7 +28,8 @@ test("User Activity is an enabled-by-default company screen", () => {
 test("SFA Setup requires explicit screen activation without changing legacy defaults", () => {
   for (const value of [undefined, null, {}, { files: "ENABLED" } as const]) {
     assert.equal(getCompanyFeatureAccessState(value, "sfa-setup"), "HIDDEN");
-    for (const screen of companyScreenRegistry.filter((item) => item.featureKey !== "sfa-setup")) {
+    assert.equal(getCompanyFeatureAccessState(value, "warehouse-core"), "HIDDEN");
+    for (const screen of companyScreenRegistry.filter((item) => !["sfa-setup","warehouse-core"].includes(item.featureKey))) {
       assert.equal(getCompanyFeatureAccessState(value, screen.featureKey), "ENABLED");
     }
   }

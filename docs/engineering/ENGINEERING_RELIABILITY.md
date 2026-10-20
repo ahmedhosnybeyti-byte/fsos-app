@@ -131,3 +131,14 @@ Changed files for this task (existing unrelated WIP was preserved):
 - `apps/api/src/modules/audit-log/audit-log.service.spec.ts`
 - `apps/web/src/components/smart-loading/lost-opportunity-groups.spec.ts` (test precision only)
 - `docs/engineering/ENGINEERING_RELIABILITY.md`, `docs/engineering/RESOLVED_ISSUES.md`
+
+## WMS Phase 01 local evidence (2026-10-20)
+
+See [WMS_PHASE01.md](WMS_PHASE01.md) for the query contract, additive migration,
+permissions, local preview and evidence. `pnpm quality --base 37931df` passed 497
+tests with zero skips/failures and four workspace typechecks. Native PostgreSQL
+18.6 independent connections additionally proved stock posting/retry/reversal
+atomicity and audit-failure rollback; actual scoped query plans and eight browser
+theme/locale/viewport combinations were captured in excluded `.quality/wms/`.
+This is a local phase acceptance, not Linux packaging, mixed-load capacity,
+backup-custody verification, deployment permission or Production migration approval.

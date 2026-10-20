@@ -14,10 +14,10 @@ test("all committed migrations apply to a fresh isolated database without tenant
   for (const migration of migrations) {
     await db.exec(readFileSync(`${folder}/${migration}/migration.sql`, "utf8"));
   }
-  for (const table of ["companies", "users", "warehouses", "company_operating_settings"]) {
+  for (const table of ["companies", "users", "warehouses", "company_operating_settings", "wms_products", "wms_batches", "wms_positions", "wms_movements", "wms_warehouse_access"]) {
     assert.equal((await db.query(`SELECT count(*)::int AS count FROM ${table}`)).rows[0].count, 0);
   }
-  assert.equal((await db.query(`SELECT count(*)::int AS count FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE p.code = 'sfa.access'`)).rows[0].count, 0);
+  assert.equal((await db.query(`SELECT count(*)::int AS count FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE p.code = 'sfa.access' OR p.code LIKE 'wms.%'`)).rows[0].count, 0);
 });
 
 test("warehouse service rolls back its write when audit persistence fails in the same SQL transaction", options, async (t) => {
