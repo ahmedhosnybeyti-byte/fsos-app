@@ -34,9 +34,9 @@ const adminNavItems = (t: (key: any) => string): NavItem[] => [
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useRequireAuth();
   const router = useRouter();
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const canUseActivity = user?.role?.code === "SUPER_ADMIN" || user?.permissions?.includes("user_activity.view");
-  const navItems: NavItem[] = user?.role?.code === "SUPER_ADMIN" ? [...adminNavItems(t), { href: "/admin/account", label: t("nav.account"), icon: CircleUserRound }] : canUseActivity ? [{ href: "/admin/user-activity", label: t("admin.nav.userActivity"), icon: Activity }, { href: "/admin/account", label: t("nav.account"), icon: CircleUserRound }] : [];
+  const navItems: NavItem[] = user?.role?.code === "SUPER_ADMIN" ? [...adminNavItems(t), { href: "/admin/sfa-preview", label: locale === "ar" ? "معاينة تجهيز SFA" : "SFA setup preview", icon: ShieldCheck }, { href: "/admin/account", label: t("nav.account"), icon: CircleUserRound }] : canUseActivity ? [{ href: "/admin/user-activity", label: t("admin.nav.userActivity"), icon: Activity }, { href: "/admin/account", label: t("nav.account"), icon: CircleUserRound }] : [];
   const mustChangePassword = user?.mustChangePassword === true;
 
   useEffect(() => {
