@@ -1,6 +1,22 @@
 # SFA Setup — controlled release gate (2026-10-19)
 
-## Current decision: GO for final release review — no Production changes applied
+## Current status: controlled release deployed — 2026-10-20
+
+The owner authorized Production deployment, temporarily accepted the external
+recovery-custody risk and requested a protected read-only preview before visual
+approval. API and Web were deployed; see
+[SFA_CONTROLLED_PRODUCTION_RELEASE_20261020.md](SFA_CONTROLLED_PRODUCTION_RELEASE_20261020.md)
+for actual deployment IDs, fresh backup/restore evidence, security checks and
+the owner's subsequent manual screen-visibility change. No company SFA mode
+was activated by the agent. The previous NO-GO below is historical.
+
+## Previous final-preparation decision: NO-GO — independent custody and visual approval pending
+
+See [SFA_FINAL_RELEASE_PREPARATION.md](SFA_FINAL_RELEASE_PREPARATION.md) for the
+2026-10-20 final review, the portable recovery test, actual off-device custody
+blocker, preview links and the approval-only deployment/rollback sequence.
+
+## Previous technical review: GO — no Production changes applied
 
 The backup, Linux packaging and global-role permission blockers were verified in
 the follow-up task. See [SFA_BLOCKERS_20261019.md](SFA_BLOCKERS_20261019.md) for
