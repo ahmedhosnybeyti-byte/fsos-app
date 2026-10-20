@@ -2,6 +2,15 @@
 
 This is durable engineering history. A **RESOLVED** item is historical evidence, not a permanent assumption. It may be reopened only when new measurements prove a regression; cite that new evidence before changing the previous design.
 
+## Engineering regression gates — disconnected suites and silent SQL skips
+
+- **Symptom:** Existing security, RIE, migration and recovery specs had no shared acceptance command or checked-in CI workflow; SQL suites could silently skip without an undeclared local PGlite runtime.
+- **Root cause:** Tests were run through disposable local helpers rather than a maintained, risk-based gate.
+- **Fix:** Add mandatory core/affected/SQL/full-regression commands, isolated credential-free test processes, fail-on-skip/TODO/error behavior, and a read-only GitHub Actions check. Put the explicitly approved PGlite dependency in an unconsumed test workspace; API/web Turbo prune excludes it. Preserve Railway startup, runtime code and migration behavior. Support existing web aliases in the test loader; correct one ratio assertion to machine precision without changing the calculation.
+- **Verification:** Final full gate: 488 passed / 109 files, critical core: 82 passed / 23 files, zero failures/skips/TODOs; all four workspace typechecks passed. Earlier three verification failures were corrected and included in the successful full rerun.
+- **Commit:** Local commit titled `chore(quality): enforce engineering reliability gates`; no push or deployment. Resolve the exact hash with `git log -1 --format=%H -- tools/quality/run.mjs`.
+- **Regression-prevention rule:** Required tests must run with zero skips; missing runtime or critical failures block readiness. Run the actual review-base gate and retain its evidence. A passing regression suite does not establish native PostgreSQL capacity, ERP ledger correctness or external branch/deployment enforcement.
+
 ## SFA release verification — Windows standalone packaging and backup isolation
 
 - **Symptom:** Windows standalone packaging failed with EPERM on pnpm symlinks, and the default Docker context could include temporary verification files and newly created database backups.

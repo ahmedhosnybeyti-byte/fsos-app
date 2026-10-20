@@ -47,3 +47,20 @@ test("surfaces a permanent audit persistence failure", async () => {
     /database rejected write/,
   );
 });
+
+test("audit retries stop at three attempts and reuse the same event key", async () => {
+  const keys: string[] = [];
+  const service = new AuditLogService({ auditLog: { upsert: async (args: any) => {
+    keys.push(args.where.eventKey); throw transientError();
+  } } } as never);
+  await assert.rejects(service.record({ action: "fixture.write", eventKey: "stable-command-key" }));
+  assert.deepEqual(keys, ["stable-command-key", "stable-command-key", "stable-command-key"]);
+});
+
+test("audit errors inside a business transaction propagate without retrying an aborted transaction", async () => {
+  let calls = 0;
+  const service = new AuditLogService({} as never);
+  const tx = { auditLog: { upsert: async () => { calls++; throw transientError(); } } };
+  await assert.rejects(service.record({ action: "fixture.atomic-write" }, tx as never));
+  assert.equal(calls, 1);
+});

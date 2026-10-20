@@ -1,0 +1,56 @@
+name: Engineering reliability
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: engineering-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  required:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install existing package manager and frozen dependencies
+        run: |
+          npm install -g pnpm@11.11.0
+          pnpm install --frozen-lockfile
+      - name: Generate Prisma types without connecting to a database
+        env:
+          DATABASE_URL: postgresql://test:test@127.0.0.1:1/quality_never_connect
+        run: pnpm --filter @field-sales-os/database generate
+      - name: Required change gate (manual dispatch runs full release regressions)
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE: ${{ github.event.before }}
+          EVENT_NAME: ${{ github.event_name }}
+        shell: bash
+        run: |
+          if [ "$EVENT_NAME" = workflow_dispatch ]; then
+            node tools/quality/run.mjs release
+          else
+            base="${PR_BASE:-$PUSH_BASE}"
+            if [ -z "$base" ] || [[ "$base" =~ ^0+$ ]]; then
+              base="$(git hash-object -t tree /dev/null)"
+            fi
+            node tools/quality/run.mjs changed --base "$base"
+          fi
+      - name: Keep sanitized gate evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engineering-gate-${{ github.sha }}
+          path: .quality/*.json
+          if-no-files-found: ignore

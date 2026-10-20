@@ -1,4 +1,5 @@
 node_modules
+.quality
 .local-backups
 .tmp*
 .codex

@@ -1,0 +1,9 @@
+{
+  "name": "@field-sales-os/quality-gates",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Isolated test runtime; no application depends on this workspace.",
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8"
+  }
+}

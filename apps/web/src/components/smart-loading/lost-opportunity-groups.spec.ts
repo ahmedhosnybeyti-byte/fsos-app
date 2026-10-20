@@ -95,5 +95,8 @@ test("calculates a per-visit quantity from the 90-day baseline exactly once", ()
   assert.equal(calculateVisitSuggestedQuantity(90, 1), 7);
   assert.equal(calculateVisitSuggestedQuantity(90, 2), 3.5);
   assert.equal(calculateVisitSuggestedQuantity(90, 6), 7 / 6);
-  assert.equal(calculateVisitSuggestedQuantity(30, 1), 7 / 3);
+  // Equivalent division orders differ by one IEEE-754 ULP for this ratio.
+  // Keep integer/half-unit assertions exact above; allow only machine precision here.
+  const expected = 7 / 3;
+  assert.ok(Math.abs(calculateVisitSuggestedQuantity(30, 1) - expected) <= Number.EPSILON * Math.abs(expected));
 });

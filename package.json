@@ -7,6 +7,10 @@
   },
   "packageManager": "pnpm@11.11.0",
   "scripts": {
+    "quality": "node tools/quality/run.mjs changed",
+    "quality:critical": "node tools/quality/run.mjs critical",
+    "quality:postgres": "node tools/quality/run.mjs postgres",
+    "quality:release": "node tools/quality/run.mjs release",
     "dev": "turbo run dev",
     "build": "turbo run build",
     "start": "turbo run start",

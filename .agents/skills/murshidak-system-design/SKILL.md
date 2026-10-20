@@ -69,7 +69,15 @@ For a narrow UI-only styling fix with no data impact, use a one-line `no archite
 
 When implementing a new frontend screen or substantial visual redesign, also read `.codex/skills/murshidak-ui-design-system/SKILL.md` (or the repository's current equivalent) and `docs/design/MURSHIDAK_UI_DESIGN_SYSTEM.md`. The UI skill owns appearance; this skill owns architecture, data access and operational correctness. Don't run visual checks for backend-only tasks.
 
-## Mandatory handoff
+## Executable evidence (existing architecture, enforced acceptance)
+
+Use [the repository gate contract](../../../docs/engineering/ENGINEERING_RELIABILITY.md) and `pnpm quality --base <actual-review-base>` instead of inventing another checklist. Always retain the critical core; select additional SQL/AI/ERP tests by the affected contract. SQL parity/migrations run on the approved test-only PGlite runtime, never a customer database. Missing runtime, skip/TODO, timeout, failed assertion or typecheck is BLOCK, not a successful reduced run.
+
+Before impactful releases, `pnpm quality:release` is necessary alongside Linux packaging, measured load/query evidence where relevant, and isolated recovery evidence. Unit/PGlite tests cannot establish capacity, native PostgreSQL locking, off-device backup custody or complete ERP ledger correctness. For new posting paths require atomic failure, duplicate retry/concurrent command, exact decimal/stock boundary, permission and reversal tests before readiness. For changed external calls require a bounded deadline/attempt count and mocked outage, throttling and malformed-output tests; do not impose a fallback/circuit breaker/queue without a demonstrated need.
+
+CI's `Engineering reliability / required` reports failure automatically. Enforcing branch protection or Railway wait-for-CI is a separately authorized repository/platform setting; do not imply local files alone prevent direct deployment. Never raise RIE concurrency/budgets or change business formulas to satisfy a gate. Test selection cannot prove arbitrary SQL is bounded: retain scoped query plans, query-count/result-size budgets and parity evidence for changed paths.
+
+## Mandatory handoff result
 
 Report succinctly:
 - `System Design Gate: PASS / WARN / BLOCK` and why.
