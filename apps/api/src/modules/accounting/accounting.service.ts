@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { ZodType, ZodTypeDef } from "zod";
 import { Prisma } from "@field-sales-os/database";
@@ -21,6 +21,8 @@ const journalFields=Prisma.sql`j.id,to_char(j.entry_date,'YYYY-MM-DD') AS date,j
 @Injectable()
 export class AccountingService {
   constructor(private readonly prisma:PrismaService,private readonly audit:AuditLogService) {}
+  authorizedScope(tx:PrismaTx,user:AuthenticatedUser,permission:string,lock=false) {return this.scope(tx,user,permission,lock);}
+  authorizedMutation<T>(work:(tx:Prisma.TransactionClient)=>Promise<T>) {return this.mutation(work);}
   private async scope(tx:PrismaTx,user:AuthenticatedUser,permission="accounting.read",lock=false) {
     if(!user.companyId || !["COMPANY_ADMIN","MANAGER"].includes(user.roleCode) ||
       !["sfa.access","accounting.read",permission].every(p=>user.permissions?.includes(p)))
@@ -38,6 +40,7 @@ export class AccountingService {
       return work(tx);
     },{maxWait:5000,timeout:15000});}
     catch(error) {
+      if(error instanceof HttpException)throw error;
       const e=error as {code?:string;meta?:{code?:string;message?:string};message?:string};
       const code=`${e.meta?.message??""} ${e.message??""}`.match(/ACC_[A-Z_]+/)?.[0];
       if(code)throw new ConflictException(code);

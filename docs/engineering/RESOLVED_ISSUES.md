@@ -1,5 +1,20 @@
 # Murshidak Resolved Engineering Issues
 
+## Accounting Phase 2 — duplicated opening debt and voucher/GL drift prevention
+
+- **Symptom/risk:** Independent AR/AP balance updates can drift from the GL;
+  replayed openings or concurrent settlements can duplicate debt or overpay it.
+- **Root cause:** Phase 1 had no typed party/voucher boundary; imported invoice
+  history is analytical and cannot establish authoritative operational debt.
+- **Fix:** Dedicated scoped GL accounts, explicit once-only openings, immutable
+  source-linked vouchers, book-serialized exact posting/reversal, unique command/
+  business references and same-transaction audit. Read balances from the GL only.
+- **Commit:** Local Accounting Phase 2 commit containing this entry; parent
+  `72d3791`. See [new-contract evidence](ACCOUNTING_PHASE02.md).
+- **Prevention:** Never repost historical invoice debt as an opening, maintain a
+  second mutable party balance, approve beyond the remaining due/funds, or edit/
+  reverse a managed party GL entry outside its source voucher transaction.
+
 ## Accounting Phase 1 — duplicate/unbalanced posting and silent correction prevention
 
 - **Symptom/risk:** A first GL path could duplicate a financial event, accept

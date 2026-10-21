@@ -454,6 +454,9 @@ model AccountingAccount {
   type String
   book AccountingBook @relation(fields: [companyId], references: [companyId], onDelete: Restrict, onUpdate: NoAction)
   lines AccountingLine[]
+  party AccountingParty?
+  treasury AccountingTreasury?
+  counterVouchers AccountingVoucher[]
   @@id([companyId,code])
   @@map("accounting_accounts")
 }
@@ -476,6 +479,7 @@ model AccountingJournal {
   sourceCorrection AccountingJournal? @relation("AccountingCorrection", fields: [companyId,correctionOf], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
   corrections AccountingJournal[] @relation("AccountingCorrection")
   lines AccountingLine[]
+  voucher AccountingVoucher?
   @@unique([companyId,id])
   @@unique([companyId,reference])
   @@unique([companyId,reversalOf])
@@ -494,6 +498,7 @@ model AccountingLine {
   journal AccountingJournal @relation(fields: [companyId,journalId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
   account AccountingAccount @relation(fields: [companyId,accountCode], references: [companyId,code], onDelete: Restrict, onUpdate: NoAction)
   @@id([companyId,journalId,lineNo])
+  @@index([companyId,accountCode,journalId], map: "accounting_lines_company_account_journal")
   @@map("accounting_lines")
 }
 model AccountingCommand {
@@ -505,8 +510,71 @@ model AccountingCommand {
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
   book AccountingBook @relation(fields: [companyId], references: [companyId], onDelete: Restrict, onUpdate: NoAction)
   actor User @relation(fields: [companyId,actorId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  voucherCommand AccountingVoucherCommand?
   @@id([companyId,idempotencyKey])
   @@map("accounting_commands")
+}
+
+model AccountingParty {
+  id String @id
+  companyId String @map("company_id")
+  kind String
+  code String
+  name String
+  accountCode String @map("account_code")
+  account AccountingAccount @relation(fields: [companyId,accountCode], references: [companyId,code], onDelete: Restrict, onUpdate: NoAction)
+  vouchers AccountingVoucher[]
+  @@unique([companyId,id])
+  @@unique([companyId,kind,code])
+  @@unique([companyId,accountCode])
+  @@index([companyId,kind,code], map: "accounting_parties_company_kind_code")
+  @@map("accounting_parties")
+}
+model AccountingTreasury {
+  companyId String @map("company_id")
+  accountCode String @map("account_code")
+  kind String
+  account AccountingAccount @relation(fields: [companyId,accountCode], references: [companyId,code], onDelete: Restrict, onUpdate: NoAction)
+  @@id([companyId,accountCode])
+  @@map("accounting_treasury")
+}
+model AccountingVoucher {
+  id String @id
+  companyId String @map("company_id")
+  partyId String @map("party_id")
+  kind String
+  entryDate DateTime @map("entry_date") @db.Date
+  reference String
+  amount Decimal @db.Decimal
+  counterAccountCode String @map("counter_account_code")
+  journalId String @map("journal_id")
+  reversalOf String? @map("reversal_of")
+  origin String
+  reason String
+  actorId String @map("actor_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  party AccountingParty @relation(fields: [companyId,partyId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  counterAccount AccountingAccount @relation(fields: [companyId,counterAccountCode], references: [companyId,code], onDelete: Restrict, onUpdate: NoAction)
+  journal AccountingJournal @relation(fields: [companyId,journalId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  actor User @relation(fields: [companyId,actorId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  source AccountingVoucher? @relation("VoucherReversal",fields: [companyId,reversalOf],references: [companyId,id],onDelete: Restrict,onUpdate: NoAction)
+  reversals AccountingVoucher[] @relation("VoucherReversal")
+  @@unique([companyId,id])
+  @@unique([companyId,reference])
+  @@unique([companyId,journalId])
+  @@unique([companyId,reversalOf])
+  // Partial one-opening index and deferred source constraints are SQL-owned.
+  @@index([companyId,partyId,entryDate(sort: Desc),createdAt(sort: Desc),id(sort: Desc)], map: "accounting_vouchers_party_date")
+  @@map("accounting_vouchers")
+}
+model AccountingVoucherCommand {
+  companyId String @map("company_id")
+  idempotencyKey String @map("idempotency_key")
+  payload Json @db.JsonB
+  result Json @db.JsonB
+  command AccountingCommand @relation(fields: [companyId,idempotencyKey],references: [companyId,idempotencyKey],onDelete: Restrict,onUpdate: NoAction)
+  @@id([companyId,idempotencyKey])
+  @@map("accounting_voucher_commands")
 }
 
 model CompanyOperatingSettings {
@@ -751,6 +819,7 @@ model User {
   wmsMovements WmsMovement[]
   accountingJournals AccountingJournal[]
   accountingCommands AccountingCommand[]
+  accountingVouchers AccountingVoucher[]
 
   @@unique([companyId, id])
   @@index([companyId])
