@@ -21,7 +21,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     && getCompanyFeatureAccessState(user.featureAccess, "sfa-setup") === "ENABLED"
     && ["sfa.access", "company.manage"].every((permission) => user.permissions?.includes(permission));
   const operatingMode = useQuery({ queryKey: ["sfa-mode", user?.companyId], queryFn: sfaSetupApi.mode,
-    enabled: canSetup || (!!user?.companyId && getCompanyFeatureAccessState(user.featureAccess,"accounting-core") === "ENABLED"
+    enabled: (!!user?.companyId && getCompanyFeatureAccessState(user.featureAccess,"procurement") === "ENABLED" && user.permissions?.includes("procurement.read")) || canSetup || (!!user?.companyId && getCompanyFeatureAccessState(user.featureAccess,"accounting-core") === "ENABLED"
       && ["sfa.access","accounting.read"].every(p => user.permissions?.includes(p))) || (!!user?.companyId && getCompanyFeatureAccessState(user.featureAccess,"warehouse-core") === "ENABLED"
       && ["sfa.access","wms.read"].every(p => user.permissions?.includes(p))), retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false });
   const isSuperAdmin = user?.role.code === "SUPER_ADMIN";
@@ -36,6 +36,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const navItems: NavItem[] = [
     ...buildCompanyNavItems({ featureAccess: user.featureAccess, t, roleCode: user.role.code, groupLabels: { data: t("group.data"), aiInsights: t("group.aiInsights"), customersTerritory: t("group.customersTerritory"), team: t("group.team"), system: t("group.system") } })
+      .filter(item => item.featureKey !== "procurement" || (operatingMode.data?.operatingMode === "FULL_ERP" && ["sfa.access","wms.read","procurement.read"].every(p=>user.permissions?.includes(p))))
       .filter((item) => item.featureKey !== "accounting-core" || (operatingMode.data?.operatingMode === "FULL_ERP" && ["COMPANY_ADMIN","MANAGER"].includes(user.role.code) && ["sfa.access","accounting.read"].every(p => user.permissions?.includes(p))))
       .filter((item) => item.featureKey !== "sfa-setup" || (canSetup && supportsSfaOperations(operatingMode.data?.operatingMode)))
       .filter((item) => item.featureKey !== "warehouse-core" || (supportsSfaOperations(operatingMode.data?.operatingMode) && ["sfa.access","wms.read"].every(p => user.permissions?.includes(p)))),

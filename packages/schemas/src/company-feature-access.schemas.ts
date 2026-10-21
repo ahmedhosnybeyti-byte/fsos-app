@@ -5,6 +5,7 @@ export const companyScreenAccessStateSchema = z.enum(COMPANY_SCREEN_ACCESS_STATE
 export type CompanyScreenAccessState = z.infer<typeof companyScreenAccessStateSchema>;
 
 export const companyScreenRegistry = [
+  { featureKey: "procurement", route: "/sfa/procurement", arabicLabel: "المشتريات", englishLabel: "Procurement", navigationGroup: "system", icon: "PackagePlus" },
   { featureKey: "accounting-core", route: "/sfa/accounting", arabicLabel: "الحسابات", englishLabel: "Accounting", navigationGroup: "system", icon: "FileText" },
   { featureKey: "warehouse-core", route: "/sfa/warehouse", arabicLabel: "المستودع الذكي", englishLabel: "Warehouse", navigationGroup: "system", icon: "PackagePlus" },
   { featureKey: "sfa-setup", route: "/sfa/setup", arabicLabel: "تجهيز التشغيل", englishLabel: "Operations setup", navigationGroup: "system", icon: "PackagePlus" },
@@ -56,7 +57,7 @@ export function normalizeCompanyFeatureAccess(value: unknown): CompanyFeatureAcc
 }
 
 export function getCompanyFeatureAccessState(featureAccess: CompanyFeatureAccess | null | undefined, featureKey: CompanyScreenFeatureKey): CompanyScreenAccessState {
-  return featureAccess?.[featureKey] ?? (["sfa-setup", "warehouse-core", "accounting-core"].includes(featureKey) ? "HIDDEN" : "ENABLED");
+  return featureAccess?.[featureKey] ?? (["sfa-setup", "warehouse-core", "accounting-core", "procurement"].includes(featureKey) ? "HIDDEN" : "ENABLED");
 }
 
 export function getCompanyScreenForRoute(pathname: string) {

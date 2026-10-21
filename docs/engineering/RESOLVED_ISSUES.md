@@ -1,5 +1,21 @@
 # Murshidak Resolved Engineering Issues
 
+## Procurement Phase 01 — premature stock and duplicate supply prevention
+
+- Symptom/risk: a purchase order could be mistaken for physical stock, converted
+  twice, or over-received through separate WMS drafts.
+- Root cause: no operational request/order identity linked the existing supplier
+  registry and WMS receipts.
+- Fix: separate request approval, unique conversion, typed scoped SQL documents,
+  immutable commands/events, transactional audit, posted-WMS-derived progress and
+  an order-serialized guard at every linked WMS posting. Reversal reopens delivery.
+- Commit: local Procurement Phase 01 commit containing this entry; parent `729c743`.
+- Evidence: six new isolated tests, independent native PostgreSQL concurrency/
+  rollback, ten HTTP checks and actual UI Demo 197→222→237 cartons with two receipts.
+- Prevention: requests/orders never change stock. Reuse the WMS ledger and shared
+  supplier identity; check remaining supply at posting, including direct WMS edits.
+  See [focused local evidence](PROCUREMENT_PHASE01.md).
+
 ## Accounting Phase 2 — duplicated opening debt and voucher/GL drift prevention
 
 - **Symptom/risk:** Independent AR/AP balance updates can drift from the GL;

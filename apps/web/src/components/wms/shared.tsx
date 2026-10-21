@@ -25,6 +25,9 @@ export function Search({id,value,onChange,onSearch,t,embedded=false}:{id:string;
 export function ErrorBox({error,retry,t}:{error?:unknown;retry?:()=>void;t:Text}) {
   const code=error instanceof ApiError?error.message:"";
   const message:Record<string,TranslationKey>={
+    WMS_PROCUREMENT_SEPARATE_APPROVER:"procurement.separate",
+    WMS_PROCUREMENT_EXCEEDS_REMAINING:"procurement.over",
+    WMS_PROCUREMENT_ALREADY_CONVERTED:"procurement.converted",
     WMS_HELD_OWNERSHIP:"wms.this_quantity_belongs_to_a_quarantine_document_resolve_it_through_its_original_doc",
     WMS_QUARANTINE_EXCEEDS_REMAINING:"wms.quantity_exceeds_the_quarantine_document_remainder_refresh_and_review_the_quantity",
     WMS_QUARANTINE_RELEASE_BLOCKED:"wms.release_is_blocked_by_quality_expiry_or_inactive_product_state",

@@ -18,9 +18,9 @@ import {ReceiptEditor,LoadEditor,operationQueryOptions} from "./operation-editor
 import {operationText} from "./operation-labels";
 
 function Events({events,t}:{events:WmsWorkflowEvent[];t:Text}){const {locale}=useTranslation();return <details className="rounded-md border border-border p-3"><summary className="cursor-pointer text-sm font-semibold">{t("wms.workflow_ledger_latest_20_events")}</summary><ol className="mt-3 space-y-3">{events.map(e=><li key={e.id} className="border-s-2 border-primary/30 ps-3 text-xs"><p className="font-semibold">{operationText(e.operation,t)} · {e.actorName}</p><p className="mt-1 text-muted-foreground">{e.fromStatus?operationText(e.fromStatus,t)+(locale==="ar"?" ← ":" → "):""}{operationText(e.toStatus,t)}</p><p className="mt-1 break-words">{e.note}</p><time className="text-muted-foreground">{new Date(e.createdAt).toLocaleString(locale==="ar"?"ar-SA":"en-GB")}</time></li>)}</ol></details>;}
-export function WmsOperationsPanel({warehouse,company,userId,permissions,t}:{warehouse:string;company:string;userId:string;permissions:string[];t:Text}){
+export function WmsOperationsPanel({warehouse,company,userId,permissions,t,initialReceiptId}:{initialReceiptId?:string;warehouse:string;company:string;userId:string;permissions:string[];t:Text}){
   const client=useQueryClient();const [tab,setTab]=useState<"receipts"|"loads"|"policies">("receipts");const [page,setPage]=useState(1),[searchInput,setSearchInput]=useState(""),[search,setSearch]=useState("");
-  const [selected,setSelected]=useState<string|null>(null);const [editor,setEditor]=useState<"receipt"|"load"|"edit-receipt"|null>(null);
+  const [selected,setSelected]=useState<string|null>(initialReceiptId??null);const [editor,setEditor]=useState<"receipt"|"load"|"edit-receipt"|null>(null);
   const [action,setAction]=useState<WmsOperation|null>(null);
   const documents=useQuery({queryKey:["wms",company,warehouse,"documents",tab,page,search],queryFn:()=>api.list(warehouse,tab==="receipts"?"receipts":"loads",page,search),enabled:tab!=="policies",...operationQueryOptions});
   const receipt=useQuery({queryKey:["wms",company,warehouse,"receipt",selected],queryFn:()=>api.receipt(warehouse,selected!),enabled:tab==="receipts"&&!!selected,...operationQueryOptions});

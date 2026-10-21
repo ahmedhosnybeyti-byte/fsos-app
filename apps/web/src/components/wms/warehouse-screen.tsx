@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useEffect,useState } from "react";
 import Link from "next/link";
 import { useMutation,useQuery,useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Boxes, ClipboardList, PackagePlus, Pencil, Plus, RefreshCw, ShieldCheck, Warehouse } from "lucide-react";
@@ -22,16 +22,17 @@ import { operationText } from "./operation-labels";
 import { WmsQuarantinePanel } from "./quarantine-panel";
 
 const queryOptions={retry:false,refetchOnWindowFocus:false,refetchOnReconnect:false} as const;
-export function WarehouseScreen() {
+export function WarehouseScreen({initialWarehouseId,initialReceiptId}:{initialWarehouseId?:string;initialReceiptId?:string}={}) {
   const {user,isLoading}=useAuth(); const {locale,t}=useTranslation();
   const client=useQueryClient(); const company=user?.companyId;
   const allowed=!!company&&user?.role.code!=="SUPER_ADMIN"&&getCompanyFeatureAccessState(user?.featureAccess,"warehouse-core")==="ENABLED"
     &&["sfa.access","wms.read"].every(p=>user?.permissions?.includes(p));
   const mode=useQuery({queryKey:["sfa-mode",company],queryFn:sfaSetupApi.mode,enabled:allowed,...queryOptions});
   const enabled=allowed&&supportsSfaOperations(mode.data?.operatingMode);
-  const [warehouse,setWarehouse]=useState<WmsWarehouse|null>(null);
+  const [warehouse,setWarehouse]=useState<WmsWarehouse|null>(()=>initialWarehouseId?{id:initialWarehouseId,name:initialWarehouseId,code:""}:null);
   const [pickerPage,setPickerPage]=useState(1); const [pickerInput,setPickerInput]=useState(""); const [pickerSearch,setPickerSearch]=useState("");
   const warehouses=useQuery({queryKey:["wms",company,"warehouses",pickerPage,pickerSearch],queryFn:()=>wmsApi.warehouses(pickerPage,pickerSearch),enabled,...queryOptions});
+  useEffect(()=>{const found=warehouses.data?.items.find(w=>w.id===initialWarehouseId);if(found&&warehouse?.id===found.id&&warehouse.name===initialWarehouseId)setWarehouse(found);},[warehouses.data,initialWarehouseId,warehouse]);
   const [searchInput,setSearchInput]=useState(""); const [search,setSearch]=useState(""); const [productPage,setProductPage]=useState(1);
   const [lotPage,setLotPage]=useState(1); const [ledgerPage,setLedgerPage]=useState(1); const [selectedProduct,setSelectedProduct]=useState<{id:string;name:string}|null>(null);
   const [nearExpiry,setNearExpiry]=useState(false); const [horizon,setHorizon]=useState(30);
@@ -69,7 +70,7 @@ export function WarehouseScreen() {
     </>}
     </div></section>
     <WmsQuarantinePanel key={warehouse.id+"quarantine"} warehouse={warehouse.id} company={company!} permissions={user?.permissions??[]} t={t}/>
-    <WmsOperationsPanel key={warehouse.id} warehouse={warehouse.id} company={company!} userId={user!.id} permissions={user?.permissions??[]} t={t}/>
+    <WmsOperationsPanel initialReceiptId={initialReceiptId} key={warehouse.id} warehouse={warehouse.id} company={company!} userId={user!.id} permissions={user?.permissions??[]} t={t}/>
     <WmsReturnsPanel key={warehouse.id+"returns"} warehouse={warehouse.id} company={company!} permissions={user?.permissions??[]} t={t}/>
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
     <Card><CardHeader><div className="flex flex-wrap items-center justify-between gap-3"><CardTitle className="flex items-center gap-2"><Boxes className="h-5 w-5 text-primary"/>{t("wms.products_balances")}</CardTitle>{canProduct&&<Button size="sm" onClick={()=>setAction({kind:"product"})}><Plus className="h-4 w-4"/>{t("wms.new_product")}</Button>}</div></CardHeader><CardContent className="space-y-4">

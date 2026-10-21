@@ -7,6 +7,7 @@ import type { TranslationKey } from "@/lib/i18n/dictionaries";
 const icons: Record<(typeof companyScreenRegistry)[number]["icon"], LucideIcon> = { LayoutDashboard, FileSpreadsheet, Bot, Compass, Radar, PackagePlus, Sparkles, Flame, Target, MapPinned, BarChart3, Globe2, UserPlus, GitCompare, Users2, Map, Footprints, LocateFixed, TrendingUp, FileText, Users, IdCard, Settings, CircleUserRound };
 
 const colorKeys: Record<CompanyScreenFeatureKey, NonNullable<NavItem["colorKey"]>> = {
+  "procurement": "smartLoading",
   "accounting-core": "reports",
   "warehouse-core": "smartLoading",
   "sfa-setup": "settings",
@@ -14,6 +15,7 @@ const colorKeys: Record<CompanyScreenFeatureKey, NonNullable<NavItem["colorKey"]
 };
 
 const navigationKeys: Record<CompanyScreenFeatureKey, TranslationKey> = {
+  "procurement": "procurement.title",
   "accounting-core": "nav.accounting",
   "warehouse-core": "nav.warehouse",
   "sfa-setup": "nav.sfaSetup",

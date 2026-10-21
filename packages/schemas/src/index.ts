@@ -110,3 +110,4 @@ export * from "./wms-quarantine.schemas";
 export * from "./erp-import.schemas";
 export * from "./accounting.schemas";
 export * from "./accounting-subledger.schemas";
+export * from "./procurement.schemas";
