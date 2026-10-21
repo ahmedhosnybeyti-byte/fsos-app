@@ -1,5 +1,20 @@
 # Murshidak Resolved Engineering Issues
 
+## Accounting Phase 1 — duplicate/unbalanced posting and silent correction prevention
+
+- **Symptom/risk:** A first GL path could duplicate a financial event, accept
+  rounding imbalance, or replace a posted entry without durable history.
+- **Root cause:** Existing subscription payments, analytical imports and WMS
+  movements are not a general ledger and supply no financial posting contract.
+- **Fix:** Company-scoped exact SQL journals, deferred balance constraints,
+  immutable history, unique command/business references, serialized per-book
+  writes, explicit reversal/atomic correction, cutoff and same-transaction audit.
+- **Commit:** Local Accounting Phase 1 commit containing this entry; parent
+  `41261a0`. See [focused evidence](ACCOUNTING_PHASE01.md).
+- **Prevention:** Never edit/delete posted financial lines, round an imbalance
+  away, correct without a linked reversal, separate posting from durable audit,
+  or infer accounting entries from imported history or WMS custody movements.
+
 This is durable engineering history. A **RESOLVED** item is historical evidence, not a permanent assumption. It may be reopened only when new measurements prove a regression; cite that new evidence before changing the previous design.
 
 ## Engineering regression gates — disconnected suites and silent SQL skips

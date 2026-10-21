@@ -31,7 +31,7 @@ export const companyModuleRegistry = [
   { key: "field-sales", arabicLabel: "دورة الزيارات والبيع التشغيلي الكاملة", englishLabel: "Complete operational visits and field sales cycle", delivery: "DEFERRED", modes: ["SFA", "FULL_ERP"] },
   { key: "warehouse", arabicLabel: "المستودع: أصناف واستلام وFEFO وحجز وتجهيز وصرف", englishLabel: "Warehouse: products, receiving, FEFO, reservations, picking and dispatch", delivery: "PARTIAL", modes: ["SFA", "FULL_ERP"] },
   { key: "purchasing", arabicLabel: "المشتريات والموردون", englishLabel: "Purchasing and suppliers", delivery: "DEFERRED", modes: ["FULL_ERP"] },
-  { key: "accounting", arabicLabel: "الحسابات والأستاذ العام", englishLabel: "Accounting and general ledger", delivery: "DEFERRED", modes: ["FULL_ERP"] },
+  { key: "accounting", arabicLabel: "الحسابات: دليل الحسابات والقيود وميزان المراجعة", englishLabel: "Accounting: chart, journals and trial balance", delivery: "PARTIAL", modes: ["FULL_ERP"] },
   { key: "invoicing", arabicLabel: "ترحيل الفواتير والمرتجعات", englishLabel: "Invoice and return posting", delivery: "DEFERRED", modes: ["FULL_ERP"] },
   { key: "collections", arabicLabel: "التحصيل وذمم العملاء", englishLabel: "Trade collections and receivables", delivery: "DEFERRED", modes: ["FULL_ERP"] },
 ] as const;

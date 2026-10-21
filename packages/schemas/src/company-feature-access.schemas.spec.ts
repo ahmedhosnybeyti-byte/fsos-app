@@ -29,7 +29,8 @@ test("SFA Setup requires explicit screen activation without changing legacy defa
   for (const value of [undefined, null, {}, { files: "ENABLED" } as const]) {
     assert.equal(getCompanyFeatureAccessState(value, "sfa-setup"), "HIDDEN");
     assert.equal(getCompanyFeatureAccessState(value, "warehouse-core"), "HIDDEN");
-    for (const screen of companyScreenRegistry.filter((item) => !["sfa-setup","warehouse-core"].includes(item.featureKey))) {
+    assert.equal(getCompanyFeatureAccessState(value, "accounting-core"), "HIDDEN");
+    for (const screen of companyScreenRegistry.filter((item) => !["sfa-setup","warehouse-core","accounting-core"].includes(item.featureKey))) {
       assert.equal(getCompanyFeatureAccessState(value, screen.featureKey), "ENABLED");
     }
   }

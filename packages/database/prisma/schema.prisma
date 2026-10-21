@@ -244,6 +244,7 @@ model Company {
   operatingSettings CompanyOperatingSettings?
   warehouses Warehouse[]
   wmsProducts WmsProduct[]
+  accountingBook AccountingBook?
   maxExcelUploadSizeMb Int? @map("max_excel_upload_size_mb")
   // Captured at signup — see CompanyAccountType. Nullable for pre-existing
   // companies created before this field was added.
@@ -433,6 +434,79 @@ model WmsMovement {
   inTransitDelta Decimal @default(0) @map("in_transit_delta") @db.Decimal(24,6)
   eventId String? @map("event_id")
   @@index([companyId,eventId], map: "wms_movements_event")
+}
+
+// Exact balance/immutability/period triggers and posting functions live in SQL.
+model AccountingBook {
+  companyId String @id @map("company_id")
+  currency String @default("SAR")
+  closedThrough DateTime? @map("closed_through") @db.Date
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  accounts AccountingAccount[]
+  journals AccountingJournal[]
+  commands AccountingCommand[]
+  @@map("accounting_books")
+}
+model AccountingAccount {
+  companyId String @map("company_id")
+  code String
+  name String
+  type String
+  book AccountingBook @relation(fields: [companyId], references: [companyId], onDelete: Restrict, onUpdate: NoAction)
+  lines AccountingLine[]
+  @@id([companyId,code])
+  @@map("accounting_accounts")
+}
+model AccountingJournal {
+  id String @id
+  companyId String @map("company_id")
+  entryDate DateTime @map("entry_date") @db.Date
+  reference String
+  reason String
+  kind String
+  status String @default("DRAFT")
+  reversalOf String? @map("reversal_of")
+  correctionOf String? @map("correction_of")
+  actorId String @map("actor_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  book AccountingBook @relation(fields: [companyId], references: [companyId], onDelete: Restrict, onUpdate: NoAction)
+  actor User @relation(fields: [companyId,actorId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  sourceReversal AccountingJournal? @relation("AccountingReversal", fields: [companyId,reversalOf], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  reversals AccountingJournal[] @relation("AccountingReversal")
+  sourceCorrection AccountingJournal? @relation("AccountingCorrection", fields: [companyId,correctionOf], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  corrections AccountingJournal[] @relation("AccountingCorrection")
+  lines AccountingLine[]
+  @@unique([companyId,id])
+  @@unique([companyId,reference])
+  @@unique([companyId,reversalOf])
+  @@unique([companyId,correctionOf])
+  @@index([companyId,entryDate(sort: Desc),id(sort: Desc)], map: "accounting_journals_company_date")
+  @@map("accounting_journals")
+}
+model AccountingLine {
+  companyId String @map("company_id")
+  journalId String @map("journal_id")
+  lineNo Int @map("line_no")
+  accountCode String @map("account_code")
+  debit Decimal @db.Decimal
+  credit Decimal @db.Decimal
+  memo String @default("")
+  journal AccountingJournal @relation(fields: [companyId,journalId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  account AccountingAccount @relation(fields: [companyId,accountCode], references: [companyId,code], onDelete: Restrict, onUpdate: NoAction)
+  @@id([companyId,journalId,lineNo])
+  @@map("accounting_lines")
+}
+model AccountingCommand {
+  companyId String @map("company_id")
+  idempotencyKey String @map("idempotency_key")
+  payload Json @db.JsonB
+  result Json @db.JsonB
+  actorId String @map("actor_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  book AccountingBook @relation(fields: [companyId], references: [companyId], onDelete: Restrict, onUpdate: NoAction)
+  actor User @relation(fields: [companyId,actorId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  @@id([companyId,idempotencyKey])
+  @@map("accounting_commands")
 }
 
 model CompanyOperatingSettings {
@@ -675,6 +749,8 @@ model User {
   opportunityRadarPreferences OpportunityRadarPreference[]
   wmsWarehouseAccess WmsWarehouseAccess[]
   wmsMovements WmsMovement[]
+  accountingJournals AccountingJournal[]
+  accountingCommands AccountingCommand[]
 
   @@unique([companyId, id])
   @@index([companyId])

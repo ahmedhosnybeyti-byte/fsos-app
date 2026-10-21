@@ -54,6 +54,7 @@ import { OpportunityRadarModule } from "./modules/opportunity-radar/opportunity-
 import { SfaSetupModule } from "./modules/sfa-setup/sfa-setup.module";
 import { WmsModule } from "./modules/wms/wms.module";
 import { ErpImportModule } from "./modules/erp-import/erp-import.module";
+import { AccountingModule } from "./modules/accounting/accounting.module";
 
 @Module({
   imports: [
@@ -109,6 +110,7 @@ import { ErpImportModule } from "./modules/erp-import/erp-import.module";
     SfaSetupModule,
     WmsModule,
     ErpImportModule,
+    AccountingModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
