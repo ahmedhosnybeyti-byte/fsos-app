@@ -83,7 +83,7 @@ export default function SettingsPage() {
           <TabsTrigger value="dataSources">{t("settings.tabDataSources")}</TabsTrigger>
           <TabsTrigger value="policies">{t("settings.tabPolicies")}</TabsTrigger>
           <TabsTrigger value="account">{t("settings.tabAccount")}</TabsTrigger>
-          <TabsTrigger value="gpt">Custom GPT</TabsTrigger>
+          <TabsTrigger value="gpt">{t("settings.tabGpt")}</TabsTrigger>
           <TabsTrigger value="billing">{t("settings.tabBilling")}</TabsTrigger>
         </TabsList>
         <TabsContent value="company">

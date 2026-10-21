@@ -65,10 +65,9 @@ After an important verified engineering fix, update `RESOLVED_ISSUES.md` with th
 
 ## Murshidak mandatory engineering gates
 
-- Permanent UI rule: every new or updated Murshidak screen must use the existing design-system components/tokens and `TranslationProvider` dictionary keys from the start. All UI copy, states, validation and accessibility labels must support Arabic/English, RTL/LTR, Light/Dark and mobile. Do not introduce local bilingual selector functions, hard-coded single-language labels, independent colors/CSS or a parallel translation system. Visual corrections must not alter inventory/accounting logic or database behavior; validate only affected interfaces unless functional work is separately authorized.
+- Before any task that creates or modifies Murshidak UI, including minor text/style changes, read and apply `.codex/skills/murshidak-ui-design-system/SKILL.md` automatically, without waiting for a prompt reminder.
 
 - Before substantive changes to backend, APIs, PostgreSQL/Prisma, RIE, integrations, ERP/SFA operations, or frontend data-fetching paths, use the `murshidak-system-design` skill at `.agents/skills/murshidak-system-design/SKILL.md`. Apply a proportional, evidence-based review and report `System Design Gate: PASS / WARN / BLOCK`.
-- For new frontend screens or substantial visual changes, ALSO use `.codex/skills/murshidak-ui-design-system/SKILL.md` and `docs/design/MURSHIDAK_UI_DESIGN_SYSTEM.md`; do not replace or bypass their approved visual system.
 - For a trivial UI text/style-only or documentation change with no architectural impact, the system-design gate can be a one-line no-impact check. Avoid unnecessary extra tool calls and tests.
 - Respect existing company isolation, default `ANALYSIS_ONLY`, explicit `SFA` permissions, unchanged Excel/RIE behavior, and production/deployment restrictions. Do not override existing repository-specific instructions; resolve conflicts explicitly.
 

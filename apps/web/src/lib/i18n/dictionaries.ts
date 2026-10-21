@@ -760,6 +760,7 @@ export type TranslationKey =
   | "settings.title"
   | "settings.subtitle"
   | "settings.tabCompany"
+  | "settings.tabGpt"
   | "settings.tabBranches"
   | "settings.tabDataSources"
   | "settings.tabPolicies"
@@ -2245,6 +2246,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "employees.statusArchived": "مؤرشف",
     "settings.title": "الإعدادات",
     "settings.subtitle": "تحكم في بيانات شركتك، إعدادات الـ Custom GPT، والفوترة.",
+    "settings.tabGpt": "إعدادات Custom GPT",
     "settings.tabCompany": "الشركة",
     "settings.tabBranches": "الفروع",
     "settings.tabDataSources": "مصادر البيانات",
@@ -3719,6 +3721,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "employees.statusArchived": "Archived",
     "settings.title": "Settings",
     "settings.subtitle": "Manage your company data, Custom GPT settings, and billing.",
+    "settings.tabGpt": "Custom GPT settings",
     "settings.tabCompany": "Company",
     "settings.tabBranches": "Branches",
     "settings.tabDataSources": "Data Sources",
