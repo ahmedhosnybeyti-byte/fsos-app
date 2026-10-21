@@ -1,0 +1,32 @@
+# WMS stock coverage contract
+
+Read-only extension based on `771951e`. No migrations, dependencies, imports or stock commands.
+
+- Admission: existing WMS SFA/company-screen guard, company and assigned warehouse boundary. Canonical demand additionally uses the existing route hierarchy resolver.
+- RIE owns one prepared PostgreSQL query: current-only Canonical (newest wins), tenant/route/date/product scope before fact joins, scalar projections, aggregate once, risk sort and 20-row pagination. No raw facts reach Node.
+- Stock: current `wms_inventory_state.available` (excludes reserved, quantity/lot quarantine, quality blocks, expiry and inactive products). Never reconstruct historical balances. Response records stock read time separately from demand period.
+- Demand: last 30 completed Riyadh calendar days. `Confirmed`/`Posted` invoices with explicit `Sale`/`Van Sale`/`Pre-Sale` type only, matching line/header route; no Exchange, cancelled, future, van loading, transfer or operational movements. The original imported Demo uses Posted with Van Sale/Pre-Sale. Quantity includes shipped free quantity; gross outbound demand, returns are not subtracted. An explicit line date must match its header; disagreement invalidates the product estimate.
+- Identity/UOM: existing ERP product link; Piece/Pack/Carton converted through original packing to WMS base units, carton mapping must still agree with WMS. Unknown/invalid conversion or quantity invalidates that product estimate, never silently undercounts.
+- Conservative evidence policy: positive demand on at least three dates, earliest at least 14 days before window end, latest within seven days. Divide by all 30 calendar days including zeros. Otherwise null mean/cover and UNKNOWN; absence is not zero demand.
+- Risk policy without supplier lead data: <=7 days CRITICAL; <=30 WATCH; >30 SAFE. These are disclosed operational review thresholds, not supplier lead times or guarantees. No typed reliable supplier lead-time field exists: return null and display missing. UNKNOWN also needs review, never safe.
+- Company/hierarchy demand is a proxy: Canonical invoices have no warehouse provenance. Explicitly label this limitation; never claim these sales came from the selected warehouse.
+- Only already-authorized procurement readers in FULL_ERP with enabled procurement screen receive a reference to an existing open/partial order (same company/warehouse/product). Existing orders do not inflate available stock or suppress risk. Link opens existing procurement UI; no automatic purchase command.
+
+## Local evidence (2026-10-22 Riyadh)
+
+- Existing synthetic PostgreSQL database identity and local cluster directory verified before read-only transactions. No Canonical reimport, migration or balance mutation. Before/after warehouse position hash, recipient/van custody position hash, movement count and current Canonical count are identical.
+- Actual demand period: 2026-09-22 through 2026-10-21. All 100 original imported Demo products are CRITICAL at their present stock levels. It is impossible to demonstrate SAFE and UNKNOWN in this existing company-wide warehouse scope without changing data or scope. These cases remain explicitly unavailable in the real Demo; never create presentation constants or reduce demand to force them.
+- Actual original example P-040, مياه فوارة ليمون 330مل×24 - واحة: 4,800 available pieces, 1,554.400000 pieces/day, 3.09 days, 26 observed sale dates. Lead time missing.
+- Isolated SQL regressions independently verify calculated SAFE (180 days), CRITICAL (7 days boundary), WATCH (30 days boundary), UNKNOWN (absent/sparse/stale/invalid history), packing/free-quantity behavior, future/cancelled/exchange/van-load exclusion, hierarchy/tenant denial, quality-blocked stock and authorized existing-order references. Fixture changes are confined to disposable in-memory test databases.
+- Native EXPLAIN ANALYZE (20-row page): approximately 1.48 seconds, no temporary spill, scalar fact scan and SQL aggregation. The planner scans 71,811 invoice candidates (3,282 eligible headers), and scans the current relation once for 345,510 item candidates (15,662 lines survive scoped invoice/product matching); these aggregate to 100 products and 20 returned rows. PostgreSQL selected a sequential item scan at this dataset distribution; no raw facts reach Node and no per-product fact queries run. HTTP product search P-040: 2.42 seconds cold, 521 bytes, one item. This is local evidence, not a production capacity claim. Detailed plan: `.quality/coverage-demo.json`; prepared SQL: `.quality/coverage-query.sql`.
+- Five actual HTTP checks pass: unauthenticated 401; foreign warehouse 404; cross-tenant 403; invalid page 400; calculated scoped Demo response 200. Evidence: `.quality/coverage/http.json`.
+- Browser webview failed to attach twice; visual acceptance is not claimed. Source uses shared Card/Badge/Button/Skeleton, semantic tokens, responsive grid and TranslationProvider with Arabic/English keys. Procurement deep link initializes the existing warehouse and order-reference search; destination retains its independent admission gates.
+
+## Executable gates
+
+- `pnpm --config.verify-deps-before-run=false quality --base 771951e`: PASS, 565 tests, zero failed/skipped/TODO/cancelled, API/database/schemas/web typechecks PASS. Evidence `.quality/changed.json`, log `.quality/coverage-quality.log`.
+- `pnpm --config.verify-deps-before-run=false quality:postgres`: PASS, 135 tests, zero failed/skipped/TODO/cancelled. Includes all five new coverage SQL tests. Evidence `.quality/postgres.json`, log `.quality/coverage-postgres.log`.
+- The pnpm setting disables pnpm's automatic dependency install before scripts; no dependency was added. Validation required access outside the filesystem sandbox to read existing dependency declarations; initial sandbox-only typecheck failures were superseded by the complete passing gate.
+- `git diff --check`: PASS. Existing unrelated working changes, including ENGINEERING_RELIABILITY.md, were preserved.
+
+System Design Gate: **WARN** for missing warehouse-specific demand provenance. Query correctness, tenant/warehouse/hierarchy admission, stock immutability and executable gates PASS; company demand is an explicitly disclosed proxy. UI verification: **WARN**, source reviewed but browser attachment unavailable. Demo acceptance: **partial**, actual SAFE/UNKNOWN examples do not exist under the requested unchanged data. No push, deployment or release approval.

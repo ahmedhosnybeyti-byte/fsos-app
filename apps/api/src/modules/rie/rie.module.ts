@@ -1,4 +1,5 @@
 import { forwardRef, Module } from "@nestjs/common";
+import { RieWmsCoverageQueryService } from "./wms-coverage-query.service";
 import { RieErpHistoryQueryService } from "./erp-history-query.service";
 import { FilesModule } from "../files/files.module";
 import { GraphBuilderService } from "./graph-builder.service";
@@ -37,6 +38,7 @@ import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.serv
 @Module({
   imports: [forwardRef(() => FilesModule)],
   providers: [
+    RieWmsCoverageQueryService,
     RieErpHistoryQueryService,
     GraphBuilderService,
     CanonicalHierarchyResolverService,
@@ -51,6 +53,7 @@ import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.serv
     RieFacade,
   ],
   exports: [
+    RieWmsCoverageQueryService,
     RieErpHistoryQueryService,
     GraphBuilderService,
     // Exported so other modules that need row-level hierarchy scoping on

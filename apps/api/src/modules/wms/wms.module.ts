@@ -1,3 +1,5 @@
+import { WmsCoverageService } from "./wms-coverage.service";
+import { RieModule } from "../rie/rie.module";
 import {ProcurementController} from "./procurement.controller";
 import {ProcurementService} from "./procurement.service";
 import {WmsCoreService} from "./wms-core.service";
@@ -12,5 +14,5 @@ import { WmsController } from "./wms.controller";
 import { WmsService } from "./wms.service";
 import { WmsOperationsController } from "./wms-operations.controller";
 import { WmsOperationsService } from "./wms-operations.service";
-@Module({imports:[AuditLogModule],controllers:[ProcurementController,WmsController,WmsOperationsController,WmsCoreController,WmsCountController,WmsQuarantineController],providers:[ProcurementService,WmsService,WmsOperationsService,WmsCoreService,WmsCountService,WmsQuarantineService]})
+@Module({imports:[AuditLogModule,RieModule],controllers:[ProcurementController,WmsController,WmsOperationsController,WmsCoreController,WmsCountController,WmsQuarantineController],providers:[WmsCoverageService,ProcurementService,WmsService,WmsOperationsService,WmsCoreService,WmsCountService,WmsQuarantineService]})
 export class WmsModule {}

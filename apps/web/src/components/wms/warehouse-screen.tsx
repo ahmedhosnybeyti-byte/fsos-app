@@ -20,6 +20,7 @@ import { WmsReturnsPanel,QualityAction } from "./returns-panel";
 import { WmsOperationsPanel } from "./operations-panel";
 import { operationText } from "./operation-labels";
 import { WmsQuarantinePanel } from "./quarantine-panel";
+import { WmsCoveragePanel } from "./coverage-panel";
 
 const queryOptions={retry:false,refetchOnWindowFocus:false,refetchOnReconnect:false} as const;
 export function WarehouseScreen({initialWarehouseId,initialReceiptId}:{initialWarehouseId?:string;initialReceiptId?:string}={}) {
@@ -69,6 +70,7 @@ export function WarehouseScreen({initialWarehouseId,initialReceiptId}:{initialWa
       <p className="text-xs text-muted-foreground">{t("wms.read_at")} <time dateTime={summary.data.asOf}>{new Date(summary.data.asOf).toLocaleString(locale==="ar"?"ar-SA":"en-GB")}</time> · {t("wms.different_units_are_never_added_together")}</p>
     </>}
     </div></section>
+    <WmsCoveragePanel key={warehouse.id+"coverage"} warehouse={warehouse.id} company={company!} t={t}/>
     <WmsQuarantinePanel key={warehouse.id+"quarantine"} warehouse={warehouse.id} company={company!} permissions={user?.permissions??[]} t={t}/>
     <WmsOperationsPanel initialReceiptId={initialReceiptId} key={warehouse.id} warehouse={warehouse.id} company={company!} userId={user!.id} permissions={user?.permissions??[]} t={t}/>
     <WmsReturnsPanel key={warehouse.id+"returns"} warehouse={warehouse.id} company={company!} permissions={user?.permissions??[]} t={t}/>

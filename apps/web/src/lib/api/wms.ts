@@ -1,7 +1,8 @@
-import type { WmsAccessUser, WmsBatch, WmsBatchInput, WmsMovement, WmsOpeningInput, WmsPage, WmsProduct, WmsProductInput, WmsReversalInput, WmsSummary, WmsWarehouse } from "@field-sales-os/schemas";
+import type { WmsCoverageResult, WmsAccessUser, WmsBatch, WmsBatchInput, WmsMovement, WmsOpeningInput, WmsPage, WmsProduct, WmsProductInput, WmsReversalInput, WmsSummary, WmsWarehouse } from "@field-sales-os/schemas";
 import { apiFetch } from "../api-client";
 const path=(warehouse:string)=>`/sfa/wms/warehouses/${encodeURIComponent(warehouse)}`;
 export const wmsApi={
+  coverage:(w:string,page:number,search:string)=>apiFetch<WmsCoverageResult>(`${path(w)}/coverage`,{query:{page,search}}),
   warehouses:(page:number,search:string)=>apiFetch<WmsPage<WmsWarehouse>>("/sfa/wms/warehouses",{query:{page,search}}),
   summary:(w:string,horizon:number)=>apiFetch<WmsSummary>(`${path(w)}/summary`,{query:{horizon}}),
   products:(w:string,page:number,search:string)=>apiFetch<WmsPage<WmsProduct>>(`${path(w)}/products`,{query:{page,search}}),

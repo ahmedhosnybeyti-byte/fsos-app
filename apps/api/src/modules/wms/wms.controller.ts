@@ -5,13 +5,15 @@ import { RequiresSfa } from "../../common/decorators/requires-sfa.decorator";
 import { CompanyScreen } from "../../common/decorators/company-screen.decorator";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { WmsService } from "./wms.service";
+import { WmsCoverageService } from "./wms-coverage.service";
 
 @Controller("sfa/wms")
 @Auth("COMPANY_ADMIN","MANAGER","SUPERVISOR","SALES_REP")
 @RequiresSfa("wms.read")
 @CompanyScreen("warehouse-core")
 export class WmsController {
-  constructor(private readonly service: WmsService) {}
+  constructor(private readonly service: WmsService, private readonly intelligence: WmsCoverageService) {}
+  @Get("warehouses/:warehouse/coverage") coverage(@CurrentUser() u: AuthenticatedUser,@Param("warehouse") w: string,@Query() q: unknown) { return this.intelligence.coverage(u,w,q); }
   @Get("warehouses") warehouses(@CurrentUser() u: AuthenticatedUser,@Query() q: unknown) { return this.service.warehouses(u,q); }
   @Get("warehouses/:warehouse/summary") summary(@CurrentUser() u: AuthenticatedUser,@Param("warehouse") w: string,@Query() q: unknown) { return this.service.summary(u,w,q); }
   @Get("warehouses/:warehouse/products") products(@CurrentUser() u: AuthenticatedUser,@Param("warehouse") w: string,@Query() q: unknown) { return this.service.products(u,w,q); }

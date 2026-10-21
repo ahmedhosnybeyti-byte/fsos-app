@@ -1,5 +1,14 @@
 # Murshidak Resolved Engineering Issues
 
+## WMS coverage — trustworthy sales/UOM and read-only early warning
+
+- Symptom: WMS showed balances without consumption-based depletion warnings; imported ERP sales use Posted/Van Sale/Pre-Sale rather than only the Analysis template's Confirmed/Sale vocabulary.
+- Root cause: no scoped RIE contract joined current WMS availability to verified historical sale quantities and original product packing.
+- Fix: one scalar PostgreSQL/RIE aggregate over current-only Canonical, scoped tenant/hierarchy/date/product, original ERP UOM links, conservative history checks, exact base-unit demand, risk-ranked pagination and existing-order references. Unknown history/UOM/date consistency stays unknown. Reservations, quarantine, expiry and quality blocks remain unavailable. No stock command, ingestion, dependency or migration.
+- Commit: local uncommitted stock-coverage extension based on `771951e`; no push/deploy.
+- Verification: 565-test quality gate with four typechecks; 135 isolated SQL checks including five coverage tests; five actual local HTTP checks; native read-only Demo EXPLAIN and unchanged warehouse/custody hashes. See [WMS_STOCK_COVERAGE.md](WMS_STOCK_COVERAGE.md) for evidence and remaining visual/Demo limitations.
+- Prevention: never count Van Loads/internal transfers as sales, include future history, silently coerce unknown packing, inflate available stock with open orders, or invent SAFE/UNKNOWN examples. Disclose company-demand proxy and missing supplier lead time until verified warehouse/source metadata exists.
+
 ## Procurement Phase 01 — premature stock and duplicate supply prevention
 
 - Symptom/risk: a purchase order could be mistaken for physical stock, converted

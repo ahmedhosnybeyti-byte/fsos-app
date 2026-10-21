@@ -22,21 +22,21 @@ import {operationText} from "../wms/operation-labels";
 import type {TranslationKey} from "@/lib/i18n/dictionaries";
 const label=(status:string,t:Text)=>t(`procurement.${status}` as TranslationKey);
 const wmsLink=(w:string,id:string)=>`/sfa/warehouse?warehouseId=${encodeURIComponent(w)}&receiptId=${encodeURIComponent(id)}`;
-export function ProcurementScreen(){
+export function ProcurementScreen({initialWarehouse="",initialSearch=""}:{initialWarehouse?:string;initialSearch?:string}={}){
  const {user,isLoading}=useAuth(),{t}=useTranslation();
  const allowed=!!user?.companyId&&getCompanyFeatureAccessState(user.featureAccess,"procurement")==="ENABLED"&&["sfa.access","wms.read","procurement.read"].every(p=>user.permissions?.includes(p));
  const mode=useQuery({queryKey:["sfa-mode",user?.companyId],queryFn:sfaSetupApi.mode,enabled:allowed,...options});
  const enabled=allowed&&mode.data?.operatingMode==="FULL_ERP";
- const [warehouse,setWarehouse]=useState(""),[page,setPage]=useState(1),[input,setInput]=useState(""),[search,setSearch]=useState("");
+ const [warehouse,setWarehouse]=useState(initialWarehouse),[page,setPage]=useState(1),[input,setInput]=useState(""),[search,setSearch]=useState("");
  const warehouses=useQuery({queryKey:["wms",user?.companyId,"procurement-warehouses",page,search],queryFn:()=>wmsApi.warehouses(page,search),enabled,...options});
  if(isLoading||(allowed&&mode.isPending))return <Skeleton className="h-64"/>;
  if(!enabled)return <Card><CardHeader><CardTitle>{t("procurement.title")}</CardTitle></CardHeader><CardContent>{mode.isError?<ErrorBox error={mode.error} retry={()=>void mode.refetch()} t={t}/>:t("procurement.blocked")}</CardContent></Card>;
  return <div className="space-y-6"><header><h1 className="flex items-center gap-2 text-2xl font-bold sm:text-3xl"><ShoppingCart className="h-7 w-7 text-primary"/>{t("procurement.title")}</h1><p className="mt-1 text-sm text-muted-foreground">{t("procurement.subtitle")}</p></header>
  <Card><CardHeader><CardTitle>{t("wms.warehouse_scope")}</CardTitle></CardHeader><CardContent className="space-y-3"><Search id="procurement-warehouse-search" value={input} onChange={setInput} onSearch={()=>{setPage(1);setSearch(input.trim());}} t={t}/>{warehouses.isPending?<Skeleton className="h-12"/>:warehouses.isError?<ErrorBox error={warehouses.error} t={t} retry={()=>void warehouses.refetch()}/>:<><div className="flex flex-wrap gap-2">{warehouses.data.items.map(w=><Button key={w.id} aria-pressed={warehouse===w.id} variant={warehouse===w.id?"default":"outline"} onClick={()=>setWarehouse(w.id)}>{w.name} · {w.code}</Button>)}</div>{!warehouses.data.items.length&&<p>{t("wms.no_matching_authorized_warehouses_ask_your_administrator_to_configure_a_warehouse_")}</p>}<Pager page={page} hasMore={warehouses.data.hasMore} busy={warehouses.isFetching} onChange={setPage} t={t}/></>}</CardContent></Card>
- {warehouse?<Workspace key={warehouse} warehouse={warehouse} company={user!.companyId!} userId={user!.id} permissions={user!.permissions??[]} t={t}/>:<Card><CardContent className="py-10 text-center text-muted-foreground">{t("wms.choose_a_warehouse_to_begin")}</CardContent></Card>}</div>;
+ {warehouse?<Workspace initialSearch={warehouse===initialWarehouse?initialSearch:""} key={warehouse} warehouse={warehouse} company={user!.companyId!} userId={user!.id} permissions={user!.permissions??[]} t={t}/>:<Card><CardContent className="py-10 text-center text-muted-foreground">{t("wms.choose_a_warehouse_to_begin")}</CardContent></Card>}</div>;
 }
-function Workspace({warehouse:w,company:c,userId,permissions,t}:{warehouse:string;company:string;userId:string;permissions:string[];t:Text}){
- const client=useQueryClient();const [tab,setTab]=useState("dashboard"),[page,setPage]=useState(1),[input,setInput]=useState(""),[search,setSearch]=useState("");
+function Workspace({warehouse:w,company:c,userId,permissions,t,initialSearch=""}:{warehouse:string;company:string;userId:string;permissions:string[];t:Text;initialSearch?:string}){
+ const client=useQueryClient();const [tab,setTab]=useState(initialSearch?"orders":"dashboard"),[page,setPage]=useState(1),[input,setInput]=useState(initialSearch),[search,setSearch]=useState(initialSearch);
  const [selected,setSelected]=useState<string|null>(null),[action,setAction]=useState<ProcurementOperation|null>(null);
  const prefix=["procurement",c,w];
  const summary=useQuery({queryKey:[...prefix,"summary"],queryFn:()=>api.summary(w),...options});
