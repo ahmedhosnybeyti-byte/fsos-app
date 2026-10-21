@@ -22,6 +22,8 @@ export function Search({id,value,onChange,onSearch,t,embedded=false}:{id:string;
 export function ErrorBox({error,retry,t}:{error?:unknown;retry?:()=>void;t:Text}) {
   const code=error instanceof ApiError?error.message:"";
   const message:Record<string,[string,string]>={
+    WMS_COUNT_STALE:["تغير رصيد أو حالة التشغيلة بعد العدّ. ألغِ المسودة وأعد العدّ من بيانات محدثة.","Lot stock or state changed after counting. Cancel the draft and recount using refreshed data."],
+    WMS_COUNT_COMMITTED_STOCK:["المعدود أقل من المحجوز والمحجور. راجع العدّ والحجوزات والجودة قبل التسوية.","Count is below reserved plus quarantined stock. Review count, reservations and quality before adjusting."],
     WMS_RETURN_EXCEEDS_SOURCE:["المرتجع يتجاوز الباقي من مستند المصدر بعد المرتجعات السابقة.","Return exceeds the source quantity remaining after earlier returns."],
     WMS_CUSTODY_INSUFFICIENT:["العهدة المتبقية لا تكفي لهذا المرتجع.","Remaining accepted custody is insufficient for this return."],
     WMS_PROPOSAL_REQUIRED:["ثبّت اقتراح التحميل ووحدة المصدر أولًا.","Record the loading proposal and source unit first."],

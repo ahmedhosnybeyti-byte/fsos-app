@@ -449,3 +449,12 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - Evidence: three focused SQL regressions pass; native PostgreSQL isolated import approved 686,663 unique rows from 686,684 source rows, with 21 identical repeats, exact parity for all 100 products, RIE future-date separation and an independent idempotent WMS opening. See ERP_HISTORICAL_IMPORT_LOCAL_20261021.md.
 - Commit: ERP historical import feature commit on codex/erp-historical-import; inspect git history for apps/api/src/modules/erp-import/erp-import.service.ts.
 - Prevention: use PostgreSQL set joins for bulk reference validation; reconcile source rows against unique rows plus identical duplicates; never restart the entire file to repair an already durable validation phase.
+
+### WMS physical counts — stale snapshots and duplicate settlement prevention
+
+- Symptom/risk: changing stock on draft save, applying a count after intervening stock movement, or retrying approval could silently misstate physical warehouse stock.
+- Root cause: existing WMS workflows had no separate count snapshot/revision and approved adjustment identity.
+- Fix: inert immutable count drafts, per-position revision (including ABA), stable product/position locks, separate approval permission, unique count-line movement, command deduplication and same-transaction approval/event/audit. Preserve reservations, holds, company/warehouse isolation, custody, opening ledger and historical facts; no estimated-cost journal.
+- Commit: local physical-count feature commit containing this entry, parent `b8f6004`; no push/deploy.
+- Verification: five focused SQL tests, native independent-connection races/rollback, 14 count-only HTTP checks, API/Web/schema compilation, and one existing Demo browser count: 200→197 cartons with exactly one −3-carton adjustment. See [WMS_PHYSICAL_COUNTS.md](WMS_PHYSICAL_COUNTS.md).
+- Prevention: draft writes never change positions; approval must compare the locked position revision and remain atomic with its immutable stock effect and durable audit. Never treat a new request key as a new right to post the same count.

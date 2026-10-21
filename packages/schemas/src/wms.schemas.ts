@@ -60,7 +60,7 @@ export interface WmsSummary {
   nearExpiryBatches: number; expiredBatches: number; stockedProducts: number; asOf: string;
 }
 export interface WmsMovement {
-  id: string; productName: string; batchCode: string; kind: "OPENING" | "REVERSAL" | "RECEIPT" | "RECEIPT_REVERSAL" | "RESERVE" | "RELEASE" | "DISPATCH" | "ACCEPT" | "TRANSIT_RETURN"|"SUPPLIER_RETURN"|"REP_RETURN"|"QUALITY_HOLD"|"QUALITY_RELEASE";
+  id: string; productName: string; batchCode: string; kind: "OPENING" | "REVERSAL" | "RECEIPT" | "RECEIPT_REVERSAL" | "RESERVE" | "RELEASE" | "DISPATCH" | "ACCEPT" | "TRANSIT_RETURN"|"SUPPLIER_RETURN"|"REP_RETURN"|"QUALITY_HOLD"|"QUALITY_RELEASE"|"ADJUSTMENT";
   quantity: string; baseUnit: string; inputQuantity: string; inputUnit: string; conversionFactor: number;
   reference: string; reason: string; createdAt: string; reversalOf: string | null; reversed: boolean;
   reservedDelta: string; inTransitDelta: string;

@@ -1,5 +1,6 @@
 import type {Text} from "./shared";
 export const operationLabels:Record<string,[string,string]>={
+  ADJUSTMENT:["تسوية جرد فعلي","Physical count adjustment"],
   DISPATCHED:["خرج — بانتظار تأكيد التسليم","Dispatched — handover pending"],COMPLETED:["تم التسليم للمورد","Supplier handover confirmed"],SUPPLIER_RETURN:["مرتجع مورد","Supplier return"],REP_RETURN:["مرتجع مندوب","Representative return"],QUALITY_HOLD:["حظر جودة","Quality block"],QUALITY_RELEASE:["رفع حظر الجودة","Quality unblock"],
   "supplier.create":["إنشاء مرتجع مورد","Create supplier return"],"supplier.submit":["إرسال مرتجع المورد","Submit supplier return"],"supplier.review":["مراجعة مرتجع المورد","Review supplier return"],"supplier.post":["اعتماد وخروج المرتجع","Approve & dispatch return"],"supplier.confirm":["تأكيد تسليم المورد","Confirm supplier handover"],"supplier.cancel":["إلغاء مرتجع المورد","Cancel supplier return"],
   "rep-return.create":["إنشاء مرتجع مندوب","Create rep return"],"rep-return.submit":["إرسال مرتجع المندوب","Submit rep return"],"rep-return.review":["مراجعة مرتجع المندوب","Review rep return"],"rep-return.post":["اعتماد وترحيل المرتجع","Approve & post return"],"rep-return.cancel":["إلغاء مرتجع المندوب","Cancel rep return"],
