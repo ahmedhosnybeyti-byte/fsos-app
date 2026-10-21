@@ -458,3 +458,12 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - Commit: local physical-count feature commit containing this entry, parent `b8f6004`; no push/deploy.
 - Verification: five focused SQL tests, native independent-connection races/rollback, 14 count-only HTTP checks, API/Web/schema compilation, and one existing Demo browser count: 200→197 cartons with exactly one −3-carton adjustment. See [WMS_PHYSICAL_COUNTS.md](WMS_PHYSICAL_COUNTS.md).
 - Prevention: draft writes never change positions; approval must compare the locked position revision and remain atomic with its immutable stock effect and durable audit. Never treat a new request key as a new right to post the same count.
+
+### WMS quantity quarantine — source ownership and approved disposal
+
+- Symptom/risk: a lot-level quality block did not provide a quantity-owned hold, partial sound release or approved damaged-stock disposal; a shared quarantine pool could be consumed by an unrelated command.
+- Root cause: no source document/counter for these held quantities and no unique approved-disposal event identity.
+- Fix: typed source-bound quarantine documents, separate hold/release/write-off permissions, owned sub-balance within existing quarantine, product/lot/position locks, version/idempotency guards and atomic immutable stock/event/audit. Only WRITE_OFF reduces physical stock; release cannot bypass expiry/quality blocks. No estimated cost or accounting effect.
+- Commit: local quarantine/operational-UI feature commit containing this entry, parent `9e00f44`; no push/deploy.
+- Evidence: four new isolated SQL tests, native concurrent-command/rollback checks, 13 new-route HTTP checks and one actual Demo browser cycle 200→190/10→196/4→196/0, with one physical write-off. Previous ledger, custody and history remain unchanged; see [WMS_QUARANTINE_AND_OPERATIONAL_UI.md](WMS_QUARANTINE_AND_OPERATIONAL_UI.md).
+- Prevention: never dispose/release an unowned shared quantity, decrement physical on HOLD, or separate an approved disposition from its unique stock effect and durable audit. New operational UI must use existing typed i18n keys and design tokens from the start.

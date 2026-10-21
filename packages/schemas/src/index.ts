@@ -106,6 +106,7 @@ export * from "./wms-operations.schemas";
 
 export * from "./wms-core.schemas";
 export * from "./wms-count.schemas";
+export * from "./wms-quarantine.schemas";
 export * from "./erp-import.schemas";
 export * from "./accounting.schemas";
 export * from "./accounting-subledger.schemas";

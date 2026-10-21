@@ -220,7 +220,7 @@ function DashboardHeader({
 
   return (
     <header className="glass-panel z-30 flex h-14 items-center gap-2 border-b border-border px-3 md:h-16 md:gap-3 md:px-6" ref={containerRef}>
-      <Button variant="ghost" size="icon" className="shrink-0 md:hidden" onClick={onToggleMobileNav} aria-label="فتح القائمة">
+      <Button variant="ghost" size="icon" className="shrink-0 md:hidden" onClick={onToggleMobileNav} aria-label={t("shell.openMenu")}>
         {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
       </Button>
 
@@ -244,7 +244,7 @@ function DashboardHeader({
         {resultsOpen && query.trim() && (
           <div className="absolute top-12 z-40 w-full overflow-hidden rounded-xl border border-border bg-popover shadow-lg">
             {matches.length === 0 ? (
-              <p className="p-3 text-sm text-muted-foreground">مفيش نتائج مطابقة</p>
+              <p className="p-3 text-sm text-muted-foreground">{t("shell.noSearchResults")}</p>
             ) : (
               matches.map((item) => (
                 <Link
