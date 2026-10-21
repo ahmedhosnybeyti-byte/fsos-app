@@ -1,11 +1,20 @@
 # Murshidak Resolved Engineering Issues
 
+## WMS coverage credibility — company demand is not warehouse attribution
+
+- Symptom: company-demand ratios appeared with critical/safe warehouse badges despite absent historical warehouse provenance.
+- Root cause: the screen presented the existing internal advisory ranking as a warehouse risk classification.
+- Fix: neutral Undetermined warehouse state, explicit indicative company-demand wording, and no confirmed warehouse stockout claim. Calculations, SQL, sorting, balances and existing purchase links are preserved; no sales allocation is invented.
+- Commit: local focused credibility-correction commit containing this entry, parent `9d71f13`; no push/deployment.
+- Verification: four focused rendered-component tests pass across Arabic/English, covering all advisory rankings, unchanged numbers/links and insufficient-history display. Broad gates were deliberately not rerun at the user's explicit request. See [WMS_STOCK_COVERAGE.md](WMS_STOCK_COVERAGE.md).
+- Prevention: never promote a company-level demand proxy to a warehouse risk state without reliable warehouse attribution. A numeric estimate may remain visible with its provenance and uncertainty.
+
 ## WMS coverage — trustworthy sales/UOM and read-only early warning
 
 - Symptom: WMS showed balances without consumption-based depletion warnings; imported ERP sales use Posted/Van Sale/Pre-Sale rather than only the Analysis template's Confirmed/Sale vocabulary.
 - Root cause: no scoped RIE contract joined current WMS availability to verified historical sale quantities and original product packing.
 - Fix: one scalar PostgreSQL/RIE aggregate over current-only Canonical, scoped tenant/hierarchy/date/product, original ERP UOM links, conservative history checks, exact base-unit demand, risk-ranked pagination and existing-order references. Unknown history/UOM/date consistency stays unknown. Reservations, quarantine, expiry and quality blocks remain unavailable. No stock command, ingestion, dependency or migration.
-- Commit: local uncommitted stock-coverage extension based on `771951e`; no push/deploy.
+- Commit: `9d71f13`, local stock-coverage extension based on `771951e`; no push/deploy.
 - Verification: 565-test quality gate with four typechecks; 135 isolated SQL checks including five coverage tests; five actual local HTTP checks; native read-only Demo EXPLAIN and unchanged warehouse/custody hashes. See [WMS_STOCK_COVERAGE.md](WMS_STOCK_COVERAGE.md) for evidence and remaining visual/Demo limitations.
 - Prevention: never count Van Loads/internal transfers as sales, include future history, silently coerce unknown packing, inflate available stock with open orders, or invent SAFE/UNKNOWN examples. Disclose company-demand proxy and missing supplier lead time until verified warehouse/source metadata exists.
 

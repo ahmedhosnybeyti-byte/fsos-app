@@ -19,13 +19,14 @@ export function WmsCoveragePanel({warehouse,company,t}:{warehouse:string;company
     {query.isPending?<Skeleton className="h-48"/>:query.isError?<ErrorBox error={query.error} retry={()=>void query.refetch()} t={t}/>:<>
       <p className="text-xs text-muted-foreground">{t("coverage.period")} <bdi>{query.data.from} — {query.data.to}</bdi> · {t("coverage.stockTime")} <time dateTime={query.data.stockAsOf}><bdi>{query.data.stockAsOf}</bdi></time></p>
       {!query.data.items.length?<p className="py-6 text-sm text-muted-foreground">{t("coverage.empty")}</p>:<ul className="divide-y divide-border">{query.data.items.map(p=><li key={p.id} className="space-y-3 py-4">
-        <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-semibold">{p.name}</h3><p className="text-xs text-muted-foreground"><bdi>{p.code}</bdi> · {unitLabel(p.baseUnit,t)}</p></div><Badge variant={p.risk==="CRITICAL"?"destructive":p.risk==="SAFE"?"success":p.risk==="WATCH"?"warning":"secondary"}>{t(`coverage.${p.risk}`)}</Badge></div>
+        {/* Canonical demand has company/route scope, never verified warehouse attribution. */}
+        <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-semibold">{p.name}</h3><p className="text-xs text-muted-foreground"><bdi>{p.code}</bdi> · {unitLabel(p.baseUnit,t)}</p></div><Badge variant="secondary">{t("coverage.undetermined")}</Badge></div>
         <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {([[t("coverage.days"),p.daysOfCover===null?t("coverage.insufficient"):quantity(p.daysOfCover)],
             [t("coverage.daily"),p.dailyDemand===null?t("coverage.insufficient"):quantity(p.dailyDemand)],
             [t("wms.available"),quantity(p.available)],[t("wms.reserved"),quantity(p.reserved)],[t("wms.quarantined"),quantity(p.quarantined)]]).map(([label,value])=><div key={label}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 text-sm font-semibold tabular-nums">{value}</dd></div>)}
         </dl>
-        <p className="text-sm">{t(`coverage.${p.reason}`)}</p>
+        <p className="text-sm">{p.daysOfCover!==null?t("coverage.companyEstimate"):t(`coverage.${p.reason}`)}</p>
         <p className="text-xs text-muted-foreground">{t("coverage.evidence",{days:p.demandDays})} · <bdi>{p.firstSale??"—"} — {p.lastSale??"—"}</bdi></p>
         <p className="text-xs text-muted-foreground">{t("coverage.leadMissing")}</p>
         {p.risk!=="SAFE"&&<p className="text-xs text-warning">{p.risk==="UNKNOWN"?t("coverage.reviewData"):t("coverage.reviewPurchase")}</p>}
