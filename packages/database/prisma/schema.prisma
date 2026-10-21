@@ -310,6 +310,8 @@ model Warehouse {
   WmsLoadRequest     WmsLoadRequest[]
   WmsOperationEvent  WmsOperationEvent[]
   WmsReceipt          WmsReceipt[]
+  WmsLoadingProposal WmsLoadingProposal[]
+  WmsReturn           WmsReturn[]
 }
 
 // CHECK constraints, immutable-ledger triggers, view and posting functions are
@@ -339,6 +341,7 @@ model WmsProduct {
   @@map("wms_products")
   WmsLoadLine    WmsLoadLine[]
   WmsReceiptLine WmsReceiptLine[]
+  WmsProposalLine WmsProposalLine[]
 }
 
 model WmsBatch {
@@ -361,6 +364,8 @@ model WmsBatch {
   WmsAllocation       WmsAllocation[]
   WmsCustodyPosition WmsCustodyPosition[]
   WmsReceiptLine     WmsReceiptLine[]
+  WmsReturnLine     WmsReturnLine[]
+  qualityEvents WmsOperationEvent[]
 }
 
 model WmsWarehouseAccess {
@@ -389,6 +394,7 @@ model WmsPosition {
   @@id([companyId,warehouseId,batchId])
   @@map("wms_positions")
   inTransit Decimal @default(0) @map("in_transit") @db.Decimal(24,6)
+  qualityBlocked Boolean @default(false) @map("quality_blocked")
 }
 
 model WmsMovement {
@@ -678,6 +684,8 @@ model User {
   wms_receipts_wms_receipts_company_id_created_byTousers             WmsReceipt[]               @relation("wms_receipts_company_id_created_byTousers")
   wms_receipts_wms_receipts_company_id_posted_byTousers              WmsReceipt[]               @relation("wms_receipts_company_id_posted_byTousers")
   wms_receipts_wms_receipts_company_id_reviewed_byTousers            WmsReceipt[]               @relation("wms_receipts_company_id_reviewed_byTousers")
+  WmsLoadingProposal                                              WmsLoadingProposal[]
+  WmsReturn                                                        WmsReturn[]
 }
 
 // Operational assignment history. Route IDs remain sourced from the active
@@ -1943,6 +1951,7 @@ model WmsReceipt {
   @@unique([companyId, warehouseId, reference])
   @@index([companyId, warehouseId, createdAt(sort: Desc), id(sort: Desc)], map: "wms_receipts_scope_created")
   @@map("wms_receipts")
+  WmsReturn                                      WmsReturn[]
 }
 
 model WmsReceiptLine {
@@ -1973,6 +1982,7 @@ model WmsReceiptLine {
   @@unique([companyId, receiptId, productId, lotKey])
   @@index([companyId, receiptId, id], map: "wms_receipt_lines_parent")
   @@map("wms_receipt_lines")
+  WmsReturnLine    WmsReturnLine[]
 }
 
 model WmsLoadRequest {
@@ -2005,6 +2015,10 @@ model WmsLoadRequest {
   @@index([companyId, recipientId, status, id], map: "wms_load_recipient_status")
   @@index([companyId, warehouseId, createdAt(sort: Desc), id(sort: Desc)], map: "wms_load_scope_created")
   @@map("wms_load_requests")
+  WmsLoadingProposal                                  WmsLoadingProposal? @relation(fields: [companyId, proposalId], references: [companyId, id], onUpdate: NoAction)
+  WmsReturn                                            WmsReturn[]
+  proposalId String? @map("proposal_id")
+  @@unique([companyId,proposalId])
 }
 
 model WmsLoadLine {
@@ -2044,6 +2058,7 @@ model WmsAllocation {
   @@unique([companyId, loadId, batchId])
   @@index([companyId, loadId, id], map: "wms_allocations_parent")
   @@map("wms_allocations")
+  WmsReturnLine   WmsReturnLine[]
 }
 
 model WmsCustodyPosition {
@@ -2084,6 +2099,14 @@ model WmsOperationEvent {
   @@index([companyId, loadId, createdAt(sort: Desc), id(sort: Desc)], map: "wms_events_load")
   @@index([companyId, receiptId, createdAt(sort: Desc), id(sort: Desc)], map: "wms_events_receipt")
   @@map("wms_operation_events")
+  WmsLoadingProposal WmsLoadingProposal? @relation(fields: [companyId, proposalId], references: [companyId, id], onUpdate: NoAction)
+  WmsReturn           WmsReturn?           @relation(fields: [companyId, returnId], references: [companyId, id], onUpdate: NoAction)
+  returnId String? @map("return_id")
+  proposalId String? @map("proposal_id")
+  qualityBatchId String? @map("quality_batch_id")
+  qualityBatch WmsBatch? @relation(fields:[companyId,qualityBatchId], references:[companyId,id], onUpdate:NoAction)
+  @@index([companyId,returnId,createdAt(sort:Desc),id(sort:Desc)],map:"wms_events_return")
+  @@index([companyId,proposalId],map:"wms_events_proposal")
 }
 
 model WmsCommand {
@@ -2096,4 +2119,102 @@ model WmsCommand {
 
   @@id([companyId, idempotencyKey])
   @@map("wms_commands")
+}
+
+
+model WmsReturn {
+  id                   String              @id
+  companyId           String @map("company_id")
+  warehouseId         String @map("warehouse_id")
+  kind                 String
+  reference            String
+  receiptId           String? @map("receipt_id")
+  loadId              String? @map("load_id")
+  status               String              @default("DRAFT")
+  version              Int                 @default(1)
+  reason               String
+  handoverReference   String? @map("handover_reference")
+  createdBy           String @map("created_by")
+  createdAt           DateTime            @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)")) @map("created_at")
+  updatedAt           DateTime            @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)")) @map("updated_at")
+  wms_operation_events WmsOperationEvent[]
+  WmsReturnLine     WmsReturnLine[]
+  users                User                @relation(fields: [companyId, createdBy], references: [companyId, id], onUpdate: NoAction)
+  wms_load_requests    WmsLoadRequest?     @relation(fields: [companyId, loadId], references: [companyId, id], onUpdate: NoAction)
+  wms_receipts         WmsReceipt?         @relation(fields: [companyId, receiptId], references: [companyId, id], onUpdate: NoAction)
+  warehouses           Warehouse           @relation(fields: [companyId, warehouseId], references: [companyId, id], onUpdate: NoAction)
+
+  @@unique([companyId, id])
+  @@unique([companyId, warehouseId, reference])
+  @@index([companyId, loadId, status], map: "wms_returns_load")
+  @@index([companyId, receiptId, status], map: "wms_returns_receipt")
+  @@index([companyId, warehouseId, kind, createdAt(sort: Desc), id(sort: Desc)], map: "wms_returns_scope")
+  @@map("wms_returns")
+}
+
+model WmsReturnLine {
+  id                 String          @id
+  companyId         String @map("company_id")
+  returnId          String @map("return_id")
+  receiptLineId    String? @map("receipt_line_id")
+  allocationId      String? @map("allocation_id")
+  productId         String @map("product_id")
+  batchId           String @map("batch_id")
+  inputUnit         String @map("input_unit")
+  conversionFactor  Int @map("conversion_factor")
+  declaredQuantity  Decimal         @db.Decimal(24, 6) @map("declared_quantity")
+  actualQuantity    Decimal         @db.Decimal(24, 6) @map("actual_quantity")
+  quantityBase      Decimal         @db.Decimal(24, 6) @map("quantity_base")
+  quality            String
+  fromQuarantine    Boolean         @default(false) @map("from_quarantine")
+  discrepancyReason String          @default("") @map("discrepancy_reason")
+  destination        String?
+  wms_allocations    WmsAllocation?  @relation(fields: [companyId, allocationId], references: [companyId, id], onUpdate: NoAction)
+  wms_batches        WmsBatch        @relation(fields: [companyId, productId, batchId], references: [companyId, productId, id], onUpdate: NoAction)
+  wms_receipt_lines  WmsReceiptLine? @relation(fields: [companyId, receiptLineId], references: [companyId, id], onUpdate: NoAction)
+  WmsReturn        WmsReturn     @relation(fields: [companyId, returnId], references: [companyId, id], onUpdate: NoAction)
+
+  @@unique([companyId, id])
+  @@unique([companyId, returnId, allocationId])
+  @@unique([companyId, returnId, receiptLineId])
+  @@index([companyId, allocationId], map: "wms_return_lines_allocation")
+  @@index([companyId, returnId, id], map: "wms_return_lines_parent")
+  @@index([companyId, receiptLineId], map: "wms_return_lines_receipt")
+  @@map("wms_return_lines")
+}
+
+model WmsLoadingProposal {
+  id                   String               @id
+  companyId           String @map("company_id")
+  warehouseId         String @map("warehouse_id")
+  authorId            String @map("author_id")
+  targetDate          DateTime             @db.Date @map("target_date")
+  fingerprint          String
+  confirmedPayload    Json @map("confirmed_payload")
+  createdAt           DateTime             @default(dbgenerated("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC'::text)")) @map("created_at")
+  wms_load_requests    WmsLoadRequest?
+  users                User                 @relation(fields: [companyId, authorId], references: [companyId, id], onUpdate: NoAction)
+  warehouses           Warehouse            @relation(fields: [companyId, warehouseId], references: [companyId, id], onUpdate: NoAction)
+  wms_operation_events WmsOperationEvent[]
+  WmsProposalLine   WmsProposalLine[]
+
+  @@unique([companyId, fingerprint])
+  @@unique([companyId, id])
+  @@map("wms_loading_proposals")
+}
+
+model WmsProposalLine {
+  companyId            String @map("company_id")
+  proposalId           String @map("proposal_id")
+  productId            String @map("product_id")
+  productCode          String @map("product_code")
+  inputQuantity        Decimal               @db.Decimal(24, 6) @map("input_quantity")
+  inputUnit            String @map("input_unit")
+  conversionFactor     Int @map("conversion_factor")
+  quantityBase         Decimal               @db.Decimal(24, 6) @map("quantity_base")
+  wms_products          WmsProduct            @relation(fields: [companyId, productId], references: [companyId, id], onUpdate: NoAction)
+  WmsLoadingProposal WmsLoadingProposal @relation(fields: [companyId, proposalId], references: [companyId, id], onUpdate: NoAction)
+
+  @@id([companyId, proposalId, productId])
+  @@map("wms_proposal_lines")
 }

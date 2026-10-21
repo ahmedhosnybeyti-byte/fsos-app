@@ -103,3 +103,5 @@ export * from "./company-operating-settings.schemas";
 export * from "./sfa-setup.schemas";
 export * from "./wms.schemas";
 export * from "./wms-operations.schemas";
+
+export * from "./wms-core.schemas";

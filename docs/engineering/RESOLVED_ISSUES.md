@@ -391,3 +391,23 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
   policy at reservation through dispatch/acceptance. Never reserve from a proposal
   alone, reserve beyond free stock, silently correct a posted entry, infer custody
   from dispatch, or separate a new operational resource from its transaction audit.
+
+## WMS Core — source-bound returns and Smart Loading UOM/replay
+
+- **Symptom:** Phase 02 lacked supplier and accepted-custody return workflows;
+  ambiguous Smart Loading units and a fresh request key could duplicate loading intent.
+- **Root cause:** Analytical suggestions had no immutable operational proposal identity;
+  stock idempotency alone cannot limit cumulative returns against their original source.
+- **Fix:** Source-linked supplier/rep return documents with exact UOM, source/product/
+  position locks and transactional movement/event/audit; an immutable proposal snapshot
+  and one-load unique link; explicit source-unit confirmation and current quality checks.
+  Preserve posted return history and never silently edit a source Lot or old movement.
+- **Commit:** Independent local WMS Core closure commit containing this entry, parent
+  `b942aa0`; see [WMS_CORE_CLOSURE.md](WMS_CORE_CLOSURE.md) and its Git history.
+- **Verification:** 524-test quality gate/four typechecks, 99 isolated SQL checks,
+  independent PostgreSQL return/proposal races, audit rollback, 82 HTTP checks,
+  full four-flow 100−10−40+5=55 /40−5=35 browser journey and eight visual combinations.
+- **Regression-prevention rule:** Bound returns to a POSTED receipt or ACCEPTED
+  loading allocation and remaining accepted custody. A request key is not source
+  identity; re-keyed proposal conversion must remain unique. Future invoices reference
+  the existing WMS stock effect and must never deduct warehouse stock a second time.

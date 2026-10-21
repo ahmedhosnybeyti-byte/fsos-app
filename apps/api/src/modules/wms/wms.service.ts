@@ -106,16 +106,16 @@ export class WmsService {
     const { page:n,productId,nearExpiry,horizon }=parse(wmsStockQuerySchema,input); const company=await this.scope(this.prisma,user,warehouse);
     return page(await this.prisma.$queryRaw<WmsBatch[]>(Prisma.sql`WITH lots AS MATERIALIZED (
       SELECT b.id,b.product_id,b.code,b.production_date,b.expiry_date,b.is_quarantined,
-        COALESCE(s.physical,0) AS physical,COALESCE(s.reserved,0) AS reserved,COALESCE(s.quarantined,0) AS quarantined,COALESCE(s.in_transit,0) AS in_transit
+        COALESCE(s.physical,0) AS physical,COALESCE(s.reserved,0) AS reserved,COALESCE(s.quarantined,0) AS quarantined,COALESCE(s.in_transit,0) AS in_transit,COALESCE(s.quality_blocked,false) AS quality_blocked
       FROM wms_batches b LEFT JOIN wms_positions s ON s.company_id=${company} AND s.warehouse_id=${warehouse} AND s.batch_id=b.id
       WHERE b.company_id=${company} ${productId ? Prisma.sql`AND b.product_id=${productId}` : Prisma.sql`AND (s.physical>0 OR s.in_transit>0)`}
       ${nearExpiry === "true" ? Prisma.sql`AND s.physical>0 AND b.expiry_date>(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date
         AND b.expiry_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date+${horizon}::int` : Prisma.empty}
       ORDER BY b.expiry_date ASC NULLS LAST,b.id LIMIT ${pageSize+1} OFFSET ${(n-1)*pageSize}
     ) SELECT b.id,b.product_id AS "productId",p.name AS "productName",p.base_unit AS "baseUnit",b.code,
-      to_char(b.production_date,'YYYY-MM-DD') AS "productionDate",to_char(b.expiry_date,'YYYY-MM-DD') AS "expiryDate",b.is_quarantined AS "isQuarantined",
+      to_char(b.production_date,'YYYY-MM-DD') AS "productionDate",to_char(b.expiry_date,'YYYY-MM-DD') AS "expiryDate",b.is_quarantined AS "isQuarantined",b.quality_blocked AS "qualityBlocked",
       b.physical::text, b.reserved::text,b.quarantined::text,b.in_transit::text AS "inTransit",
-      (CASE WHEN b.expiry_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date OR b.is_quarantined OR NOT p.is_active THEN 0
+      (CASE WHEN b.expiry_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date OR b.is_quarantined OR b.quality_blocked OR NOT p.is_active THEN 0
         ELSE b.physical-b.reserved-b.quarantined END)::text AS available,
       b.expiry_date-(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date AS "daysRemaining",
       CASE WHEN b.production_date IS NOT NULL AND b.expiry_date IS NOT NULL THEN

@@ -3,6 +3,7 @@ import test from "node:test";
 import { Reflector } from "@nestjs/core";
 import { ForbiddenException } from "@nestjs/common";
 import { WmsController } from "./wms.controller";
+import { WmsCoreController } from "./wms-core.controller";
 import { WmsOperationsController } from "./wms-operations.controller";
 import { SfaAccessGuard } from "../../common/guards/sfa-access.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
@@ -55,3 +56,10 @@ test("WMS controller forwards authenticated actor and actual warehouse path, nev
   const user=wmsUser();const body={companyId:"forged",productId:"p"};controller.opening(user,"wa",body);
   assert.deepEqual(args,[user,"wa",body]);
 });
+
+ test("every core return/custody API retains current company mode, feature and tenant admission",async()=>{
+ const reflector=new Reflector();for(const method of ["sources","source","list","detail","custody"] as const){const context=(user:any)=>({getClass:()=>WmsCoreController,getHandler:()=>WmsCoreController.prototype[method],switchToHttp:()=>({getRequest:()=>({user})})} as never);
+ for(const mode of [undefined,"ANALYSIS_ONLY","SFA","FULL_ERP"]){const guard=new SfaAccessGuard(reflector,{companyOperatingSettings:{findUnique:async()=>mode?{operatingMode:mode}:null}} as never);if(mode==="SFA"||mode==="FULL_ERP")assert.equal(await guard.canActivate(context(wmsUser())),true);else await assert.rejects(guard.canActivate(context(wmsUser())),ForbiddenException);}
+ for(const missing of ["sfa.access","wms.read"]){const guard=new SfaAccessGuard(reflector,{companyOperatingSettings:{findUnique:async()=>({operatingMode:"FULL_ERP"})}} as never);await assert.rejects(guard.canActivate(context({...wmsUser(),permissions:wmsPermissions.filter(p=>p!==missing)})),ForbiddenException);}
+ const screen=new CompanyScreenAccessGuard(reflector,{company:{findUnique:async()=>({featureAccess:{"warehouse-core":"HIDDEN"}})}} as never);await assert.rejects(screen.canActivate(context(wmsUser())),ForbiddenException);const guard=new SfaAccessGuard(reflector,{companyOperatingSettings:{findUnique:async()=>({operatingMode:"FULL_ERP"})}} as never);await assert.rejects(guard.canActivate(context({...wmsUser(),companyId:null})),ForbiddenException);
+ }});

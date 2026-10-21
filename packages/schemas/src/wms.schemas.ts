@@ -51,7 +51,7 @@ export interface WmsWarehouse { id: string; code: string; name: string }
 export interface WmsProduct extends WmsProductInput { id: string; version: number; physical: string; available: string; reserved: string; quarantined: string; inTransit: string }
 export interface WmsBatch {
   id: string; productId: string; productName: string; baseUnit: string; code: string;
-  productionDate: string | null; expiryDate: string | null; isQuarantined: boolean;
+  productionDate: string | null; expiryDate: string | null; isQuarantined: boolean; qualityBlocked:boolean;
   physical: string; available: string; reserved: string; quarantined: string; inTransit: string;
   daysRemaining: number | null; lifeConsumedPct: string | null;
 }
@@ -60,7 +60,7 @@ export interface WmsSummary {
   nearExpiryBatches: number; expiredBatches: number; stockedProducts: number; asOf: string;
 }
 export interface WmsMovement {
-  id: string; productName: string; batchCode: string; kind: "OPENING" | "REVERSAL" | "RECEIPT" | "RECEIPT_REVERSAL" | "RESERVE" | "RELEASE" | "DISPATCH" | "ACCEPT" | "TRANSIT_RETURN";
+  id: string; productName: string; batchCode: string; kind: "OPENING" | "REVERSAL" | "RECEIPT" | "RECEIPT_REVERSAL" | "RESERVE" | "RELEASE" | "DISPATCH" | "ACCEPT" | "TRANSIT_RETURN"|"SUPPLIER_RETURN"|"REP_RETURN"|"QUALITY_HOLD"|"QUALITY_RELEASE";
   quantity: string; baseUnit: string; inputQuantity: string; inputUnit: string; conversionFactor: number;
   reference: string; reason: string; createdAt: string; reversalOf: string | null; reversed: boolean;
   reservedDelta: string; inTransitDelta: string;

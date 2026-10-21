@@ -22,6 +22,13 @@ export function Search({id,value,onChange,onSearch,t,embedded=false}:{id:string;
 export function ErrorBox({error,retry,t}:{error?:unknown;retry?:()=>void;t:Text}) {
   const code=error instanceof ApiError?error.message:"";
   const message:Record<string,[string,string]>={
+    WMS_RETURN_EXCEEDS_SOURCE:["المرتجع يتجاوز الباقي من مستند المصدر بعد المرتجعات السابقة.","Return exceeds the source quantity remaining after earlier returns."],
+    WMS_CUSTODY_INSUFFICIENT:["العهدة المتبقية لا تكفي لهذا المرتجع.","Remaining accepted custody is insufficient for this return."],
+    WMS_PROPOSAL_REQUIRED:["ثبّت اقتراح التحميل ووحدة المصدر أولًا.","Record the loading proposal and source unit first."],
+    WMS_PROPOSAL_ALREADY_CONVERTED:["تحول هذا الاقتراح لطلب تحميل بالفعل. راجع الطلب المسجل.","This proposal already has a loading request. Review the existing request."],
+    WMS_PROPOSAL_CONFLICT:["هذا المحتوى والتاريخ مسجلان بوحدات أو مستودع مختلف. راجع الاقتراح الأصلي.","Content and date already exist with different units or warehouse. Review the original proposal."],
+    WMS_EXPIRED_MUST_BE_QUARANTINED:["لا يمكن قبول المنتهي كرصيد متاح. سجله صراحة في الحجر أو ارفضه.","Expired goods cannot enter available stock. Explicitly quarantine or reject them."],
+    WMS_RECEIPT_HAS_RETURNS:["لا يمكن عكس استلام له مرتجع مورد مرحّل.","A receipt with a posted supplier return cannot be reversed."],
     WMS_DOCUMENT_STALE:["تغير المستند بالتزامن. حدّث بياناته وافتح الإجراء مجددًا.","Document changed concurrently. Refresh it and reopen the action."],
     WMS_INVALID_TRANSITION:["حالة المستند أو هوية المستلم لا تسمح بهذا الإجراء.","Document status or recipient identity does not allow this action."],
     WMS_INSUFFICIENT_STOCK:["المخزون المؤهل لا يكفي. راجع التشغيلات والحجوزات وسياسة الصلاحية.","Insufficient eligible stock. Review lots, reservations and shelf-life policy."],
@@ -44,3 +51,5 @@ export function ErrorBox({error,retry,t}:{error?:unknown;retry?:()=>void;t:Text}
   };
   return <div role="alert" className="space-y-2 rounded-md border border-destructive/30 p-3 text-sm text-destructive"><p>{message[code]?t(...message[code]):error instanceof ApiError&&[403,404].includes(error.status)?t("لا يتوفر الوصول إلى هذا المستودع. تحقق من الوضع والصلاحيات والنطاق.","Warehouse access is unavailable. Check mode, permissions and assignments."):t("تعذر إكمال الطلب. تحقق من المدخلات والاتصال؛ راجع سجل الحركات قبل إعادة الترحيل.","Request could not complete. Check input and connection; review the ledger before reposting.")}</p>{retry&&<Button variant="outline" size="sm" onClick={retry}>{t("إعادة المحاولة","Retry")}</Button>}</div>;
 }
+
+export function HandlingNote({sensitive,note,t}:{sensitive?:boolean;note?:string|null;t:Text}){return sensitive||note?<p className="break-words text-xs text-warning">{t("مناولة حساسة","Sensitive handling")}{note?": "+note:""}</p>:null;}

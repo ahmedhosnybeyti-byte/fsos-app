@@ -3,7 +3,7 @@ import test from "node:test";
 import {readFileSync} from "node:fs";
 import {randomUUID} from "node:crypto";
 import {ForbiddenException,NotFoundException,BadRequestException} from "@nestjs/common";
-import {WMS_OPERATION_PERMISSIONS,type WmsOperation} from "@field-sales-os/schemas";
+import {WMS_OPERATION_PERMISSIONS,wmsCoreInputs,type WmsOperation} from "@field-sales-os/schemas";
 import {wmsFixture,wmsPersistence,wmsUser} from "./wms-test-fixture";
 import {WmsService} from "./wms.service";
 import {AuditLogService} from "../audit-log/audit-log.service";
@@ -96,7 +96,7 @@ test("Policy revalidation blocks dispatch/acceptance, and declined transit retur
 });
 test("All operations reject missing capability and tenant/warehouse scope; nonpositive loading creates no effects",options,async t=>{
   const {service,core,user,db}=await fixture(t);const p=await product(core,user);const readOnly={...user,permissions:["sfa.access","wms.read"]};
-  for(const op of Object.keys(WMS_OPERATION_PERMISSIONS) as WmsOperation[]){const input=op==="receipt.create"?{reference:"x",supplierName:"s",supplierReference:"s",lines:[receiptLine(p.id)]}:op==="receipt.edit"?{id:"x",version:1,reference:"x",supplierName:"s",supplierReference:"s",lines:[receiptLine(p.id)],note:"Edit receipt"}:op==="load.create"?{reference:"x",source:"MANUAL",recipientId:"clerk-a",targetDate:"2026-10-20",lines:[{productId:p.id,quantity:"1",unit:"BASE"}]}:op==="load.pick"?{id:"x",version:1,note:"Pick stock",allocations:[{id:"a",quantity:"1"}]}:{id:"x",version:1,note:"Workflow step"};await assert.rejects(command(service,readOnly,op,input),ForbiddenException);}
+  for(const op of Object.keys(WMS_OPERATION_PERMISSIONS).filter(op=>!(op in wmsCoreInputs)) as WmsOperation[]){const input=op==="receipt.create"?{reference:"x",supplierName:"s",supplierReference:"s",lines:[receiptLine(p.id)]}:op==="receipt.edit"?{id:"x",version:1,reference:"x",supplierName:"s",supplierReference:"s",lines:[receiptLine(p.id)],note:"Edit receipt"}:op==="load.create"?{reference:"x",source:"MANUAL",recipientId:"clerk-a",targetDate:"2026-10-20",lines:[{productId:p.id,quantity:"1",unit:"BASE"}]}:op==="load.pick"?{id:"x",version:1,note:"Pick stock",allocations:[{id:"a",quantity:"1"}]}:{id:"x",version:1,note:"Workflow step"};await assert.rejects(command(service,readOnly,op,input),ForbiddenException);}
   for(const kind of ["receipt","load"] as const){await assert.rejects(service.list(actor("b","actor-b"),"wa",kind,{}),NotFoundException);await assert.rejects(service.list(actor("a","unknown","MANAGER"),"wa",kind,{}),NotFoundException);}
   await assert.rejects(load(service,user,p.id,"0"),BadRequestException);await assert.rejects(load(service,user,p.id,"-1"),BadRequestException);
   await assert.rejects(load(service,user,p.id,"1",{recipientId:"actor-b"}),/WMS_RECIPIENT_NOT_FOUND/);

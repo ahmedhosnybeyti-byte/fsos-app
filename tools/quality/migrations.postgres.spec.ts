@@ -14,7 +14,7 @@ test("all committed migrations apply to a fresh isolated database without tenant
   for (const migration of migrations) {
     await db.exec(readFileSync(`${folder}/${migration}/migration.sql`, "utf8"));
   }
-  for (const table of ["companies", "users", "warehouses", "company_operating_settings", "wms_products", "wms_batches", "wms_positions", "wms_movements", "wms_warehouse_access", "wms_receipts", "wms_receipt_lines", "wms_load_requests", "wms_load_lines", "wms_allocations", "wms_customer_policies", "wms_custody_positions", "wms_operation_events", "wms_commands"]) {
+  for (const table of ["companies", "users", "warehouses", "company_operating_settings", "wms_products", "wms_batches", "wms_positions", "wms_movements", "wms_warehouse_access", "wms_receipts", "wms_receipt_lines", "wms_load_requests", "wms_load_lines", "wms_allocations", "wms_customer_policies", "wms_custody_positions", "wms_operation_events", "wms_commands", "wms_returns", "wms_return_lines", "wms_loading_proposals", "wms_proposal_lines"]) {
     assert.equal((await db.query(`SELECT count(*)::int AS count FROM ${table}`)).rows[0].count, 0);
   }
   assert.equal((await db.query(`SELECT count(*)::int AS count FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE p.code = 'sfa.access' OR p.code LIKE 'wms.%'`)).rows[0].count, 0);

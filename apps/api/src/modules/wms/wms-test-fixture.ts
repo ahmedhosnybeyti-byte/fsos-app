@@ -22,6 +22,7 @@ export async function wmsFixture(db:any) {
   await db.exec(readFileSync("packages/database/prisma/migrations/20261019120000_sfa_warehouses/migration.sql","utf8"));
   await db.exec(readFileSync("packages/database/prisma/migrations/20261020100000_wms_phase01/migration.sql","utf8"));
   await db.exec(readFileSync("packages/database/prisma/migrations/20261020150000_wms_phase02/migration.sql","utf8"));
+  await db.exec(readFileSync("packages/database/prisma/migrations/20261021100000_wms_core_closure/migration.sql","utf8"));
   await db.exec(wmsWarehouseSql);
   return wmsAdapter(db);
 }
