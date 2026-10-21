@@ -36,6 +36,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const router = useRouter();
   const { t, locale } = useTranslation();
   const canUseActivity = user?.role?.code === "SUPER_ADMIN" || user?.permissions?.includes("user_activity.view");
+  const importNav:NavItem[] = user?.role?.code === "SUPER_ADMIN" ? [{href:"/admin/erp-import",label:locale==="ar"?"تهيئة بيانات ERP":"ERP data onboarding",icon:ShieldCheck}] : [];
   const navItems: NavItem[] = user?.role?.code === "SUPER_ADMIN" ? [...adminNavItems(t), { href: "/admin/sfa-preview", label: locale === "ar" ? "معاينة تجهيز SFA" : "SFA setup preview", icon: ShieldCheck }, { href: "/admin/account", label: t("nav.account"), icon: CircleUserRound }] : canUseActivity ? [{ href: "/admin/user-activity", label: t("admin.nav.userActivity"), icon: Activity }, { href: "/admin/account", label: t("nav.account"), icon: CircleUserRound }] : [];
   const mustChangePassword = user?.mustChangePassword === true;
 
@@ -47,5 +48,5 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return <div className="flex min-h-screen items-center justify-center"><Spinner className="h-6 w-6" /></div>;
   }
 
-  return <AppShell navItems={navItems} user={user}>{children}</AppShell>;
+  return <AppShell navItems={[...navItems,...importNav]} user={user}>{children}</AppShell>;
 }

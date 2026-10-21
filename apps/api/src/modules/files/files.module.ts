@@ -23,6 +23,6 @@ import { RieModule } from "../rie/rie.module";
     { provide: STORAGE_PROVIDER, useExisting: S3StorageProvider },
   ],
   controllers: [FilesController],
-  exports: [FilesService],
+  exports: [FilesService, STORAGE_PROVIDER],
 })
 export class FilesModule {}

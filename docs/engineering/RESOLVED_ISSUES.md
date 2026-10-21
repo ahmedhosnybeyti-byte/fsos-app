@@ -411,3 +411,11 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
   loading allocation and remaining accepted custody. A request key is not source
   identity; re-keyed proposal conversion must remain unique. Future invoices reference
   the existing WMS stock effect and must never deduct warehouse stock a second time.
+
+### ERP historical staging — large-file validation (2026-10-21)
+- Symptom: validating the 686k-row synthetic Canonical import spent minutes probing parent JSON indexes per fact; same-batch identical rows were deduplicated but undercounted in upload metrics.
+- Root cause: correlated JSON containment FK probes and duplicate metrics that counted only rows already in PostgreSQL.
+- Fix: scoped JSON scalar-equality anti-joins and grouped incoming duplicate counts. Retained durable staging and resumed validation without reimporting facts.
+- Evidence: three focused SQL regressions pass; native PostgreSQL isolated import approved 686,663 unique rows from 686,684 source rows, with 21 identical repeats, exact parity for all 100 products, RIE future-date separation and an independent idempotent WMS opening. See ERP_HISTORICAL_IMPORT_LOCAL_20261021.md.
+- Commit: ERP historical import feature commit on codex/erp-historical-import; inspect git history for apps/api/src/modules/erp-import/erp-import.service.ts.
+- Prevention: use PostgreSQL set joins for bulk reference validation; reconcile source rows against unique rows plus identical duplicates; never restart the entire file to repair an already durable validation phase.

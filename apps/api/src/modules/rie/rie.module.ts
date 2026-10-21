@@ -1,4 +1,5 @@
 import { forwardRef, Module } from "@nestjs/common";
+import { RieErpHistoryQueryService } from "./erp-history-query.service";
 import { FilesModule } from "../files/files.module";
 import { GraphBuilderService } from "./graph-builder.service";
 import { ENTITY_PROVIDER } from "./entity-provider.interface";
@@ -36,6 +37,7 @@ import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.serv
 @Module({
   imports: [forwardRef(() => FilesModule)],
   providers: [
+    RieErpHistoryQueryService,
     GraphBuilderService,
     CanonicalHierarchyResolverService,
     { provide: ENTITY_PROVIDER, useClass: ExcelDatasetEntityProvider },
@@ -49,6 +51,7 @@ import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.serv
     RieFacade,
   ],
   exports: [
+    RieErpHistoryQueryService,
     GraphBuilderService,
     // Exported so other modules that need row-level hierarchy scoping on
     // legacy (non-Canonical-Entity) datasets — currently just gpt.module.ts's

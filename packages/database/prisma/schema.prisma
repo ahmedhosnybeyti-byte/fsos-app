@@ -235,6 +235,7 @@ enum UserRiskLevel {
 // ---------------------------------------------------------------------------
 
 model Company {
+  erpImport ErpImportProject?
   id        String        @id @default(cuid())
   name      String
   slug      String        @unique
@@ -317,6 +318,7 @@ model Warehouse {
 // CHECK constraints, immutable-ledger triggers, view and posting functions are
 // maintained in 20261020100000_wms_phase01; do not replace them with db push.
 model WmsProduct {
+  erpLinks ErpProductLink[]
   id String @id @default(cuid())
   companyId String @map("company_id")
   code String
@@ -604,6 +606,9 @@ model RolePermission {
 // ---------------------------------------------------------------------------
 
 model User {
+  erpImportCreated ErpImportProject[] @relation("ErpCreatedBy")
+  erpImportApproved ErpImportProject[] @relation("ErpApprovedBy")
+  erpUploads ErpImportUpload[]
   id           String     @id @default(cuid())
   companyId    String?    @map("company_id") // null only for platform SUPER_ADMIN users
   roleId       String     @map("role_id")
@@ -2217,4 +2222,103 @@ model WmsProposalLine {
 
   @@id([companyId, proposalId, productId])
   @@map("wms_proposal_lines")
+}
+
+// Historical onboarding metadata. Check constraints and GIN indexes live in
+// the additive SQL migration; no operational postings or grants are inferred.
+model ErpImportProject {
+  id String @id
+  companyId String @unique @map("company_id")
+  targetMode String @map("target_mode")
+  source String
+  state String @default("STAGING")
+  syntheticDemo Boolean @default(false) @map("synthetic_demo")
+  demoAsOf DateTime? @map("demo_as_of") @db.Date
+  cutoverDate DateTime @map("cutover_date") @db.Date
+  publicationAsOf DateTime? @map("publication_as_of") @db.Date
+  revision Int @default(0)
+  sourceFingerprint String? @map("source_fingerprint")
+  createdBy String @map("created_by")
+  approvedBy String? @map("approved_by")
+  approvalNote String? @map("approval_note")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  approvedAt DateTime? @map("approved_at") @db.Timestamptz(6)
+  company Company @relation(fields:[companyId],references:[id],onDelete:NoAction,onUpdate:NoAction)
+  creator User @relation("ErpCreatedBy",fields:[createdBy],references:[id],onDelete:NoAction,onUpdate:NoAction)
+  approver User? @relation("ErpApprovedBy",fields:[approvedBy],references:[id],onDelete:NoAction,onUpdate:NoAction)
+  uploads ErpImportUpload[]
+  errors ErpImportError[]
+  products ErpProductLink[]
+  @@unique([companyId,id])
+  @@map("erp_import_projects")
+}
+model ErpImportUpload {
+  id String @id
+  projectId String @map("project_id")
+  fileName String @map("file_name")
+  sha256 String
+  uploadedBy String @map("uploaded_by")
+  storageKey String @map("storage_key")
+  status String @default("QUEUED")
+  attempts Int @default(0)
+  startedAt DateTime? @map("started_at") @db.Timestamptz(6)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
+  failure String?
+  rowCount Int @default(0) @map("row_count")
+  identicalCount Int @default(0) @map("identical_count")
+  rejectedCount Int @default(0) @map("rejected_count")
+  excluded Boolean @default(false)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  project ErpImportProject @relation(fields:[projectId],references:[id],onDelete:NoAction,onUpdate:NoAction)
+  uploader User @relation(fields:[uploadedBy],references:[id],onDelete:NoAction,onUpdate:NoAction)
+  rows ErpImportRow[]
+  errors ErpImportError[]
+  @@unique([projectId,sha256])
+  @@unique([projectId,id])
+  @@index([status,createdAt],map:"erp_import_upload_queue")
+  @@map("erp_import_uploads")
+}
+model ErpImportRow {
+  projectId String @map("project_id")
+  entity String
+  businessKey String @map("business_key")
+  data Json
+  contentHash String @map("content_hash")
+  eventDate DateTime? @map("event_date") @db.Date
+  uploadId String @map("upload_id")
+  sourceRow Int @map("source_row")
+  state String @default("PENDING")
+  issues Json @default("[]")
+  upload ErpImportUpload @relation(fields:[projectId,uploadId],references:[projectId,id],onDelete:NoAction,onUpdate:NoAction)
+  @@id([projectId,entity,businessKey])
+  @@index([projectId,state,entity],map:"erp_import_rows_validation")
+  @@index([projectId,entity,eventDate,businessKey],map:"erp_import_rows_date")
+  @@index([data(ops:JsonbPathOps)],type:Gin,map:"erp_import_rows_data")
+  @@map("erp_import_rows")
+}
+model ErpImportError {
+  id BigInt @id @default(autoincrement())
+  projectId String @map("project_id")
+  uploadId String @map("upload_id")
+  entity String
+  sourceRow Int @map("source_row")
+  message String
+  project ErpImportProject @relation(fields:[projectId],references:[id],onDelete:NoAction,onUpdate:NoAction)
+  upload ErpImportUpload @relation(fields:[projectId,uploadId],references:[projectId,id],onDelete:NoAction,onUpdate:NoAction)
+  @@unique([uploadId,entity,sourceRow,message],map:"erp_import_error_source")
+  @@index([projectId,id],map:"erp_import_errors_page")
+  @@map("erp_import_errors")
+}
+model ErpProductLink {
+  companyId String @map("company_id")
+  projectId String @map("project_id")
+  sourceCode String @map("source_code")
+  productId String @map("product_id")
+  sourceName String @map("source_name")
+  sourceUom Json @map("source_uom")
+  project ErpImportProject @relation(fields:[companyId,projectId],references:[companyId,id],onDelete:NoAction,onUpdate:NoAction)
+  product WmsProduct @relation(fields:[companyId,productId],references:[companyId,id],onDelete:NoAction,onUpdate:NoAction)
+  @@id([companyId,sourceCode])
+  @@unique([companyId,productId])
+  @@map("erp_product_links")
 }
