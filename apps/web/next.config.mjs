@@ -26,6 +26,10 @@ const nextConfig = {
   // imports to their individual source files instead, both in dev and in
   // the production build. See PROJECT_LOG.md.
   experimental: {
+    // Canonical uploads are capped at 64 MB by the API and validated in the
+    // background. Next's 30s rewrite timeout aborts the approved 53 MB source
+    // while it is still streaming; retain a finite five-minute transfer limit.
+    proxyTimeout: 300_000,
     optimizePackageImports: ["lucide-react", "@radix-ui/react-dropdown-menu", "@radix-ui/react-select", "@radix-ui/react-tabs", "@radix-ui/react-dialog"],
   },
 };
