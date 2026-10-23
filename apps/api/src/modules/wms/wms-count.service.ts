@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import { productCategory } from "../../common/queries/product-category";
 import { Prisma } from "@field-sales-os/database";
 import { wmsCountDraftSchema, wmsCountStepSchema, wmsPageSchema, type WmsCountCandidate, type WmsCountDocument, type WmsCountSummary } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
@@ -25,7 +26,7 @@ export class WmsCountService {
   async candidates(user: AuthenticatedUser, warehouse: string, input: unknown) {
     const { page, search } = this.page(input), c = await this.access.authorizedRead(user, warehouse);
     const rows = await this.prisma.$queryRaw<WmsCountCandidate[]>(Prisma.sql`
-      SELECT s.batch_id AS "batchId",p.code AS "productCode",p.name AS "productName",b.code AS "batchCode",
+      SELECT s.batch_id AS "batchId",p.code AS "productCode",p.name AS "productName",${productCategory(Prisma.sql`p.company_id`,Prisma.sql`p.code`)} AS category,b.code AS "batchCode",
        to_char(b.expiry_date,'YYYY-MM-DD') AS "expiryDate",p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",
        s.physical::text,CASE WHEN p.base_unit='PIECE' THEN round(s.physical/p.pieces_per_carton,6)::text END AS "physicalCartons",
        s.reserved::text,s.quarantined::text,s.revision::text
@@ -51,7 +52,7 @@ export class WmsCountService {
       WHERE d.company_id=${c} AND d.warehouse_id=${warehouse} AND d.id=${id}`);
     if (!rows[0]) throw new NotFoundException("WMS_DOCUMENT_NOT_FOUND");
     const lines = await this.prisma.$queryRaw<WmsCountDocument["lines"]>(Prisma.sql`
-      SELECT l.id,l.batch_id AS "batchId",p.code AS "productCode",p.name AS "productName",b.code AS "batchCode",p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",
+      SELECT l.id,l.batch_id AS "batchId",p.code AS "productCode",p.name AS "productName",${productCategory(Prisma.sql`p.company_id`,Prisma.sql`p.code`)} AS category,b.code AS "batchCode",p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",
        l.input_unit AS unit,l.conversion_factor AS "conversionFactor",round(l.system_base/l.conversion_factor,6)::text AS "systemQuantity",
        l.counted_quantity::text AS "countedQuantity",round((l.counted_base-l.system_base)/l.conversion_factor,6)::text AS difference,
        (l.counted_base-l.system_base)::text AS "differenceBase",

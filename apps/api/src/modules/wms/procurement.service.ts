@@ -2,6 +2,7 @@ import {BadRequestException,ForbiddenException,Injectable,NotFoundException} fro
 import {hasOperationalPermissions} from "@field-sales-os/schemas";
 import {z} from "zod";
 import {randomUUID} from "node:crypto";
+import { productCategory } from "../../common/queries/product-category";
 import {Prisma} from "@field-sales-os/database";
 import {procurementCommandSchema,procurementPermissions,wmsPageSchema,type ProcurementDocument,type ProcurementDetail,type ProcurementSummary,type ProcurementSupplier} from "@field-sales-os/schemas";
 import {PrismaService,type PrismaTx} from "../../common/prisma";
@@ -58,7 +59,7 @@ export class ProcurementService {
   const c=await this.read(u,w);
   const docs=await this.prisma.$queryRaw<ProcurementDocument[]>(Prisma.sql`SELECT ${fields} FROM procurement_documents d WHERE d.company_id=${c} AND d.warehouse_id=${w} AND d.id=${id} AND (${u.roleCode!=="COMPANY_ADMIN"} OR d.order_id IS NOT NULL)`);
   if(!docs[0])throw new NotFoundException("WMS_PROCUREMENT_NOT_FOUND");
-  const lines=await this.prisma.$queryRaw<ProcurementDetail["lines"]>(Prisma.sql`SELECT p.product_id AS "productId",m.code AS "productCode",m.name AS "productName",p.quantity::text,p.unit,p.factor,m.pieces_per_carton AS "piecesPerCarton",m.base_unit AS "baseUnit",m.track_batches AS "trackBatches",m.track_expiry AS "trackExpiry",p.price::text,p.received::numeric(24,6)::text,p.remaining::numeric(24,6)::text
+  const lines=await this.prisma.$queryRaw<ProcurementDetail["lines"]>(Prisma.sql`SELECT p.product_id AS "productId",m.code AS "productCode",m.name AS "productName",${productCategory(Prisma.sql`m.company_id`,Prisma.sql`m.code`)} AS category,p.quantity::text,p.unit,p.factor,m.pieces_per_carton AS "piecesPerCarton",m.base_unit AS "baseUnit",m.track_batches AS "trackBatches",m.track_expiry AS "trackExpiry",p.price::text,p.received::numeric(24,6)::text,p.remaining::numeric(24,6)::text
    FROM procurement_progress p JOIN wms_products m ON m.company_id=${c} AND m.id=p.product_id WHERE p.company_id=${c} AND p.request_id=${id} ORDER BY m.code LIMIT 20`);
   const receipts=await this.prisma.$queryRaw<ProcurementDetail["receipts"]>(Prisma.sql`SELECT d.id,d.reference,d.status FROM procurement_orders o JOIN procurement_receipts pr ON pr.company_id=${c} AND pr.order_id=o.id
    JOIN wms_receipts d ON d.company_id=${c} AND d.id=pr.receipt_id WHERE o.company_id=${c} AND o.request_id=${id} ORDER BY d.created_at DESC,d.id LIMIT 100`);

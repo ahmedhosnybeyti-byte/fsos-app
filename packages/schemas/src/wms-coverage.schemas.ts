@@ -1,5 +1,5 @@
 export type WmsCoverageRisk = "CRITICAL" | "WATCH" | "SAFE" | "UNKNOWN";
-export interface WmsCoverageRow {
+export interface WmsCoverageRow {category?:string|null;
   id: string; code: string; name: string; baseUnit: string; piecesPerCarton?: number;
   available: string; reserved: string; quarantined: string;
   dailyDemand: string | null; daysOfCover: string | null;

@@ -1,6 +1,8 @@
 // WMS and accounting messages consumed by the existing TranslationProvider.
 export const operationalMessages = {
   "ar": {
+    "productGroups.uncategorized": "غير مصنف",
+    "productGroups.pageCount": "عدد الأصناف المعروضة في هذه الصفحة",
     "wms.uncategorized": "أصناف غير مصنفة",
     "wms.quantities_in_cartons": "الأرصدة بالكرتونة",
     "wms.quantity_cartons": "الكمية بالكرتونة",
@@ -694,6 +696,8 @@ export const operationalMessages = {
     "accounting.balance": "الرصيد"
   },
   "en": {
+    "productGroups.uncategorized": "Uncategorized",
+    "productGroups.pageCount": "Products shown on this page",
     "wms.uncategorized": "Uncategorized products",
     "wms.quantities_in_cartons": "Balances in cartons",
     "wms.quantity_cartons": "Quantity in cartons",

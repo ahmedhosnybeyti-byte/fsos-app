@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, NotFoundException } from "@nestjs/common";
 import { createHash, randomUUID } from "node:crypto";
+import { productCategory } from "../../common/queries/product-category";
 import { Prisma } from "@field-sales-os/database";
 import { SALES_DRAFT_PERMISSION, SALES_DRAFT_PRICE_BLOCKERS, SALES_DRAFT_CREDIT_BLOCKERS, salesDraftCreateSchema, salesDraftSaveSchema, salesDraftCancelSchema, salesDraftPageSchema, type SalesDraft, type SalesDraftProduct, type SalesDraftCheck } from "@field-sales-os/schemas";
 import type { ZodType } from "zod";
@@ -47,7 +48,7 @@ export class SalesDraftsService {
   }
   private async row(tx:PrismaTx,u:AuthenticatedUser,visitId:string,id:string):Promise<SalesDraft>{
     const rows=await tx.$queryRaw<SalesDraft[]>(Prisma.sql`SELECT ${header},coalesce((SELECT jsonb_agg(x ORDER BY x."lineNo") FROM (
-      SELECT line_no AS "lineNo",product_id AS "productId",product_code AS "productCode",product_name AS "productName",base_unit AS "baseUnit",quantity::text,unit,conversion_factor AS "conversionFactor",quantity_base::text AS "quantityBase"
+      SELECT line_no AS "lineNo",product_id AS "productId",product_code AS "productCode",product_name AS "productName",${productCategory(Prisma.sql`d.company_id`,Prisma.sql`product_code`)} AS category,base_unit AS "baseUnit",quantity::text,unit,conversion_factor AS "conversionFactor",quantity_base::text AS "quantityBase"
       FROM sales_draft_lines WHERE company_id=d.company_id AND draft_id=d.id ORDER BY line_no LIMIT 20) x),'[]'::jsonb) AS lines
       FROM sales_drafts d JOIN visit_executions v ON v.company_id=d.company_id AND v.id=d.visit_id
       LEFT JOIN warehouses w ON w.company_id=d.company_id AND w.id=d.warehouse_id WHERE d.company_id=${u.companyId} AND d.rep_id=${u.userId} AND d.visit_id=${visitId} AND d.id=${id}`);
@@ -70,7 +71,7 @@ export class SalesDraftsService {
   }
   async products(u:AuthenticatedUser,visitId:string,warehouseId:string,input:unknown){
     const {page,search}=parse(salesDraftPageSchema,input);await this.authorize(u,visitId);await this.warehouse(this.prisma,u,warehouseId);
-    const rows=await this.prisma.$queryRaw<SalesDraftProduct[]>(Prisma.sql`SELECT id,code,name,base_unit AS "baseUnit",pieces_per_carton AS "piecesPerCarton",(base_unit='PIECE' AND pieces_per_carton>0) AS "cartonAllowed"
+    const rows=await this.prisma.$queryRaw<SalesDraftProduct[]>(Prisma.sql`SELECT id,code,name,${productCategory(Prisma.sql`wms_products.company_id`,Prisma.sql`wms_products.code`)} AS category,base_unit AS "baseUnit",pieces_per_carton AS "piecesPerCarton",(base_unit='PIECE' AND pieces_per_carton>0) AS "cartonAllowed"
       FROM wms_products WHERE company_id=${u.companyId} AND is_active AND position(lower(${search}) in lower(code||' '||name))>0 ORDER BY id LIMIT 21 OFFSET ${(page-1)*20}`);
     return {items:rows.slice(0,20),hasMore:rows.length>20,page};
   }

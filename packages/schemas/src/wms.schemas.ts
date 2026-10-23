@@ -49,7 +49,7 @@ export type WmsReversalInput = z.infer<typeof wmsReversalSchema>;
 export interface WmsPage<T> { items: T[]; page: number; hasMore: boolean }
 export interface WmsWarehouse { id: string; code: string; name: string }
 export interface WmsProduct extends WmsProductInput { id: string; category?: string | null; version: number; physical: string; available: string; reserved: string; quarantined: string; inTransit: string }
-export interface WmsBatch {
+export interface WmsBatch {category?:string|null;
   id: string; productId: string; productName: string; baseUnit: string; piecesPerCarton?: number; code: string;
   productionDate: string | null; expiryDate: string | null; isQuarantined: boolean; qualityBlocked:boolean;
   physical: string; available: string; reserved: string; quarantined: string; inTransit: string;

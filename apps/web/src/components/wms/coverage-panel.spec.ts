@@ -15,6 +15,7 @@ require.extensions[".tsx"]=(module:NodeModule,filename:string)=>{
   }).outputText,filename);
 };
 const {WmsCoveragePanel}=require("./coverage-panel.tsx");
+const {TranslationProvider}=require("../translation-provider");
 
 function render(locale:Locale,risk:WmsCoverageRisk,estimate=true){
   const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:Infinity}}});
@@ -26,7 +27,7 @@ function render(locale:Locale,risk:WmsCoverageRisk,estimate=true){
   }]};
   client.setQueryData(["wms","company","warehouse","coverage",1,""],data);
   const t=(key:TranslationKey,params?:Record<string,string|number>)=>dictionaries[locale][key].replace(/\{(\w+)\}/g,(_,k)=>String(params?.[k]??""));
-  try{return renderToStaticMarkup(createElement(QueryClientProvider,{client},createElement(WmsCoveragePanel,{warehouse:"warehouse",company:"company",t})));}
+  try{return renderToStaticMarkup(createElement(QueryClientProvider,{client},createElement(TranslationProvider,null,createElement(WmsCoveragePanel,{warehouse:"warehouse",company:"company",t}))));}
   finally{client.clear();}
 }
 

@@ -1,4 +1,5 @@
 "use client";
+import { ProductCategoryGroups } from "@/components/products/product-category-groups";
 import {useState} from "react";
 import Link from "next/link";
 import {useQuery} from "@tanstack/react-query";
@@ -18,7 +19,7 @@ export function WmsCoveragePanel({warehouse,company,t}:{warehouse:string;company
     <Search id="coverage-search" value={input} onChange={setInput} onSearch={()=>{setSearch(input.trim());setPage(1);}} t={t}/>
     {query.isPending?<Skeleton className="h-48"/>:query.isError?<ErrorBox error={query.error} retry={()=>void query.refetch()} t={t}/>:<>
       <p className="text-xs text-muted-foreground">{t("coverage.period")} <bdi>{query.data.from} — {query.data.to}</bdi> · {t("coverage.stockTime")} <time dateTime={query.data.stockAsOf}><bdi>{query.data.stockAsOf}</bdi></time></p>
-      {!query.data.items.length?<p className="py-6 text-sm text-muted-foreground">{t("coverage.empty")}</p>:<ul className="divide-y divide-border">{query.data.items.map(p=><li key={p.id} className="space-y-3 py-4">
+      {!query.data.items.length?<p className="py-6 text-sm text-muted-foreground">{t("coverage.empty")}</p>:<ProductCategoryGroups items={query.data.items} search={search} containerAs="ul" contentClassName="divide-y divide-border" renderItem={p=><li key={p.id} className="space-y-3 py-4">
         {/* Canonical demand has company/route scope, never verified warehouse attribution. */}
         <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-semibold">{p.name}</h3><p className="text-xs text-muted-foreground"><bdi>{p.code}</bdi> · {t("wms.carton")}</p></div><Badge variant="secondary">{t("coverage.undetermined")}</Badge></div>
         <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -31,7 +32,7 @@ export function WmsCoveragePanel({warehouse,company,t}:{warehouse:string;company
         <p className="text-xs text-muted-foreground">{t("coverage.leadMissing")}</p>
         {p.risk!=="SAFE"&&<p className="text-xs text-warning">{p.risk==="UNKNOWN"?t("coverage.reviewData"):t("coverage.reviewPurchase")}</p>}
         {p.purchaseReference&&<Button variant="outline" size="sm" asChild><Link href={`/sfa/procurement?warehouseId=${encodeURIComponent(warehouse)}&search=${encodeURIComponent(p.purchaseReference)}`}>{t("coverage.existingOrder")} · {p.purchaseReference}</Link></Button>}
-      </li>)}</ul>}
+      </li>}/>}
       <Pager page={page} hasMore={query.data.hasMore} busy={query.isFetching} onChange={setPage} t={t}/>
     </>}
   </CardContent></Card>;

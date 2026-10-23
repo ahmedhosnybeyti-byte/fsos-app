@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { productCategory } from "../../common/queries/product-category";
 import { Prisma } from "@field-sales-os/database";
 import type { WmsCoverageRow } from "@field-sales-os/schemas";
 import { PrismaService } from "../../common/prisma";
@@ -74,7 +75,7 @@ export class RieWmsCoverageQueryService {
       ), result_page AS (
         SELECT * FROM scored ORDER BY CASE risk WHEN 'CRITICAL' THEN 0 WHEN 'WATCH' THEN 1 WHEN 'UNKNOWN' THEN 2 ELSE 3 END,
           cover NULLS LAST,code,id LIMIT 21 OFFSET ${(page-1)*20}
-      ) SELECT r.id,r.code,r.name,r.base_unit AS "baseUnit",r.pieces_per_carton AS "piecesPerCarton",r.available::text,r.reserved::text,r.quarantined::text,
+      ) SELECT r.id,r.code,r.name,${productCategory(Prisma.sql`${company}`,Prisma.sql`r.code`)} AS category,r.base_unit AS "baseUnit",r.pieces_per_carton AS "piecesPerCarton",r.available::text,r.reserved::text,r.quarantined::text,
         round(r.daily,6)::text AS "dailyDemand",round(r.cover,2)::text AS "daysOfCover",r.days AS "demandDays",
         to_char(r.first,'YYYY-MM-DD') AS "firstSale",to_char(r.last,'YYYY-MM-DD') AS "lastSale",r.risk,
         CASE WHEN r.invalid THEN 'UOM' WHEN r.daily IS NULL THEN 'HISTORY' WHEN r.risk='CRITICAL' THEN 'LOW'

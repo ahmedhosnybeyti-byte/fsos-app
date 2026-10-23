@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import type { ZodType, ZodTypeDef } from "zod";
 import { randomUUID } from "node:crypto";
 import { hasOperationalPermissions } from "@field-sales-os/schemas";
+import { productCategory } from "../../common/queries/product-category";
 import { Prisma } from "@field-sales-os/database";
 import { wmsAccessSchema, wmsBatchSchema, wmsCreateProductSchema, wmsOpeningSchema, wmsPageSchema, wmsReversalSchema, wmsStockQuerySchema, wmsUpdateProductSchema, type WmsAccessUser, type WmsBatch, type WmsMovement, type WmsProduct, type WmsSummary, type WmsWarehouse } from "@field-sales-os/schemas";
 import { PrismaService, type PrismaTx } from "../../common/prisma";
@@ -121,7 +122,7 @@ export class WmsService {
       ${nearExpiry === "true" ? Prisma.sql`AND s.physical>0 AND b.expiry_date>(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date
         AND b.expiry_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date+${horizon}::int` : Prisma.empty}
       ORDER BY b.expiry_date ASC NULLS LAST,b.id LIMIT ${pageSize+1} OFFSET ${(n-1)*pageSize}
-    ) SELECT b.id,b.product_id AS "productId",p.name AS "productName",p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",b.code,
+    ) SELECT b.id,b.product_id AS "productId",p.name AS "productName",${productCategory(Prisma.sql`p.company_id`,Prisma.sql`p.code`)} AS category,p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",b.code,
       to_char(b.production_date,'YYYY-MM-DD') AS "productionDate",to_char(b.expiry_date,'YYYY-MM-DD') AS "expiryDate",b.is_quarantined AS "isQuarantined",b.quality_blocked AS "qualityBlocked",
       b.physical::text, b.reserved::text,b.quarantined::text,b.in_transit::text AS "inTransit",
       (CASE WHEN b.expiry_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date OR b.is_quarantined OR b.quality_blocked OR NOT p.is_active THEN 0

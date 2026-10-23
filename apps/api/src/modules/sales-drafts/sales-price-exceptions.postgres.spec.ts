@@ -13,8 +13,8 @@ test("B2 price requests: isolated roles, immutable approval and no price/financi
  assert.ok(process.env.RIE_TEST_PGLITE_MODULE);const {PGlite}=require(process.env.RIE_TEST_PGLITE_MODULE!);const db=new PGlite();t.after(()=>db.close());await draftFixture(db);
  await db.exec(`CREATE TABLE roles(id text PRIMARY KEY,code text UNIQUE);ALTER TABLE users ADD COLUMN role_id text REFERENCES roles(id);ALTER TABLE users ADD COLUMN email text;
   CREATE TABLE role_permissions(role_id text REFERENCES roles(id),permission_id text REFERENCES permissions(id),PRIMARY KEY(role_id,permission_id));
-  CREATE TABLE rie_canonical_entity_rows(company_id text,entity_name text,data jsonb);
-  INSERT INTO rie_canonical_entity_rows VALUES('a','Customers','{"CustomerCode":"C1","RouteID":"r1","Channel":"Cash Van"}'),('b','Customers','{"CustomerCode":"C1","RouteID":"r1","Channel":"Cash Van"}');
+  CREATE TABLE IF NOT EXISTS rie_canonical_entity_rows(company_id text,entity_name text,entity_key text,data jsonb);
+  INSERT INTO rie_canonical_entity_rows(company_id,entity_name,data) VALUES('a','Customers','{"CustomerCode":"C1","RouteID":"r1","Channel":"Cash Van"}'),('b','Customers','{"CustomerCode":"C1","RouteID":"r1","Channel":"Cash Van"}');
   INSERT INTO roles VALUES('rep','SALES_REP'),('sup','SUPERVISOR'),('mgr','MANAGER'),('acc','ACCOUNTANT');
   UPDATE users SET role_id='rep',email='rep@example.invalid' WHERE id IN('clerk-a','actor-b');
   UPDATE users SET role_id='acc' WHERE id='actor-a';

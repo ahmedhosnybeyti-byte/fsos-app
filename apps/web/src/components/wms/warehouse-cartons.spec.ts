@@ -18,8 +18,8 @@ test("company administrator sees category headings and carton balances while ope
  client.setQueryData(["wms","company","warehouse","batches",1,undefined,false,30],{items:[],page:1,hasMore:false});
  try{
  const html=renderToStaticMarkup(createElement(QueryClientProvider,{client},createElement(TranslationProvider,null,createElement(WarehouseScreen,{initialWarehouseId:"warehouse"}))));
- assert.equal((html.match(/>ألبان<\/h3>/g)??[]).length,1);assert.equal((html.match(/>سناكس<\/h3>/g)??[]).length,1);
- assert.match(html,/font-bold text-primary/);assert.match(html,/100 كرتونة/);assert.match(html,/300/);
+ assert.equal((html.match(/>ألبان /g)??[]).length,1);assert.equal((html.match(/>سناكس /g)??[]).length,1);
+ assert.match(html,/aria-expanded="false"/);assert.match(html,/100 كرتونة/);assert.match(html,/300/);
  assert.doesNotMatch(html,/1200|2400|4800|صنف جديد|رصيد افتتاحي|استلام جديد|سجل الحركات/);
  }finally{client.clear();}
 });

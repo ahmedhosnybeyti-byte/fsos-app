@@ -1,4 +1,5 @@
 "use client";
+import { ProductCategoryGroups } from "@/components/products/product-category-groups";
 import { useEffect,useRef,useState } from "react";
 import { useMutation,useQuery,useQueryClient } from "@tanstack/react-query";
 import { SALES_DRAFT_PERMISSION,salesDraftSaveSchema,type SalesDraft,type SalesDraftProduct,type SalesDraftSave,type VisitExecution } from "@field-sales-os/schemas";
@@ -45,7 +46,7 @@ export function SalesDraftsPanel({visit}:{visit:VisitExecution}){
  </CardContent></Card>;
 }
 
-type Line=SalesDraftSave["lines"][number]&{productCode:string;productName:string;baseUnit:string};
+type Line=SalesDraftSave["lines"][number]&{productCode:string;productName:string;baseUnit:string;category?:string|null};
 export function SalesDraftEditor({draft,visitClosed,scope,onDirty,onSaved,onReload}:{draft:SalesDraft;visitClosed:boolean;scope:(string|null|undefined)[];onDirty:(dirty:boolean)=>void;onSaved:(d:SalesDraft)=>unknown;onReload:()=>unknown}){
  const {t,locale}=useTranslation();
  const [lines,setLines]=useState<Line[]>(draft.lines.map(l=>({...l}))),[warehouse,setWarehouse]=useState(draft.warehouseId),[notes,setNotes]=useState(draft.notes);
@@ -64,7 +65,7 @@ export function SalesDraftEditor({draft,visitClosed,scope,onDirty,onSaved,onRelo
  const check=useMutation({mutationFn:()=>salesDraftsApi.check(draft.visitId,draft.id)});
  const busy=save.isPending||cancel.isPending;
  function submit(){const signature=JSON.stringify({...body,version:draft.version});if(command.current?.signature!==signature)command.current={signature,key:crypto.randomUUID()};const p=salesDraftSaveSchema.safeParse({...body,version:draft.version,commandKey:command.current.key});setInvalid(!p.success);if(p.success)save.mutate(p.data)}
- function add(p:SalesDraftProduct){if(lines.length<20&&!lines.some(l=>l.productId===p.id))setLines([...lines,{productId:p.id,productCode:p.code,productName:p.name,baseUnit:p.baseUnit,quantity:"1",unit:"BASE"}]);}
+ function add(p:SalesDraftProduct){if(lines.length<20&&!lines.some(l=>l.productId===p.id))setLines([...lines,{productId:p.id,productCode:p.code,productName:p.name,category:p.category,baseUnit:p.baseUnit,quantity:"1",unit:"BASE"}]);}
  return <div className="space-y-4 border-t border-border/60 pt-4">
   <div className="flex flex-wrap items-center gap-3"><Badge>{t(`draft.${draft.status}`)}</Badge><p className="min-w-0 break-all text-xs text-muted-foreground">{t("draft.id")}: {draft.id}</p></div>
   <p className="text-sm font-semibold">{draft.customerName} · {draft.customerCode} · {draft.repName}</p>
@@ -80,13 +81,13 @@ export function SalesDraftEditor({draft,visitClosed,scope,onDirty,onSaved,onRelo
    {editable&&warehouse&&<div className="space-y-3"><div className="flex gap-2"><Input aria-label={t("draft.productSearch")} value={productInput} onChange={e=>setProductInput(e.target.value)}/><Button variant="outline" onClick={()=>{setProductSearch(productInput);setProductPage(1)}}>{t("draft.productSearch")}</Button></div>
     {products.isLoading&&<Skeleton className="h-24"/>}{products.isError&&<div><p role="alert" className="text-sm text-destructive">{t("draft.error")}</p><Button variant="outline" onClick={()=>products.refetch()}>{t("draft.retry")}</Button></div>}
     {products.data&&!products.data.items.length&&<p className="text-sm text-muted-foreground">{t("draft.noProducts")}</p>}
-    <div className="grid gap-2 sm:grid-cols-2">{products.data?.items.map(p=><div key={p.id} className="flex items-center justify-between gap-2 rounded-md border border-border/60 p-3"><p className="min-w-0 break-words text-sm">{p.name} <span className="text-xs text-muted-foreground">{p.code}</span></p><Button variant="outline" disabled={lines.length>=20||lines.some(l=>l.productId===p.id)} aria-label={`${t("draft.add")} ${p.name}`} onClick={()=>add(p)}>{t("draft.add")}</Button></div>)}</div>
+    <ProductCategoryGroups items={products.data?.items} search={productSearch} contentClassName="grid gap-2 sm:grid-cols-2" renderItem={p=><div key={p.id} className="flex items-center justify-between gap-2 rounded-md border border-border/60 p-3"><p className="min-w-0 break-words text-sm">{p.name} <span className="text-xs text-muted-foreground">{p.code}</span></p><Button variant="outline" disabled={lines.length>=20||lines.some(l=>l.productId===p.id)} aria-label={`${t("draft.add")} ${p.name}`} onClick={()=>add(p)}>{t("draft.add")}</Button></div>}/>
     {(productPage>1||products.data?.hasMore)&&<div className="flex gap-2"><Button variant="outline" disabled={productPage===1} onClick={()=>setProductPage(p=>p-1)}>{t("draft.previous")}</Button><Button variant="outline" disabled={!products.data?.hasMore} onClick={()=>setProductPage(p=>p+1)}>{t("draft.next")}</Button></div>}
    </div>}
    <div className="space-y-3"><h3 className="font-semibold">{t("draft.lines")} ({lines.length}/20)</h3><p className="text-xs text-muted-foreground">{t("draft.limit")}</p>{!lines.length&&<p className="text-sm text-muted-foreground">{t("draft.noLines")}</p>}
-    {lines.map((l,i)=><div key={l.productId} className="space-y-3 rounded-md border border-border/60 p-3"><p className="break-words text-sm font-semibold">{l.productName} · {l.productCode}</p><div className="grid gap-3 sm:grid-cols-3"><div className="space-y-1"><Label htmlFor={`draft-quantity-${i}`}>{t("draft.quantity")}</Label><Input id={`draft-quantity-${i}`} inputMode="decimal" dir="ltr" maxLength={25} value={l.quantity} onChange={e=>setLines(lines.map((x,n)=>n===i?{...x,quantity:e.target.value}:x))}/></div><div className="space-y-1"><Label htmlFor={`draft-unit-${i}`}>{t("draft.unit")}</Label><Select dir={locale==="ar"?"rtl":"ltr"} value={l.unit} onValueChange={unit=>setLines(lines.map((x,n)=>n===i?{...x,unit:unit as Line["unit"]}:x))}><SelectTrigger id={`draft-unit-${i}`}><SelectValue/></SelectTrigger><SelectContent><SelectItem value="BASE">{t("draft.BASE")} ({["PIECE","KG","LITRE"].includes(l.baseUnit)?t(`draft.${l.baseUnit as "PIECE"|"KG"|"LITRE"}`):l.baseUnit})</SelectItem>{l.baseUnit==="PIECE"&&<SelectItem value="CARTON">{t("draft.CARTON")}</SelectItem>}</SelectContent></Select></div>{editable&&<Button variant="ghost" className="self-end" onClick={()=>setLines(lines.filter((_,n)=>n!==i))}>{t("draft.remove")}</Button>}</div>
+    {<ProductCategoryGroups items={lines}  renderItem={(l,i)=><div key={l.productId} className="space-y-3 rounded-md border border-border/60 p-3"><p className="break-words text-sm font-semibold">{l.productName} · {l.productCode}</p><div className="grid gap-3 sm:grid-cols-3"><div className="space-y-1"><Label htmlFor={`draft-quantity-${i}`}>{t("draft.quantity")}</Label><Input id={`draft-quantity-${i}`} inputMode="decimal" dir="ltr" maxLength={25} value={l.quantity} onChange={e=>setLines(lines.map((x,n)=>n===i?{...x,quantity:e.target.value}:x))}/></div><div className="space-y-1"><Label htmlFor={`draft-unit-${i}`}>{t("draft.unit")}</Label><Select dir={locale==="ar"?"rtl":"ltr"} value={l.unit} onValueChange={unit=>setLines(lines.map((x,n)=>n===i?{...x,unit:unit as Line["unit"]}:x))}><SelectTrigger id={`draft-unit-${i}`}><SelectValue/></SelectTrigger><SelectContent><SelectItem value="BASE">{t("draft.BASE")} ({["PIECE","KG","LITRE"].includes(l.baseUnit)?t(`draft.${l.baseUnit as "PIECE"|"KG"|"LITRE"}`):l.baseUnit})</SelectItem>{l.baseUnit==="PIECE"&&<SelectItem value="CARTON">{t("draft.CARTON")}</SelectItem>}</SelectContent></Select></div>{editable&&<Button variant="ghost" className="self-end" onClick={()=>setLines(lines.filter((_,n)=>n!==i))}>{t("draft.remove")}</Button>}</div>
      {!dirty&&draft.lines[i]&&<p className="text-xs text-muted-foreground">{t("draft.baseQuantity")}: {draft.lines[i].quantityBase} ({["PIECE","KG","LITRE"].includes(l.baseUnit)?t(`draft.${l.baseUnit as "PIECE"|"KG"|"LITRE"}`):l.baseUnit}) · {t("draft.factor")}: {draft.lines[i].conversionFactor}</p>}
-    </div>)}
+    </div>}/>}
    </div>
    <div className="space-y-2"><Label htmlFor="draft-notes">{t("draft.notes")}</Label><Input id="draft-notes" value={notes} maxLength={2000} onChange={e=>setNotes(e.target.value)}/></div>
   </fieldset>

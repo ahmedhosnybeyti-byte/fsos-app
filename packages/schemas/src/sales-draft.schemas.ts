@@ -19,7 +19,7 @@ export const salesDraftSaveSchema = z.object({
 export const salesDraftCancelSchema = z.object({ commandKey: key, version: z.number().int().nonnegative() }).strict();
 export const salesDraftPageSchema = z.object({ page:z.coerce.number().int().min(1).max(1000).default(1), search:z.string().trim().max(80).default("") }).strict();
 export type SalesDraftSave = z.infer<typeof salesDraftSaveSchema>;
-export interface SalesDraftLine {
+export interface SalesDraftLine {category?:string|null;
   lineNo:number; productId:string; productCode:string; productName:string; baseUnit:string;
   quantity:string; unit:"BASE"|"CARTON"; conversionFactor:number; quantityBase:string;
 }
@@ -28,7 +28,7 @@ export interface SalesDraft {
   status:"DRAFT"|"CANCELLED"; version:number; warehouseId:string|null; warehouseName:string|null;
   notes:string; createdAt:string; updatedAt:string; lines:SalesDraftLine[]; editable:boolean;
 }
-export interface SalesDraftProduct { id:string; code:string; name:string; baseUnit:string; piecesPerCarton:number; cartonAllowed:boolean }
+export interface SalesDraftProduct {category?:string|null; id:string; code:string; name:string; baseUnit:string; piecesPerCarton:number; cartonAllowed:boolean }
 export type SalesDraftAvailability = "AVAILABLE" | "UNAVAILABLE" | "NEEDS_REVIEW";
 export const SALES_DRAFT_PRICE_BLOCKERS = ["PRICE_APPROVAL", "PRICE_PRECEDENCE", "PRICE_UNIT_MAPPING", "PRICE_EFFECTIVE_DATE", "PRICE_MONEY_POLICY"] as const;
 export const SALES_DRAFT_CREDIT_BLOCKERS = ["CREDIT_CUSTOMER_LINK", "CREDIT_APPROVAL", "CREDIT_EXPOSURE_POLICY", "CREDIT_DRAFT_TOTAL"] as const;
