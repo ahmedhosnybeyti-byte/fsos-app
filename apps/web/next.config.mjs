@@ -26,6 +26,10 @@ const nextConfig = {
   // imports to their individual source files instead, both in dev and in
   // the production build. See PROJECT_LOG.md.
   experimental: {
+    // The rewrite body clone defaults to 10 MB even when API routes are not
+    // matched by middleware. Allow the API's 64 MB file plus multipart overhead;
+    // the API remains the authoritative file-size and authorization boundary.
+    middlewareClientMaxBodySize: "65mb",
     // Canonical uploads are capped at 64 MB by the API and validated in the
     // background. Next's 30s rewrite timeout aborts the approved 53 MB source
     // while it is still streaming; retain a finite five-minute transfer limit.
