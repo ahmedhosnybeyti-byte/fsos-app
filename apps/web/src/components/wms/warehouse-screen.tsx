@@ -3,7 +3,7 @@ import { useEffect,useState } from "react";
 import Link from "next/link";
 import { useMutation,useQuery,useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Boxes, ClipboardList, PackagePlus, Pencil, Plus, RefreshCw, ShieldCheck, Warehouse } from "lucide-react";
-import { supportsSfaOperations, getCompanyFeatureAccessState, type WmsWarehouse } from "@field-sales-os/schemas";
+import { hasOperationalPermissions, supportsSfaOperations, getCompanyFeatureAccessState, type WmsWarehouse } from "@field-sales-os/schemas";
 import { useAuth } from "@/hooks/use-auth";
 import { useTranslation } from "@/components/translation-provider";
 import { sfaSetupApi } from "@/lib/api/sfa-setup";
@@ -25,9 +25,9 @@ import { WmsCoveragePanel } from "./coverage-panel";
 const queryOptions={retry:false,refetchOnWindowFocus:false,refetchOnReconnect:false} as const;
 export function WarehouseScreen({initialWarehouseId,initialReceiptId}:{initialWarehouseId?:string;initialReceiptId?:string}={}) {
   const {user,isLoading}=useAuth(); const {locale,t}=useTranslation();
-  const client=useQueryClient(); const company=user?.companyId;
+  const client=useQueryClient(); const company=user?.companyId; const readOnly=user?.role.code==="COMPANY_ADMIN";
   const allowed=!!company&&user?.role.code!=="SUPER_ADMIN"&&getCompanyFeatureAccessState(user?.featureAccess,"warehouse-core")==="ENABLED"
-    &&["sfa.access","wms.read"].every(p=>user?.permissions?.includes(p));
+    &&hasOperationalPermissions(user?.role.code??"",user?.permissions,["sfa.access","wms.read"]);
   const mode=useQuery({queryKey:["sfa-mode",company],queryFn:sfaSetupApi.mode,enabled:allowed,...queryOptions});
   const enabled=allowed&&supportsSfaOperations(mode.data?.operatingMode);
   const [warehouse,setWarehouse]=useState<WmsWarehouse|null>(()=>initialWarehouseId?{id:initialWarehouseId,name:initialWarehouseId,code:""}:null);
@@ -41,9 +41,9 @@ export function WarehouseScreen({initialWarehouseId,initialReceiptId}:{initialWa
   const summary=useQuery({queryKey:["wms",company,warehouse?.id,"summary",horizon],queryFn:()=>wmsApi.summary(warehouse!.id,horizon),enabled:ready,...queryOptions});
   const products=useQuery({queryKey:["wms",company,warehouse?.id,"products",productPage,search],queryFn:()=>wmsApi.products(warehouse!.id,productPage,search),enabled:ready,...queryOptions});
   const batches=useQuery({queryKey:["wms",company,warehouse?.id,"batches",lotPage,selectedProduct?.id,nearExpiry,horizon],queryFn:()=>wmsApi.batches(warehouse!.id,lotPage,selectedProduct?.id,nearExpiry,horizon),enabled:ready,...queryOptions});
-  const ledger=useQuery({queryKey:["wms",company,warehouse?.id,"ledger",ledgerPage],queryFn:()=>wmsApi.movements(warehouse!.id,ledgerPage),enabled:ready,...queryOptions});
-  const canProduct=user?.permissions?.includes("wms.products.manage"); const canPost=user?.permissions?.includes("wms.opening.post");
-  const canAccess=user?.role.code==="COMPANY_ADMIN"&&user.permissions?.includes("wms.access.manage");
+  const ledger=useQuery({queryKey:["wms",company,warehouse?.id,"ledger",ledgerPage],queryFn:()=>wmsApi.movements(warehouse!.id,ledgerPage),enabled:ready&&!readOnly,...queryOptions});
+  const canProduct=!readOnly&&user?.permissions?.includes("wms.products.manage"); const canPost=!readOnly&&user?.permissions?.includes("wms.opening.post");
+  const canAccess=!readOnly&&user?.role.code==="COMPANY_ADMIN"&&user.permissions?.includes("wms.access.manage");
   const [showAccess,setShowAccess]=useState(false); const [accessPage,setAccessPage]=useState(1); const [accessInput,setAccessInput]=useState(""); const [accessSearch,setAccessSearch]=useState("");
   const access=useQuery({queryKey:["wms",company,warehouse?.id,"access",accessPage,accessSearch],queryFn:()=>wmsApi.users(warehouse!.id,accessPage,accessSearch),enabled:ready&&canAccess&&showAccess,...queryOptions});
   const accessMutation=useMutation({mutationFn:({userId,granted}:{userId:string;granted:boolean})=>wmsApi.access(warehouse!.id,userId,granted),onSuccess:()=>client.invalidateQueries({queryKey:["wms",company]})});
@@ -60,7 +60,7 @@ export function WarehouseScreen({initialWarehouseId,initialReceiptId}:{initialWa
         {!warehouses.data.items.length&&<p className="py-3 text-sm text-muted-foreground">{t("wms.no_matching_authorized_warehouses_ask_your_administrator_to_configure_a_warehouse_")}</p>}
         <Pager page={pickerPage} hasMore={warehouses.data.hasMore} busy={warehouses.isFetching} onChange={setPickerPage} t={t}/>
       </>}
-      {user?.role.code==="COMPANY_ADMIN"&&user.permissions?.includes("company.manage")&&getCompanyFeatureAccessState(user.featureAccess,"sfa-setup")==="ENABLED"&&<Link href="/sfa/setup" className="inline-flex rounded-md text-sm text-primary underline focus-visible:ring-2 focus-visible:ring-ring">{t("wms.manage_warehouse_registry")}</Link>}
+      {!readOnly&&user?.role.code==="COMPANY_ADMIN"&&user.permissions?.includes("company.manage")&&getCompanyFeatureAccessState(user.featureAccess,"sfa-setup")==="ENABLED"&&<Link href="/sfa/setup" className="inline-flex rounded-md text-sm text-primary underline focus-visible:ring-2 focus-visible:ring-ring">{t("wms.manage_warehouse_registry")}</Link>}
     </CardContent></Card>
     {!warehouse?<Card><CardContent className="flex flex-col items-center gap-3 py-10 text-center"><Boxes className="h-10 w-10 text-primary"/><h2 className="text-lg font-semibold">{t("wms.choose_a_warehouse_to_begin")}</h2><p className="max-w-lg text-sm text-muted-foreground">{t("wms.its_actual_balances_lots_and_your_authorized_actions_will_appear_here")}</p></CardContent></Card>:<>
     <section className="glass-hero p-4 sm:p-6" aria-label={t("wms.warehouse_operations_center")}><div className="relative z-10 space-y-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs text-primary">{t("wms.selected_warehouse")}</p><h2 className="mt-1 text-xl font-bold">{warehouse.name}</h2><p className="mt-1 text-xs text-muted-foreground">{t("wms.available_excludes_reserved_quarantined_expired_and_inactive_product_stock")}</p></div><Button variant="outline" size="sm" onClick={retryAll} disabled={summary.isFetching}><RefreshCw className="h-4 w-4"/>{t("wms.refresh")}</Button></div>
@@ -70,10 +70,12 @@ export function WarehouseScreen({initialWarehouseId,initialReceiptId}:{initialWa
       <p className="text-xs text-muted-foreground">{t("wms.read_at")} <time dateTime={summary.data.asOf}>{new Date(summary.data.asOf).toLocaleString(locale==="ar"?"ar-SA":"en-GB")}</time> · {t("wms.different_units_are_never_added_together")}</p>
     </>}
     </div></section>
+    {!readOnly&&<>
     <WmsCoveragePanel key={warehouse.id+"coverage"} warehouse={warehouse.id} company={company!} t={t}/>
     <WmsQuarantinePanel key={warehouse.id+"quarantine"} warehouse={warehouse.id} company={company!} permissions={user?.permissions??[]} t={t}/>
     <WmsOperationsPanel initialReceiptId={initialReceiptId} key={warehouse.id} warehouse={warehouse.id} company={company!} userId={user!.id} permissions={user?.permissions??[]} t={t}/>
     <WmsReturnsPanel key={warehouse.id+"returns"} warehouse={warehouse.id} company={company!} permissions={user?.permissions??[]} t={t}/>
+    </>}
     <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)]">
     <Card><CardHeader><div className="flex flex-wrap items-center justify-between gap-3"><CardTitle className="flex items-center gap-2"><Boxes className="h-5 w-5 text-primary"/>{t("wms.products_balances")}</CardTitle>{canProduct&&<Button size="sm" onClick={()=>setAction({kind:"product"})}><Plus className="h-4 w-4"/>{t("wms.new_product")}</Button>}</div></CardHeader><CardContent className="space-y-4">
       <Search id="product-search" value={searchInput} onChange={setSearchInput} onSearch={()=>{setProductPage(1);setSearch(searchInput.trim());}} t={t}/>
@@ -94,18 +96,20 @@ export function WarehouseScreen({initialWarehouseId,initialReceiptId}:{initialWa
       {batches.isPending?<Skeleton className="h-48"/>:batches.isError?<ErrorBox error={batches.error} retry={()=>void batches.refetch()} t={t}/>:<>
         {!batches.data.items.length?<p className="py-6 text-sm text-muted-foreground">{t("wms.no_lots_in_this_scope")}</p>:<ul className="divide-y divide-border">{batches.data.items.map(b=><li key={b.id} className="space-y-2 py-4"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="font-semibold">{b.productName}</h3><p className="text-xs text-muted-foreground">{b.code==="__UNTRACKED__"?t("wms.stock_without_lot_tracking"):b.code}</p></div><Badge variant={b.isQuarantined||b.qualityBlocked?"warning":b.daysRemaining!==null&&b.daysRemaining<=0?"destructive":b.daysRemaining!==null&&b.daysRemaining<=horizon?"warning":"secondary"}>{b.qualityBlocked?t("wms.quality_blocked"):b.isQuarantined?t("wms.quarantined_73845da"):b.daysRemaining===null?t("wms.no_expiry"):b.daysRemaining<=0?t("wms.expired_unavailable"):`${b.daysRemaining} ${t("wms.days_remaining")}`}</Badge></div>
           <dl className="grid grid-cols-2 gap-2 text-xs"><div><dt className="text-muted-foreground">{t("wms.production")}</dt><dd>{b.productionDate??t("wms.not_recorded")}</dd></div><div><dt className="text-muted-foreground">{t("wms.expiry")}</dt><dd>{b.expiryDate??t("wms.not_recorded")}</dd></div><div><dt className="text-muted-foreground">{t("wms.life_consumed")}</dt><dd>{b.lifeConsumedPct===null?t("wms.unknown_missing_date"):`${quantity(b.lifeConsumedPct)}%`}</dd></div><div><dt className="text-muted-foreground">{t("wms.physical_available")}</dt><dd>{quantity(b.physical)} / {quantity(b.available)} {unitLabel(b.baseUnit,t)}</dd></div></dl>
-          {user?.permissions?.includes("wms.quality.manage")&&<QualityAction warehouse={warehouse.id} company={company!} batchId={b.id} blocked={b.qualityBlocked} t={t}/>}
+          {!readOnly&&user?.permissions?.includes("wms.quality.manage")&&<QualityAction warehouse={warehouse.id} company={company!} batchId={b.id} blocked={b.qualityBlocked} t={t}/>}
         </li>)}</ul>}
         <Pager page={lotPage} hasMore={batches.data.hasMore} busy={batches.isFetching} onChange={setLotPage} t={t}/>
       </>}
       <p className="text-xs text-muted-foreground">{t("wms.stock_is_blocked_on_its_expiry_date_quality_is_rechecked_at_reservation_picking_di")}</p>
     </CardContent></Card>
     </div>
+    {!readOnly&&<>
     <Card><CardHeader><CardTitle>{t("wms.physical_counts_stock_adjustments")}</CardTitle></CardHeader><CardContent><Button asChild><Link href={`/sfa/warehouse/counts?warehouseCode=${encodeURIComponent(warehouse.code)}`}>{t("wms.open_physical_counts")}</Link></Button></CardContent></Card>
     <Card><CardHeader><CardTitle className="flex items-center gap-2"><ClipboardList className="h-5 w-5 text-primary"/>{t("wms.movement_ledger")}</CardTitle></CardHeader><CardContent>
       {ledger.isPending?<Skeleton className="h-44"/>:ledger.isError?<ErrorBox error={ledger.error} retry={()=>void ledger.refetch()} t={t}/>:<>{!ledger.data.items.length?<p className="py-5 text-sm text-muted-foreground">{t("wms.no_posted_movements_each_opening_appears_here_with_its_reference_and_reason")}</p>:<Table><TableHeader><TableRow>{[t("wms.movement_reference"),t("wms.product_lot_6eb91b6"),t("wms.base_quantity"),t("wms.input_unit"),t("wms.reason_time"),t("wms.action")].map(l=><TableHead key={l}>{l}</TableHead>)}</TableRow></TableHeader><TableBody>{ledger.data.items.map(m=><TableRow key={m.id}><TableCell><Badge variant={m.kind==="REVERSAL"?"warning":"secondary"}>{operationText(m.kind,t)}</Badge><p className="mt-1 text-xs">{m.reference}</p>{m.reversed&&<p className="text-xs text-muted-foreground">{t("wms.reversed_b31bfd7")}</p>}</TableCell><TableCell>{m.productName}<p className="text-xs text-muted-foreground">{m.batchCode==="__UNTRACKED__"?"—":m.batchCode}</p></TableCell><TableCell className="tabular-nums">{quantity(m.quantity)} {unitLabel(m.baseUnit,t)}{(m.reservedDelta!=="0.000000"||m.inTransitDelta!=="0.000000")&&<p className="text-xs text-muted-foreground">{t("wms.reserved_transit_change")}: {quantity(m.reservedDelta)} / {quantity(m.inTransitDelta)}</p>}</TableCell><TableCell>{quantity(m.inputQuantity)} {m.inputUnit==="CARTON"?t("wms.carton_776d2a9"):unitLabel(m.baseUnit,t)}<p className="text-xs text-muted-foreground">× {m.conversionFactor}</p></TableCell><TableCell><p className="max-w-64 whitespace-normal break-words text-xs">{m.reason}</p><time className="text-xs text-muted-foreground">{new Date(m.createdAt).toLocaleString(locale==="ar"?"ar-SA":"en-GB")}</time></TableCell><TableCell>{canPost&&m.kind==="OPENING"&&!m.reversed?<Button variant="outline" size="sm" onClick={()=>setAction({kind:"reverse",movement:m})}>{t("wms.reverse")}</Button>:"—"}</TableCell></TableRow>)}</TableBody></Table>}
       <Pager page={ledgerPage} hasMore={ledger.data.hasMore} busy={ledger.isFetching} onChange={setLedgerPage} t={t}/></>}
     </CardContent></Card>
+    </>}
     {canAccess&&<Card><CardHeader><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary"/>{t("wms.warehouse_access")}</CardTitle><Button variant="outline" size="sm" aria-expanded={showAccess} onClick={()=>setShowAccess(!showAccess)}>{showAccess?t("wms.close"):t("wms.manage_access")}</Button></div></CardHeader>{showAccess&&<CardContent className="space-y-4"><p className="text-xs text-muted-foreground">{t("wms.company_administrators_see_their_company_warehouses_other_users_need_an_assignment")}</p><Search id="access-search" value={accessInput} onChange={setAccessInput} onSearch={()=>{setAccessPage(1);setAccessSearch(accessInput.trim());}} t={t}/>{accessMutation.isError&&<ErrorBox error={accessMutation.error} t={t}/>} {access.isPending?<Skeleton className="h-20"/>:access.isError?<ErrorBox error={access.error} retry={()=>void access.refetch()} t={t}/>:<><ul className="divide-y divide-border">{access.data.items.map(u=><li key={u.id} className="flex flex-wrap items-center justify-between gap-2 py-3"><span className="text-sm">{u.fullName}</span><Button variant="outline" size="sm" disabled={accessMutation.isPending} onClick={()=>accessMutation.mutate({userId:u.id,granted:!u.granted})}>{u.granted?t("wms.revoke_assignment"):t("wms.assign_warehouse")}</Button></li>)}</ul><Pager page={accessPage} hasMore={access.data.hasMore} busy={access.isFetching} onChange={setAccessPage} t={t}/></>}</CardContent>}</Card>}
     </>}
     {action&&warehouse&&company&&<WarehouseDialog action={action} warehouse={warehouse.id} company={company} onClose={()=>setAction(null)} t={t}/>}

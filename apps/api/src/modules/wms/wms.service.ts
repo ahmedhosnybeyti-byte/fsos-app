@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import type { ZodType, ZodTypeDef } from "zod";
 import { randomUUID } from "node:crypto";
+import { hasOperationalPermissions } from "@field-sales-os/schemas";
 import { Prisma } from "@field-sales-os/database";
 import { wmsAccessSchema, wmsBatchSchema, wmsCreateProductSchema, wmsOpeningSchema, wmsPageSchema, wmsReversalSchema, wmsStockQuerySchema, wmsUpdateProductSchema, type WmsAccessUser, type WmsBatch, type WmsMovement, type WmsProduct, type WmsSummary, type WmsWarehouse } from "@field-sales-os/schemas";
 import { PrismaService, type PrismaTx } from "../../common/prisma";
@@ -34,7 +35,7 @@ export class WmsService {
   }
 
   private company(user: AuthenticatedUser, permission = "wms.read") {
-    if (!user.companyId || user.roleCode === "SUPER_ADMIN" || !["sfa.access","wms.read",permission].every(p => user.permissions?.includes(p)))
+    if (!user.companyId || user.roleCode === "SUPER_ADMIN" || !hasOperationalPermissions(user.roleCode,user.permissions,["sfa.access","wms.read",permission]))
       throw new ForbiddenException("Warehouse company context and explicit permissions required");
     return user.companyId;
   }

@@ -43,6 +43,22 @@ test("specialist duties cannot be crossed by forged broad grants; company admini
   }
 });
 
+test("company admin read-only capability admits exact GET views and denies all mutations and unrelated reads", async () => {
+  const user = {...actor,roleCode:"COMPANY_ADMIN",permissions:["sfa.access","erp.admin.read","wms.products.manage","accounting.journal.post"]};
+  for (const [method,path,allowed] of [
+    ["GET","/api/v1/sfa/wms/warehouses",true],
+    ["GET","/api/v1/sfa/wms/warehouses/wa/products?page=1",true],
+    ["POST","/api/v1/sfa/wms/warehouses/wa/products",false],
+    ["PATCH","/api/v1/sfa/wms/warehouses/wa/products/p",false],
+    ["DELETE","/api/v1/sfa/wms/warehouses/wa/products/p",false],
+    ["GET","/api/v1/sfa/wms/warehouses/wa/movements",false],
+    ["GET","/api/v1/sfa/wms/warehouses/wa/access",false],
+  ] as const) {
+    const f=fixture("FULL_ERP"),request={getClass:()=>SpecialistController,getHandler:()=>SpecialistController.prototype.warehouse,switchToHttp:()=>({getRequest:()=>({user,method,originalUrl:path})})} as never;
+    if(allowed)assert.equal(await f.guard.canActivate(request),true);else {await assert.rejects(f.guard.canActivate(request),ForbiddenException);assert.equal(f.calls.length,0);}
+  }
+});
+
 const actor = { companyId: "company-a", roleCode: "SALES_REP", permissions: ["sfa.access", "sfa.test.read"] };
 const context = (controller: Function, handler: Function, user: unknown = actor) => ({
   getClass: () => controller, getHandler: () => handler,

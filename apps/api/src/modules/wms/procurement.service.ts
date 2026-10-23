@@ -1,4 +1,5 @@
 import {BadRequestException,ForbiddenException,Injectable,NotFoundException} from "@nestjs/common";
+import {hasOperationalPermissions} from "@field-sales-os/schemas";
 import {z} from "zod";
 import {randomUUID} from "node:crypto";
 import {Prisma} from "@field-sales-os/database";
@@ -12,7 +13,7 @@ const fields=Prisma.sql`d.id,d.reference,d.document_status AS status,d.document_
 export class ProcurementService {
  constructor(private readonly prisma:PrismaService,private readonly access:WmsService,private readonly audit:AuditLogService){}
  private async scope(tx:PrismaTx,u:AuthenticatedUser,lock=false){
-  if(!u.companyId||!["COMPANY_ADMIN","MANAGER","SUPERVISOR","SALES_REP","PROCUREMENT"].includes(u.roleCode)||!u.permissions?.includes("procurement.read"))throw new ForbiddenException("Procurement permission required");
+  if(!u.companyId||!["COMPANY_ADMIN","MANAGER","SUPERVISOR","SALES_REP","PROCUREMENT"].includes(u.roleCode)||!hasOperationalPermissions(u.roleCode,u.permissions,["sfa.access","procurement.read"]))throw new ForbiddenException("Procurement permission required");
   const rows=await tx.$queryRaw(Prisma.sql`SELECT s.company_id FROM company_operating_settings s JOIN users u ON u.company_id=s.company_id AND u.id=${u.userId} AND u.status='ACTIVE'
    WHERE s.company_id=${u.companyId} AND s.operating_mode='FULL_ERP' ${lock?Prisma.sql`FOR SHARE OF s,u`:Prisma.empty}`);
   if(!(rows as unknown[]).length)throw new ForbiddenException("Full ERP required");
@@ -32,7 +33,7 @@ export class ProcurementService {
   const c=await this.read(u,w);
   const rows=await this.prisma.$queryRaw<ProcurementSummary[]>(Prisma.sql`WITH requests AS MATERIALIZED (
    SELECT r.id,r.status,o.id AS order_id,o.cancelled FROM procurement_requests r LEFT JOIN procurement_orders o ON o.company_id=${c} AND o.request_id=r.id
-   WHERE r.company_id=${c} AND r.warehouse_id=${w}
+   WHERE r.company_id=${c} AND r.warehouse_id=${w} AND (${u.roleCode!=="COMPANY_ADMIN"} OR o.id IS NOT NULL)
   ), progress AS MATERIALIZED (
    SELECT p.request_id,p.received,p.remaining,CASE WHEN p.unit='CARTON' THEN 'CARTON' ELSE m.base_unit END AS unit
    FROM requests r JOIN procurement_progress p ON p.company_id=${c} AND p.request_id=r.id
@@ -48,14 +49,14 @@ export class ProcurementService {
   return rows[0]!;
  }
  async list(u:AuthenticatedUser,w:string,input:unknown){
-  const parsed=wmsPageSchema.extend({kind:z.enum(["all","requests","orders"]).default("all")}).safeParse(input);if(!parsed.success)throw new BadRequestException("WMS_INVALID_INPUT");const {page,search,kind}=parsed.data,c=await this.read(u,w);
+  const parsed=wmsPageSchema.extend({kind:z.enum(["all","requests","orders"]).default("all")}).safeParse(input);if(!parsed.success)throw new BadRequestException("WMS_INVALID_INPUT");const {page,search}=parsed.data,kind=u.roleCode==="COMPANY_ADMIN"?"orders":parsed.data.kind,c=await this.read(u,w);
   const rows=await this.prisma.$queryRaw<ProcurementDocument[]>(Prisma.sql`SELECT ${fields} FROM procurement_documents d WHERE d.company_id=${c} AND d.warehouse_id=${w}
    AND (${kind} <> 'orders' OR d.order_id IS NOT NULL) AND position(lower(${search}) in lower(d.reference))>0 ORDER BY d.created_at DESC,d.id DESC LIMIT 21 OFFSET ${(page-1)*20}`);
   return {items:rows.slice(0,20),page,hasMore:rows.length>20};
  }
  async detail(u:AuthenticatedUser,w:string,id:string):Promise<ProcurementDetail>{
   const c=await this.read(u,w);
-  const docs=await this.prisma.$queryRaw<ProcurementDocument[]>(Prisma.sql`SELECT ${fields} FROM procurement_documents d WHERE d.company_id=${c} AND d.warehouse_id=${w} AND d.id=${id}`);
+  const docs=await this.prisma.$queryRaw<ProcurementDocument[]>(Prisma.sql`SELECT ${fields} FROM procurement_documents d WHERE d.company_id=${c} AND d.warehouse_id=${w} AND d.id=${id} AND (${u.roleCode!=="COMPANY_ADMIN"} OR d.order_id IS NOT NULL)`);
   if(!docs[0])throw new NotFoundException("WMS_PROCUREMENT_NOT_FOUND");
   const lines=await this.prisma.$queryRaw<ProcurementDetail["lines"]>(Prisma.sql`SELECT p.product_id AS "productId",m.code AS "productCode",m.name AS "productName",p.quantity::text,p.unit,p.factor,m.pieces_per_carton AS "piecesPerCarton",m.base_unit AS "baseUnit",m.track_batches AS "trackBatches",m.track_expiry AS "trackExpiry",p.price::text,p.received::numeric(24,6)::text,p.remaining::numeric(24,6)::text
    FROM procurement_progress p JOIN wms_products m ON m.company_id=${c} AND m.id=p.product_id WHERE p.company_id=${c} AND p.request_id=${id} ORDER BY m.code LIMIT 20`);

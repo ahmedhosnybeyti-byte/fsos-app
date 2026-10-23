@@ -11,5 +11,5 @@ export function AccountingNav(){
  {href:"/sfa/accounting/payables",label:t("accounting.supplier_payables"),permission:"accounting.ap.read"},
  {href:"/sfa/accounting/treasury",label:t("accounting.cash_and_banks"),permission:"accounting.treasury.read"},
  {href:"/dashboard/sales-price-exceptions",label:t("price.queueLink"),permission:"sales.price-exceptions.accounting"}];
- return <nav aria-label={t("accounting.accounting_section")} className="flex flex-wrap gap-2">{links.filter(l=>user?.permissions?.includes(l.permission)).map(l=><Button key={l.href} asChild variant={path===l.href?"default":"outline"}><Link href={l.href} aria-current={path===l.href?"page":undefined}>{l.label}</Link></Button>)}</nav>;
+ return <nav aria-label={t("accounting.accounting_section")} className="flex flex-wrap gap-2">{links.filter(l=>user?.role.code==="COMPANY_ADMIN"?l.href==="/sfa/accounting/treasury":user?.permissions?.includes(l.permission)).map(l=><Button key={l.href} asChild variant={path===l.href?"default":"outline"}><Link href={l.href} aria-current={path===l.href?"page":undefined}>{l.label}</Link></Button>)}</nav>;
 }

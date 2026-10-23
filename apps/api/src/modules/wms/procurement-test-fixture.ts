@@ -6,5 +6,6 @@ export const procurementSeed=`CREATE TABLE company_operating_settings(company_id
  INSERT INTO accounting_parties VALUES('supplier','a','SUPPLIER','SUP','Existing supplier'),('foreign','b','SUPPLIER','SUP','Foreign supplier');
  INSERT INTO wms_products(id,company_id,code,name,pieces_per_carton,track_batches) VALUES('p','a','SKU','Existing product',12,true);
  INSERT INTO wms_batches(id,company_id,product_id,code) VALUES('lot','a','p','LOT');
- INSERT INTO wms_positions(company_id,warehouse_id,batch_id,physical) VALUES('a','wa','lot',2352);`;
-export const procurementUser=(id="actor-a")=>({...wmsUser("a",id),permissions:[...wmsUser().permissions,"procurement.read","procurement.request.create","procurement.request.approve","procurement.order.create","wms.receiving.create","wms.receiving.review","wms.receiving.approve"]});
+ INSERT INTO wms_positions(company_id,warehouse_id,batch_id,physical) VALUES('a','wa','lot',2352);
+ INSERT INTO wms_warehouse_access(company_id,warehouse_id,user_id) VALUES('a','wa','actor-a'),('a','wa','clerk-a');`;
+export const procurementUser=(id="actor-a")=>({...wmsUser("a",id,"MANAGER"),permissions:[...wmsUser().permissions,"procurement.read","procurement.request.create","procurement.request.approve","procurement.order.create","wms.receiving.create","wms.receiving.review","wms.receiving.approve"]});
