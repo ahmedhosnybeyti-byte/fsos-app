@@ -7,7 +7,7 @@ import { PrismaService } from "../../common/prisma";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { WmsService } from "./wms.service";
 const fields = Prisma.sql`d.id,d.reference,d.reason,d.status,d.version,d.batch_id AS "batchId",p.code AS "productCode",p.name AS "productName",
- b.code AS "batchCode",p.base_unit AS "baseUnit",d.input_unit AS unit,d.conversion_factor AS "conversionFactor",
+ b.code AS "batchCode",p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",d.input_unit AS unit,d.conversion_factor AS "conversionFactor",
  round(d.held_base/d.conversion_factor,6)::text AS held,round(d.released_base/d.conversion_factor,6)::text AS released,
  round(d.written_off_base/d.conversion_factor,6)::text AS "writtenOff",round((d.held_base-d.released_base-d.written_off_base)/d.conversion_factor,6)::text AS remaining,
  round(s.physical/d.conversion_factor,6)::text AS physical,round(s.available/d.conversion_factor,6)::text AS available,

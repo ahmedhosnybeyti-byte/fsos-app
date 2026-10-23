@@ -51,7 +51,7 @@ export class WmsCountService {
       WHERE d.company_id=${c} AND d.warehouse_id=${warehouse} AND d.id=${id}`);
     if (!rows[0]) throw new NotFoundException("WMS_DOCUMENT_NOT_FOUND");
     const lines = await this.prisma.$queryRaw<WmsCountDocument["lines"]>(Prisma.sql`
-      SELECT l.id,l.batch_id AS "batchId",p.code AS "productCode",p.name AS "productName",b.code AS "batchCode",p.base_unit AS "baseUnit",
+      SELECT l.id,l.batch_id AS "batchId",p.code AS "productCode",p.name AS "productName",b.code AS "batchCode",p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",
        l.input_unit AS unit,l.conversion_factor AS "conversionFactor",round(l.system_base/l.conversion_factor,6)::text AS "systemQuantity",
        l.counted_quantity::text AS "countedQuantity",round((l.counted_base-l.system_base)/l.conversion_factor,6)::text AS difference,
        (l.counted_base-l.system_base)::text AS "differenceBase",

@@ -11,6 +11,7 @@ export const wmsFixtureSql=`
   CREATE TABLE companies(id text PRIMARY KEY);
   CREATE TABLE users(id text PRIMARY KEY,company_id text REFERENCES companies(id),status text DEFAULT 'ACTIVE',full_name text);
   CREATE TABLE permissions(id text PRIMARY KEY,code text UNIQUE,description text);
+  CREATE TABLE rie_canonical_entity_rows(company_id text,entity_name text,entity_key text,data jsonb,UNIQUE(company_id,entity_name,entity_key));
   CREATE TABLE test_audit(event_key text PRIMARY KEY,action text,entity_id text);
   INSERT INTO companies VALUES ('a'),('b');
   INSERT INTO users(id,company_id,full_name) VALUES ('actor-a','a','Admin A'),('actor-b','b','Admin B'),('clerk-a','a','Clerk A');

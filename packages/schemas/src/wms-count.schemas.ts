@@ -22,7 +22,7 @@ export interface WmsCountSummary {
   createdAt: string; approvedAt: string|null; approvedBy: string|null;
 }
 export interface WmsCountLine {
-  id: string; batchId: string; productCode: string; productName: string; batchCode: string; baseUnit: string;
+  id: string; batchId: string; productCode: string; productName: string; batchCode: string; baseUnit: string; piecesPerCarton?: number;
   unit: "BASE"|"CARTON"; conversionFactor: number; systemQuantity: string; countedQuantity: string;
   difference: string; differenceBase: string; shortage: string; surplus: string; movementId: string|null;
 }

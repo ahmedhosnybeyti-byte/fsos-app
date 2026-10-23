@@ -19,7 +19,7 @@ const {WmsCoveragePanel}=require("./coverage-panel.tsx");
 function render(locale:Locale,risk:WmsCoverageRisk,estimate=true){
   const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:Infinity}}});
   const data:WmsCoverageResult={page:1,hasMore:false,from:"2026-09-22",to:"2026-10-21",stockAsOf:"2026-10-22T00:00:00Z",items:[{
-    id:"p",code:"P-040",name:"Original product",baseUnit:"PIECE",available:"4800.000000",reserved:"12.000000",quarantined:"24.000000",
+    id:"p",code:"P-040",name:"Original product",baseUnit:"PIECE",piecesPerCarton:12,available:"4800.000000",reserved:"12.000000",quarantined:"24.000000",
     dailyDemand:estimate?"1554.400000":null,daysOfCover:estimate?"3.09":null,demandDays:estimate?26:0,firstSale:null,lastSale:null,
     risk,reason:estimate?({CRITICAL:"LOW",WATCH:"MONITOR",SAFE:"SUFFICIENT",UNKNOWN:"HISTORY"} as const)[risk]:"HISTORY",
     leadTimeDays:null,purchaseReference:"EXISTING-PO",
@@ -38,7 +38,9 @@ for(const locale of ["ar","en"] as const){
       assert.ok(html.includes(dictionaries[locale]["coverage.scope"]));
       assert.ok(html.includes(dictionaries[locale]["coverage.companyEstimate"].replaceAll("'","&#x27;")));
       for(const label of ["CRITICAL","WATCH","SAFE"] as const)assert.ok(!html.includes(`>${dictionaries[locale][`coverage.${label}`]}<`));
-      for(const value of ["3.09","1554.4","4800","12","24","EXISTING-PO"])assert.ok(html.includes(value));
+      for(const value of ["3.09","129.533333","400","EXISTING-PO"])assert.ok(html.includes(value));
+      assert.ok(html.includes(dictionaries[locale]["wms.carton"]));
+      assert.ok(!html.includes("4800"));
       assert.ok(html.includes("/sfa/procurement?warehouseId=warehouse&amp;search=EXISTING-PO"));
     }
   });

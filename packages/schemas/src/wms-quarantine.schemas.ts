@@ -14,7 +14,7 @@ export interface WmsQuarantineCandidate {
 }
 export interface WmsQuarantineDocument {
   id: string; reference: string; reason: string; status: "OPEN" | "PARTIAL" | "CLOSED"; version: number;
-  productCode: string; productName: string; batchCode: string; batchId: string; baseUnit: string;
+  productCode: string; productName: string; batchCode: string; batchId: string; baseUnit: string; piecesPerCarton?: number;
   unit: "BASE" | "CARTON"; conversionFactor: number; held: string; released: string; writtenOff: string; remaining: string;
   physical: string; available: string; quarantined: string; releaseAllowed: boolean;
   createdAt: string;
