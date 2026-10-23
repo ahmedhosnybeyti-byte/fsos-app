@@ -19,6 +19,30 @@ class SfaTestController {
 @Controller("sfa/forgotten")
 class UnmarkedSfaController { read() {} }
 
+@Controller("sfa/specialist")
+class SpecialistController {
+  @RequiresSfa("wms.read") warehouse() {}
+  @RequiresSfa("accounting.read") accounting() {}
+  @RequiresSfa("procurement.read", "wms.read") procurement() {}
+}
+
+test("specialist duties cannot be crossed by forged broad grants; company administration stays separate", async () => {
+  for (const [role, own] of [["WAREHOUSE_KEEPER", "warehouse"], ["ACCOUNTANT", "accounting"], ["PROCUREMENT", "procurement"]] as const) {
+    for (const method of ["warehouse", "accounting", "procurement"] as const) {
+      const f = fixture("FULL_ERP");
+      const request = context(SpecialistController, SpecialistController.prototype[method], { ...actor, roleCode: role, permissions: ["sfa.access", "wms.read", "accounting.read", "procurement.read"] });
+      // Procurement needs the existing warehouse picker, but no accounting.
+      if (method === own || (role === "PROCUREMENT" && method === "warehouse")) assert.equal(await f.guard.canActivate(request), true);
+      else { await assert.rejects(f.guard.canActivate(request), ForbiddenException); assert.equal(f.calls.length, 0); }
+    }
+  }
+  for (const method of ["warehouse", "accounting", "procurement"] as const) {
+    const f = fixture("FULL_ERP");
+    await assert.rejects(f.guard.canActivate(context(SpecialistController, SpecialistController.prototype[method], { ...actor, roleCode: "COMPANY_ADMIN", permissions: ["sfa.access", "wms.read", "accounting.read", "procurement.read"] })), ForbiddenException);
+    assert.equal(f.calls.length, 0);
+  }
+});
+
 const actor = { companyId: "company-a", roleCode: "SALES_REP", permissions: ["sfa.access", "sfa.test.read"] };
 const context = (controller: Function, handler: Function, user: unknown = actor) => ({
   getClass: () => controller, getHandler: () => handler,

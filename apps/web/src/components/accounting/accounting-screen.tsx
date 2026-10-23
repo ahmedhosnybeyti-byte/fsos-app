@@ -34,7 +34,7 @@ function typeLabel(type:string,t:Text) {const labels:Record<string,TranslationKe
 
 export function AccountingScreen() {
  const {user,isLoading}=useAuth();const {locale,t}=useTranslation();const client=useQueryClient();const company=user?.companyId;
- const allowed=!!company&&["COMPANY_ADMIN","MANAGER"].includes(user?.role.code??"")&&getCompanyFeatureAccessState(user?.featureAccess,"accounting-core")==="ENABLED"&&["sfa.access","accounting.read"].every(p=>user?.permissions?.includes(p));
+ const allowed=!!company&&["MANAGER","ACCOUNTANT"].includes(user?.role.code??"")&&getCompanyFeatureAccessState(user?.featureAccess,"accounting-core")==="ENABLED"&&["sfa.access","accounting.read"].every(p=>user?.permissions?.includes(p));
  const mode=useQuery({queryKey:["sfa-mode",company],queryFn:sfaSetupApi.mode,enabled:allowed,...options});const ready=allowed&&mode.data?.operatingMode==="FULL_ERP";
  const [tab,setTab]=useState<"accounts"|"journals"|"trial">("accounts");const [p,setP]=useState(1);const [searchInput,setSearchInput]=useState("");const [search,setSearch]=useState("");const [asOf,setAsOf]=useState(today);
  const [selected,setSelected]=useState<AccountingJournal|null>(null);const [action,setAction]=useState<Action|null>(null);

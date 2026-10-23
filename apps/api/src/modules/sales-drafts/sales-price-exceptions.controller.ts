@@ -7,7 +7,7 @@ import type {AuthenticatedUser} from "../../common/types/authenticated-user";
 import {SalesPriceExceptionsService} from "./sales-price-exceptions.service";
 
 @Controller("sfa/sales-price-exceptions")
-@Auth("SALES_REP","SUPERVISOR","MANAGER","COMPANY_ADMIN")
+@Auth("SALES_REP","SUPERVISOR","MANAGER","ACCOUNTANT")
 @RequiresSfa()
 export class SalesPriceExceptionsController{
  constructor(private readonly service:SalesPriceExceptionsService){}

@@ -37,7 +37,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const navItems: NavItem[] = [
     ...buildCompanyNavItems({ featureAccess: user.featureAccess, t, roleCode: user.role.code, groupLabels: { data: t("group.data"), aiInsights: t("group.aiInsights"), customersTerritory: t("group.customersTerritory"), team: t("group.team"), system: t("group.system") } })
       .filter(item => item.featureKey !== "procurement" || (operatingMode.data?.operatingMode === "FULL_ERP" && ["sfa.access","wms.read","procurement.read"].every(p=>user.permissions?.includes(p))))
-      .filter((item) => item.featureKey !== "accounting-core" || (operatingMode.data?.operatingMode === "FULL_ERP" && ["COMPANY_ADMIN","MANAGER"].includes(user.role.code) && ["sfa.access","accounting.read"].every(p => user.permissions?.includes(p))))
+      .filter((item) => item.featureKey !== "accounting-core" || (operatingMode.data?.operatingMode === "FULL_ERP" && ["MANAGER","ACCOUNTANT"].includes(user.role.code) && ["sfa.access","accounting.read"].every(p => user.permissions?.includes(p))))
       .filter((item) => item.featureKey !== "sfa-setup" || (canSetup && supportsSfaOperations(operatingMode.data?.operatingMode)))
       .filter((item) => item.featureKey !== "warehouse-core" || (supportsSfaOperations(operatingMode.data?.operatingMode) && ["sfa.access","wms.read"].every(p => user.permissions?.includes(p)))),
   ];

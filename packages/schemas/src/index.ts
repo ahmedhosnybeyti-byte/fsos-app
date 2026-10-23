@@ -114,3 +114,4 @@ export * from "./procurement.schemas";
 export * from "./wms-coverage.schemas";
 export * from "./visit-execution.schemas";
 export * from "./sales-draft.schemas";
+export * from "./operational-role-policy";

@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import * as argon2 from "argon2";
+import { isSpecialistRole } from "@field-sales-os/schemas";
 import type { AssignUserRouteInput, CreateUserInput, ListNewSubscribersQueryInput, ListUsersQueryInput, RouteAssignmentEndReason, UpdateUserInput, UserStatus } from "@field-sales-os/schemas";
 import { PrismaService, type PrismaTx, isUniqueConstraintError } from "../../common/prisma";
 import { RolesService } from "../roles/roles.service";
@@ -90,6 +91,7 @@ export class UsersService {
   }
 
   async createUser(companyId: string, dto: CreateUserInput, actorUserId: string) {
+    await this.assertSpecialistAdministration(actorUserId, dto.roleCode);
     await this.assertUnderSeatLimit(companyId);
     const role = await this.rolesService.findByCode(dto.roleCode);
     const user = await this.createUserInternal({
@@ -236,6 +238,8 @@ export class UsersService {
     if (!existing || existing.companyId !== companyId) {
       throw new NotFoundException("User not found");
     }
+
+    await this.assertSpecialistAdministration(actorUserId, existing.role.code, dto.roleCode);
 
     const newRole = dto.roleCode ? await this.rolesService.findByCode(dto.roleCode) : undefined;
 
@@ -437,6 +441,12 @@ export class UsersService {
         data: { revokedAt: new Date() },
       });
     });
+  }
+
+  private async assertSpecialistAdministration(actorUserId: string | undefined, ...roles: (string | undefined)[]) {
+    if (!roles.some(role => role !== undefined && isSpecialistRole(role))) return;
+    const actor = actorUserId ? await this.prisma.user.findUnique({ where: { id: actorUserId }, select: { role: { select: { code: true } } } }) : null;
+    if (actor?.role.code !== "SUPER_ADMIN") throw new ForbiddenException("Specialist accounts require platform administration");
   }
 
 

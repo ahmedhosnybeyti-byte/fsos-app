@@ -11,6 +11,9 @@ export const ROLE_CODES = [
   "MANAGER",
   "SUPERVISOR",
   "SALES_REP",
+  "WAREHOUSE_KEEPER",
+  "ACCOUNTANT",
+  "PROCUREMENT",
 ] as const;
 export const roleCodeSchema = z.enum(ROLE_CODES);
 export type RoleCode = z.infer<typeof roleCodeSchema>;

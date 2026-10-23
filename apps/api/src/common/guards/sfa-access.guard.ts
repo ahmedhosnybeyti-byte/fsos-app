@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from "@nestjs/common";
 import { PATH_METADATA } from "@nestjs/common/constants";
 import { Reflector } from "@nestjs/core";
-import { SFA_ACCESS_PERMISSION, supportsSfaOperations } from "@field-sales-os/schemas";
+import { SFA_ACCESS_PERMISSION, supportsSfaOperations, permitsOperationalRole } from "@field-sales-os/schemas";
 import { SFA_PERMISSIONS_KEY } from "../decorators/requires-sfa.decorator";
 import { PrismaService } from "../prisma";
 import type { AuthenticatedUser } from "../types/authenticated-user";
@@ -26,6 +26,7 @@ export class SfaAccessGuard implements CanActivate {
     }
     const user = context.switchToHttp().getRequest<{ user?: AuthenticatedUser }>().user;
     if (!user?.companyId || !Array.isArray(user.permissions)
+      || !permitsOperationalRole(user.roleCode, required)
       || ![SFA_ACCESS_PERMISSION, ...required].every((permission) => user.permissions.includes(permission))) {
       throw new ForbiddenException("SFA company context and explicit permissions are required");
     }

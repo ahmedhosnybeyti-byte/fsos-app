@@ -5,7 +5,7 @@ import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import { RequiresSfa } from "../../common/decorators/requires-sfa.decorator";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { AccountingSubledgerService } from "./accounting-subledger.service";
-@Controller("sfa/accounting") @Auth("COMPANY_ADMIN","MANAGER") @CompanyScreen("accounting-core") @RequiresSfa("accounting.read")
+@Controller("sfa/accounting") @Auth("COMPANY_ADMIN","MANAGER","ACCOUNTANT") @CompanyScreen("accounting-core") @RequiresSfa("accounting.read")
 export class AccountingSubledgerController {
  constructor(private readonly service:AccountingSubledgerService){}
  @Get("parties") parties(@CurrentUser() u:AuthenticatedUser,@Query() q:unknown){return this.service.parties(u,q);}

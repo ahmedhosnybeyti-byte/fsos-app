@@ -12,7 +12,7 @@ function render(role:string,status=request.status){const client=new QueryClient(
 test("B2 UI exposes review only to supervisor and commercial decision only to manager after review",()=>{
  const sup=render("SUPERVISOR");assert.match(sup,/توثيق المراجعة والإحالة للمدير/);assert.doesNotMatch(sup,/>موافقة تجارية موثقة|>رفض موثق</);assert.match(sup,/type="checkbox"/);
  assert.doesNotMatch(render("MANAGER"),/type="checkbox"/);assert.match(render("MANAGER","REVIEWED"),/>موافقة تجارية موثقة/);
- for(const role of ["SALES_REP","COMPANY_ADMIN"]){const html=render(role,"APPROVED");assert.doesNotMatch(html,/type="checkbox"/);assert.match(html,/التفعيل محجوب/);assert.match(html,/السعر التشغيلي السابق غير معتمد/);assert.match(html,/10.123456/);assert.match(html,/official-ref/);assert.doesNotMatch(html,/<input[^>]+type="file"/);}
+ for(const role of ["SALES_REP","ACCOUNTANT"]){const html=render(role,"APPROVED");assert.doesNotMatch(html,/type="checkbox"/);assert.match(html,/التفعيل محجوب/);assert.match(html,/السعر التشغيلي السابق غير معتمد/);assert.match(html,/10.123456/);assert.match(html,/official-ref/);assert.doesNotMatch(html,/<input[^>]+type="file"/);}
 });
 test("B2 denied queue cannot render approval/request actions",()=>{
  const client=new QueryClient({defaultOptions:{queries:{retry:false}}});client.setQueryData(["auth","me"],{id:"rep",companyId:"a",role:{code:"SALES_REP"},permissions:["sfa.access"]});

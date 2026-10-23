@@ -12,7 +12,7 @@ const fields=Prisma.sql`d.id,d.reference,d.document_status AS status,d.document_
 export class ProcurementService {
  constructor(private readonly prisma:PrismaService,private readonly access:WmsService,private readonly audit:AuditLogService){}
  private async scope(tx:PrismaTx,u:AuthenticatedUser,lock=false){
-  if(!u.companyId||!["COMPANY_ADMIN","MANAGER","SUPERVISOR","SALES_REP"].includes(u.roleCode)||!u.permissions?.includes("procurement.read"))throw new ForbiddenException("Procurement permission required");
+  if(!u.companyId||!["COMPANY_ADMIN","MANAGER","SUPERVISOR","SALES_REP","PROCUREMENT"].includes(u.roleCode)||!u.permissions?.includes("procurement.read"))throw new ForbiddenException("Procurement permission required");
   const rows=await tx.$queryRaw(Prisma.sql`SELECT s.company_id FROM company_operating_settings s JOIN users u ON u.company_id=s.company_id AND u.id=${u.userId} AND u.status='ACTIVE'
    WHERE s.company_id=${u.companyId} AND s.operating_mode='FULL_ERP' ${lock?Prisma.sql`FOR SHARE OF s,u`:Prisma.empty}`);
   if(!(rows as unknown[]).length)throw new ForbiddenException("Full ERP required");

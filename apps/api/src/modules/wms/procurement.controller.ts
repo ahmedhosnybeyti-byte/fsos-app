@@ -6,7 +6,7 @@ import {CurrentUser} from "../../common/decorators/current-user.decorator";
 import type {AuthenticatedUser} from "../../common/types/authenticated-user";
 import {ProcurementService} from "./procurement.service";
 @Controller("sfa/procurement/warehouses/:warehouse")
-@Auth("COMPANY_ADMIN","MANAGER","SUPERVISOR","SALES_REP")
+@Auth("COMPANY_ADMIN","MANAGER","SUPERVISOR","SALES_REP","PROCUREMENT")
 @RequiresSfa("procurement.read","wms.read")
 @CompanyScreen("procurement")
 export class ProcurementController {

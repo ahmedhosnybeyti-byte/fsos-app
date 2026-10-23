@@ -180,6 +180,9 @@ export class AuthService {
     if (actingUser.roleCode !== "SUPER_ADMIN" && target.companyId !== actingUser.companyId) {
       throw new ForbiddenException();
     }
+    if (actingUser.roleCode !== "SUPER_ADMIN" && ["WAREHOUSE_KEEPER", "ACCOUNTANT", "PROCUREMENT"].includes(target.role.code)) {
+      throw new ForbiddenException("Specialist accounts require platform administration");
+    }
 
     const temporaryPassword = generateTemporaryPassword();
     await this.usersService.setPasswordHash(targetUserId, await argon2.hash(temporaryPassword), true);

@@ -20,20 +20,20 @@ const fields=Prisma.sql`r.id,r.draft_id AS "draftId",r.draft_version AS "draftVe
 export class SalesPriceExceptionsService{
  constructor(private readonly prisma:PrismaService,private readonly rie:RieFacade,private readonly hierarchy:CanonicalHierarchyResolverService,private readonly audit:AuditLogService){}
  private stage(u:AuthenticatedUser){
-  const permission=u.roleCode==="SALES_REP"?P.request:u.roleCode==="SUPERVISOR"?P.review:u.roleCode==="MANAGER"?P.approve:u.roleCode==="COMPANY_ADMIN"?P.accounting:null;
-  if(!u.companyId||!permission||!["sfa.access",permission,...(u.roleCode==="COMPANY_ADMIN"?["accounting.read"]:u.roleCode==="SALES_REP"?["visits.execute","sales.drafts.manage"]:[])].every(p=>u.permissions?.includes(p)))throw new ForbiddenException("PRICE_FORBIDDEN");return permission;
+  const permission=u.roleCode==="SALES_REP"?P.request:u.roleCode==="SUPERVISOR"?P.review:u.roleCode==="MANAGER"?P.approve:u.roleCode==="ACCOUNTANT"?P.accounting:null;
+  if(!u.companyId||!permission||!["sfa.access",permission,...(u.roleCode==="ACCOUNTANT"?["accounting.read"]:u.roleCode==="SALES_REP"?["visits.execute","sales.drafts.manage"]:[])].every(p=>u.permissions?.includes(p)))throw new ForbiddenException("PRICE_FORBIDDEN");return permission;
  }
  private async admission(tx:PrismaTx,u:AuthenticatedUser,lock=false){
   const permission=this.stage(u);
   const rows=await tx.$queryRaw<{id:string}[]>(Prisma.sql`SELECT u.id FROM users u JOIN roles ro ON ro.id=u.role_id JOIN company_operating_settings s ON s.company_id=u.company_id
    WHERE u.company_id=${u.companyId} AND u.id=${u.userId} AND ro.code=${u.roleCode} AND sales_price_actor(${u.companyId},u.id,ro.code,${permission})
-   AND (${u.roleCode}<>'COMPANY_ADMIN' OR EXISTS(SELECT 1 FROM role_permissions rp JOIN permissions p ON p.id=rp.permission_id WHERE rp.role_id=ro.id AND p.code='accounting.read'))
+   AND (${u.roleCode}<>'ACCOUNTANT' OR EXISTS(SELECT 1 FROM role_permissions rp JOIN permissions p ON p.id=rp.permission_id WHERE rp.role_id=ro.id AND p.code='accounting.read'))
    AND (${u.roleCode}<>'SALES_REP' OR (SELECT count(DISTINCT p.code) FROM role_permissions rp JOIN permissions p ON p.id=rp.permission_id WHERE rp.role_id=ro.id AND p.code IN('visits.execute','sales.drafts.manage'))=2)
    ${lock?Prisma.sql`FOR SHARE OF u,ro,s`:Prisma.empty}`);
   if(!rows.length)throw new ForbiddenException("PRICE_FORBIDDEN");
  }
  private async scope(u:AuthenticatedUser){
-  this.stage(u);if(u.roleCode==="COMPANY_ADMIN")return Prisma.sql`r.status='APPROVED'`;
+  this.stage(u);if(u.roleCode==="ACCOUNTANT")return Prisma.sql`r.status='APPROVED'`;
   const routes=await this.hierarchy.resolveAllowedRouteIds(u.companyId!,{roleCode:u.roleCode,email:u.email});
   if(!routes?.size)return Prisma.sql`FALSE`;
   // Current-only customer metadata, scoped before pagination. No JSON payload leaves PG.

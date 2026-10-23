@@ -14,8 +14,8 @@ import {Select,SelectTrigger,SelectValue,SelectContent,SelectItem} from "@/compo
 import {Skeleton} from "@/components/ui/skeleton";
 import {priceExceptionsApi as api} from "@/lib/api/sales-price-exceptions";
 
-function usePriceAuthority(){const {user}=useAuth();const role=user?.role.code;const p=role==="SALES_REP"?P.request:role==="SUPERVISOR"?P.review:role==="MANAGER"?P.approve:role==="COMPANY_ADMIN"?P.accounting:null;
- return {user,role,allowed:!!p&&["sfa.access",p,...(role==="COMPANY_ADMIN"?["accounting.read"]:role==="SALES_REP"?["visits.execute","sales.drafts.manage"]:[])].every(x=>user?.permissions?.includes(x))};}
+function usePriceAuthority(){const {user}=useAuth();const role=user?.role.code;const p=role==="SALES_REP"?P.request:role==="SUPERVISOR"?P.review:role==="MANAGER"?P.approve:role==="ACCOUNTANT"?P.accounting:null;
+ return {user,role,allowed:!!p&&["sfa.access",p,...(role==="ACCOUNTANT"?["accounting.read"]:role==="SALES_REP"?["visits.execute","sales.drafts.manage"]:[])].every(x=>user?.permissions?.includes(x))};}
 
 export function SalesPriceRequestForm({draft,dirty}:{draft:SalesDraft;dirty:boolean}){
  const {allowed,role}=usePriceAuthority(),{t,locale}=useTranslation();

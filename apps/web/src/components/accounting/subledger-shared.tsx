@@ -14,7 +14,7 @@ export type Text = (key: TranslationKey, params?: Record<string, string | number
 export const queryOptions={retry:false,refetchOnWindowFocus:false,refetchOnReconnect:false} as const;
 export function useAccountingAccess(permission:string){
  const {user,isLoading}=useAuth();const {locale,t}=useTranslation();const company=user?.companyId;
- const allowed=!!company&&["COMPANY_ADMIN","MANAGER"].includes(user?.role.code??"")&&getCompanyFeatureAccessState(user?.featureAccess,"accounting-core")==="ENABLED"&&["sfa.access","accounting.read",permission].every(p=>user?.permissions?.includes(p));
+ const allowed=!!company&&["MANAGER","ACCOUNTANT"].includes(user?.role.code??"")&&getCompanyFeatureAccessState(user?.featureAccess,"accounting-core")==="ENABLED"&&["sfa.access","accounting.read",permission].every(p=>user?.permissions?.includes(p));
  const mode=useQuery({queryKey:["sfa-mode",company],queryFn:sfaSetupApi.mode,enabled:allowed,...queryOptions});
  return {user,company,t,mode,ready:allowed&&mode.data?.operatingMode==="FULL_ERP",loading:isLoading||(allowed&&mode.isPending),can:(p:string)=>!!user?.permissions?.includes(p)};
 }

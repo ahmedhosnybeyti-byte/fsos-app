@@ -24,7 +24,7 @@ export class AccountingService {
   authorizedScope(tx:PrismaTx,user:AuthenticatedUser,permission:string,lock=false) {return this.scope(tx,user,permission,lock);}
   authorizedMutation<T>(work:(tx:Prisma.TransactionClient)=>Promise<T>) {return this.mutation(work);}
   private async scope(tx:PrismaTx,user:AuthenticatedUser,permission="accounting.read",lock=false) {
-    if(!user.companyId || !["COMPANY_ADMIN","MANAGER"].includes(user.roleCode) ||
+    if(!user.companyId || !["COMPANY_ADMIN","MANAGER","ACCOUNTANT"].includes(user.roleCode) ||
       !["sfa.access","accounting.read",permission].every(p=>user.permissions?.includes(p)))
       throw new ForbiddenException("Accounting company context and explicit permissions required");
     // Mode is checked again inside each mutation transaction. No JWT/body mode.
