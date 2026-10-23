@@ -63,6 +63,25 @@ After an important verified engineering fix, update `RESOLVED_ISSUES.md` with th
     - absence of dangerous Full Reads
 
 
+## Mandatory Murshidak Scalability Gate
+
+Every impactful API, PostgreSQL/Prisma, RIE, WMS, inventory/custody, accounting,
+analytics or ingestion/data-fetching change must assess performance before local
+engineering acceptance. Use `.agents/skills/murshidak-system-design/SKILL.md`
+and [the executable scalability contract](docs/engineering/SCALABILITY_GATE.md).
+Run `pnpm quality --base <actual-review-base>`; its scalability assessment is
+mandatory, separate from functional success. Preserve comparable synthetic local
+measurements; an approved-budget regression is BLOCK, absent/untrusted baseline
+or unmeasured relevant waits/capacity is UNVERIFIED/WARN, never invented PASS.
+
+Every impactful handoff must report `Scalability Gate: PASS / WARN / BLOCK`,
+scenario, dataset size, actual concurrency, SQL count, API p95, bottleneck and
+untested risks. Use `Scalability Gate: N/A — <reason>` for changes without
+performance impact. One serial request never proves 150-user capacity. Local
+functional acceptance is separate from deployment/capacity readiness; WARN cannot
+waive critical failures. No large load tests on every edit, new infrastructure,
+Production access or increased RIE concurrency are authorized by this policy.
+
 ## Murshidak mandatory engineering gates
 
 - Before any task that creates or modifies Murshidak UI, including minor text/style changes, read and apply `.codex/skills/murshidak-ui-design-system/SKILL.md` automatically, without waiting for a prompt reminder.

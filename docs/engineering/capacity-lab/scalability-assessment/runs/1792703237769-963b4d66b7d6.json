@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "status": "WARN",
+  "verification": "UNVERIFIED",
+  "warnings": [
+    "No current synthetic evidence or trusted comparable baseline."
+  ],
+  "failures": [],
+  "scenarios": [],
+  "scope": "Measured scenarios only; functional acceptance is separate from deployment and user capacity.",
+  "assessedAt": "2026-10-22T21:07:17.767Z"
+}

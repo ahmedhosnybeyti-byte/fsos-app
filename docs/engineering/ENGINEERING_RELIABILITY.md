@@ -1,5 +1,57 @@
 # Executable engineering reliability gates
 
+Permanent scalability acceptance is specified in [SCALABILITY_GATE.md](SCALABILITY_GATE.md).
+The existing quality runner now records functional and scalability outcomes
+separately: approved regressions block, absent comparable evidence is WARN and
+release verification refuses WARN. No load starts automatically. See the
+[2026-10-23 verification](SCALABILITY_GATE_VERIFICATION_20261023.md) for actual
+tests, fresh-session discovery, host-policy/runtime limits and enforcement gaps.
+
+## Sales drafts Foundation 002-B1 — local read-only evidence (2026-10-22)
+
+See [the B1 report](SALES_DRAFTS_FOUNDATION_002B1.md) and
+[Scalability Gate: WARN](SALES_DRAFTS_SCALABILITY_GATE_002B1.md).
+The additive check response binds results to saved revision/warehouse, reports
+independent exact WMS/custody/lot states and fails closed on unapproved price/credit.
+The transaction is READ ONLY. Actual HTTP with overlapping/different-unit/future
+prices, a high imported limit and existing GL still returns setup required; 19
+protected-table digests match. Native fixture-statistics failure is retained and
+does not establish stale-statistics robustness. Current prepared-fixture plan
+assertions pass without changing their budgets or RIE admission settings.
+Local gates: 621 checks / 141 suites and four typechecks; standalone SQL 167 / 29;
+zero failures/skips/TODOs/cancellations. Real B1 browser results passed 20 locale/
+theme/viewport checks. This is no release approval and adds no posting/ZATCA path.
+
+## Sales drafts Foundation 002-A — local evidence (2026-10-22)
+
+See [SALES_DRAFTS_FOUNDATION_002A.md](SALES_DRAFTS_FOUNDATION_002A.md).
+Draft-only operations have explicit company/rep/route/mode/permission boundaries,
+durable replay/version protection and atomic audit. Native PostgreSQL independent
+connections verify creation/edit/cancel/visit-finish races; actual HTTP and browser
+checks verify admission and persisted behavior. Exact protected-table digests
+remain unchanged for WMS, custody, GL, AR and canonical reference facts. No stock
+or financial posting is implemented or certified by this slice.
+
+Final isolated gate artifacts are `.quality/changed.json` and
+`.quality/postgres.json`; browser/native evidence is under `.quality/sales-drafts/`.
+Tests run locally without Docker/Production/Railway. This is no release approval:
+Node 22/Linux packaging, representative performance/recovery and external platform
+gates remain outside this local foundation. Existing Foundation 001 evidence and
+unrelated local changes remain intact.
+
+Final changed gate: 613 checks / 140 suites, four passing typechecks, zero
+failures/skips/TODOs. Independent SQL gate: 161 checks / 28 suites, zero failures/
+skips/TODOs. Actual HTTP: 13 grouped checks; browser: 20 locale/theme/
+viewport combinations plus failure/retry states and the verified reconnect/
+concurrent-session preservation regression. See the separate
+[Scalability Gate: WARN](SALES_DRAFTS_SCALABILITY_GATE_002A.md): serial synthetic
+check-20 p95 48.2 ms after correcting a measured 2,055 ms repeated-scan defect;
+save-1/save-20 each use 31 SQL statements including admission/auth/transaction
+control. These observations do not certify 25/50/100/150-user capacity or resolve
+the previous shared RIE/PostgreSQL saturation issue. System Design Gate: WARN
+for the unmeasured representative concurrent workload; no critical failed test
+is waived by this warning.
+
 This extends the existing AGENTS/System Design/Performance rules; it does not
 replace the UI system or change application behavior. No Production access is
 needed. Existing Railway Docker builds, readiness probe and separate migration
@@ -158,3 +210,92 @@ result sizes are recorded; these are local samples, not capacity certification.
 Final WMS-only gate against `624321d` passed 517 checks and four typechecks;
 see the handoff and `.quality/changed.json`. No Production data,
 activation, push, deployment or Production migration was performed.
+
+## Company-only release review (2026-10-21)
+
+Candidate `41f06ee7b29cb797a55adcd8501eaaaee3c7490d` backports company modes
+onto deployed `7d59abb`, excluding WMS and new Demo work. Changed/release gates
+passed 494 tests each with four typechecks; isolated SQL passed 79, without
+failures/skips/TODOs. Native PostgreSQL 18.6 verified the additive enum migration
+against synthetic existing-company fixtures. No RIE/fact query or budget changed.
+Local API/Web build passed with a verified Windows directory-junction helper;
+Linux image builds remain unperformed and will use Railway, not Docker Desktop.
+Read-only Production fingerprints remained unchanged across all seven companies.
+Fresh encrypted backup/isolated restore and recovery-key custody are still pending;
+the release is BLOCKED before the automatic pre-deploy migration until explicit
+user approval. No push/deployment/Production migration was performed.
+See [the release review](COMPANY_MODES_RELEASE_REVIEW_20261021.md) for exact
+deployment identities, source-provenance limits, evidence and safe rollback rules.
+
+The owner subsequently authorized the single FULL_ERP enum migration. Fresh
+encrypted backup and two isolated native PostgreSQL recoveries (including a full
+restore from the authenticated decrypted archive) passed before any change.
+Railway's unchanged Linux API/Web builders passed; deployments
+`54567f71-e1c5-4d81-80bd-8d017733662b` and
+`3ec8a484-2303-4f5a-8cea-0e607c962c35` are SUCCESS/online. Exactly one approved
+migration was added; all seven company/user/subscription control fingerprints
+remain unchanged. Thirteen API checks and the final eighteen-check API/Web run
+passed, including actual theme/locale Create/Edit journeys without saving.
+See [the completed release report](COMPANY_MODES_PRODUCTION_RELEASE_20261021.md)
+for artifact/image identities, recovery limits, log samples and UI evidence.
+
+## Visit Execution Foundation 001 — local only (2026-10-22)
+
+New operational visit records, start retry identities, versioned save/completion,
+audit-atomic changes and scoped market photos are documented in
+[VISIT_EXECUTION_FOUNDATION_001.md](VISIT_EXECUTION_FOUNDATION_001.md).
+The additive migration has only run on disposable synthetic test databases.
+Isolated SQL/security/React-render suites and independent native PostgreSQL
+connections cover the visit contract; final gate counts are in `.quality`.
+Native testing caught and corrected Prisma's unsupported `void` lock result.
+Final changed gate: 589 checks / 135 suites, all four typechecks passed;
+separate PostgreSQL gate: 149 checks / 27 suites; native connection races: six
+passed. No failures, skips or TODOs. See `.quality/changed.json`,
+`.quality/postgres.json` and `.quality/visit-execution/native.json`.
+The configured local image store at `localhost:9000` refuses TCP connections;
+real storage/camera integration and rendered Light/Dark mobile/desktop QA remain
+unverified. Financial operation links and future entry adapters remain deferred.
+System Design Gate: WARN, not release approval. No Production change, push,
+deployment, role grant, new infrastructure or dependency was performed.
+
+Final native/browser verification (same date; supersedes app-session status):
+the actual Next/Nest/RIE/Prisma flow passed start, notes, OTHER validation,
+save/reopen and completion on a new database in the existing native loopback
+test cluster. The Visit migration followed a verified custom-format backup;
+only the single synthetic rep role in that new database received permission.
+No operating database was migrated. Actual guards and concurrent replay checks
+passed. A context-plan accounting defect found in the browser was fixed and
+verified at 10 RIE PostgreSQL calls; the new regression retains the 24-call
+ceiling and proves over-budget denial. Twenty existing focused checks plus the
+new plan check and API typecheck passed; 589/149 suites were not rerun per user
+instruction. Real multipart image upload returned 503 and saved zero photos.
+The existing localhost:9000 MinIO has only container startup configuration;
+no running native alternative was found. No Docker use/repair after the user's
+prohibition, no storage substitute, push or deploy. Actual image read/private
+store verification remains BLOCKED; System Design Gate remains WARN and the
+foundation is open. Detailed evidence and limitations are in the final section
+of [VISIT_EXECUTION_FOUNDATION_001.md](VISIT_EXECUTION_FOUNDATION_001.md).
+
+Native image closure (2026-10-22; supersedes the preceding storage BLOCKED):
+with explicit user authorization, official MinIO source release
+`RELEASE.2025-10-15T17-29-55Z` was compiled using a hash-verified portable Go
+toolchain after official historical binary downloads returned HTTP 410.
+Native MinIO now serves the unchanged local S3 endpoint on loopback with a
+private bucket and independent retained test data. No Docker, provider swap,
+Production credential change, operating DB migration or application dependency
+change occurred. `tools/local/start-minio.cjs` preserves provenance/local-only
+checks and refuses occupied ports.
+
+The actual browser uploaded a real CC0 shelf JPEG, reloaded and displayed it;
+S3 readback and read after native server restart matched its SHA-256. Tests
+denied other permitted actors/companies, wrong-visit IDs, unsigned access and
+tampered/expired signatures. With MinIO actually stopped, browser save and
+completion still committed with audit; restart retained the image. One photo,
+one photo audit and one completion audit remain after retry. Three focused
+native integration scripts plus startup/launcher checks passed; 589/149 suites
+were not repeated. See `.quality/visit-execution/minio-native/` evidence and
+the report's native-image closure. Foundation 001 local functional acceptance:
+CLOSED; System Design Gate PASS for that isolated local scope. Upstream MinIO
+Community is archived/no longer maintained; this test build is not Production
+runtime approval, a capacity claim or physical-camera certification. No push,
+deploy or Railway change.

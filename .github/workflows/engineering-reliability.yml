@@ -52,5 +52,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: engineering-gate-${{ github.sha }}
-          path: .quality/*.json
+          path: |
+            .quality/*.json
+            .quality/scalability/latest.json
           if-no-files-found: ignore

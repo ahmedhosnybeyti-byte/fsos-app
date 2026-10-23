@@ -1,0 +1,19 @@
+{
+  "verifiedAtUtc": "2026-10-22T22:21:11.1798652Z",
+  "kind": "document-and-local-evidence-integrity-check-not-quality-or-capacity-test",
+  "reportSha256": "9795e063a49e35af42ff2db14d82f9362b5f7d6d226c413f6be17f974d5e9188",
+  "evidenceSha256": "d2089d7f00ed9e61cb08a3f95e875b5786a012e80e13ee271c503f2f37319eee",
+  "localMarkdownLinks": 22,
+  "missingLinks": [],
+  "maintainedInputsChangedSinceSnapshot": [],
+  "historicalRunCount": 7,
+  "historicalSuccessErrorCountMismatches": 0,
+  "mutableSharedGateDrift": "Observed and separately retained in evidence.json; old PASS is superseded by observed API typecheck BLOCK",
+  "offlineScalabilityStatus": "WARN",
+  "offlineScalabilityVerification": "UNVERIFIED",
+  "offlineScalabilityScenarios": 0,
+  "loadExecuted": false,
+  "databaseConnected": false,
+  "developmentSourceFilesWrittenByThisAudit": [],
+  "outputScope": "docs/engineering/capacity-lab only"
+}

@@ -112,3 +112,5 @@ export * from "./accounting.schemas";
 export * from "./accounting-subledger.schemas";
 export * from "./procurement.schemas";
 export * from "./wms-coverage.schemas";
+export * from "./visit-execution.schemas";
+export * from "./sales-draft.schemas";

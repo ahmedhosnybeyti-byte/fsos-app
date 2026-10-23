@@ -1,5 +1,106 @@
 # Murshidak Resolved Engineering Issues
 
+## Scalability acceptance — observations had no shared regression contract (2026-10-23)
+
+- Symptom/risk: successful functional tests and isolated serial observations
+  could be mistaken for capacity acceptance; existing per-feature performance
+  reports were not evaluated by the common quality runner.
+- Root cause: durable system-design guidance existed, but no shared machine
+  contract for comparable evidence, approved baselines/limits and gate outcomes.
+- Fix: extend the existing AGENTS/system-design/quality/CI structure with the
+  mandatory scalability contract, offline comparator, source freshness, pinned
+  approved baseline hashes, separate wait metrics and sanitized local history.
+  Missing measurements/baselines remain WARN; approved regressions block and
+  release verification refuses unverified evidence. No runtime path changed.
+- Commit: uncommitted local gate change on review base
+  `f482d9bde14b94e3619e221d61a416b145874ca6`; no commit/push/deploy authorized.
+- Verification: 20 focused checks passed, including independent-process injected
+  performance failure with exit 1 and bounded RIE query-count compilation.
+  Full-gate/fresh-session evidence and limitations are in
+  [the verification report](SCALABILITY_GATE_VERIFICATION_20261023.md).
+- Prevention: never promote a proposed budget, unmatched baseline, unmeasured
+  pool/lock wait or one serial request into a performance/capacity PASS. Keep
+  functional, measured scenario and release conclusions separate. This entry
+  closes the enforcement-contract gap, not the historical mixed-load/stale-stats
+  runtime risks or the documented child-session host-policy limitation.
+
+## Sales draft validation — bind observations to the saved revision (2026-10-22)
+
+- Risk: a check made after another session's save could describe different saved
+  lines/warehouse while being rendered beneath an older local editor revision.
+- Root cause: the 002-A observation response had no draft/version/warehouse identity.
+- Fix: additive identity metadata from the same repeatable-read snapshot; render
+  results only when draft ID/version/warehouse match. Dirty content remains hidden
+  from checks; explicit reload and reconnect preservation are unchanged.
+- Commit: uncommitted local Foundation 002-B1 on base `f482d9bde14b94e3619e221d61a416b145874ca6`.
+- Evidence: mismatched identity/version/warehouse rendered regression; native
+  actual HTTP response identity assertions; actual completed-draft browser check
+  displays version 2. See [B1 evidence](SALES_DRAFTS_FOUNDATION_002B1.md).
+- Prevention: a business observation must carry the precise document revision it
+  evaluated; never show another revision as validation of unsaved/local content.
+
+## Sales draft checks — repeated lot scans (2026-10-22)
+
+- B1 remeasurement caveat: a restored/newly seeded fixture with stale company
+  cardinality estimates still produced repeated batch sequential scans. Preparing
+  statistics explicitly on the disposable fixture passes the unchanged plan gate;
+  this is test preparation, not a runtime fix or proof of stale-statistics robustness.
+  Retain this measured open risk in [the B1 Scalability Gate](SALES_DRAFTS_SCALABILITY_GATE_002B1.md).
+
+- Symptom: a nonbinding 20-line check on 200 synthetic lots reached API p95
+  2,055 ms with RIE global queue wait 0 ms; functional tests alone did not expose it.
+- Root cause: inlined aggregates and repeated lot/product joins produced nested
+  fact scans. An aggregate-only fix was unstable in a longer prepared-query run.
+- Fix: materialize narrow company/product-scoped lots, warehouse inventory and
+  rep custody before aggregation; restrict inventory by selected lot identities.
+  Reuse `wms_inventory_state.available`, evaluate shelf-life policy once and
+  preserve WMS expiry/quality semantics without per-lot policy/function probes.
+- Commit: uncommitted Foundation 002-A on base
+  `f482d9bde14b94e3619e221d61a416b145874ca6`; no push/deploy.
+- Verification: native isolated 25-sample endpoint run, check p95 48.2 ms,
+  EXPLAIN execution 3.121 ms / 20 returned rows, both aggregate loops one and
+  no repeated fact sequential scans on that fixture. SQL WMS eligibility parity,
+  613-check quality gate/four typechecks and protected-table digests passed.
+- Prevention: retain the explicit isolated performance harness and explain-plan
+  checks. Measure warm prepared-query behavior, not just a short first-call
+  sample. Never infer capacity from functional success, zero serial queue wait
+  or unused CPU. See [the Scalability Gate](SALES_DRAFTS_SCALABILITY_GATE_002A.md);
+  representative 25/50/100/150-user mixed-load capacity remains untested.
+
+## Sales drafts — duplicate creation, lost edits and visit-close boundary
+
+- Symptom/risk: retried field drafts could duplicate, concurrent saves could lose
+  content, and a draft write racing visit completion could escape the visit boundary.
+- Root cause: Foundation 001 intentionally had no separate draft identity,
+  durable draft-command ledger or shared visit/draft transaction boundary.
+- Fix: inert typed DRAFT/CANCELLED documents, one active draft per visit, durable
+  company/rep command results, expected versions, exact approved WMS UOM snapshots,
+  shared visit-row locking and same-transaction audit. Missing operational balances
+  remain unknown; imported prices are not promoted to approved operational prices.
+- Commit: uncommitted local Foundation 002-A changes based on
+  `f482d9bde14b94e3619e221d61a416b145874ca6`; existing Foundation 001 WIP preserved.
+- Evidence: isolated SQL, native independent-connection races/audit rollback,
+  actual HTTP and browser flows, unchanged stock/custody/GL/AR/reference digests;
+  see [SALES_DRAFTS_FOUNDATION_002A.md](SALES_DRAFTS_FOUNDATION_002A.md).
+- Prevention: draft writes must never reserve/post or infer financial approval.
+  Keep replay identity, optimistic version, visit-open check and audit atomic;
+  preserve cancelled content and expose no draft mutation after visit completion.
+
+### Draft reconnect — preserve unsaved local edits
+
+- Symptom: actual browser reproduction after a 31-second offline interval
+  replaced local unsaved quantity 7 with another session's saved quantity 2.
+- Root cause: React Query's reconnect refetch updated the stale detail version,
+  remounting the editor before the user explicitly reloaded or saved.
+- Fix: disable reconnect refetch on draft detail; retain explicit reload and
+  optimistic save conflicts. Focus refetch was already disabled.
+- Commit: uncommitted Foundation 002-A on base `f482d9b`; no push/deploy.
+- Evidence: `.quality/sales-drafts/reconnect.json` and actual browser rerun pass
+  local retention, stale-save conflict, explicit reload and completed read-only
+  behavior; the final 613-check/four-typecheck gate passes after the fix.
+- Prevention: background refresh must not replace an editor's unsaved content.
+  Verify reconnect after cache staleness with a separate concurrent session.
+
 ## WMS coverage credibility — company demand is not warehouse attribution
 
 - Symptom: company-demand ratios appeared with critical/safe warehouse badges despite absent historical warehouse provenance.
@@ -501,3 +602,30 @@ This is durable engineering history. A **RESOLVED** item is historical evidence,
 - Commit: local quarantine/operational-UI feature commit containing this entry, parent `9e00f44`; no push/deploy.
 - Evidence: four new isolated SQL tests, native concurrent-command/rollback checks, 13 new-route HTTP checks and one actual Demo browser cycle 200→190/10→196/4→196/0, with one physical write-off. Previous ledger, custody and history remain unchanged; see [WMS_QUARANTINE_AND_OPERATIONAL_UI.md](WMS_QUARANTINE_AND_OPERATIONAL_UI.md).
 - Prevention: never dispose/release an unowned shared quantity, decrement physical on HOLD, or separate an approved disposition from its unique stock effect and durable audit. New operational UI must use existing typed i18n keys and design tokens from the start.
+
+### Visit Execution Foundation — native Prisma advisory-lock result
+
+- Symptom/evidence: the first native PostgreSQL start-visit test failed with `Failed to deserialize column of type 'void'`; the isolated PGlite service tests had passed.
+- Root cause: selecting `pg_advisory_xact_lock` through Prisma `$queryRaw` asked its result decoder to deserialize PostgreSQL's unsupported `void` return value.
+- Fix: execute the advisory-lock statement with `$executeRaw` inside the same start transaction. Keep the company/rep lock, retry identities, case-insensitive one-open-visit index and durable audit unchanged.
+- Commit: uncommitted Visit Execution Foundation 001 changes based on `f482d9bde14b94e3619e221d61a416b145874ca6`; no push/deploy.
+- Verification: actual Prisma clients on independent connections to an explicitly verified disposable PostgreSQL 18.6 database passed start/save/photo/finish races and audit rollback; see `.quality/visit-execution/native.json` and `tools/quality/visit-execution-native.cjs`.
+- Prevention: do not infer native driver compatibility or independent-connection lock behavior from PGlite adapters. Statements returning unsupported PostgreSQL types must use execution-only commands or an explicit supported result cast, and new idempotent operational paths retain native race evidence.
+
+### Visit Execution context — whole-request RIE accounting
+
+- Symptom: the actual browser context request returned 500/`RiePostgresExecutionBudgetExceededError` although mocked service/SQL checks passed.
+- Root cause: the supplemental four-operation plan imposed a four-PostgreSQL-execution limit; hierarchy and source metadata also consume executions. The reused Copilot briefing ran outside that plan, preventing one coherent accounting/reuse boundary.
+- Fix: one plan spans the unchanged briefing and four bounded supplemental reads, using Copilot's existing 24-execution ceiling, shared metadata/hierarchy and request serialization. Shared/global admission limits and analytical formulas are unchanged.
+- Commit: uncommitted Foundation 001 final-verification fix on base `f482d9bde14b94e3619e221d61a416b145874ca6`; no push/deploy.
+- Evidence: actual Nest/RIE/Prisma HTTP context passed with 10 executions on native isolated PostgreSQL; `visit-execution.context.spec.ts` verifies serialization and rejects a 25th call. Focused SQL/controller/render checks and API typecheck passed. See the final verification in `VISIT_EXECUTION_FOUNDATION_001.md`.
+- Prevention: budget the entire request including hierarchy/metadata, retain real coordinator context in endpoint integration checks, and test the upper-bound failure as well as success. Do not infer coordinator safety from a `runPlannedRequest` no-op stub.
+
+### Visit Execution images — native MinIO without Docker
+
+- Symptom: real browser uploads returned 503; `localhost:9000` refused connections. The project had only container startup configuration, with no installed native store.
+- Root cause: the existing S3-compatible endpoint had no running native server. Historical official binary downloads additionally returned HTTP 410; a search-index listing was not proof that the binary was available.
+- Fix: with explicit user authorization, built the pinned official MinIO security release `RELEASE.2025-10-15T17-29-55Z` using a hash-verified portable official Go toolchain and normal module checksum verification. Native MinIO binds only loopback, uses the existing local storage credentials/provider and a private bucket, with independent retained synthetic test data. `tools/local/start-minio.cjs` verifies binary provenance, local endpoint/credentials and port availability before starting hidden; no global install/autostart.
+- Commit: uncommitted local Foundation 001 native-runtime/documentation change; no push, deploy, Railway operation or operating database change.
+- Evidence: real shelf JPEG uploaded from the actual browser, one linked photo/audit, full byte SHA-256 parity on S3 read and after native process restart. Other authorized actor/company and wrong-visit access denied; unsigned/tampered/expired URLs denied. Actual browser save/finish passed while MinIO was stopped. Three focused native integration scripts passed; full suites were not rerun. See the native image closure in `VISIT_EXECUTION_FOUNDATION_001.md` and `.quality/visit-execution/minio-native/*-evidence.json`.
+- Prevention: treat image integration as verified only after real stored-byte readback and private-access checks. Do not replace missing storage with fake success or change the provider to make a test pass. This upstream Community release is archived/no longer maintained and is retained only for isolated synthetic local verification; it does not establish Production runtime suitability.

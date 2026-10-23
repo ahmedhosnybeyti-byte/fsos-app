@@ -10,6 +10,7 @@
     "quality": "node tools/quality/run.mjs changed",
     "quality:critical": "node tools/quality/run.mjs critical",
     "quality:postgres": "node tools/quality/run.mjs postgres",
+    "quality:scalability": "node tools/quality/scalability.mjs",
     "quality:release": "node tools/quality/run.mjs release",
     "dev": "turbo run dev",
     "build": "turbo run build",
