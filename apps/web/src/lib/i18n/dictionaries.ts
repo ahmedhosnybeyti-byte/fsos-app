@@ -1,4 +1,5 @@
 import { operationalMessages, type OperationalTranslationKey } from "./operational-messages";
+import { supplierMessages, type SupplierTranslationKey } from "./supplier-messages";
 // Lightweight in-house i18n — deliberately not a library (no new npm
 // dependency to install; see components/theme-provider.tsx for the same
 // reasoning applied to the light/dark toggle). Flat, dot-namespaced keys so
@@ -26,6 +27,7 @@ export type TranslationKey =
   | "shell.toggleTheme"
   | "shell.toggleThemeHint"
   | OperationalTranslationKey
+  | SupplierTranslationKey
   | `newCustomer.${NewCustomerTranslationKey}`
   | "nav.overview"
   | "nav.assistant"
@@ -1554,6 +1556,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "shell.toggleTheme": "تبديل المظهر",
     "shell.toggleThemeHint": "تبديل المظهر (فاتح / غامق)",
     ...operationalMessages.ar,
+    ...supplierMessages.ar,
     "routePlanning.splitComplete": "تم التقسيم — ", "routePlanning.customersAcross": " عميل على ", "routePlanning.groups": " مجموعات", "routePlanning.splitError": "تعذر إتمام التقسيم", "routePlanning.selectedValues": " قيمة محددة", "routePlanning.customersUsed": " عميل مستخدم", "routePlanning.coverage": "نسبة التغطية: ", "routePlanning.targetAverage": "المتوسط المستهدف: ", "routePlanning.maxDeviation": "أقصى انحراف: ", "routePlanning.invalidCoordinates": " صف مستبعد (إحداثيات غير صالحة)", "routePlanning.newRoute": "خط جديد ", "routePlanning.groupPrefix": "مجموعة ",
     "routePlanning.exportCustomerId": "رقم العميل", "routePlanning.exportName": "الاسم", "routePlanning.exportLatitude": "خط العرض", "routePlanning.exportLongitude": "خط الطول", "routePlanning.exportBeforeRoute": "الخط (قبل)", "routePlanning.exportAfterRoute": "الخط (بعد)", "routePlanning.exportSheet": "التقسيم", "routePlanning.exportFilePrefix": "تقسيم",
     "dashboard.refresh": "تحديث البيانات",
@@ -3029,6 +3032,7 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "shell.toggleTheme": "Toggle theme",
     "shell.toggleThemeHint": "Toggle theme (light / dark)",
     ...operationalMessages.en,
+    ...supplierMessages.en,
     "routePlanning.splitComplete": "Split complete — ", "routePlanning.customersAcross": " customers across ", "routePlanning.groups": " groups", "routePlanning.splitError": "Could not complete the split", "routePlanning.selectedValues": " selected values", "routePlanning.customersUsed": " customers used", "routePlanning.coverage": "Coverage: ", "routePlanning.targetAverage": "Target average: ", "routePlanning.maxDeviation": "Maximum deviation: ", "routePlanning.invalidCoordinates": " excluded rows (invalid coordinates)", "routePlanning.newRoute": "New route ", "routePlanning.groupPrefix": "Group ",
     "routePlanning.exportCustomerId": "Customer ID", "routePlanning.exportName": "Name", "routePlanning.exportLatitude": "Latitude", "routePlanning.exportLongitude": "Longitude", "routePlanning.exportBeforeRoute": "Route (before)", "routePlanning.exportAfterRoute": "Route (after)", "routePlanning.exportSheet": "Split", "routePlanning.exportFilePrefix": "route-split",
     "dashboard.refresh": "Refresh data",
