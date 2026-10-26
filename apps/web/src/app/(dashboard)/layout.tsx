@@ -10,8 +10,10 @@ import { buildCompanyNavItems } from "@/lib/company-screen-registry";
 import { useTranslation } from "@/components/translation-provider";
 import { Spinner } from "@/components/ui/spinner";
 import { useQuery } from "@tanstack/react-query";
-import { supportsSfaOperations, getCompanyFeatureAccessState } from "@field-sales-os/schemas";
+import { hasOperationalPermissions,supportsSfaOperations, getCompanyFeatureAccessState } from "@field-sales-os/schemas";
 import { sfaSetupApi } from "@/lib/api/sfa-setup";
+import { Footprints } from "lucide-react";
+import { canExecuteVisits, showVisitExecution } from "@/lib/visit-execution-access";
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useRequireAuth();
@@ -21,9 +23,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     && getCompanyFeatureAccessState(user.featureAccess, "sfa-setup") === "ENABLED"
     && ["sfa.access", "company.manage"].every((permission) => user.permissions?.includes(permission));
   const operatingMode = useQuery({ queryKey: ["sfa-mode", user?.companyId], queryFn: sfaSetupApi.mode,
-    enabled: (!!user?.companyId && getCompanyFeatureAccessState(user.featureAccess,"procurement") === "ENABLED" && user.permissions?.includes("procurement.read")) || canSetup || (!!user?.companyId && getCompanyFeatureAccessState(user.featureAccess,"accounting-core") === "ENABLED"
-      && ["sfa.access","accounting.read"].every(p => user.permissions?.includes(p))) || (!!user?.companyId && getCompanyFeatureAccessState(user.featureAccess,"warehouse-core") === "ENABLED"
-      && ["sfa.access","wms.read"].every(p => user.permissions?.includes(p))), retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false });
+    enabled: canExecuteVisits(user) || (!!user?.companyId && getCompanyFeatureAccessState(user.featureAccess,"procurement") === "ENABLED" && user.permissions?.includes("procurement.read")) || canSetup || (!!user?.companyId && getCompanyFeatureAccessState(user.featureAccess,"accounting-core") === "ENABLED"
+      && hasOperationalPermissions(user.role.code,user.permissions,["sfa.access","accounting.read"])) || (!!user?.companyId && getCompanyFeatureAccessState(user.featureAccess,"warehouse-core") === "ENABLED"
+      && hasOperationalPermissions(user.role.code,user.permissions,["sfa.access","wms.read"])), retry: false, refetchOnWindowFocus: false, refetchOnReconnect: false });
   const isSuperAdmin = user?.role.code === "SUPER_ADMIN";
   const mustChangePassword = user?.mustChangePassword === true;
 
@@ -36,11 +38,15 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const navItems: NavItem[] = [
     ...buildCompanyNavItems({ featureAccess: user.featureAccess, t, roleCode: user.role.code, groupLabels: { data: t("group.data"), aiInsights: t("group.aiInsights"), customersTerritory: t("group.customersTerritory"), team: t("group.team"), system: t("group.system") } })
-      .filter(item => item.featureKey !== "procurement" || (operatingMode.data?.operatingMode === "FULL_ERP" && ["sfa.access","wms.read","procurement.read"].every(p=>user.permissions?.includes(p))))
-      .filter((item) => item.featureKey !== "accounting-core" || (operatingMode.data?.operatingMode === "FULL_ERP" && ["COMPANY_ADMIN","MANAGER"].includes(user.role.code) && ["sfa.access","accounting.read"].every(p => user.permissions?.includes(p))))
+      .filter(item => item.featureKey !== "procurement" || (operatingMode.data?.operatingMode === "FULL_ERP" && hasOperationalPermissions(user.role.code,user.permissions,["sfa.access","wms.read","procurement.read"])))
+      .filter((item) => item.featureKey !== "accounting-core" || (operatingMode.data?.operatingMode === "FULL_ERP" && ["COMPANY_ADMIN","MANAGER","ACCOUNTANT"].includes(user.role.code) && hasOperationalPermissions(user.role.code,user.permissions,["sfa.access","accounting.read"])))
       .filter((item) => item.featureKey !== "sfa-setup" || (canSetup && supportsSfaOperations(operatingMode.data?.operatingMode)))
-      .filter((item) => item.featureKey !== "warehouse-core" || (supportsSfaOperations(operatingMode.data?.operatingMode) && ["sfa.access","wms.read"].every(p => user.permissions?.includes(p)))),
+      .filter((item) => item.featureKey !== "warehouse-core" || (supportsSfaOperations(operatingMode.data?.operatingMode) && hasOperationalPermissions(user.role.code,user.permissions,["sfa.access","wms.read"]))),
   ];
+  if (showVisitExecution(user, operatingMode.data?.operatingMode)) {
+    const copilotIndex = navItems.findIndex(item => item.featureKey === "visit-copilot");
+    navItems.splice(copilotIndex + 1, 0, { href: "/dashboard/visit-execution", label: t("visit.title"), icon: Footprints, colorKey: "visitCopilot", group: navItems[copilotIndex]?.group });
+  }
 
   return <AppShell navItems={navItems} user={user}><CompanyScreenAccessGuard user={user}>{children}</CompanyScreenAccessGuard></AppShell>;
 }

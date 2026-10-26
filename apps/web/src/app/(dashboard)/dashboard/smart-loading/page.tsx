@@ -6,16 +6,12 @@ import { SmartLoadingScreen } from "@/components/smart-loading/smart-loading-scr
 import { smartLoadingApi } from "@/lib/api/smart-loading";
 import { useAuth } from "@/hooks/use-auth";
 import { DEFAULT_SMART_LOADING_STALE_DAYS } from "@field-sales-os/schemas";
-
-function tomorrowIso(): string {
-  const date = new Date();
-  date.setDate(date.getDate() + 1);
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
+import { minimumLoadingTargetDate, resolveLoadingTargetDate } from "@/components/smart-loading/loading-target-date";
 
 export default function SmartLoadingPage() {
   const { user } = useAuth();
-  const [targetDate, setTargetDate] = useState(tomorrowIso);
+  const [selectedTargetDate, setTargetDate] = useState(minimumLoadingTargetDate);
+  const targetDate = resolveLoadingTargetDate(selectedTargetDate);
   const [staleDaysThreshold, setStaleDaysThreshold] = useState(DEFAULT_SMART_LOADING_STALE_DAYS);
   const [salesRepId, setSalesRepId] = useState<string>();
   const [managerId, setManagerId] = useState<string>();

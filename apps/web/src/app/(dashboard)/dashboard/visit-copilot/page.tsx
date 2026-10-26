@@ -30,6 +30,7 @@ import { visitCopilotApi } from "@/lib/api";
 import { ApiError, isTrialFeatureLocked } from "@/lib/api-client";
 import { useTranslation } from "@/components/translation-provider";
 import { useAuth } from "@/hooks/use-auth";
+import { StartVisitButton } from "@/components/visit-execution/start-visit-button";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1042,6 +1043,7 @@ function VisitCopilotScreen() {
             <div className="glass-card rise-in space-y-4 p-4">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <h2 className="text-lg font-semibold">{briefing.customerName}</h2>
+                {!briefing.isProspect && !salesRepId && <StartVisitButton customerCode={briefing.customerCode} />}
                 {briefing.isProspect ? (
                   <Badge className="bg-ai/15 text-ai hover:bg-ai/15">{t("copilot.prospectBadge")}</Badge>
                 ) : (

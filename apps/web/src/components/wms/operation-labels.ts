@@ -1,6 +1,7 @@
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
 import type {Text} from "./shared";
 export const operationLabels:Record<string,TranslationKey>={
+  "load.confirm":"smartLoading.approvePreparedQuantities","load.decline":"smartLoading.returnForPreparation",
   QUARANTINE_HOLD:"wms.quantity_quarantine",QUARANTINE_RELEASE:"wms.quarantine_release",WRITE_OFF:"wms.approved_write_off",
   ADJUSTMENT:"wms.physical_count_adjustment",
   DISPATCHED:"wms.dispatched_handover_pending",COMPLETED:"wms.supplier_handover_confirmed",SUPPLIER_RETURN:"wms.supplier_return",REP_RETURN:"wms.representative_return",QUALITY_HOLD:"wms.quality_block",QUALITY_RELEASE:"wms.quality_unblock",
