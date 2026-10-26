@@ -234,7 +234,123 @@ enum UserRiskLevel {
 // Tenant root
 // ---------------------------------------------------------------------------
 
+// Foundation operational visits; additional checks and partial indexes live in SQL.
+model SalesDraft {
+  id String @id
+  companyId String @map("company_id")
+  visitId String @map("visit_id")
+  repId String @map("rep_id")
+  customerCode String @map("customer_code")
+  customerName String @map("customer_name")
+  repName String @map("rep_name")
+  status String @default("DRAFT")
+  version Int @default(0)
+  warehouseId String? @map("warehouse_id")
+  notes String @default("")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz
+  visit VisitExecution @relation(fields:[companyId,repId,visitId],references:[companyId,repId,id],onDelete:Restrict,onUpdate:NoAction)
+  warehouse Warehouse? @relation(fields:[companyId,warehouseId],references:[companyId,id],onDelete:Restrict,onUpdate:NoAction)
+  lines SalesDraftLine[]
+  commands SalesDraftCommand[]
+  @@unique([companyId,id])
+  @@index([companyId,repId,visitId,createdAt(sort:Desc),id],map:"sales_drafts_visit")
+  @@map("sales_drafts")
+}
+model SalesDraftLine {
+  companyId String @map("company_id")
+  draftId String @map("draft_id")
+  lineNo Int @map("line_no")
+  productId String @map("product_id")
+  productCode String @map("product_code")
+  productName String @map("product_name")
+  baseUnit String @map("base_unit")
+  quantity Decimal @db.Decimal(24,6)
+  unit String
+  conversionFactor Int @map("conversion_factor")
+  quantityBase Decimal @map("quantity_base") @db.Decimal(30,6)
+  draft SalesDraft @relation(fields:[companyId,draftId],references:[companyId,id],onDelete:Restrict,onUpdate:NoAction)
+  product WmsProduct @relation(fields:[companyId,productId],references:[companyId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@id([companyId,draftId,lineNo])
+  @@unique([companyId,draftId,productId])
+  @@map("sales_draft_lines")
+}
+model SalesDraftCommand {
+  companyId String @map("company_id")
+  repId String @map("rep_id")
+  commandKey String @map("command_key")
+  payloadHash String @map("payload_hash")
+  draftId String @map("draft_id")
+  result Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  draft SalesDraft @relation(fields:[companyId,draftId],references:[companyId,id],onDelete:Restrict,onUpdate:NoAction)
+  @@id([companyId,repId,commandKey])
+  @@map("sales_draft_commands")
+}
+
+model VisitExecution {
+  salesDrafts SalesDraft[]
+  starts VisitExecutionStart[]
+  id String @id
+  companyId String @map("company_id")
+  repId String @map("rep_id")
+  customerCode String @map("customer_code")
+  customerName String @map("customer_name")
+  repName String @map("rep_name")
+  entrySource String @map("entry_source")
+  sourceReference String? @map("source_reference")
+  requestKey String @map("request_key")
+  status String @default("OPEN")
+  version Int @default(0)
+  goal String @default("FOLLOW_UP")
+  notes String @default("")
+  outcome String?
+  failureReason String? @map("failure_reason")
+  reasonDetail String @default("") @map("reason_detail")
+  lastCommandKey String? @map("last_command_key")
+  lastCommandHash String? @map("last_command_hash")
+  startedAt DateTime @default(now()) @map("started_at") @db.Timestamptz
+  completedAt DateTime? @map("completed_at") @db.Timestamptz
+  company Company @relation(fields: [companyId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  rep User @relation(fields: [companyId,repId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  photos VisitExecutionPhoto[]
+  @@unique([companyId,id])
+  @@unique([companyId,repId,id])
+  @@unique([companyId,repId,requestKey])
+  @@index([companyId,repId,customerCode,startedAt(sort: Desc),id], map: "visit_executions_history")
+  @@map("visit_executions")
+}
+
+model VisitExecutionPhoto {
+  id String @id
+  companyId String @map("company_id")
+  visitId String @map("visit_id")
+  requestKey String @map("request_key")
+  kind String
+  objectKey String @unique @map("object_key")
+  contentHash String @map("content_hash")
+  contentType String @map("content_type")
+  sizeBytes Int @map("size_bytes")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz
+  visit VisitExecution @relation(fields: [companyId,visitId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  @@unique([companyId,visitId,requestKey])
+  @@index([companyId,visitId,createdAt,id], map: "visit_execution_photos_visit")
+  @@map("visit_execution_photos")
+}
+
+model VisitExecutionStart {
+  companyId String @map("company_id")
+  repId String @map("rep_id")
+  requestKey String @map("request_key")
+  visitId String @map("visit_id")
+  rep User @relation(fields: [companyId,repId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  visit VisitExecution @relation(fields: [companyId,repId,visitId], references: [companyId,repId,id], onDelete: Restrict, onUpdate: NoAction)
+  @@id([companyId,repId,requestKey])
+  @@map("visit_execution_starts")
+}
+
 model Company {
+  visitExecutions VisitExecution[]
   erpImport ErpImportProject?
   id        String        @id @default(cuid())
   name      String
@@ -292,6 +408,7 @@ model Company {
 // Missing settings deliberately means ANALYSIS_ONLY for existing companies.
 // Kept separate so legacy Company reads do not acquire a new scalar column.
 model Warehouse {
+  salesDrafts SalesDraft[]
   id        String   @id @default(cuid())
   companyId String   @map("company_id")
   code      String
@@ -302,6 +419,7 @@ model Warehouse {
   updatedAt DateTime @updatedAt @map("updated_at")
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   wmsAccess WmsWarehouseAccess[]
+  servedBranches WmsWarehouseBranch[]
   wmsPositions WmsPosition[]
 
   @@unique([companyId, id])
@@ -319,6 +437,7 @@ model Warehouse {
 // CHECK constraints, immutable-ledger triggers, view and posting functions are
 // maintained in 20261020100000_wms_phase01; do not replace them with db push.
 model WmsProduct {
+  salesDraftLines SalesDraftLine[]
   erpLinks ErpProductLink[]
   id String @id @default(cuid())
   companyId String @map("company_id")
@@ -748,6 +867,8 @@ model RolePermission {
 // ---------------------------------------------------------------------------
 
 model User {
+  visitExecutionStarts VisitExecutionStart[]
+  visitExecutions VisitExecution[]
   erpImportCreated ErpImportProject[] @relation("ErpCreatedBy")
   erpImportApproved ErpImportProject[] @relation("ErpApprovedBy")
   erpUploads ErpImportUpload[]
@@ -2227,6 +2348,8 @@ model WmsCustodyPosition {
 }
 
 model WmsOperationEvent {
+  recipientVersion Int? @map("recipient_version")
+  preparedFingerprint String? @map("prepared_fingerprint")
   id                String             @id
   companyId        String @map("company_id")
   warehouseId      String @map("warehouse_id")
@@ -2466,4 +2589,18 @@ model ErpProductLink {
   @@id([companyId,sourceCode])
   @@unique([companyId,productId])
   @@map("erp_product_links")
+}
+
+
+// Stable company BranchID, validated against current RIE Branches on both
+// configuration and request admission; not an FK to rebuildable projection IDs.
+model WmsWarehouseBranch {
+  companyId String @map("company_id")
+  warehouseId String @map("warehouse_id")
+  branchId String @map("branch_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  warehouse Warehouse @relation(fields: [companyId,warehouseId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  @@id([companyId,warehouseId,branchId])
+  @@index([companyId,branchId,warehouseId], map: "wms_warehouse_branches_company_branch_warehouse")
+  @@map("wms_warehouse_branches")
 }

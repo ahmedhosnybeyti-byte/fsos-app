@@ -8,6 +8,7 @@ import type { RieAssistantCustomerMentionQuery, RieAssistantDatasetQuery, RieAss
 import { fingerprintRieQueryShape, observeRiePostgres, recordActiveVersionResolution } from "../../common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 import { assistantDatasetFields } from "./assistant-dataset-query.data";
+import { demoCanonicalReadGuard, isDemoDailyCompany, riyadhReadDay } from "./demo-daily-read-policy";
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
@@ -31,6 +32,73 @@ export class RieScalableQueryService {
     return this.executionCoordinator.executePrepared(operation, prepare, (statement) =>
       observeRiePostgres(operation, fingerprintRieQueryShape(shape), "semaphore", () => this.prisma.$queryRaw<T>(statement)),
     );
+  }
+
+  async demoReadDay(companyId:string):Promise<string|null> {
+    if(!isDemoDailyCompany(companyId)) return null;
+    const rows=await this.postgres<{day:string|null}[]>("demoDailyReadDay.sql",{kind:"metadata",operation:"demoDailyReadDay"},()=>Prisma.sql`
+      SELECT CASE WHEN EXISTS(SELECT 1 FROM company_operating_settings WHERE company_id=${companyId} AND operating_mode='FULL_ERP') THEN ${riyadhReadDay()}::text END AS day`);
+    return rows[0]?.day??null;
+  }
+
+  /** Session product labels only; never substitutes WMS stock or sales for canonical facts. */
+  async querySmartLoadingProductMetadata(input: EntityQueryContext & { productCodes: readonly string[] }): Promise<RieScalableQueryResult> {
+    if (!input.companyId?.trim() || input.productCodes.length > MAX_PAGE_SIZE) {
+      throw new Error("RIE Smart Loading product metadata requires company and at most 5000 product codes.");
+    }
+    const page = { limit: MAX_PAGE_SIZE, offset: 0, hasMore: false };
+    if (!input.productCodes.length) return { records: [], page };
+    const codes = input.productCodes.map(code => code.trim().toLowerCase()).filter(Boolean);
+    // One coordinator admission / SQL statement, including mode resolution.
+    // Both sources are tenant- and code-scoped before merging scalar labels.
+    const rows = await this.postgres<Array<EntityRecord & { ambiguousOperationalCode: boolean }>>(
+      "smartLoading.productMetadata.sql", { kind: "specialized", operation: "smartLoadingProductMetadata" }, () => Prisma.sql`
+      WITH operational_mode AS MATERIALIZED (
+        SELECT EXISTS(SELECT 1 FROM company_operating_settings
+          WHERE company_id=${input.companyId} AND operating_mode IN ('SFA','FULL_ERP')) AS enabled
+      ), requested AS MATERIALIZED (
+        -- Keep a hashable key relation even after PostgreSQL caches a generic
+        -- plan: scalar = ANY(array-parameter) can instead become a linear probe.
+        SELECT DISTINCT code FROM unnest(${codes}::text[]) code
+      ), historical AS NOT MATERIALIZED (
+        SELECT r.id,r.entity_key,lower(btrim(r.data->>'ProductCode')) AS code,
+          r.data->>'ProductCode' AS product_code,r.data->>'ProductName' AS product_name,r.data->>'Category' AS category
+        FROM rie_canonical_entity_rows r
+        WHERE r.company_id=${input.companyId} AND r.entity_name='Products'
+          AND lower(btrim(r.data->>'ProductCode')) IN (SELECT code FROM requested)
+      ), operational_labels AS (
+        -- One merge/sort, rather than requested-key joins, a window sort and
+        -- a separately sorted historical relation. Only bounded scalar labels.
+        SELECT code,
+          COALESCE(max(product_code) FILTER(WHERE is_native),
+            (array_agg(product_code ORDER BY entity_key DESC,id DESC) FILTER(WHERE NOT is_native))[1]) AS product_code,
+          COALESCE(max(product_name) FILTER(WHERE is_native),
+            (array_agg(product_name ORDER BY entity_key DESC,id DESC) FILTER(WHERE NOT is_native))[1]) AS product_name,
+          (array_agg(category ORDER BY entity_key DESC,id DESC) FILTER(WHERE NOT is_native))[1] AS category,
+          count(*) FILTER(WHERE is_native)>1 AS ambiguous
+        FROM (
+          SELECT h.*,false AS is_native FROM historical h WHERE (SELECT enabled FROM operational_mode)
+          UNION ALL
+          SELECT p.id,p.code,lower(btrim(p.code)),p.code,p.name,NULL::text,true
+          FROM wms_products p WHERE p.company_id=${input.companyId}
+            AND (SELECT enabled FROM operational_mode)
+            AND lower(btrim(p.code)) IN (SELECT code FROM requested)
+        ) sources GROUP BY code
+      ), labels AS (
+        -- Keep the original ANALYSIS_ONLY rows, including their ordering/duplicates.
+        SELECT h.product_code,h.product_name,h.category,h.entity_key AS sort_key,false AS ambiguous
+        FROM historical h WHERE NOT (SELECT enabled FROM operational_mode)
+        UNION ALL
+        -- Operational identity wins; imported-only products and categories survive.
+        -- Inactive products retain their identity for historical recommendations.
+        SELECT product_code,product_name,category,code,ambiguous FROM operational_labels
+      ) SELECT product_code AS "productCode",product_name AS "productName",category,
+          ambiguous AS "ambiguousOperationalCode" FROM labels ORDER BY sort_key LIMIT ${MAX_PAGE_SIZE + 1}
+    `);
+    if (rows.some(row => row.ambiguousOperationalCode)) throw new Error("RIE_PRODUCT_METADATA_AMBIGUOUS_OPERATIONAL_CODE");
+    const hasMore = rows.length > MAX_PAGE_SIZE;
+    const records = (hasMore ? rows.slice(0, MAX_PAGE_SIZE) : rows).map(({ ambiguousOperationalCode: _ambiguous, ...record }) => record);
+    return { records, page: { ...page, hasMore } };
   }
 
   async query(input: RieScalableQuery): Promise<RieScalableQueryResult> {
@@ -264,6 +332,7 @@ export class RieScalableQueryService {
           FROM "rie_canonical_entity_rows" source_row
           WHERE source_row.company_id = ${input.companyId}
             AND source_row.entity_name = ${input.entityName}
+            ${demoCanonicalReadGuard(input.companyId,input.entityName,"source_row")}
             ${hierarchy}
         ), filtered AS MATERIALIZED (
           SELECT visible.* FROM visible ${filterClause}
@@ -3872,6 +3941,7 @@ export function activeEntityRowsCte(companyId: string, entityName: string, alias
     ${sourceJoins.length ? Prisma.join(sourceJoins, " ") : Prisma.empty}
     WHERE ${Prisma.raw(rowAlias)}."company_id" = ${companyId}
       AND ${Prisma.raw(rowAlias)}."entity_name" = ${entityName}
+      ${demoCanonicalReadGuard(companyId,entityName,rowAlias)}
       ${predicates.length ? Prisma.sql`AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty}
       ${semiJoins.length ? Prisma.sql`AND ${Prisma.join(semiJoins, " AND ")}` : Prisma.empty}
   )`;

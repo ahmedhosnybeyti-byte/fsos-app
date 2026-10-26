@@ -1,3 +1,7 @@
+import { WarehouseBootstrapService } from "./warehouse-bootstrap.service";
+import { WarehouseBootstrapController } from "./warehouse-bootstrap.controller";
+import { WarehouseManagementService } from "./warehouse-management.service";
+import { WarehouseManagementController } from "./warehouse-management.controller";
 import { WmsCoverageService } from "./wms-coverage.service";
 import { RieModule } from "../rie/rie.module";
 import {ProcurementController} from "./procurement.controller";
@@ -14,5 +18,6 @@ import { WmsController } from "./wms.controller";
 import { WmsService } from "./wms.service";
 import { WmsOperationsController } from "./wms-operations.controller";
 import { WmsOperationsService } from "./wms-operations.service";
-@Module({imports:[AuditLogModule,RieModule],controllers:[ProcurementController,WmsController,WmsOperationsController,WmsCoreController,WmsCountController,WmsQuarantineController],providers:[WmsCoverageService,ProcurementService,WmsService,WmsOperationsService,WmsCoreService,WmsCountService,WmsQuarantineService]})
+import { SmartLoadingRequestsController } from "./smart-loading-requests.controller";
+@Module({imports:[AuditLogModule,RieModule],controllers:[ProcurementController,WmsController,WmsOperationsController,WmsCoreController,WmsCountController,WmsQuarantineController,SmartLoadingRequestsController,WarehouseManagementController,WarehouseBootstrapController],providers:[WmsCoverageService,ProcurementService,WmsService,WmsOperationsService,WmsCoreService,WmsCountService,WmsQuarantineService,WarehouseManagementService,WarehouseBootstrapService]})
 export class WmsModule {}

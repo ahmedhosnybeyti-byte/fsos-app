@@ -1,5 +1,6 @@
-import { ConflictException, Injectable, NotFoundException } from "@nestjs/common";
-import { createWarehouseSchema, updateWarehouseSchema, warehouseListQuerySchema, type CompanySetupChecklist } from "@field-sales-os/schemas";
+import { ConflictException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { createWarehouseSchema, updateWarehouseSchema, warehouseBranchesSchema, warehouseListQuerySchema, type CompanySetupChecklist } from "@field-sales-os/schemas";
+import { Prisma } from "@field-sales-os/database";
 import { PrismaService, isUniqueConstraintError } from "../../common/prisma";
 import { AuditLogService } from "../audit-log/audit-log.service";
 
@@ -57,6 +58,33 @@ export class SfaSetupService {
       if (isUniqueConstraintError(error)) throw new ConflictException("Warehouse code already exists in your company");
       throw error;
     }
+  }
+
+  async setBranches(companyId: string, warehouseId: string, input: unknown, userId: string) {
+    const {branchIds}=warehouseBranchesSchema.parse(input);
+    return this.prisma.$transaction(async tx=>{
+      await tx.$queryRaw`SELECT set_config('lock_timeout','5s',true),set_config('statement_timeout','10s',true)`;
+      const mode=await tx.$queryRaw<{id:string}[]>(Prisma.sql`SELECT company_id AS id FROM company_operating_settings
+        WHERE company_id=${companyId} AND operating_mode='FULL_ERP' FOR SHARE`);
+      if(!mode.length)throw new ForbiddenException("FULL_ERP warehouse branch configuration required");
+      // Serialize configuration and request admission on the existing warehouse.
+      const warehouse=await tx.$queryRaw<{id:string}[]>(Prisma.sql`SELECT id FROM warehouses
+        WHERE company_id=${companyId} AND id=${warehouseId} AND is_active FOR UPDATE`);
+      if(!warehouse.length)throw new NotFoundException("Warehouse not found");
+      if(branchIds.length){
+        const branches=await tx.$queryRaw<{branchId:string}[]>(Prisma.sql`SELECT btrim(COALESCE(data->>'BranchID','')) AS "branchId"
+          FROM rie_canonical_entity_rows WHERE company_id=${companyId} AND entity_name='Branches'
+          AND btrim(COALESCE(data->>'BranchID','')) IN (${Prisma.join(branchIds)})
+          AND lower(btrim(COALESCE(data->>'Status','')))='active' FOR SHARE`);
+        if(branches.length!==branchIds.length||new Set(branches.map(b=>b.branchId)).size!==branchIds.length)
+          throw new NotFoundException("Active company branch IDs not found or ambiguous");
+      }
+      await tx.$executeRaw(Prisma.sql`DELETE FROM wms_warehouse_branches WHERE company_id=${companyId} AND warehouse_id=${warehouseId}`);
+      if(branchIds.length)await tx.$executeRaw(Prisma.sql`INSERT INTO wms_warehouse_branches(company_id,warehouse_id,branch_id)
+        VALUES ${Prisma.join(branchIds.map(branch=>Prisma.sql`(${companyId},${warehouseId},${branch})`))}`);
+      await this.auditLog.record({companyId,userId,action:"warehouse.branches.updated",entityType:"Warehouse",entityId:warehouseId,metadata:{branchIds}},tx);
+      return {warehouseId,branchIds};
+    },{maxWait:5000,timeout:15000});
   }
 
   async update(companyId: string, id: string, input: unknown, userId: string) {

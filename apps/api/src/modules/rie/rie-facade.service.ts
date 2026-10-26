@@ -23,6 +23,7 @@ import type { RieAssistantCustomerMentionQuery, RieAssistantDatasetQuery, RieAss
 import { fingerprintRieQueryShape, observeRieLogicalOperation, observeRiePostgres, recordActiveVersionResolution, scopeMetadata } from "../../common/observability/rie-observability";
 import { RieRequestPlannerService, type RieRequestPlanOptions } from "./rie-request-planner.service";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
+import { demoCanonicalReadGuard } from "./demo-daily-read-policy";
 
 /**
  * The smallest sales grain used by analytics: an invoice line, or the same
@@ -210,6 +211,14 @@ export class RieFacade {
   /** Bounded PostgreSQL query surface for high-cardinality canonical data. */
   queryCanonicalRecords(query: RieScalableQuery): Promise<RieScalableQueryResult> {
     return observeRieLogicalOperation("queryCanonicalRecords", scopeMetadata(query), () => this.plannedOperation("queryCanonicalRecords", () => this.scalableQuery.query(query)));
+  }
+
+  demoReadDay(companyId:string):Promise<string|null> {
+    return this.plannedOperation("demoDailyReadDay",()=>this.scalableQuery.demoReadDay(companyId));
+  }
+
+  querySmartLoadingProductMetadata(query: EntityQueryContext & { productCodes: readonly string[] }): Promise<RieScalableQueryResult> {
+    return observeRieLogicalOperation("querySmartLoadingProductMetadata", scopeMetadata(query), () => this.plannedOperation("queryCanonicalRecords", () => this.scalableQuery.querySmartLoadingProductMetadata(query)));
   }
 
   /** Compact PostgreSQL-first surface for Assistant's safe query_dataset subset. */
@@ -402,6 +411,7 @@ export class RieFacade {
         SELECT inv."data"
         FROM "rie_canonical_entity_rows" inv
         WHERE inv."company_id" = ${companyId} AND inv."entity_name" = 'Invoices'
+          ${demoCanonicalReadGuard(companyId,"Invoices","inv")}
           AND BTRIM(COALESCE(inv."data" ->> 'InvoiceNo', '')) <> ''
           AND BTRIM(COALESCE(inv."data" ->> 'CustomerCode', '')) <> ''
           ${routeFilter("inv")}
@@ -410,6 +420,7 @@ export class RieFacade {
         SELECT item."data"
         FROM "rie_canonical_entity_rows" item
         WHERE item."company_id" = ${companyId} AND item."entity_name" = 'Invoice Items'
+          ${demoCanonicalReadGuard(companyId,"Invoice Items","item")}
           ${routeFilter("item")}
       )
       SELECT BTRIM(inv."data" ->> 'InvoiceNo') AS "invoiceNo", ${lineNo} AS "lineNo",

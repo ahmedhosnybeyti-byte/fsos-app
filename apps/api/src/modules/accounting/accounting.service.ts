@@ -1,6 +1,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, HttpException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
 import type { ZodType, ZodTypeDef } from "zod";
+import { hasOperationalPermissions } from "@field-sales-os/schemas";
 import { Prisma } from "@field-sales-os/database";
 import { accountingAccountSchema, accountingCloseSchema, accountingJournalQuerySchema, accountingPageSchema, accountingPostSchema, accountingReverseSchema, accountingTrialQuerySchema, type AccountingAccount, type AccountingBook, type AccountingJournal, type AccountingLine, type AccountingResult, type AccountingTrial } from "@field-sales-os/schemas";
 import { PrismaService, type PrismaTx } from "../../common/prisma";
@@ -24,8 +25,8 @@ export class AccountingService {
   authorizedScope(tx:PrismaTx,user:AuthenticatedUser,permission:string,lock=false) {return this.scope(tx,user,permission,lock);}
   authorizedMutation<T>(work:(tx:Prisma.TransactionClient)=>Promise<T>) {return this.mutation(work);}
   private async scope(tx:PrismaTx,user:AuthenticatedUser,permission="accounting.read",lock=false) {
-    if(!user.companyId || !["COMPANY_ADMIN","MANAGER"].includes(user.roleCode) ||
-      !["sfa.access","accounting.read",permission].every(p=>user.permissions?.includes(p)))
+    if(!user.companyId || !["COMPANY_ADMIN","MANAGER","ACCOUNTANT"].includes(user.roleCode) ||
+      !hasOperationalPermissions(user.roleCode,user.permissions,["sfa.access","accounting.read",permission]))
       throw new ForbiddenException("Accounting company context and explicit permissions required");
     // Mode is checked again inside each mutation transaction. No JWT/body mode.
     const rows=await tx.$queryRaw<{company_id:string}[]>(Prisma.sql`SELECT s.company_id FROM company_operating_settings s

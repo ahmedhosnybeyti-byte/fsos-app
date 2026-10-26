@@ -16,6 +16,7 @@ import { PrismaService } from "../../common/prisma";
 import { IMPORT_TEMPLATES } from "../import-validation/import-templates.data";
 import { serializeExcelParse } from "../../common/excel-parse-queue";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
+import { demoCanonicalReadGuard, demoDailyTypedDateGuard, isDemoDailyCompany } from "./demo-daily-read-policy";
 
 // Official primary key per Canonical Entity, straight from the Import
 // Templates — powers the incremental-update merge in getRecords: when a
@@ -365,6 +366,7 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
       WHERE r."company_id" = ${options.companyId}
         AND r."entity_name" = ${entityName}
         AND r."source_file_id" IN (${Prisma.join(matchingFiles.map((file) => file.id))})
+        ${demoCanonicalReadGuard(options.companyId,entityName,"r")}
         ${whereClause}
       ORDER BY source_file."created_at" DESC, r."created_at" ASC, r.id ASC
       LIMIT ${options.limit ?? 2147483647}
@@ -558,7 +560,11 @@ export class ExcelDatasetEntityProvider implements EntityProvider {
 
     let rawRows;
     try {
-      rawRows = await this.postgres("entityProvider.salesCalendar.rows", () => this.prisma.salesCalendar.findMany({ where: { companyId: options.companyId } }));
+      rawRows = isDemoDailyCompany(options.companyId)
+        ? await this.postgresRaw<Array<{calendarDate:Date;day:string|null;week:number|null;month:number|null;quarter:number|null;year:number|null;workingDay:boolean|null;holiday:string|null;season:string|null;ramadan:boolean|null;promotionSeason:string|null}>>("entityProvider.salesCalendar.rows",()=>Prisma.sql`
+          SELECT calendar_date AS "calendarDate",day,week,month,quarter,year,working_day AS "workingDay",holiday,season,ramadan,promotion_season AS "promotionSeason"
+          FROM sales_calendars WHERE company_id=${options.companyId} ${demoDailyTypedDateGuard(options.companyId,Prisma.sql`calendar_date`)}`)
+        : await this.postgres("entityProvider.salesCalendar.rows", () => this.prisma.salesCalendar.findMany({ where: { companyId: options.companyId } }));
     } catch (err) {
       this.logger.error(`Failed to read Sales Calendar for company ${options.companyId}: ${(err as Error).message}`);
       return {

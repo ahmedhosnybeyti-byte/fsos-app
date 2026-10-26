@@ -24,7 +24,7 @@ const navigationKeys: Record<CompanyScreenFeatureKey, TranslationKey> = {
 
 export function buildCompanyNavItems({ featureAccess, t, groupLabels, roleCode }: { featureAccess: CompanyFeatureAccess | null | undefined; t: (key: TranslationKey) => string; groupLabels: Record<string, string>; roleCode: string }) {
   return companyScreenRegistry
-    .filter(screen => !isSpecialistRole(roleCode) || screen.featureKey === "account" || (roleCode === "WAREHOUSE_KEEPER" && screen.featureKey === "warehouse-core") || (roleCode === "ACCOUNTANT" && screen.featureKey === "accounting-core") || (roleCode === "PROCUREMENT" && screen.featureKey === "procurement"))
+    .filter(screen => !isSpecialistRole(roleCode) || screen.featureKey === "account" || ((roleCode === "WAREHOUSE_KEEPER" || roleCode === "WAREHOUSE_MANAGER") && screen.featureKey === "warehouse-core") || (roleCode === "ACCOUNTANT" && screen.featureKey === "accounting-core") || (roleCode === "PROCUREMENT" && screen.featureKey === "procurement"))
     .filter((screen) => !(screen.featureKey === "team-performance" || screen.featureKey === "reports") || ["COMPANY_ADMIN", "MANAGER", "SUPERVISOR"].includes(roleCode))
     .filter((screen) => !["team", "employees", "settings", "sfa-setup"].includes(screen.featureKey) || roleCode === "COMPANY_ADMIN")
     .filter((screen) => getCompanyFeatureAccessState(featureAccess, screen.featureKey) !== "HIDDEN")

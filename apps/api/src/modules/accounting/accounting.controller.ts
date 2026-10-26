@@ -7,7 +7,7 @@ import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { AccountingService } from "./accounting.service";
 
 @Controller("sfa/accounting")
-@Auth("COMPANY_ADMIN","MANAGER")
+@Auth("COMPANY_ADMIN","MANAGER","ACCOUNTANT")
 @RequiresSfa("accounting.read")
 @CompanyScreen("accounting-core")
 export class AccountingController {

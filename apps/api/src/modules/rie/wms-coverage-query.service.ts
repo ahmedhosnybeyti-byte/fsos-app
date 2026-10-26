@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { productCategory } from "../../common/queries/product-category";
 import { Prisma } from "@field-sales-os/database";
 import type { WmsCoverageRow } from "@field-sales-os/schemas";
 import { PrismaService } from "../../common/prisma";
@@ -62,7 +63,7 @@ export class RieWmsCoverageQueryService {
         FROM wms_inventory_state s WHERE s.company_id=${company} AND s.warehouse_id=${warehouse}
           AND s.product_id IN (SELECT id FROM products) GROUP BY s.product_id
       ), evidence AS (
-        SELECT p.id,p.code,p.name,p.base_unit,COALESCE(s.available,0) AS available,COALESCE(s.reserved,0) AS reserved,
+        SELECT p.id,p.code,p.name,p.base_unit,p.pieces_per_carton,COALESCE(s.available,0) AS available,COALESCE(s.reserved,0) AS reserved,
           COALESCE(s.quarantined,0) AS quarantined,COALESCE(d.days,0) AS days,d.first,d.last,COALESCE(d.invalid,false) AS invalid,
           CASE WHEN NOT d.invalid AND d.days>=3 AND d.first<=${to}::date-13 AND d.last>=${to}::date-6 AND d.daily>0 THEN d.daily END AS daily
         FROM products p LEFT JOIN stock s ON s.product_id=p.id LEFT JOIN demand d ON d.id=p.id
@@ -74,7 +75,7 @@ export class RieWmsCoverageQueryService {
       ), result_page AS (
         SELECT * FROM scored ORDER BY CASE risk WHEN 'CRITICAL' THEN 0 WHEN 'WATCH' THEN 1 WHEN 'UNKNOWN' THEN 2 ELSE 3 END,
           cover NULLS LAST,code,id LIMIT 21 OFFSET ${(page-1)*20}
-      ) SELECT r.id,r.code,r.name,r.base_unit AS "baseUnit",r.available::text,r.reserved::text,r.quarantined::text,
+      ) SELECT r.id,r.code,r.name,${productCategory(Prisma.sql`${company}`,Prisma.sql`r.code`)} AS category,r.base_unit AS "baseUnit",r.pieces_per_carton AS "piecesPerCarton",r.available::text,r.reserved::text,r.quarantined::text,
         round(r.daily,6)::text AS "dailyDemand",round(r.cover,2)::text AS "daysOfCover",r.days AS "demandDays",
         to_char(r.first,'YYYY-MM-DD') AS "firstSale",to_char(r.last,'YYYY-MM-DD') AS "lastSale",r.risk,
         CASE WHEN r.invalid THEN 'UOM' WHEN r.daily IS NULL THEN 'HISTORY' WHEN r.risk='CRITICAL' THEN 'LOW'

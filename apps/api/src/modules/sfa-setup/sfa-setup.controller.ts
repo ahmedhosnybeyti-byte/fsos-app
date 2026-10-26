@@ -40,4 +40,9 @@ export class SfaSetupController {
   update(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Body(new ZodValidationPipe(updateWarehouseSchema)) body: UpdateWarehouseInput) {
     return this.service.update(this.company(user), id, body, user.userId);
   }
+
+  @Patch("warehouses/:id/branches")
+  setBranches(@CurrentUser() user: AuthenticatedUser, @Param("id") id: string, @Body() body: unknown) {
+    return this.service.setBranches(this.company(user), id, body, user.userId);
+  }
 }

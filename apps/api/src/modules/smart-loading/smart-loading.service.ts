@@ -8,6 +8,7 @@ import { SmartLoadingManagementCacheService } from "../smart-loading-management-
 import { PrismaService } from "../../common/prisma";
 import { LostOpportunityService } from "../lost-opportunity/lost-opportunity.service";
 import { selectRoutePriorityProducts } from "./smart-loading-priority";
+import { demoDailyCacheTag, isDemoDailyCompany } from "../rie/demo-daily-read-policy";
 
 const SMART_LOADING_TIMING_AUDIT_ENABLED = process.env.SMART_LOADING_TIMING_AUDIT === "true";
 
@@ -239,22 +240,28 @@ export class SmartLoadingService {
   // Metadata-only freshness token. It includes the active RIE versions and
   // the newest canonical mutation for every source that can alter this input.
   // A mismatch is always a cache miss; stale rows are never served.
-  private async lastSaleSnapshotVersion(companyId: string): Promise<string> {
+  private demoCacheContext(user:AuthenticatedUser, readDay:string|null) {
+    if(!readDay) return undefined;
+    return {policy:demoDailyCacheTag(user.companyId!,readDay),userId:user.userId,role:user.roleCode,
+      orgUnitId:user.orgUnitId,permissions:[...user.permissions].sort()};
+  }
+
+  private async lastSaleSnapshotVersion(companyId: string, demoContext?:ReturnType<SmartLoadingService["demoCacheContext"]>): Promise<string> {
     const entities = ["Invoices", "Invoice Items", "Van Inventory", "Routes", "Employees"];
     const [versions, latest] = await Promise.all([
       this.prisma.rieDatasetVersion.findMany({ where: { companyId, entityName: { in: entities }, isActive: true }, select: { entityName: true, id: true, updatedAt: true }, orderBy: [{ entityName: "asc" }, { id: "asc" }] }),
       this.prisma.rieCanonicalEntityRow.findFirst({ where: { companyId, entityName: { in: entities } }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } }),
     ]);
-    return createHash("sha256").update(JSON.stringify({ versions, latest: latest?.updatedAt.toISOString() ?? null })).digest("hex");
+    return createHash("sha256").update(JSON.stringify({ versions, latest: latest?.updatedAt.toISOString() ?? null, ...(demoContext?{demoContext}:{}) })).digest("hex");
   }
 
-  private async managementLoadingRiskSnapshotVersion(companyId: string): Promise<string> {
+  private async managementLoadingRiskSnapshotVersion(companyId: string, demoContext?:ReturnType<SmartLoadingService["demoCacheContext"]>): Promise<string> {
     const entities = ["Van Inventory", "Invoices", "Invoice Items", "Returns", "Return Items", "Routes", "Employees", "Products"];
     const [versions, latest] = await Promise.all([
       this.prisma.rieDatasetVersion.findMany({ where: { companyId, entityName: { in: entities }, isActive: true }, select: { entityName: true, id: true, updatedAt: true }, orderBy: [{ entityName: "asc" }, { id: "asc" }] }),
       this.prisma.rieCanonicalEntityRow.findFirst({ where: { companyId, entityName: { in: entities } }, orderBy: { updatedAt: "desc" }, select: { updatedAt: true } }),
     ]);
-    return createHash("sha256").update(JSON.stringify({ versions, latest: latest?.updatedAt.toISOString() ?? null })).digest("hex");
+    return createHash("sha256").update(JSON.stringify({ versions, latest: latest?.updatedAt.toISOString() ?? null, ...(demoContext?{demoContext}:{}) })).digest("hex");
   }
 
   private async readLastSaleSnapshot(companyId: string, routeIds: ReadonlySet<string>, targetDate: string, activeVersion: string): Promise<Map<string, number> | null> {
@@ -281,7 +288,9 @@ export class SmartLoadingService {
   async getManagementLoadingRisk(user: AuthenticatedUser, query: SmartLoadingManagementLoadingRiskQuery): Promise<SmartLoadingManagementLoadingRiskResponse> {
     if (!user.companyId || !["COMPANY_ADMIN", "MANAGER", "SUPERVISOR"].includes(user.roleCode)) throw new ForbiddenException();
     const targetDate = isoDay(parseTargetDate(query.targetDate).getTime());
-    const salesTo = query.salesTo ?? isoDay(companyCalendarDate().getTime());
+    const demoDay = isDemoDailyCompany(user.companyId) ? await this.rieFacade.demoReadDay(user.companyId) : null;
+    const requestedSalesTo = query.salesTo ?? isoDay(companyCalendarDate().getTime());
+    const salesTo = demoDay && requestedSalesTo > demoDay ? demoDay : requestedSalesTo;
     const salesFrom = query.salesFrom ?? isoDay(Date.UTC(new Date(`${salesTo}T00:00:00.000Z`).getUTCFullYear(), new Date(`${salesTo}T00:00:00.000Z`).getUTCMonth() - MONTHS_LOOKBACK, new Date(`${salesTo}T00:00:00.000Z`).getUTCDate()));
     if (salesFrom > salesTo) throw new BadRequestException("salesFrom must not be after salesTo.");
     const personLevel = user.roleCode === "COMPANY_ADMIN" ? "manager" : user.roleCode === "MANAGER" ? "supervisor" : "sales_rep";
@@ -289,8 +298,14 @@ export class SmartLoadingService {
     // same scope remains enforced by RIE when a snapshot is first computed.
     const [allowedRouteIds, sourceVersion] = await Promise.all([
       this.hierarchyResolver.resolveAllowedRouteIds(user.companyId, { roleCode: user.roleCode, email: user.email }),
-      this.managementLoadingRiskSnapshotVersion(user.companyId),
+      this.managementLoadingRiskSnapshotVersion(user.companyId,this.demoCacheContext(user,demoDay)),
     ]);
+    const compute = async () => {
+      const result = await this.rieFacade.queryManagementLoadingRisk({ ...this.rieContext(user), targetDate, salesFrom, salesTo, personLevel });
+      return { targetDate, salesFrom, salesTo, affectedPersonCount: result.people.length, people: result.people };
+    };
+    // Reuse the existing persistent cache. Demo sourceVersion also binds the
+    // Saudi read day, policy revision and authenticated access context.
     const { value: response, hit } = await this.managementCache.getOrCompute({
       companyId: user.companyId,
       targetDate,
@@ -299,10 +314,7 @@ export class SmartLoadingService {
       personLevel,
       routeIds: allowedRouteIds === null ? null : [...allowedRouteIds],
       sourceVersion,
-    }, async () => {
-      const result = await this.rieFacade.queryManagementLoadingRisk({ ...this.rieContext(user), targetDate, salesFrom, salesTo, personLevel });
-      return { targetDate, salesFrom, salesTo, affectedPersonCount: result.people.length, people: result.people };
-    });
+    }, compute);
     this.logger.log(JSON.stringify({
       event: "smart_loading_management_loading_risk_snapshot",
       currentUser: user.email,
@@ -458,6 +470,7 @@ export class SmartLoadingService {
       }
     };
     const ctx = this.rieContext(user);
+    const demoDay = isDemoDailyCompany(ctx.companyId) ? await this.rieFacade.demoReadDay(ctx.companyId) : null;
     const logManagementSessionStageFailure = (stage: string, error: unknown): void => {
       const databaseError = error as { code?: unknown; message?: unknown };
       this.logger.error(JSON.stringify({
@@ -571,7 +584,7 @@ export class SmartLoadingService {
     const vehicleStockAvailable = activeVehicleRouteIds.size > 0;
     const invoiceJoin = [{ entityName: "Invoices", alias: "invoice", on: { left: { field: "InvoiceNo" }, rightField: "InvoiceNo" } }] as const;
     const salesScope = { route: { values: [...activeVehicleRouteIds], source: "invoice" }, routeFallback: { primary: { field: "RouteID" }, fallback: { field: "RouteID", source: "invoice" }, values: [...activeVehicleRouteIds] }, date: { field: "InvoiceDate", source: "invoice", to: targetDateIso } } as const;
-    const lastSaleSnapshotVersion = !useManagementStaleGrain && activeVehicleRouteIds.size ? await this.lastSaleSnapshotVersion(ctx.companyId) : null;
+    const lastSaleSnapshotVersion = !useManagementStaleGrain && activeVehicleRouteIds.size ? await this.lastSaleSnapshotVersion(ctx.companyId,this.demoCacheContext(user,demoDay)) : null;
     const snapshotLastSaleMsByProduct = lastSaleSnapshotVersion
       ? await this.readLastSaleSnapshot(ctx.companyId, activeVehicleRouteIds, targetDateIso, lastSaleSnapshotVersion)
       : null;
@@ -614,7 +627,11 @@ export class SmartLoadingService {
       if (priorityQuantity > 0 && priorityCustomerCount > 0) prioritySalesByProduct.set(productCode, { customerCount: priorityCustomerCount, totalQuantity: priorityQuantity });
     }
     const sessionProductCodes = [...new Set([...vehicleStockByProduct.keys(), ...windowQtyByProduct.keys()])];
-    const productRows = sessionProductCodes.length ? await timed("products-lookup", () => bounded("products-lookup", { companyId: ctx.companyId, entityName: "Products", projection: [{ field: "ProductCode", as: "productCode" }, { field: "ProductName", as: "productName" }, { field: "Category", as: "category" }], scope: { product: { values: sessionProductCodes } } })) : [];
+    const productRows = sessionProductCodes.length ? await timed("products-lookup", async () => {
+      const result = await this.rieFacade.querySmartLoadingProductMetadata({ companyId: ctx.companyId, productCodes: sessionProductCodes });
+      if (result.page.hasMore) throw new BadRequestException("Smart Loading scoped result exceeds its safe response limit.");
+      return result.records;
+    }) : [];
     const productMeta = new Map(productRows.map((row) => { const code = normalizedProductCode(row.productCode); return [code, { code: String(row.productCode ?? code).trim() || code, name: String(row.productName ?? row.productCode ?? code).trim() || code, category: row.category ? String(row.category).trim() || null : null }] as const; }).filter(([code]) => !!code));
     const managementVehicleProducts: SmartLoadingManagementVehicleProduct[] | null = useManagementStaleGrain
       ? managementVehicleRows.map((row) => {
@@ -818,6 +835,8 @@ export class SmartLoadingService {
   }
 
   async recalculate(user: AuthenticatedUser, input: SmartLoadingRecalculateInput): Promise<SmartLoadingRecalculateResult> {
+    const demoDay = isDemoDailyCompany(user.companyId!) ? await this.rieFacade.demoReadDay(user.companyId!) : null;
+    if(demoDay && input.toDate > demoDay) input={...input,toDate:demoDay};
     const from = parseAsOfDate(input.fromDate); const to = parseAsOfDate(input.toDate);
     if (from > to) throw new BadRequestException("toDate must be on or after fromDate.");
     const ctx = this.rieContext(user);
@@ -842,10 +861,12 @@ export class SmartLoadingService {
     if (input.customerCodes.some((code) => !allowed.has(code))) throw new ForbiddenException("One or more customers are outside your scope.");
     const [salesRows, latestInventoryRows] = await Promise.all([
       this.rieFacade.querySmartLoadingNetQuantities({ ...ctx, routeIds: selectedRepRouteIds, customerCodes: requestedCustomerCodes, fromDate: input.fromDate, toDate: input.toDate }),
-      bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }] })),
+      demoDay ? Promise.resolve([]) : bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [], aggregates: [{ op: "maxText", field: "ReportDate", as: "latestReportDate" }] })),
     ]);
     const latestReportDate = String(latestInventoryRows[0]?.latestReportDate ?? "").trim().slice(0, 10);
-    const inventoryRows = latestReportDate
+    const inventoryRows = demoDay
+      ? await bounded(withSelectedRepScope({ ...ctx, entityName:"Van Inventory", projection:[{field:"ProductCode",as:"productCode"}],latestPer:{partitionBy:{field:"RouteID"},orderBy:{field:"ReportDate"}},groupBy:[{field:"ProductCode"}],aggregates:[{op:"sum",field:"Quantity",as:"quantity"}]}))
+      : latestReportDate
       ? await bounded(withSelectedRepScope({ ...ctx, entityName: "Van Inventory", projection: [{ field: "ProductCode", as: "productCode" }], groupBy: [{ field: "ProductCode" }], aggregates: [{ op: "sum", field: "Quantity", as: "quantity" }], scope: { date: { field: "ReportDate", values: [latestReportDate] } } }))
       : [];
     const net = new Map<string, number>();

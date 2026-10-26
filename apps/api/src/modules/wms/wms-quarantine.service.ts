@@ -1,13 +1,14 @@
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import { productCategory } from "../../common/queries/product-category";
 import { Prisma } from "@field-sales-os/database";
 import { wmsPageSchema, wmsQuarantineHoldSchema, wmsQuarantineStepSchema, type WmsQuarantineCandidate, type WmsQuarantineDocument, type WmsQuarantineEvent } from "@field-sales-os/schemas";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { PrismaService } from "../../common/prisma";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { WmsService } from "./wms.service";
-const fields = Prisma.sql`d.id,d.reference,d.reason,d.status,d.version,d.batch_id AS "batchId",p.code AS "productCode",p.name AS "productName",
- b.code AS "batchCode",p.base_unit AS "baseUnit",d.input_unit AS unit,d.conversion_factor AS "conversionFactor",
+const fields = Prisma.sql`d.id,d.reference,d.reason,d.status,d.version,d.batch_id AS "batchId",p.code AS "productCode",p.name AS "productName",${productCategory(Prisma.sql`p.company_id`,Prisma.sql`p.code`)} AS category,
+ b.code AS "batchCode",p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",d.input_unit AS unit,d.conversion_factor AS "conversionFactor",
  round(d.held_base/d.conversion_factor,6)::text AS held,round(d.released_base/d.conversion_factor,6)::text AS released,
  round(d.written_off_base/d.conversion_factor,6)::text AS "writtenOff",round((d.held_base-d.released_base-d.written_off_base)/d.conversion_factor,6)::text AS remaining,
  round(s.physical/d.conversion_factor,6)::text AS physical,round(s.available/d.conversion_factor,6)::text AS available,
@@ -19,7 +20,7 @@ export class WmsQuarantineService {
  constructor(private readonly prisma: PrismaService, private readonly access: WmsService, private readonly audit: AuditLogService) {}
  private page(input: unknown) { const r=wmsPageSchema.safeParse(input);if(!r.success)throw new BadRequestException("WMS_INVALID_INPUT");return r.data; }
  async candidates(user:AuthenticatedUser,w:string,input:unknown){const {page,search}=this.page(input),c=await this.access.authorizedRead(user,w);
-  const rows=await this.prisma.$queryRaw<WmsQuarantineCandidate[]>(Prisma.sql`SELECT s.batch_id AS "batchId",p.code AS "productCode",p.name AS "productName",b.code AS "batchCode",p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",s.physical::text,s.available::text,s.quarantined::text,(s.physical-s.reserved-s.quarantined)::text AS holdable
+  const rows=await this.prisma.$queryRaw<WmsQuarantineCandidate[]>(Prisma.sql`SELECT s.batch_id AS "batchId",p.code AS "productCode",p.name AS "productName",${productCategory(Prisma.sql`p.company_id`,Prisma.sql`p.code`)} AS category,b.code AS "batchCode",p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",s.physical::text,s.available::text,s.quarantined::text,(s.physical-s.reserved-s.quarantined)::text AS holdable
    FROM wms_inventory_state s JOIN wms_batches b ON b.company_id=${c} AND b.id=s.batch_id JOIN wms_products p ON p.company_id=${c} AND p.id=b.product_id
    WHERE s.company_id=${c} AND s.warehouse_id=${w} AND s.physical>s.reserved+s.quarantined
    AND position(lower(${search}) in lower(p.code||' '||p.name||' '||b.code))>0 ORDER BY p.code,b.code,s.batch_id LIMIT 21 OFFSET ${(page-1)*20}`);
