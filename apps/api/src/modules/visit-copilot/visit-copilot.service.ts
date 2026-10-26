@@ -1412,6 +1412,9 @@ export class VisitCopilotService {
   // ------------------------------------------------------------------
 
   private readonly ROLE_LABEL_AR: Record<AuthenticatedUser["roleCode"], string> = {
+    WAREHOUSE_KEEPER: "أمين مستودع",
+    ACCOUNTANT: "محاسب",
+    PROCUREMENT: "مسؤول المشتريات",
     SUPER_ADMIN: "مدير المنصة",
     COMPANY_ADMIN: "مدير الشركة",
     MANAGER: "مدير",
@@ -1689,6 +1692,9 @@ export class VisitCopilotService {
     const ctx = this.rieContext(user);
 
     const scopeLabelByRole: Record<AuthenticatedUser["roleCode"], string> = {
+      WAREHOUSE_KEEPER: "المستودعات المصرح بها",
+      ACCOUNTANT: "حسابات الشركة المصرح بها",
+      PROCUREMENT: "مشتريات المستودعات المصرح بها",
       SUPER_ADMIN: "المنصة بالكامل",
       COMPANY_ADMIN: "الشركة بالكامل",
       MANAGER: "المديرين والمشرفين والمندوبين التابعين لك",

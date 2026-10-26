@@ -1,6 +1,6 @@
 import { strict as assert } from "node:assert";
 import test from "node:test";
-import { ConflictException } from "@nestjs/common";
+import { ConflictException, ForbiddenException } from "@nestjs/common";
 import { Prisma } from "@field-sales-os/database";
 import * as argon2 from "argon2";
 import { createUserSchema } from "@field-sales-os/schemas";
@@ -52,4 +52,16 @@ test("maps a duplicate company-user email to conflict", async () => {
     () => service.createUser("company-1", { email: "user@example.test", fullName: "User Name", roleCode: "SALES_REP", password: "Valid1!Pass" }, "actor-1"),
     (error: unknown) => error instanceof ConflictException,
   );
+});
+
+test("company administration cannot create or assume a specialist role or edit its account", async () => {
+  let writes = 0;
+  const prisma = { user: {
+    findUnique: async ({ where }: { where: { id: string } }) => where.id === "actor" ? { role: { code: "COMPANY_ADMIN" } } : { id: "target", companyId: "company-1", role: { code: "ACCOUNTANT" } },
+    create: async () => { writes++; }, update: async () => { writes++; },
+  } };
+  const service = new UsersService(prisma as never, {} as never, {} as never, {} as never, {} as never);
+  for (const roleCode of ["WAREHOUSE_KEEPER", "ACCOUNTANT", "PROCUREMENT"] as const) await assert.rejects(service.createUser("company-1", { email: "demo@example.invalid", fullName: "Demo Role", roleCode, password: "Valid1!Pass" }, "actor"), ForbiddenException);
+  await assert.rejects(service.updateUser("target", "company-1", { roleCode: "COMPANY_ADMIN" }, "actor"), ForbiddenException);
+  assert.equal(writes, 0);
 });

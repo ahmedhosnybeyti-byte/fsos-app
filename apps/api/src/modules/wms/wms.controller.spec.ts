@@ -8,7 +8,8 @@ import { WmsOperationsController } from "./wms-operations.controller";
 import { SfaAccessGuard } from "../../common/guards/sfa-access.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { CompanyScreenAccessGuard } from "../../common/guards/company-screen-access.guard";
-import { wmsPermissions,wmsUser } from "./wms-test-fixture";
+import { wmsPermissions,wmsUser as legacyWmsUser } from "./wms-test-fixture";
+const wmsUser = (companyId="a",userId="actor-a",roleCode="WAREHOUSE_KEEPER") => legacyWmsUser(companyId,userId,roleCode);
 
 const operations={coverage:[],warehouses:[],summary:[],products:[],batches:[],movements:[],createProduct:["wms.products.manage"],updateProduct:["wms.products.manage"],createBatch:["wms.products.manage"],opening:["wms.opening.post"],reverse:["wms.opening.post"],accessUsers:["wms.access.manage"],access:["wms.access.manage"]};
 test("every WMS API fails closed for missing mode, company screen, operation permission or tenant",async()=>{
@@ -21,6 +22,7 @@ test("every WMS API fails closed for missing mode, company screen, operation per
       else await assert.rejects(guard.canActivate(context(wmsUser())),ForbiddenException);
     }
     const guard=new SfaAccessGuard(reflector,{companyOperatingSettings:{findUnique:async()=>({operatingMode:"SFA"})}} as never);
+    await assert.rejects(guard.canActivate(context(wmsUser("a","actor-a","COMPANY_ADMIN"))),ForbiddenException);
     for(const missing of ["sfa.access","wms.read",...extra])await assert.rejects(guard.canActivate(context({...wmsUser(),permissions:wmsPermissions.filter(p=>p!==missing)})),ForbiddenException);
     await assert.rejects(guard.canActivate(context({...wmsUser(),companyId:null,roleCode:"SUPER_ADMIN"})),ForbiddenException);
     for(const state of [undefined,"HIDDEN","LOCKED","ENABLED"]){

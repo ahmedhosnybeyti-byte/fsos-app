@@ -1,7 +1,7 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from "@nestjs/common";
 import { PATH_METADATA } from "@nestjs/common/constants";
 import { Reflector } from "@nestjs/core";
-import { SFA_ACCESS_PERMISSION, supportsSfaOperations } from "@field-sales-os/schemas";
+import { SFA_ACCESS_PERMISSION, supportsSfaOperations, permitsOperationalRole, hasOperationalPermissions } from "@field-sales-os/schemas";
 import { SFA_PERMISSIONS_KEY } from "../decorators/requires-sfa.decorator";
 import { PrismaService } from "../prisma";
 import type { AuthenticatedUser } from "../types/authenticated-user";
@@ -24,9 +24,11 @@ export class SfaAccessGuard implements CanActivate {
       }
       return true; // Legacy Excel/RIE requests perform no new database lookup.
     }
-    const user = context.switchToHttp().getRequest<{ user?: AuthenticatedUser }>().user;
+    const request = context.switchToHttp().getRequest<{ user?: AuthenticatedUser; method?: string; originalUrl?: string; url?: string }>();
+    const user = request.user;
     if (!user?.companyId || !Array.isArray(user.permissions)
-      || ![SFA_ACCESS_PERMISSION, ...required].every((permission) => user.permissions.includes(permission))) {
+      || !permitsOperationalRole(user.roleCode, required, {method:request.method,path:request.originalUrl??request.url})
+      || !hasOperationalPermissions(user.roleCode, user.permissions, [SFA_ACCESS_PERMISSION, ...required])) {
       throw new ForbiddenException("SFA company context and explicit permissions are required");
     }
     // Deliberately no SUPER_ADMIN bypass and no trust in body/JWT mode flags.

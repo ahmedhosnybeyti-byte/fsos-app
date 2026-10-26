@@ -19,6 +19,46 @@ class SfaTestController {
 @Controller("sfa/forgotten")
 class UnmarkedSfaController { read() {} }
 
+@Controller("sfa/specialist")
+class SpecialistController {
+  @RequiresSfa("wms.read") warehouse() {}
+  @RequiresSfa("accounting.read") accounting() {}
+  @RequiresSfa("procurement.read", "wms.read") procurement() {}
+}
+
+test("specialist duties cannot be crossed by forged broad grants; company administration stays separate", async () => {
+  for (const [role, own] of [["WAREHOUSE_KEEPER", "warehouse"], ["ACCOUNTANT", "accounting"], ["PROCUREMENT", "procurement"]] as const) {
+    for (const method of ["warehouse", "accounting", "procurement"] as const) {
+      const f = fixture("FULL_ERP");
+      const request = context(SpecialistController, SpecialistController.prototype[method], { ...actor, roleCode: role, permissions: ["sfa.access", "wms.read", "accounting.read", "procurement.read"] });
+      // Procurement needs the existing warehouse picker, but no accounting.
+      if (method === own || (role === "PROCUREMENT" && method === "warehouse")) assert.equal(await f.guard.canActivate(request), true);
+      else { await assert.rejects(f.guard.canActivate(request), ForbiddenException); assert.equal(f.calls.length, 0); }
+    }
+  }
+  for (const method of ["warehouse", "accounting", "procurement"] as const) {
+    const f = fixture("FULL_ERP");
+    await assert.rejects(f.guard.canActivate(context(SpecialistController, SpecialistController.prototype[method], { ...actor, roleCode: "COMPANY_ADMIN", permissions: ["sfa.access", "wms.read", "accounting.read", "procurement.read"] })), ForbiddenException);
+    assert.equal(f.calls.length, 0);
+  }
+});
+
+test("company admin read-only capability admits exact GET views and denies all mutations and unrelated reads", async () => {
+  const user = {...actor,roleCode:"COMPANY_ADMIN",permissions:["sfa.access","erp.admin.read","wms.products.manage","accounting.journal.post"]};
+  for (const [method,path,allowed] of [
+    ["GET","/api/v1/sfa/wms/warehouses",true],
+    ["GET","/api/v1/sfa/wms/warehouses/wa/products?page=1",true],
+    ["POST","/api/v1/sfa/wms/warehouses/wa/products",false],
+    ["PATCH","/api/v1/sfa/wms/warehouses/wa/products/p",false],
+    ["DELETE","/api/v1/sfa/wms/warehouses/wa/products/p",false],
+    ["GET","/api/v1/sfa/wms/warehouses/wa/movements",false],
+    ["GET","/api/v1/sfa/wms/warehouses/wa/access",false],
+  ] as const) {
+    const f=fixture("FULL_ERP"),request={getClass:()=>SpecialistController,getHandler:()=>SpecialistController.prototype.warehouse,switchToHttp:()=>({getRequest:()=>({user,method,originalUrl:path})})} as never;
+    if(allowed)assert.equal(await f.guard.canActivate(request),true);else {await assert.rejects(f.guard.canActivate(request),ForbiddenException);assert.equal(f.calls.length,0);}
+  }
+});
+
 const actor = { companyId: "company-a", roleCode: "SALES_REP", permissions: ["sfa.access", "sfa.test.read"] };
 const context = (controller: Function, handler: Function, user: unknown = actor) => ({
   getClass: () => controller, getHandler: () => handler,

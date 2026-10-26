@@ -7,7 +7,7 @@ import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { WmsOperationsService } from "./wms-operations.service";
 
 @Controller("sfa/wms/warehouses/:warehouse")
-@Auth("COMPANY_ADMIN","MANAGER","SUPERVISOR","SALES_REP")
+@Auth("COMPANY_ADMIN","MANAGER","SUPERVISOR","SALES_REP","WAREHOUSE_KEEPER","PROCUREMENT")
 @RequiresSfa("wms.read")
 @CompanyScreen("warehouse-core")
 export class WmsOperationsController {

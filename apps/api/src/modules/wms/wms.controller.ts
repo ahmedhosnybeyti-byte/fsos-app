@@ -8,7 +8,7 @@ import { WmsService } from "./wms.service";
 import { WmsCoverageService } from "./wms-coverage.service";
 
 @Controller("sfa/wms")
-@Auth("COMPANY_ADMIN","MANAGER","SUPERVISOR","SALES_REP")
+@Auth("COMPANY_ADMIN","MANAGER","SUPERVISOR","SALES_REP","WAREHOUSE_KEEPER","PROCUREMENT")
 @RequiresSfa("wms.read")
 @CompanyScreen("warehouse-core")
 export class WmsController {

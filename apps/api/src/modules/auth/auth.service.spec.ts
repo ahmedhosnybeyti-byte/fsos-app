@@ -140,6 +140,13 @@ test("resets a target password, forces a change, revokes sessions, and audits th
   assert.deepEqual(revoked, [USER_ID]);
   assert.deepEqual(audits.map((entry) => entry.action), ["identity.password_reset", "identity.session_revoked"]);
 });
+test("company administrators cannot take over a specialist account by resetting its password", async () => {
+  let writes = 0;
+  const service = new AuthService({} as never, { findById: async () => ({ id: USER_ID, companyId: COMPANY_ID, role: { code: "ACCOUNTANT" } }), setPasswordHash: async () => { writes++; } } as never, {} as never, { revokeAllForUser: async () => { writes++; } } as never, {} as never);
+  await assert.rejects(service.resetPassword(USER_ID, { userId: "company-admin", companyId: COMPANY_ID, roleCode: "COMPANY_ADMIN", permissions: [], email: "admin@example.invalid", orgUnitId: null, mustChangePassword: false }), ForbiddenException);
+  assert.equal(writes, 0);
+});
+
 test("prevents a company admin from resetting a user in another company", async (t) => {
   const passwordUpdates: unknown[] = [];
   const revoked: string[] = [];
