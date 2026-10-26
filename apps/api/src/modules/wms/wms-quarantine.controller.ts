@@ -6,7 +6,7 @@ import { CurrentUser } from "../../common/decorators/current-user.decorator";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { WmsQuarantineService } from "./wms-quarantine.service";
 @Controller("sfa/wms/warehouses/:warehouse/quarantines")
-@Auth("COMPANY_ADMIN","MANAGER","SUPERVISOR","SALES_REP","WAREHOUSE_KEEPER","PROCUREMENT")
+@Auth("COMPANY_ADMIN","MANAGER","SUPERVISOR","SALES_REP","WAREHOUSE_KEEPER","WAREHOUSE_MANAGER","PROCUREMENT")
 @RequiresSfa("wms.read")
 @CompanyScreen("warehouse-core")
 export class WmsQuarantineController {

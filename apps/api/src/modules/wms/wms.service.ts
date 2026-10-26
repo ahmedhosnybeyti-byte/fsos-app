@@ -189,7 +189,7 @@ export class WmsService {
   }
   private accessAdmin(user: AuthenticatedUser) {
     this.company(user,"wms.access.manage");
-    if (user.roleCode!=="COMPANY_ADMIN") throw new ForbiddenException("Company administrator required");
+    if (!["COMPANY_ADMIN","WAREHOUSE_MANAGER"].includes(user.roleCode)) throw new ForbiddenException("Warehouse access administration required");
   }
   async accessUsers(user: AuthenticatedUser, warehouse: string, input: unknown) {
     this.accessAdmin(user); const {page:n,search}=parse(wmsPageSchema,input); const company=await this.scope(this.prisma,user,warehouse);

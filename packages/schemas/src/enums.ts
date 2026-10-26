@@ -12,6 +12,7 @@ export const ROLE_CODES = [
   "SUPERVISOR",
   "SALES_REP",
   "WAREHOUSE_KEEPER",
+  "WAREHOUSE_MANAGER",
   "ACCOUNTANT",
   "PROCUREMENT",
 ] as const;
