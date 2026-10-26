@@ -1,5 +1,14 @@
 # Murshidak Resolved Engineering Issues
 
+## Warehouse bootstrap and count approval separation — 2026-10-26
+
+- Symptom: the first warehouse manager could not be assigned through the scoped SFA APIs; one person could create and approve the same count document.
+- Root cause: no narrow platform bootstrap operation existed, and count documents recorded both actors without enforcing that they differ.
+- Fix: platform-only, persisted-identity-checked, tenant/warehouse-scoped first assignment with transactional audit; a PostgreSQL NOT VALID check prevents self-approval on new writes without altering legacy documents. No owner exception is introduced.
+- Commit: isolated gap-closure commit on `codex/warehouse-permission-gap-closure`, parent `f894647235121afb65783ab5c84b5d050933eeed`; no push/deploy or operating database migration.
+- Evidence: 21 focused cases plus API/schema types passed. SQL fixtures verify direct-function denial, stock/audit rollback, separate actor posting, initial-assignment replay and tenant/identity denial.
+- Prevention: never grant a platform-wide SFA bypass to solve bootstrap, never infer owner exceptions from team size, and never treat audit events as delivered notifications. Keeper notifications remain OPEN because no existing delivery system/responsible-keeper definition is available; native concurrent capacity remains unverified.
+
 ## WMS coverage credibility — company demand is not warehouse attribution
 
 - Symptom: company-demand ratios appeared with critical/safe warehouse badges despite absent historical warehouse provenance.
