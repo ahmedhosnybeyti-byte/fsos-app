@@ -35,7 +35,7 @@ export class WmsOperationsService {
       if (receiptMetadata) {
         // Share the engine's replay lock. Replaying an older create/edit must
         // never overwrite metadata belonging to a later successful edit.
-        await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${company}||':command:'||${idempotencyKey},0))`);
+        await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${company}||':command:'||${idempotencyKey},0))::text`);
         const replay = await tx.$queryRaw<{exists:boolean}[]>(Prisma.sql`SELECT EXISTS(SELECT 1 FROM wms_commands WHERE company_id=${company} AND idempotency_key=${idempotencyKey}) AS exists`);
         metadataReplay = replay[0]!.exists;
         if ("supplierId" in payload && payload.supplierId) {
