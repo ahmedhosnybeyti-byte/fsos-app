@@ -1,2 +1,2 @@
 import {ProcurementScreen} from "@/components/procurement/procurement-screen";
-export default function Page({searchParams}:{searchParams:{warehouseId?:string;search?:string}}){return <ProcurementScreen initialWarehouse={searchParams.warehouseId} initialSearch={searchParams.search}/>;}
+export default async function Page({searchParams}:{searchParams:Promise<{warehouseId?:string;search?:string}>}){const params=await searchParams;return <ProcurementScreen initialWarehouse={params.warehouseId} initialSearch={params.search}/>;}

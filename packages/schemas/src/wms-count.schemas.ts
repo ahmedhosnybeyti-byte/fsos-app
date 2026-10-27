@@ -12,7 +12,7 @@ export const wmsCountDraftSchema = z.object({
 export const wmsCountStepSchema = z.object({ version: z.number().int().positive(), reason, idempotencyKey: z.string().uuid() }).strict();
 export type WmsCountDraftInput = z.infer<typeof wmsCountDraftSchema>;
 export type WmsCountStepInput = z.infer<typeof wmsCountStepSchema>;
-export interface WmsCountCandidate {
+export interface WmsCountCandidate {category?:string|null;
   batchId: string; productCode: string; productName: string; batchCode: string; expiryDate: string|null;
   baseUnit: string; piecesPerCarton: number; physical: string; physicalCartons: string|null;
   reserved: string; quarantined: string; revision: string;
@@ -21,8 +21,8 @@ export interface WmsCountSummary {
   id: string; reference: string; reason: string; status: "DRAFT"|"POSTED"|"CANCELLED"; version: number;
   createdAt: string; approvedAt: string|null; approvedBy: string|null;
 }
-export interface WmsCountLine {
-  id: string; batchId: string; productCode: string; productName: string; batchCode: string; baseUnit: string;
+export interface WmsCountLine {category?:string|null;
+  id: string; batchId: string; productCode: string; productName: string; batchCode: string; baseUnit: string; piecesPerCarton?: number;
   unit: "BASE"|"CARTON"; conversionFactor: number; systemQuantity: string; countedQuantity: string;
   difference: string; differenceBase: string; shortage: string; surplus: string; movementId: string|null;
 }

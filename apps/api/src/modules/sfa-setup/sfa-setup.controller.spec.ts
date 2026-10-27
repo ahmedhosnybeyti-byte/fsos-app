@@ -12,7 +12,7 @@ test("all setup routes require company-admin role, explicit permissions and curr
   const roleGuard = new RolesGuard(reflector, { record: async () => undefined } as never);
   const modes: Record<string, string> = { a: "SFA", b: "ANALYSIS_ONLY" };
   const sfaGuard = new SfaAccessGuard(reflector, { companyOperatingSettings: { findUnique: async ({ where }: any) => modes[where.companyId] ? { operatingMode: modes[where.companyId] } : null } } as never);
-  for (const method of ["checklist", "list", "get", "create", "update"] as const) {
+  for (const method of ["checklist", "list", "get", "create", "update", "setBranches"] as const) {
     for (const [roleCode, companyId, permissions, expected] of [
       ["COMPANY_ADMIN", "a", ["sfa.access", "company.manage"], true],
       ["COMPANY_ADMIN", "b", ["sfa.access", "company.manage"], false],
@@ -40,7 +40,7 @@ test("controller derives tenant and actor from authentication only", async () =>
 
 test("every direct setup API requires the existing company screen gate even when SFA is enabled", async () => {
   const reflector = new Reflector();
-  for (const method of ["checklist", "list", "get", "create", "update"] as const) {
+  for (const method of ["checklist", "list", "get", "create", "update", "setBranches"] as const) {
     for (const state of [undefined, "HIDDEN", "LOCKED", "ENABLED"]) {
       const queries: unknown[] = [];
       const guard = new CompanyScreenAccessGuard(reflector, { company: { findUnique: async (query: unknown) => {

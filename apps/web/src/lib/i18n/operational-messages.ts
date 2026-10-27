@@ -1,6 +1,13 @@
 // WMS and accounting messages consumed by the existing TranslationProvider.
 export const operationalMessages = {
   "ar": {
+    "productGroups.uncategorized": "غير مصنف",
+    "productGroups.pageCount": "عدد الأصناف المعروضة في هذه الصفحة",
+    "productGroups.expandAll": "فتح الكل",
+    "productGroups.collapseAll": "طي الكل",
+    "wms.uncategorized": "أصناف غير مصنفة",
+    "wms.quantities_in_cartons": "الأرصدة بالكرتونة",
+    "wms.quantity_cartons": "الكمية بالكرتونة",
     "coverage.title": "ذكاء المخزون والإنذار المبكر",
     "coverage.scope": "أيام التغطية الحالية تقديرية بناءً على طلب الشركة ضمن صلاحياتك، وليست توقع نفاد مؤكدًا لهذا المستودع. الرصيد المتاح يخص المستودع المحدد، لكن لا يوجد ربط تاريخي موثوق ينسب الطلب إليه.",
     "coverage.policy": "متوسط 30 يومًا مكتملًا، شامل الأيام بلا بيع والكمية المجانية. يتطلب 3 أيام بيع تمتد 14 يومًا مع بيع خلال آخر 7 أيام. لا تدخل تحميلات السيارات أو التحويلات أو المرتجعات في هذا المعدل، ولا يُفترض توزيع المبيعات على المستودعات.",
@@ -90,6 +97,9 @@ export const operationalMessages = {
     "wms.physically_counted": "المعدود فعليًا",
     "wms.count_unit": "وحدة العدّ",
     "wms.carton": "كرتونة",
+    "wms.loadingPack": "عبوة",
+    "wms.loadingQuantityDraftHint": "عدّل الكرتونات والعبوات حسب المتاح. تُحفظ الكميات عند تأكيد التجهيز الفعلي بعد الحجز.",
+    "wms.loadingQuantityInvalid": "أدخل كرتونات وعبوات صحيحة دون كسور، وبحد أقصى الكمية المحجوزة.",
     "wms.system_stock": "رصيد النظام",
     "wms.difference": "الفرق",
     "wms.matched": "مطابق",
@@ -691,6 +701,13 @@ export const operationalMessages = {
     "accounting.balance": "الرصيد"
   },
   "en": {
+    "productGroups.uncategorized": "Uncategorized",
+    "productGroups.pageCount": "Products shown on this page",
+    "productGroups.expandAll": "Expand all",
+    "productGroups.collapseAll": "Collapse all",
+    "wms.uncategorized": "Uncategorized products",
+    "wms.quantities_in_cartons": "Balances in cartons",
+    "wms.quantity_cartons": "Quantity in cartons",
     "coverage.title": "Stock coverage intelligence & early warning",
     "coverage.scope": "Current days of cover are estimates based on company demand within your permissions, not a confirmed stockout forecast for this warehouse. Available stock belongs to the selected warehouse, but no reliable historical link attributes demand to it.",
     "coverage.policy": "30 completed calendar days including zero-sale days and free quantities. Requires 3 sale dates spanning 14 days and a sale within 7 days. Van loads, transfers and returns are excluded; sales are never assumed to be distributed across warehouses.",
@@ -780,6 +797,9 @@ export const operationalMessages = {
     "wms.physically_counted": "Physically counted",
     "wms.count_unit": "Count unit",
     "wms.carton": "Carton",
+    "wms.loadingPack": "Pack",
+    "wms.loadingQuantityDraftHint": "Adjust cartons and packs to available stock. Quantities are saved when actual picking is confirmed after reservation.",
+    "wms.loadingQuantityInvalid": "Enter whole cartons and packs without fractions, up to the reserved quantity.",
     "wms.system_stock": "System stock",
     "wms.difference": "Difference",
     "wms.matched": "Matched",

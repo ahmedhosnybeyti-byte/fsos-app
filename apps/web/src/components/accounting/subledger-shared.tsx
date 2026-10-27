@@ -2,7 +2,7 @@
 import type { TranslationKey } from "@/lib/i18n/dictionaries";
 import { useId } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { getCompanyFeatureAccessState } from "@field-sales-os/schemas";
+import { getCompanyFeatureAccessState,hasOperationalPermissions } from "@field-sales-os/schemas";
 import { useAuth } from "@/hooks/use-auth";
 import { useTranslation } from "@/components/translation-provider";
 import { sfaSetupApi } from "@/lib/api/sfa-setup";
@@ -14,9 +14,9 @@ export type Text = (key: TranslationKey, params?: Record<string, string | number
 export const queryOptions={retry:false,refetchOnWindowFocus:false,refetchOnReconnect:false} as const;
 export function useAccountingAccess(permission:string){
  const {user,isLoading}=useAuth();const {locale,t}=useTranslation();const company=user?.companyId;
- const allowed=!!company&&["COMPANY_ADMIN","MANAGER"].includes(user?.role.code??"")&&getCompanyFeatureAccessState(user?.featureAccess,"accounting-core")==="ENABLED"&&["sfa.access","accounting.read",permission].every(p=>user?.permissions?.includes(p));
+ const allowed=!!company&&(["MANAGER","ACCOUNTANT"].includes(user?.role.code??"")||(user?.role.code==="COMPANY_ADMIN"&&permission==="accounting.treasury.read"))&&getCompanyFeatureAccessState(user?.featureAccess,"accounting-core")==="ENABLED"&&hasOperationalPermissions(user?.role.code??"",user?.permissions,["sfa.access","accounting.read",permission]);
  const mode=useQuery({queryKey:["sfa-mode",company],queryFn:sfaSetupApi.mode,enabled:allowed,...queryOptions});
- return {user,company,t,mode,ready:allowed&&mode.data?.operatingMode==="FULL_ERP",loading:isLoading||(allowed&&mode.isPending),can:(p:string)=>!!user?.permissions?.includes(p)};
+ return {user,company,t,mode,ready:allowed&&mode.data?.operatingMode==="FULL_ERP",loading:isLoading||(allowed&&mode.isPending),can:(p:string)=>user?.role.code!=="COMPANY_ADMIN"&&!!user?.permissions?.includes(p)};
 }
 export function AccessState({loading,error,retry,t}:{loading:boolean;error?:unknown;retry:()=>void;t:Text}){return loading?<Skeleton className="h-64"/>:<Card><CardHeader><CardTitle>{t("accounting.accounting")}</CardTitle></CardHeader><CardContent>{error?<ErrorBox error={error} retry={retry} t={t}/>:<p className="text-sm text-muted-foreground">{t("accounting.this_screen_requires_full_erp_accounting_activation_and_explicit_permissions")}</p>}</CardContent></Card>;}
 export function Field({label,...props}:React.ComponentProps<typeof Input>&{label:string}){const id=useId();return <label className="block space-y-1 text-sm" htmlFor={id}><span>{label}</span><Input id={id} {...props}/></label>;}

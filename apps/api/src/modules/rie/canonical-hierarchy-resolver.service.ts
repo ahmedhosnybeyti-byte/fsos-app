@@ -5,6 +5,8 @@ import { ENTITY_DATASET_TYPE_MAP } from "./excel-entity-provider.mapping";
 import { observeHierarchyResolution } from "../../common/observability/rie-observability";
 import { RieRequestPlannerService } from "./rie-request-planner.service";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
+import { Prisma } from "@field-sales-os/database";
+import { demoCanonicalReadGuard, demoDailyCacheTag, isDemoDailyCompany } from "./demo-daily-read-policy";
 
 // Routes and Employees are read from the active PostgreSQL RIE
 // materialization.  Excel is ingestion-only: hierarchy resolution must never
@@ -258,7 +260,12 @@ export class CanonicalHierarchyResolverService {
     const mapping = ENTITY_DATASET_TYPE_MAP[entityName];
     if (!mapping) return null;
 
-    const allFiles = await this.postgres("hierarchy.files", () => this.prisma.file.findMany({ where: { companyId, isActive: true, status: "READY", datasetTypeConfirmed: true }, select: { id: true, datasetType: true }, orderBy: { createdAt: "desc" } }));
+    // Routes and Employees resolve together on a cold hierarchy. Share their
+    // identical metadata read inside this request, never across tenant/request
+    // boundaries. Persistent entity-cache freshness and all scopes stay intact.
+    const allFiles = await this.executionCoordinator.singleFlight("hierarchy.files", companyId, () =>
+      this.postgres("hierarchy.files", () => this.prisma.file.findMany({ where: { companyId, isActive: true, status: "READY", datasetTypeConfirmed: true }, select: { id: true, datasetType: true }, orderBy: { createdAt: "desc" } })),
+    );
 
     const matchingFiles = allFiles.filter((f: { datasetType: string }) => f.datasetType === mapping.datasetType);
     if (matchingFiles.length === 0) return null;
@@ -267,10 +274,13 @@ export class CanonicalHierarchyResolverService {
     const signature = matchingFiles
       .map((f: { id: string }) => f.id)
       .sort()
-      .join(",");
+      .join(",") + demoDailyCacheTag(companyId);
 
     const cached = this.rawCache.get(cacheKey);
-    if (cached && cached.signature === signature) {
+    // Employee HireDate is mode-sensitive. Do not retain a filtered employee
+    // set across a mode change; the request coordinator still deduplicates
+    // hierarchy resolution. Undated Routes keep their existing raw cache.
+    if (!(isDemoDailyCompany(companyId) && entityName === "Employees") && cached && cached.signature === signature) {
       this.rawCache.delete(cacheKey);
       this.rawCache.set(cacheKey, cached);
       return cached.snapshot;
@@ -304,7 +314,13 @@ export class CanonicalHierarchyResolverService {
   private async readMaterializedEntityRows(entityName: string, companyId: string, fileIds: string[]): Promise<{ rows: DatasetRow[]; headers: string[] } | null> {
     const versions = await this.postgres("hierarchy.datasetVersions", () => this.prisma.rieDatasetVersion.findMany({ where: { companyId, entityName, isActive: true, sourceFileId: { in: fileIds } }, select: { id: true, sourceFileId: true } }));
     if (versions.length !== fileIds.length) return null;
-    const sourceRows = await this.postgres("hierarchy.currentRows", () => this.prisma.rieCanonicalEntityRow.findMany({
+    const sourceRows = isDemoDailyCompany(companyId)
+      ? await this.postgres("hierarchy.currentRows",()=>this.prisma.$queryRaw<{data:unknown}[]>(Prisma.sql`
+        SELECT r.data FROM rie_canonical_entity_rows r JOIN files f ON f.id=r.source_file_id
+        WHERE r.company_id=${companyId} AND r.entity_name=${entityName} AND r.source_file_id IN (${Prisma.join(fileIds)})
+          ${demoCanonicalReadGuard(companyId,entityName,"r")}
+        ORDER BY f.created_at DESC,r.created_at ASC,r.id ASC`))
+      : await this.postgres("hierarchy.currentRows", () => this.prisma.rieCanonicalEntityRow.findMany({
       where: { companyId, entityName, sourceFileId: { in: fileIds } },
       select: { data: true },
       orderBy: [{ sourceFile: { createdAt: "desc" } }, { createdAt: "asc" }, { id: "asc" }],

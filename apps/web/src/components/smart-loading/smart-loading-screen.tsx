@@ -36,6 +36,8 @@ import {
 import { cn, formatQuantity, formatQuantityInput } from "@/lib/utils";
 import { categoryAddedProductCount, formatLostOpportunityQuantity, formatLostOpportunityQuantityInput, getEffectiveAccordionState, groupLostOpportunities, lostOpportunityProductId, normalizeOpportunityQuantity, type LostOpportunityCategoryGroup, type LostOpportunityProductGroup, type OpportunityQuantityDrafts } from "./lost-opportunity-groups";
 import { calculateSuggestedLoading } from "./suggested-loading";
+import { minimumLoadingTargetDate, resolveLoadingTargetDate } from "./loading-target-date";
+import { LoadingRecipientPanel } from "../wms/loading-recipient-panel";
 import { ManagementLoadingRisk } from "./management-loading-risk";
 import { ManagementLostOpportunitiesCard, ManagementLostOpportunitiesTable } from "./management-lost-opportunities";
 import { ManagementStaleInventory } from "./management-stale-inventory";
@@ -157,7 +159,13 @@ export function SmartLoadingScreen({
   const activeRouteKey = useRef<string | null>(null);
   const [appliedInputs, setAppliedInputs] = useState<SmartLoadingRecalculateInput | null>(null);
   const restoredWork = useRef<Partial<{ selectionVersion: 1; targetDate: string; fromDate: string; toDate: string; visitsPerWeek: 1 | 2 | 6; selectedCustomerCodes: string[]; exceptionalCustomers: SmartLoadingRouteCustomer[]; confirmedOrders: Record<string, number>; appliedInputs: SmartLoadingRecalculateInput; hasUnappliedChanges: boolean; isSessionClosed: boolean; staleDaysThreshold: number }> | null>(null);
-  useEffect(() => { try { restoredWork.current = JSON.parse(window.sessionStorage.getItem("smart-loading-work") ?? "null") as typeof restoredWork.current; if (restoredWork.current?.targetDate && restoredWork.current.targetDate !== targetDate) onTargetDateChange(restoredWork.current.targetDate); } catch { restoredWork.current = null; hydrated.current = true; } }, []);
+  useEffect(() => { try {
+    restoredWork.current = JSON.parse(window.sessionStorage.getItem("smart-loading-work") ?? "null") as typeof restoredWork.current;
+    const restoredTargetDate = resolveLoadingTargetDate(restoredWork.current?.targetDate);
+    // Expired work belongs to a different route/day; do not replay its edits.
+    if (restoredWork.current?.targetDate !== restoredTargetDate) restoredWork.current = null;
+    if (restoredTargetDate !== targetDate) onTargetDateChange(restoredTargetDate);
+  } catch { restoredWork.current = null; hydrated.current = true; } }, []);
   useEffect(() => { window.sessionStorage.setItem("smart-loading-work", JSON.stringify({ selectionVersion: 1, targetDate, fromDate, toDate, visitsPerWeek, selectedCustomerCodes: [...selectedCustomerCodes], exceptionalCustomers, confirmedOrders: confirmedOrdersByProduct, appliedInputs, hasUnappliedChanges, isSessionClosed, staleDaysThreshold })); }, [appliedInputs, confirmedOrdersByProduct, exceptionalCustomers, fromDate, hasUnappliedChanges, selectedCustomerCodes, staleDaysThreshold, toDate, visitsPerWeek]);
   const recalculateSequence = useRef(0);
   const recalculateAbort = useRef<AbortController | null>(null);
@@ -358,9 +366,7 @@ export function SmartLoadingScreen({
   }
 
   function changeTargetDate(value: string) {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    const minimumDate = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+    const minimumDate = minimumLoadingTargetDate();
     if (!value || value < minimumDate) return;
     if (hasLocalChanges && !window.confirm(label("smartLoading.changeDateConfirm", "Changing the loading day will discard local changes. Continue?"))) return;
     if (hasLocalChanges) restoreOriginalList();
@@ -692,7 +698,7 @@ export function SmartLoadingScreen({
           <div className="mt-3 flex flex-wrap items-end gap-2">
             <div className="grid gap-1">
               <Label htmlFor="smart-loading-target-date" className="text-xs">{label("smartLoading.targetDate", "تجهيز تحميل ليوم")}</Label>
-              <Input id="smart-loading-target-date" className="h-9 w-48" type="date" min={new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)} value={targetDate} onChange={(event) => changeTargetDate(event.target.value)} />
+              <Input id="smart-loading-target-date" className="h-9 w-48" type="date" min={minimumLoadingTargetDate()} value={targetDate} onChange={(event) => changeTargetDate(event.target.value)} />
             </div>
             {session.route ? <p className="pb-2 text-xs text-muted-foreground">{label("smartLoading.routeCustomers", "عملاء خط السير")}: {formatQuantity(session.route.customerCount, locale)}</p> : <p className="pb-2 text-xs text-amber-700">{label("smartLoading.noRouteForDate", "لا يوجد خط سير محدد لهذا اليوم.")}</p>}
           </div>
@@ -710,7 +716,7 @@ export function SmartLoadingScreen({
             {t("smartLoading.lostOpportunities")} ({formatQuantity(lostOpportunityGroups.reduce((sum, category) => sum + category.products.reduce((productSum, product) => productSum + product.customers.length, 0), 0), locale)})
           </Button>
           <div className="relative">
-            <Button variant="outline" onClick={() => void (isSessionClosed ? exportExcel() : closeAndExport())}><Download className="h-4 w-4" />{isSessionClosed ? (locale === "ar" ? "تنزيل ملف المستودع" : "Download warehouse file") : (locale === "ar" ? "إغلاق وتصدير التحميل" : "Close and export loading")}</Button>
+            <SmartLoadingWarehouseBridge targetDate={targetDate} proposals={rows.map(row=>({productCode:row.product.productCode,productName:row.product.productName,category:row.product.category,quantity:row.suggested}))} onExport={isSessionClosed ? exportExcel : closeAndExport} disabled={recalculationLoading} requestDisabled={hasUnappliedChanges || !!recalculationError}/>
             {isSessionClosed && <Button variant="outline" onClick={startNewSession}>{locale === "ar" ? "بدء جلسة تحميل جديدة" : "Start new loading session"}</Button>}
             {!isSessionClosed && <Button className="sr-only" onClick={() => setExportOpen((open) => !open)}>
               <Download className="h-4 w-4" />
@@ -741,7 +747,7 @@ export function SmartLoadingScreen({
         </div>
       </header>
 
-      {!managementView && <SmartLoadingWarehouseBridge targetDate={targetDate} proposals={rows.map(row=>({productCode:row.product.productCode,productName:row.product.productName,quantity:row.suggested}))}/>}
+      {!managementView&&<LoadingRecipientPanel/>}
 
       {managementView && (
         <div className="-my-2 grid items-stretch gap-3 md:grid-cols-3">

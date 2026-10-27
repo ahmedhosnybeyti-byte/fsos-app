@@ -1,15 +1,23 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "node:crypto";
+import { productCategory } from "../../common/queries/product-category";
 import { Prisma } from "@field-sales-os/database";
-import { WMS_OPERATION_PERMISSIONS,wmsCommandSchema,wmsInputSchema,wmsPageSchema,wmsFefoSchema,wmsPolicySchema,type WmsDocumentSummary,type WmsReceipt,type WmsLoad,type WmsWorkflowEvent,type WmsFefoResult,type WmsCustomerPolicy } from "@field-sales-os/schemas";
+import { WMS_OPERATION_PERMISSIONS,wmsCommandSchema,wmsInputSchema,wmsPageSchema,wmsFefoSchema,wmsPolicySchema,smartLoadingWarehouseRequestSchema,wmsProposalInputSchema,wmsLoadInputSchema,type WmsOperation,type WmsDocumentSummary,type WmsReceipt,type WmsLoad,type WmsWorkflowEvent,type WmsFefoResult,type WmsCustomerPolicy } from "@field-sales-os/schemas";
 import type { ZodType,ZodTypeDef } from "zod";
 import { PrismaService } from "../../common/prisma";
 import type { AuthenticatedUser } from "../../common/types/authenticated-user";
 import { AuditLogService } from "../audit-log/audit-log.service";
 import { WmsService } from "./wms.service";
+import {loadingRecipientDecisionSchema,type LoadingRecipientSummary,type LoadingRecipientDetail} from "@field-sales-os/schemas";
 function parse<T>(schema:ZodType<T,ZodTypeDef,unknown>,input:unknown):T {const r=schema.safeParse(input);if(!r.success)throw new BadRequestException({message:"WMS_INVALID_INPUT",errors:r.error.flatten()});return r.data;}
 const time=(column:Prisma.Sql)=>Prisma.sql`to_char(${column},'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
 const pageSize=20;
+
+function cartonSuggestionToWholeBase(quantity:string,piecesPerCarton:number):string {
+  const [whole,fraction=""]=quantity.split(".");
+  const scale=10n**BigInt(fraction.length);
+  return ((BigInt(`${whole}${fraction}`)*BigInt(piecesPerCarton)+scale-1n)/scale).toString();
+}
 
 @Injectable()
 export class WmsOperationsService {
@@ -21,11 +29,102 @@ export class WmsOperationsService {
     if(!data.success)throw new BadRequestException({message:"WMS_INVALID_INPUT",errors:data.error.flatten()});
     const {idempotencyKey,...payload}=data.data;
     return this.access.authorizedTransaction(user,warehouse,WMS_OPERATION_PERMISSIONS[operation],async(tx,company)=>{
+      const result=await this.executeCommand(tx,user,company,warehouse,operation,payload,idempotencyKey);
+      if(operation!=="load.dispatch")return result;
+      // Fulfil recorded recipient consent within this transaction; no login
+      // impersonation or warehouse permission is granted to the recipient.
+      const mode=await tx.$queryRaw<{mode:string}[]>(Prisma.sql`SELECT operating_mode AS mode FROM company_operating_settings WHERE company_id=${company}`);
+      if(mode[0]?.mode!=="FULL_ERP")return result;
+      const acceptKey=`recipient-handover:${idempotencyKey}`;
+      const replay=await tx.$queryRaw<{result:typeof result}[]>(Prisma.sql`SELECT result FROM wms_commands WHERE company_id=${company} AND idempotency_key=${acceptKey}`);
+      if(replay.length)return replay[0]!.result;
+      const proof=await tx.$queryRaw<{recipientId:string;version:number;eventId:string}[]>(Prisma.sql`SELECT d.recipient_id AS "recipientId",d.version,e.id AS "eventId"
+        FROM wms_load_requests d JOIN wms_operation_events e ON e.company_id=d.company_id AND e.warehouse_id=d.warehouse_id AND e.load_id=d.id
+        AND e.operation='load.confirm' AND e.actor_id=d.recipient_id AND e.recipient_version=d.version-1
+        AND e.prepared_fingerprint=wms_prepared_fingerprint(d.company_id,d.id)
+        WHERE d.company_id=${company} AND d.warehouse_id=${warehouse} AND d.id=${result.id} AND d.status='IN_TRANSIT' LIMIT 1`);
+      if(!proof.length)throw new BadRequestException("WMS_RECIPIENT_CONFIRMATION_REQUIRED");
+      const consent=proof[0]!;
+      return this.executeCommand(tx,{...user,userId:consent.recipientId},company,warehouse,"load.accept",{
+        id:result.id,version:consent.version,note:`Custody from recorded recipient consent ${consent.eventId}`,
+      },acceptKey,{source:"recorded-recipient-consent",consentEventId:consent.eventId,dispatchedBy:user.userId});
+    });
+  }
+  async smartLoadingRequest(user:AuthenticatedUser,warehouse:string,input:unknown) {
+    const data=parse(smartLoadingWarehouseRequestSchema,input);
+    // Both immutable proposal and REQUESTED load use the existing WMS engine,
+    // audit and replay ledger in one transaction. No reserve/dispatch command.
+    return this.access.authorizedLoadingRequestTransaction(user,warehouse,async(tx,company)=>{
+      const factors=await tx.$queryRaw<{code:string;piecesPerCarton:number}[]>(Prisma.sql`SELECT p.code,p.pieces_per_carton AS "piecesPerCarton"
+        FROM wms_products p JOIN jsonb_array_elements(${JSON.stringify(data.lines)}::jsonb) input ON p.code=upper(input->>'productCode')
+        WHERE p.company_id=${company} AND p.is_active FOR SHARE`);
+      const byCode=new Map(factors.map(row=>[row.code.toUpperCase(),row.piecesPerCarton]));
+      const lines=data.lines.map(line=>{
+        const factor=byCode.get(line.productCode.toUpperCase());
+        if(!factor)throw new BadRequestException("WMS_PRODUCT_MAPPING_REQUIRED");
+        return {productCode:line.productCode,quantity:cartonSuggestionToWholeBase(line.quantity,factor),unit:"BASE" as const};
+      });
+      const {idempotencyKey:proposalKey,...proposal}=wmsProposalInputSchema.parse({targetDate:data.targetDate,lines,note:"Confirmed Smart Loading proposal",idempotencyKey:data.proposalKey});
+      const snapshot=await this.executeCommand(tx,user,company,warehouse,"proposal.create",proposal,proposalKey);
+      const {idempotencyKey,...load}=wmsLoadInputSchema.parse({reference:`SL-${data.idempotencyKey}`,source:"SMART_LOADING",proposalId:snapshot.id,
+        recipientId:user.userId,targetDate:data.targetDate,lines,note:"Confirmed Smart Loading proposal",idempotencyKey:data.idempotencyKey});
+      return this.executeCommand(tx,user,company,warehouse,"load.create",load,idempotencyKey);
+    });
+  }
+  private async executeCommand(tx:Prisma.TransactionClient,user:AuthenticatedUser,company:string,warehouse:string,operation:WmsOperation,payload:unknown,idempotencyKey:string,metadata?:Prisma.InputJsonValue) {
       const rows=await tx.$queryRaw<{result:{id:string;status:string;eventId:string}}[]>(Prisma.sql`SELECT wms_core_execute(${company},${warehouse},${operation},${JSON.stringify(payload)}::jsonb,${user.userId},${idempotencyKey},${randomUUID()}) AS result`);
       const result=rows[0]!.result;
       const entityType=operation.startsWith("receipt.")?"WmsReceipt":operation.startsWith("supplier.")||operation.startsWith("rep-return.")?"WmsReturn":operation.startsWith("quality.")?"WmsBatchQuality":operation==="proposal.create"?"WmsLoadingProposal":"WmsLoadRequest";
-      await this.audit.record({companyId:company,userId:user.userId,action:`wms.${operation}`,entityType,entityId:result.id,eventKey:`wms:${company}:${result.eventId}`},tx);
+      await this.audit.record({companyId:company,userId:user.userId,action:`wms.${operation}`,entityType,entityId:result.id,eventKey:`wms:${company}:${result.eventId}`,metadata},tx);
       return result;
+  }
+
+  async recipientLoads(user:AuthenticatedUser,input:unknown){
+    const {page:n}=parse(wmsPageSchema,input),company=await this.access.loadingRequestCompany(this.prisma,user);
+    const rows=await this.prisma.$queryRaw<LoadingRecipientSummary[]>(Prisma.sql`SELECT ${this.recipientFields()}
+      FROM wms_load_requests d JOIN warehouses w ON w.company_id=d.company_id AND w.id=d.warehouse_id
+      WHERE d.company_id=${company} AND d.recipient_id=${user.userId}
+      ORDER BY d.created_at DESC,d.id DESC LIMIT ${pageSize+1} OFFSET ${(n-1)*pageSize}`);
+    return {items:rows.slice(0,pageSize),page:n,hasMore:rows.length>pageSize};
+  }
+  private recipientFields(){return Prisma.sql`d.id,d.warehouse_id AS "warehouseId",w.name AS "warehouseName",d.reference,d.status,d.version,
+    to_char(d.target_date,'YYYY-MM-DD') AS "targetDate",d.discrepancy_reason AS "discrepancyReason",
+    EXISTS(SELECT 1 FROM wms_operation_events e WHERE e.company_id=d.company_id AND e.load_id=d.id
+      AND e.operation='load.confirm' AND e.actor_id=d.recipient_id AND e.recipient_version=d.version
+      AND e.prepared_fingerprint=wms_prepared_fingerprint(d.company_id,d.id)) AS "recipientConfirmed"`;}
+  async recipientLoad(user:AuthenticatedUser,warehouse:string,id:string):Promise<LoadingRecipientDetail>{
+    const company=await this.access.loadingRequestCompany(this.prisma,user);
+    const rows=await this.prisma.$queryRaw<LoadingRecipientSummary[]>(Prisma.sql`SELECT ${this.recipientFields()}
+      FROM wms_load_requests d JOIN warehouses w ON w.company_id=d.company_id AND w.id=d.warehouse_id
+      WHERE d.company_id=${company} AND d.warehouse_id=${warehouse} AND d.id=${id} AND d.recipient_id=${user.userId}`);
+    if(!rows.length)throw new NotFoundException("Recipient loading request not found");
+    const lines=await this.prisma.$queryRaw<LoadingRecipientDetail["lines"]>(Prisma.sql`WITH prepared AS (
+      SELECT product_id,sum(picked_quantity) quantity FROM wms_allocations WHERE company_id=${company} AND load_id=${id} GROUP BY product_id
+    ) SELECT l.id,p.code AS "productCode",p.name AS "productName",${productCategory(Prisma.sql`p.company_id`,Prisma.sql`p.code`)} AS category,p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",l.input_unit AS unit,l.requested_base::text AS "requestedQuantity",
+      COALESCE(a.quantity,0)::text AS "preparedQuantity",
+      GREATEST(l.requested_base-COALESCE(a.quantity,0),0)::text AS "shortageQuantity"
+      FROM wms_load_lines l JOIN wms_products p ON p.company_id=l.company_id AND p.id=l.product_id
+      LEFT JOIN prepared a ON a.product_id=l.product_id WHERE l.company_id=${company} AND l.load_id=${id} ORDER BY l.id`);
+    return {...rows[0]!,lines};
+  }
+  async recipientDecision(user:AuthenticatedUser,warehouse:string,id:string,input:unknown){
+    const data=parse(loadingRecipientDecisionSchema,input);
+    return this.access.authorizedLoadingRequestTransaction(user,warehouse,async(tx,company)=>{
+      const rows=await tx.$queryRaw<{result:{id:string;status:string;version:number;eventId:string;recipientConfirmed:boolean}}[]>(Prisma.sql`
+        SELECT wms_confirm_prepared(${company},${warehouse},${id},${data.version}::integer,${data.confirmed},${data.note},${user.userId},${data.idempotencyKey},${randomUUID()}) AS result`);
+      const result=rows[0]!.result;
+      await this.audit.record({companyId:company,userId:user.userId,action:data.confirmed?"wms.load.confirm":"wms.load.decline",entityType:"WmsLoadRequest",entityId:id,eventKey:`wms:${company}:${result.eventId}`},tx);
+      if(!data.confirmed)return result;
+      // The approved, recipient-owned document is the authority for this
+      // whole-load handover. Reuse the stock engine and its replay ledger;
+      // never grant the rep the general warehouse dispatch permission.
+      await this.executeCommand(tx,user,company,warehouse,"load.dispatch",{
+        id,version:result.version,note:data.note,
+      },`recipient-dispatch:${data.idempotencyKey}`,{source:"recipient-decision",consentEventId:result.eventId});
+      const accepted=await this.executeCommand(tx,user,company,warehouse,"load.accept",{
+        id,version:result.version+1,note:data.note,
+      },`recipient-accept:${data.idempotencyKey}`,{source:"recipient-decision",consentEventId:result.eventId});
+      return {...accepted,version:result.version+2,recipientConfirmed:true};
     });
   }
   async list(user:AuthenticatedUser,warehouse:string,kind:"receipt"|"load",input:unknown) {
@@ -50,7 +149,7 @@ export class WmsOperationsService {
       ${time(Prisma.sql`d.created_at`)} AS "createdAt",EXISTS(SELECT 1 FROM wms_receipt_lines l WHERE l.company_id=${c} AND l.receipt_id=d.id AND l.accepted_quantity+l.quarantined_quantity+l.rejected_quantity<l.expected_quantity) AS partial
       FROM wms_receipts d WHERE d.company_id=${c} AND d.warehouse_id=${warehouse} AND d.id=${id}`);
     if(!rows[0])throw new NotFoundException("Receipt not found");
-    const lines=await this.prisma.$queryRaw<WmsReceipt["lines"]>(Prisma.sql`SELECT l.id,l.product_id AS "productId",p.name AS "productName",p.sensitive_handling AS "sensitiveHandling",p.handling_notes AS "handlingNotes",p.code AS "productCode",p.base_unit AS "baseUnit",p.track_batches AS "trackBatches",p.track_expiry AS "trackExpiry",p.pieces_per_carton AS "piecesPerCarton",l.batch_id AS "batchId",COALESCE(b.code,l.batch_code) AS "batchCode",
+    const lines=await this.prisma.$queryRaw<WmsReceipt["lines"]>(Prisma.sql`SELECT l.id,l.product_id AS "productId",p.name AS "productName",${productCategory(Prisma.sql`p.company_id`,Prisma.sql`p.code`)} AS category,p.sensitive_handling AS "sensitiveHandling",p.handling_notes AS "handlingNotes",p.code AS "productCode",p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",p.track_batches AS "trackBatches",p.track_expiry AS "trackExpiry",p.pieces_per_carton AS "piecesPerCarton",l.batch_id AS "batchId",COALESCE(b.code,l.batch_code) AS "batchCode",
       to_char(COALESCE(b.production_date,l.production_date),'YYYY-MM-DD') AS "productionDate",to_char(COALESCE(b.expiry_date,l.expiry_date),'YYYY-MM-DD') AS "expiryDate",
       l.input_unit AS unit,l.conversion_factor AS "conversionFactor",l.expected_quantity::text AS "expectedQuantity",l.accepted_quantity::text AS "acceptedQuantity",l.quarantined_quantity::text AS "quarantinedQuantity",l.rejected_quantity::text AS "rejectedQuantity",l.rejection_reason AS "rejectionReason"
       FROM wms_receipt_lines l JOIN wms_products p ON p.company_id=${c} AND p.id=l.product_id LEFT JOIN wms_batches b ON b.company_id=${c} AND b.id=l.batch_id
@@ -60,14 +159,17 @@ export class WmsOperationsService {
   async load(user:AuthenticatedUser,warehouse:string,id:string):Promise<WmsLoad> {
     const c=await this.access.authorizedRead(user,warehouse);
     const rows=await this.prisma.$queryRaw<Omit<WmsLoad,"lines"|"allocations"|"events">[]>(Prisma.sql`SELECT d.id,d.reference,d.status,d.version,d.source,d.recipient_id AS "recipientId",u.full_name AS "recipientName",d.customer_code AS "customerCode",
-      to_char(d.target_date,'YYYY-MM-DD') AS "targetDate",d.discrepancy_reason AS "discrepancyReason",wms_min_days(${c},d.customer_code) AS "minShelfLifeDays",${time(Prisma.sql`d.created_at`)} AS "createdAt"
+      to_char(d.target_date,'YYYY-MM-DD') AS "targetDate",d.discrepancy_reason AS "discrepancyReason",wms_min_days(${c},d.customer_code) AS "minShelfLifeDays",${time(Prisma.sql`d.created_at`)} AS "createdAt",
+      EXISTS(SELECT 1 FROM company_operating_settings WHERE company_id=d.company_id AND operating_mode='FULL_ERP') AS "requiresRecipientConsent",
+      EXISTS(SELECT 1 FROM wms_operation_events e WHERE e.company_id=d.company_id AND e.load_id=d.id AND e.operation='load.confirm'
+        AND e.actor_id=d.recipient_id AND e.recipient_version=d.version AND e.prepared_fingerprint=wms_prepared_fingerprint(d.company_id,d.id)) AS "recipientConfirmed"
       FROM wms_load_requests d JOIN users u ON u.company_id=${c} AND u.id=d.recipient_id WHERE d.company_id=${c} AND d.warehouse_id=${warehouse} AND d.id=${id}`);
     if(!rows[0])throw new NotFoundException("Loading request not found");
-    const lines=await this.prisma.$queryRaw<WmsLoad["lines"]>(Prisma.sql`SELECT l.id,l.product_id AS "productId",p.name AS "productName",p.sensitive_handling AS "sensitiveHandling",p.handling_notes AS "handlingNotes",p.base_unit AS "baseUnit",l.input_quantity::text AS quantity,l.input_unit AS unit,
-      l.conversion_factor AS "conversionFactor",l.requested_base::text AS "requestedBase" FROM wms_load_lines l JOIN wms_products p ON p.company_id=${c} AND p.id=l.product_id WHERE l.company_id=${c} AND l.load_id=${id} ORDER BY l.id LIMIT 20`);
-    const allocations=await this.prisma.$queryRaw<WmsLoad["allocations"]>(Prisma.sql`SELECT a.id,p.name AS "productName",p.sensitive_handling AS "sensitiveHandling",p.handling_notes AS "handlingNotes",p.base_unit AS "baseUnit",a.batch_id AS "batchId",b.code AS "batchCode",to_char(b.expiry_date,'YYYY-MM-DD') AS "expiryDate",
+    const lines=await this.prisma.$queryRaw<WmsLoad["lines"]>(Prisma.sql`SELECT l.id,l.product_id AS "productId",p.name AS "productName",${productCategory(Prisma.sql`p.company_id`,Prisma.sql`p.code`)} AS category,p.sensitive_handling AS "sensitiveHandling",p.handling_notes AS "handlingNotes",p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",l.input_quantity::text AS quantity,l.input_unit AS unit,
+      l.conversion_factor AS "conversionFactor",l.requested_base::text AS "requestedBase" FROM wms_load_lines l JOIN wms_products p ON p.company_id=${c} AND p.id=l.product_id WHERE l.company_id=${c} AND l.load_id=${id} ORDER BY l.id`);
+    const allocations=await this.prisma.$queryRaw<WmsLoad["allocations"]>(Prisma.sql`SELECT a.id,a.product_id AS "productId",p.name AS "productName",${productCategory(Prisma.sql`p.company_id`,Prisma.sql`p.code`)} AS category,p.sensitive_handling AS "sensitiveHandling",p.handling_notes AS "handlingNotes",p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",a.batch_id AS "batchId",b.code AS "batchCode",to_char(b.expiry_date,'YYYY-MM-DD') AS "expiryDate",
       a.allocated_quantity::text AS "allocatedQuantity",a.reserved_quantity::text AS "reservedQuantity",a.picked_quantity::text AS "pickedQuantity",a.dispatched_quantity::text AS "dispatchedQuantity",a.reason,a.policy_min_days AS "policyMinDays"
-      FROM wms_allocations a JOIN wms_products p ON p.company_id=${c} AND p.id=a.product_id JOIN wms_batches b ON b.company_id=${c} AND b.id=a.batch_id WHERE a.company_id=${c} AND a.load_id=${id} ORDER BY a.product_id,b.expiry_date NULLS LAST,b.id LIMIT 100`);
+      FROM wms_allocations a JOIN wms_products p ON p.company_id=${c} AND p.id=a.product_id JOIN wms_batches b ON b.company_id=${c} AND b.id=a.batch_id WHERE a.company_id=${c} AND a.load_id=${id} ORDER BY a.product_id,b.expiry_date NULLS LAST,b.id`);
     return {...rows[0],lines,allocations,events:await this.events(c,id,"load")};
   }
   async fefo(user:AuthenticatedUser,warehouse:string,input:unknown) {

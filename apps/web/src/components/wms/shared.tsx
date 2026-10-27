@@ -7,6 +7,16 @@ import { Label } from "@/components/ui/label";
 import { Select,SelectContent,SelectItem,SelectTrigger,SelectValue } from "@/components/ui/select";
 import { ApiError } from "@/lib/api-client";
 import { useTranslation } from "@/components/translation-provider";
+import { cartonAndPieceParts,cartonQuantity } from "./carton-quantity";
+export function stockQuantity(value:string,factor:number|undefined,baseUnit:string,t:Text) {
+  if(baseUnit!=="PIECE")return "—";
+  const parts=cartonAndPieceParts(value,factor);
+  if(!parts)return `${cartonQuantity(value,factor)} ${t("wms.carton")}`;
+  if(parts.cartons==="0")return `${parts.pieces} ${t("wms.piece")}`;
+  if(parts.pieces==="0")return `${parts.cartons} ${t("wms.carton")}`;
+  return `${parts.cartons} ${t("wms.carton")} + ${parts.pieces} ${t("wms.piece")}`;
+}
+export function inputQuantity(value:string,unit:string,factor:number|undefined,baseUnit:string,t:Text) { return unit==="CARTON"?`${quantity(value)} ${t("wms.carton")}`:stockQuantity(value,factor,baseUnit,t); }
 export type Text = (key: TranslationKey, params?: Record<string, string | number>) => string;
 export function unitLabel(unit:string,t:Text) { return unit==="PIECE"?t("wms.piece"):unit==="KG"?t("wms.kg"):t("wms.litre"); }
 export function quantity(value:string = "0") { return value.replace(/(\.\d*?[1-9])0+$|\.0+$/, "$1"); }

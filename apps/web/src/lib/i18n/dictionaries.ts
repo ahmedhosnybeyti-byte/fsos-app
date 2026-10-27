@@ -1,4 +1,7 @@
 import { operationalMessages, type OperationalTranslationKey } from "./operational-messages";
+import { supplierMessages, type SupplierTranslationKey } from "./supplier-messages";
+import { visitExecutionMessages, type VisitExecutionTranslationKey } from "./visit-execution-messages";
+import { salesDraftMessages, type SalesDraftTranslationKey } from "./sales-draft-messages";
 // Lightweight in-house i18n — deliberately not a library (no new npm
 // dependency to install; see components/theme-provider.tsx for the same
 // reasoning applied to the light/dark toggle). Flat, dot-namespaced keys so
@@ -20,12 +23,16 @@ type NewCustomerTranslationKey = "title" | "subtitle" | "pointTab" | "territoryT
 export const LOCALES: Locale[] = ["ar", "en"];
 
 export type TranslationKey =
+  | `warehouseLayout.${"home" | "receiving" | "loading" | "transfers" | "inventory" | "ledger" | "sections" | "attention" | "attentionHint" | "managerHint" | "keeperHint" | "overviewHint" | "transfersPending" | "receivingHint" | "loadingHint" | "inventoryHint" | "ledgerHint" | "open"}`
+  | SalesDraftTranslationKey
+  | VisitExecutionTranslationKey
   | "common.close"
   | "shell.openMenu"
   | "shell.noSearchResults"
   | "shell.toggleTheme"
   | "shell.toggleThemeHint"
   | OperationalTranslationKey
+  | SupplierTranslationKey
   | `newCustomer.${NewCustomerTranslationKey}`
   | "nav.overview"
   | "nav.assistant"
@@ -1364,6 +1371,38 @@ export type TranslationKey =
   | "smartLoading.productsWithStaleSales"
   | "smartLoading.productsWithoutLastSaleDate"
   | "smartLoading.exportExcel"
+  | "smartLoading.exportLoadingOrderExcel"
+  | "smartLoading.sendToWarehouse"
+  | "smartLoading.requestAccessRequired"
+  | "smartLoading.applyBeforeSending"
+  | "smartLoading.requestOnlyDescription"
+  | "smartLoading.recipientLoadingTitle"
+  | "smartLoading.refreshRecipientLoads"
+  | "smartLoading.recipientLoadingDescription"
+  | "smartLoading.showLoadingQuantities"
+  | "smartLoading.sendWholeLoadingDescription"
+  | "smartLoading.finalLoadingReview"
+  | "smartLoading.productsAndQuantities"
+  | "smartLoading.selectedWarehouse"
+  | "smartLoading.chooseWarehouseToContinue"
+  | "smartLoading.reviewAndDecide"
+  | "smartLoading.noRecipientLoads"
+  | "smartLoading.readyForRecipientReview"
+  | "smartLoading.reviewPreparedLoading"
+  | "smartLoading.requestedLoadingQuantity"
+  | "smartLoading.preparedLoadingQuantity"
+  | "smartLoading.loadingShortage"
+  | "smartLoading.confirmPreparedQuantities"
+  | "smartLoading.approvePreparedQuantities"
+  | "smartLoading.preparedDeclineReason"
+  | "smartLoading.returnForPreparation"
+  | "smartLoading.recipientConsentNote"
+  | "smartLoading.recipientConsentRecorded"
+  | "smartLoading.awaitingRecipientConsent"
+  | "smartLoading.custodyAfterConsent"
+  | "smartLoading.noAssignedWarehouse"
+  | "smartLoading.confirmCartonUnits"
+  | "smartLoading.requestFieldsRequired"
   | "smartLoading.exportOds"
   | "smartLoading.exportColumnProduct"
   | "smartLoading.exportColumnCategory"
@@ -1548,12 +1587,33 @@ export type TranslationKey =
 
 export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
   ar: {
+    "warehouseLayout.home": "الرئيسية",
+    "warehouseLayout.receiving": "الموردون والاستلام",
+    "warehouseLayout.loading": "تحميل المناديب",
+    "warehouseLayout.transfers": "التحويلات",
+    "warehouseLayout.inventory": "المخزون والرقابة",
+    "warehouseLayout.ledger": "سجل الحركات",
+    "warehouseLayout.sections": "أقسام المستودع",
+    "warehouseLayout.attention": "المتابعة والإجراءات",
+    "warehouseLayout.attentionHint": "افتح القسم لمراجعة المستندات وحالاتها وتنفيذ الإجراءات المصرح بها لحسابك.",
+    "warehouseLayout.managerHint": "متابعة المستودع ومراجعة المستندات والاعتمادات وفق صلاحيات حسابك.",
+    "warehouseLayout.keeperHint": "عملياتك اليومية من الاستلام والتجهيز والصرف والمرتجعات ضمن نطاق مستودعك.",
+    "warehouseLayout.overviewHint": "أرصدة المستودع وحالات المخزون ضمن النطاق المصرح لحسابك.",
+    "warehouseLayout.transfersPending": "التحويلات بين المستودعات غير متاحة في الواجهة الحالية.",
+    "warehouseLayout.receivingHint": "مستندات الاستلام والمراجعة والاعتماد.",
+    "warehouseLayout.loadingHint": "طلبات التحميل والحجز والتجهيز والصرف.",
+    "warehouseLayout.inventoryHint": "الأرصدة والصلاحية والحجر والجرد والمرتجعات.",
+    "warehouseLayout.ledgerHint": "الحركات المرحلة ومراجعها وأسبابها.",
+    "warehouseLayout.open": "فتح القسم",
     "common.close": "إغلاق",
     "shell.openMenu": "فتح القائمة",
     "shell.noSearchResults": "لا توجد نتائج مطابقة",
     "shell.toggleTheme": "تبديل المظهر",
     "shell.toggleThemeHint": "تبديل المظهر (فاتح / غامق)",
     ...operationalMessages.ar,
+    ...supplierMessages.ar,
+    ...visitExecutionMessages.ar,
+    ...salesDraftMessages.ar,
     "routePlanning.splitComplete": "تم التقسيم — ", "routePlanning.customersAcross": " عميل على ", "routePlanning.groups": " مجموعات", "routePlanning.splitError": "تعذر إتمام التقسيم", "routePlanning.selectedValues": " قيمة محددة", "routePlanning.customersUsed": " عميل مستخدم", "routePlanning.coverage": "نسبة التغطية: ", "routePlanning.targetAverage": "المتوسط المستهدف: ", "routePlanning.maxDeviation": "أقصى انحراف: ", "routePlanning.invalidCoordinates": " صف مستبعد (إحداثيات غير صالحة)", "routePlanning.newRoute": "خط جديد ", "routePlanning.groupPrefix": "مجموعة ",
     "routePlanning.exportCustomerId": "رقم العميل", "routePlanning.exportName": "الاسم", "routePlanning.exportLatitude": "خط العرض", "routePlanning.exportLongitude": "خط الطول", "routePlanning.exportBeforeRoute": "الخط (قبل)", "routePlanning.exportAfterRoute": "الخط (بعد)", "routePlanning.exportSheet": "التقسيم", "routePlanning.exportFilePrefix": "تقسيم",
     "dashboard.refresh": "تحديث البيانات",
@@ -2826,6 +2886,38 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.productsWithStaleSales": "أصناف راكدة",
     "smartLoading.productsWithoutLastSaleDate": "أصناف بلا تاريخ آخر بيع",
     "smartLoading.exportExcel": "Excel",
+    "smartLoading.exportLoadingOrderExcel": "تصدير أمر التحميل Excel",
+    "smartLoading.sendToWarehouse": "إرسال إلى المستودع",
+    "smartLoading.requestAccessRequired": "إرسال طلب التحميل غير متاح لحسابك. راجع مسؤول الشركة.",
+    "smartLoading.applyBeforeSending": "اضغط تحديث لتطبيق التغييرات قبل إرسال الطلب.",
+    "smartLoading.requestOnlyDescription": "أرسل طلب تحميل إلى مستودعك المسموح. يجهز المستودع الكميات وتراجعها أنت قبل موافقتك؛ الإرسال لا يخصم المخزون ولا ينشئ عهدة.",
+    "smartLoading.recipientLoadingTitle": "طلبات التحميل والاستلام",
+    "smartLoading.refreshRecipientLoads": "تحديث طلبات التحميل",
+    "smartLoading.recipientLoadingDescription": "راجع جميع الأصناف والكميات المجهزة وأي نقص. قبول كامل يرحّل كل الكميات المجهزة إلى عهدتك مرة واحدة، ورفض كامل يعيد الطلب للمستودع دون إضافة رصيد للسيارة.",
+    "smartLoading.showLoadingQuantities": "إظهار كميات التحميل",
+    "smartLoading.sendWholeLoadingDescription": "سيُرسل أمر التحميل كاملًا بجميع أصنافه ذات الكمية الموجبة إلى المستودع، دون اختيار جزئي للأصناف.",
+    "smartLoading.finalLoadingReview": "مراجعة أخيرة قبل الإرسال",
+    "smartLoading.productsAndQuantities": "الأصناف والكميات المرسلة",
+    "smartLoading.selectedWarehouse": "المستودع المختار",
+    "smartLoading.chooseWarehouseToContinue": "اختر المستودع للمتابعة",
+    "smartLoading.reviewAndDecide": "مراجعة وقبول أو رفض",
+    "smartLoading.noRecipientLoads": "لا توجد طلبات تحميل مرتبطة بحسابك.",
+    "smartLoading.readyForRecipientReview": "إشعار: التحميل جاهز لمراجعتك وموافقتك",
+    "smartLoading.reviewPreparedLoading": "مراجعة الكميات المجهزة",
+    "smartLoading.requestedLoadingQuantity": "المطلوب",
+    "smartLoading.preparedLoadingQuantity": "المجهز فعليًا",
+    "smartLoading.loadingShortage": "النقص",
+    "smartLoading.confirmPreparedQuantities": "راجعت الكميات المجهزة والنقص الموضح وأؤكد قراري بشأنها.",
+    "smartLoading.approvePreparedQuantities": "قبول كامل",
+    "smartLoading.preparedDeclineReason": "سبب الإرجاع للتجهيز",
+    "smartLoading.returnForPreparation": "رفض كامل",
+    "smartLoading.recipientConsentNote": "وافق المندوب على الكميات المجهزة والنقص المعروض قبل الصرف والتسليم.",
+    "smartLoading.recipientConsentRecorded": "سُجلت موافقة المندوب؛ بانتظار تأكيد مسؤول المستودع التسليم.",
+    "smartLoading.awaitingRecipientConsent": "بانتظار موافقة المندوب على الكميات المجهزة؛ الصرف غير متاح قبل موافقته.",
+    "smartLoading.custodyAfterConsent": "تم التسليم بعد موافقتك وأصبحت الكميات المجهزة في عهدتك.",
+    "smartLoading.noAssignedWarehouse": "لا يوجد مستودع مسموح مرتبط بحسابك ضمن هذه النتائج. راجع مسؤول الشركة لتحديد مستودعك.",
+    "smartLoading.confirmCartonUnits": "أؤكد أن الكميات المختارة بالكرتون، كما تظهر في توصيات التحميل.",
+    "smartLoading.requestFieldsRequired": "اختر المستودع والأصناف وأكد وحدة الكميات قبل الإرسال.",
     "smartLoading.exportOds": "ODS",
     "smartLoading.exportColumnProduct": "الصنف",
     "smartLoading.exportColumnCategory": "القسم",
@@ -3023,12 +3115,33 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "performance.targetSales": "\u0647\u062f\u0641 \u0627\u0644\u0645\u0628\u064a\u0639\u0627\u062a", "performance.targetCollections": "\u0647\u062f\u0641 \u0627\u0644\u062a\u062d\u0635\u064a\u0644", "performance.targetWeight": "\u0647\u062f\u0641 \u0627\u0644\u0648\u0632\u0646", "performance.targetActiveCustomers": "\u0647\u062f\u0641 \u0627\u0644\u0639\u0645\u0644\u0627\u0621 \u0627\u0644\u0646\u0634\u0637\u064a\u0646", "performance.targetProductiveCalls": "\u0647\u062f\u0641 \u0627\u0644\u0632\u064a\u0627\u0631\u0627\u062a \u0627\u0644\u0645\u0646\u062a\u062c\u0629", "performance.targetSkuDistribution": "\u0647\u062f\u0641 \u062a\u0648\u0632\u064a\u0639 \u0627\u0644\u0623\u0635\u0646\u0627\u0641",
   },
   en: {
+    "warehouseLayout.home": "Home",
+    "warehouseLayout.receiving": "Suppliers & receiving",
+    "warehouseLayout.loading": "Rep loading",
+    "warehouseLayout.transfers": "Transfers",
+    "warehouseLayout.inventory": "Inventory & control",
+    "warehouseLayout.ledger": "Movement ledger",
+    "warehouseLayout.sections": "Warehouse sections",
+    "warehouseLayout.attention": "Follow-up & actions",
+    "warehouseLayout.attentionHint": "Open a section to review documents and their status and perform actions authorized for your account.",
+    "warehouseLayout.managerHint": "Monitor the warehouse, review documents and approve within your account permissions.",
+    "warehouseLayout.keeperHint": "Daily receiving, picking, dispatch and returns within your warehouse scope.",
+    "warehouseLayout.overviewHint": "Warehouse balances and stock status within your authorized scope.",
+    "warehouseLayout.transfersPending": "Inter-warehouse transfers are not available in the current interface.",
+    "warehouseLayout.receivingHint": "Receiving documents, reviews and approvals.",
+    "warehouseLayout.loadingHint": "Loading requests, reservations, picking and dispatch.",
+    "warehouseLayout.inventoryHint": "Balances, expiry, quarantine, counts and returns.",
+    "warehouseLayout.ledgerHint": "Posted movements, references and reasons.",
+    "warehouseLayout.open": "Open section",
     "common.close": "Close",
     "shell.openMenu": "Open menu",
     "shell.noSearchResults": "No matching results",
     "shell.toggleTheme": "Toggle theme",
     "shell.toggleThemeHint": "Toggle theme (light / dark)",
     ...operationalMessages.en,
+    ...supplierMessages.en,
+    ...visitExecutionMessages.en,
+    ...salesDraftMessages.en,
     "routePlanning.splitComplete": "Split complete — ", "routePlanning.customersAcross": " customers across ", "routePlanning.groups": " groups", "routePlanning.splitError": "Could not complete the split", "routePlanning.selectedValues": " selected values", "routePlanning.customersUsed": " customers used", "routePlanning.coverage": "Coverage: ", "routePlanning.targetAverage": "Target average: ", "routePlanning.maxDeviation": "Maximum deviation: ", "routePlanning.invalidCoordinates": " excluded rows (invalid coordinates)", "routePlanning.newRoute": "New route ", "routePlanning.groupPrefix": "Group ",
     "routePlanning.exportCustomerId": "Customer ID", "routePlanning.exportName": "Name", "routePlanning.exportLatitude": "Latitude", "routePlanning.exportLongitude": "Longitude", "routePlanning.exportBeforeRoute": "Route (before)", "routePlanning.exportAfterRoute": "Route (after)", "routePlanning.exportSheet": "Split", "routePlanning.exportFilePrefix": "route-split",
     "dashboard.refresh": "Refresh data",
@@ -4302,6 +4415,38 @@ export const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
     "smartLoading.productsWithStaleSales": "Products with stale sales",
     "smartLoading.productsWithoutLastSaleDate": "Products without a last sale date",
     "smartLoading.exportExcel": "Excel",
+    "smartLoading.exportLoadingOrderExcel": "Export loading order Excel",
+    "smartLoading.sendToWarehouse": "Send to warehouse",
+    "smartLoading.requestAccessRequired": "Loading requests are unavailable for your account. Contact your company administrator.",
+    "smartLoading.applyBeforeSending": "Apply your changes using Refresh before sending the request.",
+    "smartLoading.requestOnlyDescription": "Send a loading request to an allowed warehouse. The warehouse prepares quantities for your review and consent; sending does not deduct stock or create custody.",
+    "smartLoading.recipientLoadingTitle": "Loading requests and handover",
+    "smartLoading.refreshRecipientLoads": "Refresh loading requests",
+    "smartLoading.recipientLoadingDescription": "Review all products, prepared quantities and shortages. Accept all transfers every prepared quantity into your custody once. Reject all returns the request to the warehouse without adding vehicle stock.",
+    "smartLoading.showLoadingQuantities": "Show loading quantities",
+    "smartLoading.sendWholeLoadingDescription": "The complete loading order, including every product with a positive quantity, will be sent to the warehouse. Individual products cannot be deselected here.",
+    "smartLoading.finalLoadingReview": "Final review before sending",
+    "smartLoading.productsAndQuantities": "products and quantities to send",
+    "smartLoading.selectedWarehouse": "Selected warehouse",
+    "smartLoading.chooseWarehouseToContinue": "Choose a warehouse to continue",
+    "smartLoading.reviewAndDecide": "Review, accept, or reject",
+    "smartLoading.noRecipientLoads": "No loading requests belong to your account.",
+    "smartLoading.readyForRecipientReview": "Notification: loading is ready for your review and consent",
+    "smartLoading.reviewPreparedLoading": "Review prepared quantities",
+    "smartLoading.requestedLoadingQuantity": "Requested",
+    "smartLoading.preparedLoadingQuantity": "Actually prepared",
+    "smartLoading.loadingShortage": "Shortage",
+    "smartLoading.confirmPreparedQuantities": "I reviewed the prepared quantities and displayed shortages and confirm my decision.",
+    "smartLoading.approvePreparedQuantities": "Accept all",
+    "smartLoading.preparedDeclineReason": "Reason for returning to preparation",
+    "smartLoading.returnForPreparation": "Reject all",
+    "smartLoading.recipientConsentNote": "The recipient approved the displayed prepared quantities and shortages before dispatch and handover.",
+    "smartLoading.recipientConsentRecorded": "Recipient consent recorded; awaiting warehouse handover confirmation.",
+    "smartLoading.awaitingRecipientConsent": "Waiting for recipient consent to the prepared quantities. Dispatch is blocked until consent.",
+    "smartLoading.custodyAfterConsent": "Handover completed after your consent; the prepared quantities are now in your custody.",
+    "smartLoading.noAssignedWarehouse": "No authorized warehouse is linked to your account in these results. Contact your company administrator to assign your warehouse.",
+    "smartLoading.confirmCartonUnits": "I confirm the selected quantities are in cartons, as shown in the loading recommendations.",
+    "smartLoading.requestFieldsRequired": "Select a warehouse and products, and confirm quantity units before sending.",
     "smartLoading.exportOds": "ODS",
     "smartLoading.exportColumnProduct": "Product",
     "smartLoading.exportColumnCategory": "Category",

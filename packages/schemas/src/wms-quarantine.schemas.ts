@@ -8,13 +8,13 @@ export const wmsQuarantineHoldSchema = z.object({ reference: z.string().trim().m
 export const wmsQuarantineStepSchema = z.object({ quantity: positive, version: z.number().int().positive(), reason, idempotencyKey: z.string().uuid() }).strict();
 export type WmsQuarantineHoldInput = z.infer<typeof wmsQuarantineHoldSchema>;
 export type WmsQuarantineStepInput = z.infer<typeof wmsQuarantineStepSchema>;
-export interface WmsQuarantineCandidate {
+export interface WmsQuarantineCandidate {category?:string|null;
   batchId: string; productCode: string; productName: string; batchCode: string; baseUnit: string;
   piecesPerCarton: number; physical: string; available: string; quarantined: string; holdable: string;
 }
-export interface WmsQuarantineDocument {
+export interface WmsQuarantineDocument {category?:string|null;
   id: string; reference: string; reason: string; status: "OPEN" | "PARTIAL" | "CLOSED"; version: number;
-  productCode: string; productName: string; batchCode: string; batchId: string; baseUnit: string;
+  productCode: string; productName: string; batchCode: string; batchId: string; baseUnit: string; piecesPerCarton?: number;
   unit: "BASE" | "CARTON"; conversionFactor: number; held: string; released: string; writtenOff: string; remaining: string;
   physical: string; available: string; quarantined: string; releaseAllowed: boolean;
   createdAt: string;

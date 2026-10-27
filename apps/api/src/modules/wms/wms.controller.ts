@@ -8,7 +8,7 @@ import { WmsService } from "./wms.service";
 import { WmsCoverageService } from "./wms-coverage.service";
 
 @Controller("sfa/wms")
-@Auth("COMPANY_ADMIN","MANAGER","SUPERVISOR","SALES_REP","WAREHOUSE_KEEPER","PROCUREMENT")
+@Auth("COMPANY_ADMIN","MANAGER","SUPERVISOR","SALES_REP","WAREHOUSE_KEEPER","WAREHOUSE_MANAGER","PROCUREMENT")
 @RequiresSfa("wms.read")
 @CompanyScreen("warehouse-core")
 export class WmsController {
@@ -29,8 +29,8 @@ export class WmsController {
   opening(@CurrentUser() u: AuthenticatedUser,@Param("warehouse") w: string,@Body() b: unknown) { return this.service.postOpening(u,w,b); }
   @Post("warehouses/:warehouse/movements/:id/reverse") @RequiresSfa("wms.opening.post")
   reverse(@CurrentUser() u: AuthenticatedUser,@Param("warehouse") w: string,@Param("id") id: string,@Body() b: unknown) { return this.service.reverseOpening(u,w,id,b); }
-  @Get("warehouses/:warehouse/access") @Auth("COMPANY_ADMIN") @RequiresSfa("wms.access.manage")
+  @Get("warehouses/:warehouse/access") @Auth("COMPANY_ADMIN","WAREHOUSE_MANAGER") @RequiresSfa("wms.access.manage")
   accessUsers(@CurrentUser() u: AuthenticatedUser,@Param("warehouse") w: string,@Query() q: unknown) { return this.service.accessUsers(u,w,q); }
-  @Post("warehouses/:warehouse/access") @Auth("COMPANY_ADMIN") @RequiresSfa("wms.access.manage")
+  @Post("warehouses/:warehouse/access") @Auth("COMPANY_ADMIN","WAREHOUSE_MANAGER") @RequiresSfa("wms.access.manage")
   access(@CurrentUser() u: AuthenticatedUser,@Param("warehouse") w: string,@Body() b: unknown) { return this.service.setAccess(u,w,b); }
 }

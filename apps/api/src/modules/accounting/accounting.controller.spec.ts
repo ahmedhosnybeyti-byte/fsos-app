@@ -8,7 +8,7 @@ import { ROLES_KEY } from "../../common/decorators/roles.decorator";
 import { getCompanyFeatureAccessState,getCompanyModuleEntitlements,getCompanyScreenForRoute } from "@field-sales-os/schemas";
 test("Accounting routes fail closed behind company screen, explicit capability and separate financial permissions",()=>{
  const r=new Reflector(),controller=AccountingController;
- assert.deepEqual(r.get(ROLES_KEY,controller),["COMPANY_ADMIN","MANAGER"]);
+ assert.deepEqual(r.get(ROLES_KEY,controller),["COMPANY_ADMIN","MANAGER","ACCOUNTANT"]);
  assert.equal(r.get(COMPANY_SCREEN_KEY,controller),"accounting-core");
  assert.deepEqual(r.get(SFA_PERMISSIONS_KEY,controller),["sfa.access","accounting.read"]);
  for(const [method,permissions] of [["createAccount",["accounting.accounts.manage"]],["post",["accounting.journal.post"]],["reverse",["accounting.journal.reverse"]],["correct",["accounting.journal.reverse","accounting.journal.post"]],["close",["accounting.period.close"]]] as const) {

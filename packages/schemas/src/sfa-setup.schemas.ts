@@ -7,6 +7,10 @@ const warehouseFields = z.object({
   isActive: z.boolean().optional(),
 }).strict();
 export const createWarehouseSchema = warehouseFields;
+export const warehouseBranchesSchema = z.object({
+  branchIds: z.array(z.string().trim().min(1).max(100)).max(20)
+    .refine(ids => new Set(ids).size === ids.length, "Duplicate branch IDs"),
+}).strict();
 export const updateWarehouseSchema = warehouseFields.partial().refine((value) => Object.keys(value).length > 0, "At least one field is required");
 export const warehouseListQuerySchema = z.object({
   page: z.coerce.number().int().min(1).max(1000).default(1),

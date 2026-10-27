@@ -14,6 +14,6 @@ export const procurementCommandSchema=z.object({operation:z.enum(["CREATE","EDIT
 export type ProcurementCommand=z.input<typeof procurementCommandSchema>;
 export interface ProcurementSummary{pending:number;open:number;partial:number;remaining:{unit:string;quantity:string}[]}
 export interface ProcurementDocument{id:string;reference:string;status:string;version:number;creatorId:string;reason:string;orderId:string|null;supplierName:string|null}
-export interface ProcurementLine{productId:string;productCode:string;productName:string;quantity:string;unit:"BASE"|"CARTON";factor:number;piecesPerCarton:number;baseUnit:string;trackBatches:boolean;trackExpiry:boolean;received:string;remaining:string;price:string|null}
+export interface ProcurementLine{category?:string|null;productId:string;productCode:string;productName:string;quantity:string;unit:"BASE"|"CARTON";factor:number;piecesPerCarton:number;baseUnit:string;trackBatches:boolean;trackExpiry:boolean;received:string;remaining:string;price:string|null}
 export interface ProcurementDetail extends ProcurementDocument{lines:ProcurementLine[];receipts:{id:string;reference:string;status:string}[];events:{operation:string;reason:string;actorName:string}[]}
 export interface ProcurementSupplier{id:string;code:string;name:string}

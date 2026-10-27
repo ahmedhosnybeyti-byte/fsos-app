@@ -3,7 +3,8 @@ import { resolve } from 'node:path';
 import { createRequire } from 'node:module';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { run } from 'node:test';
-import { critical, selectTests, isSuccessful } from './policy.mjs';
+import { critical, selectTests, isSuccessful, acceptanceResult } from './policy.mjs';
+import { assessFiles, saveAssessment } from './scalability.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 if (resolve(process.cwd()) !== root) throw new Error('Run from the repository root (official local folder: D:\\Field Sales OS).');
@@ -35,6 +36,11 @@ function discover(dir) {
 const specs = ['apps/api/src', 'apps/web/src', 'packages/schemas/src', 'packages/database/prisma', 'tools/quality'].flatMap(discover).sort();
 for (const file of critical) if (!specs.includes(file)) throw new Error(`Missing mandatory regression suite: ${file}`);
 const plan = selectTests(changed, specs, mode);
+// Missing measurements are explicit WARN, never inferred from passing unit tests.
+// Approved regressions fail the same command used by CI. No native load is started.
+const scalability = assessFiles({ root, applicable: mode === 'release' || plan.risk.scalability });
+saveAssessment(scalability, root);
+console.log(`Scalability Gate: ${scalability.status} (${scalability.verification}); .quality/scalability/latest.json`);
 const require = createRequire(import.meta.url);
 let postgresModule = process.env.RIE_TEST_PGLITE_MODULE;
 if (!postgresModule) {
@@ -88,11 +94,15 @@ if (isSuccessful(counts)) for (const name of new Set(packages)) {
   if (result.error || result.status !== 0) { typesPassed = false; break; }
   typesPassed = true;
 }
-const passed = isSuccessful(counts) && typesPassed !== false;
-const report = { gate: mode, status: passed ? 'PASS' : 'BLOCK', revision: git('rev-parse', 'HEAD')[0]?.trim(),
+const functionalPassed = isSuccessful(counts) && typesPassed !== false;
+saveAssessment(scalability, root);
+const acceptance = acceptanceResult(functionalPassed, scalability.status, mode);
+const passed = acceptance.passed;
+const report = { gate: mode, status: acceptance.status,
+  functionalStatus: functionalPassed ? 'PASS' : 'BLOCK', scalability, revision: git('rev-parse', 'HEAD')[0]?.trim(),
   changed, suites: plan.tests, counts, typechecks: completedTypechecks, typesPassed, durationMs: Date.now() - started,
   scope: 'Offline regressions/typechecks only; not deployment, load capacity, backup custody or release approval.' };
 mkdirSync('.quality', { recursive: true });
 writeFileSync(`.quality/${mode}.json`, `${JSON.stringify(report, null, 2)}\n`);
-console.log(`System Design Gate: ${report.status}; ${JSON.stringify(counts)}; ${report.durationMs}ms. Evidence: .quality/${mode}.json`);
+console.log(`System Design Gate: ${report.status}; functional=${report.functionalStatus}; Scalability Gate: ${scalability.status}; ${JSON.stringify(counts)}; ${report.durationMs}ms. Evidence: .quality/${mode}.json`);
 process.exitCode = passed ? 0 : 1;

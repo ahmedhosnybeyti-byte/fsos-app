@@ -2,6 +2,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Injectable,
 import type { ZodType, ZodTypeDef } from "zod";
 import { randomUUID } from "node:crypto";
 import { hasOperationalPermissions } from "@field-sales-os/schemas";
+import { productCategory } from "../../common/queries/product-category";
 import { Prisma } from "@field-sales-os/database";
 import { wmsAccessSchema, wmsBatchSchema, wmsCreateProductSchema, wmsOpeningSchema, wmsPageSchema, wmsReversalSchema, wmsStockQuerySchema, wmsUpdateProductSchema, type WmsAccessUser, type WmsBatch, type WmsMovement, type WmsProduct, type WmsSummary, type WmsWarehouse } from "@field-sales-os/schemas";
 import { PrismaService, type PrismaTx } from "../../common/prisma";
@@ -12,7 +13,7 @@ const productFields = Prisma.sql`p.id,p.code,p.barcode,p.name,p.base_unit AS "ba
   p.track_batches AS "trackBatches",p.track_expiry AS "trackExpiry",p.sensitive_handling AS "sensitiveHandling",
   p.handling_notes AS "handlingNotes",p.is_active AS "isActive",p.version`;
 const movementFields = Prisma.sql`m.id,p.name AS "productName",b.code AS "batchCode",m.kind,m.quantity::text,
-  p.base_unit AS "baseUnit",m.input_quantity::text AS "inputQuantity",m.input_unit AS "inputUnit",m.conversion_factor AS "conversionFactor",
+  p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",m.input_quantity::text AS "inputQuantity",m.input_unit AS "inputUnit",m.conversion_factor AS "conversionFactor",
   m.reserved_delta::text AS "reservedDelta",m.in_transit_delta::text AS "inTransitDelta",m.reference,m.reason,to_char(m.created_at,'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "createdAt",m.reversal_of AS "reversalOf",
   EXISTS(SELECT 1 FROM wms_movements r WHERE r.company_id=m.company_id AND r.reversal_of=m.id) AS reversed`;
 function parse<T>(schema: ZodType<T,ZodTypeDef,unknown>, input: unknown): T {
@@ -32,6 +33,70 @@ export class WmsService {
   authorizedTransaction<T>(user: AuthenticatedUser,warehouse: string,permission: string,work:(tx:Prisma.TransactionClient,company:string)=>Promise<T>) {
     this.company(user,permission);
     return this.mutation(async tx=>work(tx,await this.scope(tx,user,warehouse,true)));
+  }
+
+  /** Direct or branch-based assignment authorizes requests only. Normal WMS
+   * stock/command admission below deliberately keeps its explicit user grants. */
+  async loadingRequestCompany(tx:PrismaTx,user:AuthenticatedUser,lock=false) {
+    if(!user.companyId||user.roleCode!=="SALES_REP"||!user.permissions?.includes("sfa.access"))
+      throw new ForbiddenException("SMART_LOADING_REQUEST_ACCESS_REQUIRED");
+    const rows=await tx.$queryRaw<{id:string}[]>(Prisma.sql`SELECT c.id FROM companies c
+      JOIN company_operating_settings s ON s.company_id=c.id AND s.operating_mode='FULL_ERP'
+      WHERE c.id=${user.companyId} AND c.feature_access->>'warehouse-core'='ENABLED'
+      AND COALESCE(c.feature_access->>'smart-loading','ENABLED')='ENABLED'
+      ${lock?Prisma.sql`FOR SHARE OF c,s`:Prisma.empty}`);
+    if(!rows.length)throw new ForbiddenException("SMART_LOADING_REQUEST_ACCESS_REQUIRED");
+    return user.companyId;
+  }
+  async loadingRequestWarehouses(user:AuthenticatedUser,input:unknown) {
+    const {page:n,search}=parse(wmsPageSchema,input);
+    const company=await this.loadingRequestCompany(this.prisma,user);
+    return page(await this.prisma.$queryRaw<WmsWarehouse[]>(Prisma.sql`WITH ${this.loadingRequestRepBranch(company,user)}
+      SELECT w.id,w.code,w.name FROM warehouses w
+      WHERE w.company_id=${company} AND w.is_active AND ${this.loadingRequestEligibility(company,user)}
+      AND (position(lower(${search}) in lower(w.name))>0 OR position(lower(${search}) in lower(w.code))>0)
+      ORDER BY w.id LIMIT ${pageSize+1} OFFSET ${(n-1)*pageSize}`),n);
+  }
+  authorizedLoadingRequestTransaction<T>(user:AuthenticatedUser,warehouse:string,work:(tx:Prisma.TransactionClient,company:string)=>Promise<T>) {
+    return this.mutation(async tx=>{
+      const company=await this.loadingRequestCompany(tx,user,true);
+      // Configuration locks the same warehouse before changing links. Acquire
+      // it first so revocation and sending have one consistent lock order.
+      const active=await tx.$queryRaw<{id:string}[]>(Prisma.sql`SELECT id FROM warehouses
+        WHERE company_id=${company} AND id=${warehouse} AND is_active FOR SHARE`);
+      if(!active.length)throw new NotFoundException("Authorized loading-request warehouse not found");
+      const rows=await tx.$queryRaw<{id:string}[]>(Prisma.sql`WITH ${this.loadingRequestRepBranch(company,user,true)}
+        SELECT w.id FROM warehouses w WHERE w.company_id=${company} AND w.id=${warehouse} AND w.is_active
+        AND ${this.loadingRequestEligibility(company,user,true)} FOR SHARE OF w`);
+      if(!rows.length)throw new NotFoundException("Authorized loading-request warehouse not found");
+      return work(tx,company);
+    });
+  }
+
+  private loadingRequestRepBranch(company:string,user:AuthenticatedUser,lock=false) {
+    // Match the authenticated DB user to the company's current Employee record.
+    // Two matching active identities are ambiguous and grant no branch access.
+    // The two scalar rows are materialized once, never once per warehouse.
+    return Prisma.sql`request_rep_branch AS MATERIALIZED (
+      SELECT btrim(COALESCE(e.data->>'BranchID','')) AS branch_id
+      FROM users u JOIN rie_canonical_entity_rows e ON e.company_id=u.company_id AND e.entity_name='Employees'
+        AND lower(btrim(COALESCE(e.data->>'Email','')))=lower(btrim(u.email))
+      WHERE u.company_id=${company} AND u.id=${user.userId} AND u.status='ACTIVE'
+        AND lower(btrim(COALESCE(e.data->>'Status','')))='active'
+      ORDER BY e.id LIMIT 2 ${lock?Prisma.sql`FOR SHARE OF u,e`:Prisma.empty}
+    )`;
+  }
+  private loadingRequestEligibility(company:string,user:AuthenticatedUser,lock=false) {
+    return Prisma.sql`(EXISTS(SELECT 1 FROM wms_warehouse_access a
+      WHERE a.company_id=${company} AND a.warehouse_id=w.id AND a.user_id=${user.userId}
+      ${lock?Prisma.sql`FOR SHARE OF a`:Prisma.empty})
+      OR EXISTS(SELECT 1 FROM wms_warehouse_branches link
+        JOIN rie_canonical_entity_rows b ON b.company_id=link.company_id AND b.entity_name='Branches'
+          AND btrim(COALESCE(b.data->>'BranchID',''))=link.branch_id
+        WHERE link.company_id=${company} AND link.warehouse_id=w.id
+          AND link.branch_id=(SELECT branch_id FROM request_rep_branch WHERE (SELECT count(*) FROM request_rep_branch)=1)
+          AND lower(btrim(COALESCE(b.data->>'Status','')))='active'
+        ${lock?Prisma.sql`FOR SHARE OF link,b`:Prisma.empty}))`;
   }
 
   private company(user: AuthenticatedUser, permission = "wms.read") {
@@ -78,12 +143,18 @@ export class WmsService {
   async summary(user: AuthenticatedUser, warehouse: string, input: unknown) {
     const { horizon }=parse(wmsStockQuerySchema,input); const company=await this.scope(this.prisma,user,warehouse);
     const rows=await this.prisma.$queryRaw<WmsSummary[]>(Prisma.sql`WITH stock AS MATERIALIZED (
-      SELECT s.physical,s.available,s.reserved,s.quarantined,s.in_transit,s.expired,s.days_remaining,s.product_id,s.base_unit
-      FROM wms_inventory_state s
+      SELECT s.physical,s.available,s.reserved,s.quarantined,s.in_transit,s.expired,s.days_remaining,s.product_id,s.base_unit,p.pieces_per_carton
+      FROM wms_inventory_state s JOIN wms_products p ON p.company_id=${company} AND p.id=s.product_id
       WHERE s.company_id=${company} AND s.warehouse_id=${warehouse} AND (s.physical>0 OR s.in_transit>0)
     ), units AS (SELECT base_unit AS "baseUnit",sum(physical)::text AS physical,sum(available)::text AS available,
       sum(reserved)::text AS reserved,sum(quarantined)::text AS quarantined,sum(expired)::text AS expired,sum(in_transit)::text AS "inTransit" FROM stock GROUP BY base_unit)
     SELECT COALESCE((SELECT jsonb_agg(units ORDER BY "baseUnit") FROM units),'[]'::jsonb) AS units,
+      jsonb_build_object('physical',COALESCE(sum(physical/pieces_per_carton) FILTER(WHERE base_unit='PIECE'),0)::text,
+        'available',COALESCE(sum(available/pieces_per_carton) FILTER(WHERE base_unit='PIECE'),0)::text,
+        'reserved',COALESCE(sum(reserved/pieces_per_carton) FILTER(WHERE base_unit='PIECE'),0)::text,
+        'quarantined',COALESCE(sum(quarantined/pieces_per_carton) FILTER(WHERE base_unit='PIECE'),0)::text,
+        'expired',COALESCE(sum(expired/pieces_per_carton) FILTER(WHERE base_unit='PIECE'),0)::text,
+        'inTransit',COALESCE(sum(in_transit/pieces_per_carton) FILTER(WHERE base_unit='PIECE'),0)::text) AS cartons,
       count(*) FILTER(WHERE physical>0 AND days_remaining>0 AND days_remaining<=${horizon})::int AS "nearExpiryBatches",
       count(*) FILTER(WHERE physical>0 AND days_remaining<=0)::int AS "expiredBatches",count(DISTINCT product_id) FILTER(WHERE physical>0)::int AS "stockedProducts",
       to_char(CURRENT_TIMESTAMP AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS "asOf" FROM stock`);
@@ -92,16 +163,18 @@ export class WmsService {
   async products(user: AuthenticatedUser, warehouse: string, input: unknown) {
     const { page:n,search }=parse(wmsPageSchema,input); const company=await this.scope(this.prisma,user,warehouse);
     return page(await this.prisma.$queryRaw<WmsProduct[]>(Prisma.sql`WITH products AS MATERIALIZED (
-      SELECT ${productFields} FROM wms_products p WHERE p.company_id=${company}
+      SELECT ${productFields},NULLIF(trim(source.data->>'Category'),'') AS category FROM wms_products p
+      LEFT JOIN rie_canonical_entity_rows source ON source.company_id=${company} AND source.entity_name='Products' AND source.entity_key=p.code
+      WHERE p.company_id=${company}
       AND (position(lower(${search}) in lower(p.name))>0 OR position(lower(${search}) in lower(p.code))>0 OR p.barcode=${search})
-      ORDER BY p.id LIMIT ${pageSize+1} OFFSET ${(n-1)*pageSize}
+      ORDER BY category NULLS LAST,p.code,p.id LIMIT ${pageSize+1} OFFSET ${(n-1)*pageSize}
     ) SELECT p.*,COALESCE(s.physical,0)::text AS physical,COALESCE(s.available,0)::text AS available,
       COALESCE(s.reserved,0)::text AS reserved,COALESCE(s.quarantined,0)::text AS quarantined,COALESCE(s.in_transit,0)::text AS "inTransit"
       FROM products p LEFT JOIN (
         SELECT s.product_id,sum(s.physical) AS physical,sum(s.available) AS available,sum(s.reserved) AS reserved,sum(s.quarantined) AS quarantined,sum(s.in_transit) AS in_transit
         FROM wms_inventory_state s WHERE s.company_id=${company} AND s.warehouse_id=${warehouse}
         AND s.product_id IN (SELECT id FROM products) GROUP BY s.product_id
-      ) s ON s.product_id=p.id ORDER BY p.id`),n);
+      ) s ON s.product_id=p.id ORDER BY p.category NULLS LAST,p.code,p.id`),n);
   }
   async batches(user: AuthenticatedUser, warehouse: string, input: unknown) {
     const { page:n,productId,nearExpiry,horizon }=parse(wmsStockQuerySchema,input); const company=await this.scope(this.prisma,user,warehouse);
@@ -113,7 +186,7 @@ export class WmsService {
       ${nearExpiry === "true" ? Prisma.sql`AND s.physical>0 AND b.expiry_date>(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date
         AND b.expiry_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date+${horizon}::int` : Prisma.empty}
       ORDER BY b.expiry_date ASC NULLS LAST,b.id LIMIT ${pageSize+1} OFFSET ${(n-1)*pageSize}
-    ) SELECT b.id,b.product_id AS "productId",p.name AS "productName",p.base_unit AS "baseUnit",b.code,
+    ) SELECT b.id,b.product_id AS "productId",p.name AS "productName",${productCategory(Prisma.sql`p.company_id`,Prisma.sql`p.code`)} AS category,p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",b.code,
       to_char(b.production_date,'YYYY-MM-DD') AS "productionDate",to_char(b.expiry_date,'YYYY-MM-DD') AS "expiryDate",b.is_quarantined AS "isQuarantined",b.quality_blocked AS "qualityBlocked",
       b.physical::text, b.reserved::text,b.quarantined::text,b.in_transit::text AS "inTransit",
       (CASE WHEN b.expiry_date<=(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date OR b.is_quarantined OR b.quality_blocked OR NOT p.is_active THEN 0
@@ -189,7 +262,7 @@ export class WmsService {
   }
   private accessAdmin(user: AuthenticatedUser) {
     this.company(user,"wms.access.manage");
-    if (user.roleCode!=="COMPANY_ADMIN") throw new ForbiddenException("Company administrator required");
+    if (!["COMPANY_ADMIN","WAREHOUSE_MANAGER"].includes(user.roleCode)) throw new ForbiddenException("Warehouse access administration required");
   }
   async accessUsers(user: AuthenticatedUser, warehouse: string, input: unknown) {
     this.accessAdmin(user); const {page:n,search}=parse(wmsPageSchema,input); const company=await this.scope(this.prisma,user,warehouse);

@@ -9,10 +9,13 @@ export const wmsPermissions=["sfa.access","wms.read","wms.products.manage","wms.
 export const wmsUser=(companyId="a",userId="actor-a",roleCode="COMPANY_ADMIN"):AuthenticatedUser=>({companyId,userId,roleCode,permissions:[...wmsPermissions],email:"synthetic@example.invalid",mustChangePassword:false,orgUnitId:null} as AuthenticatedUser);
 export const wmsFixtureSql=`
   CREATE TABLE companies(id text PRIMARY KEY);
-  CREATE TABLE users(id text PRIMARY KEY,company_id text REFERENCES companies(id),status text DEFAULT 'ACTIVE',full_name text);
+  CREATE TABLE users(id text PRIMARY KEY,company_id text REFERENCES companies(id),status text DEFAULT 'ACTIVE',full_name text,email text);
   CREATE TABLE permissions(id text PRIMARY KEY,code text UNIQUE,description text);
+  CREATE TABLE rie_canonical_entity_rows(company_id text,entity_name text,entity_key text,data jsonb,id text DEFAULT gen_random_uuid()::text,UNIQUE(company_id,entity_name,entity_key));
   CREATE TABLE test_audit(event_key text PRIMARY KEY,action text,entity_id text);
   INSERT INTO companies VALUES ('a'),('b');
+  CREATE TABLE company_operating_settings(company_id text PRIMARY KEY,operating_mode text);
+  INSERT INTO company_operating_settings VALUES('a','SFA'),('b','SFA');
   INSERT INTO users(id,company_id,full_name) VALUES ('actor-a','a','Admin A'),('actor-b','b','Admin B'),('clerk-a','a','Clerk A');
 `;
 export const wmsWarehouseSql=`INSERT INTO warehouses(id,company_id,code,name,updated_at) VALUES
@@ -23,6 +26,8 @@ export async function wmsFixture(db:any) {
   await db.exec(readFileSync("packages/database/prisma/migrations/20261020100000_wms_phase01/migration.sql","utf8"));
   await db.exec(readFileSync("packages/database/prisma/migrations/20261020150000_wms_phase02/migration.sql","utf8"));
   await db.exec(readFileSync("packages/database/prisma/migrations/20261021100000_wms_core_closure/migration.sql","utf8"));
+  await db.exec(readFileSync("packages/database/prisma/migrations/20261025100000_wms_warehouse_branches/migration.sql","utf8"));
+  await db.exec(readFileSync("packages/database/prisma/migrations/20261025120000_wms_recipient_handover/migration.sql","utf8"));
   await db.exec(wmsWarehouseSql);
   return wmsAdapter(db);
 }
