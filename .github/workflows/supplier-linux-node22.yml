@@ -19,6 +19,8 @@ jobs:
       NEXT_PUBLIC_API_URL: http://127.0.0.1:54322/api/v1
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -44,3 +46,4 @@ jobs:
           name: supplier-linux-node22-${{ github.sha }}
           path: .quality/linux-node22/
           if-no-files-found: error
+          include-hidden-files: true
