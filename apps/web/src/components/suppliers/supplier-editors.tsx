@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState, type ReactNode, type FormEvent } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { wmsReceiptInputSchema, wmsReceiptEditSchema, wmsReturnInputSchema, type WmsReceipt, type WmsReturnKind, type WmsReturnDocument, type WmsReturnSource, type WmsReturnSourceLine, type WmsOperation } from "@field-sales-os/schemas";
+import { wmsReceiptInputSchema, wmsReceiptEditSchema, wmsReturnInputSchema, wmsSupplierReturnInputSchema, type WmsReceipt, type WmsReturnKind, type WmsReturnDocument, type WmsReturnSource, type WmsReturnSourceLine, type WmsOperation } from "@field-sales-os/schemas";
 import { wmsOperationsApi as api } from "@/lib/api/wms-operations";
 import { wmsApi } from "@/lib/api/wms";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import { operationText } from "../wms/operation-labels";
 import { SupplierPicker } from "./supplier-picker";
 import { SupplierQuantityFields, draftValue, zeroQuantity, type QuantityDraft } from "./supplier-quantity-fields";
 import { decimalSum, fromRecordedQuantity, receiptQuantityError } from "./supplier-quantities";
+import { SupplierDocumentRows, SUPPLIER_DOCUMENT_VISIBLE_ROWS } from "./supplier-document-rows";
 
 function InvoiceSection({ title, children, open = true }: { title: string; children: ReactNode; open?: boolean }) {
   return <Card><CardContent className="pt-4 sm:pt-6"><details open={open}>
@@ -74,6 +75,8 @@ export function SupplierReceiptEditor({ warehouse, warehouseName, company, recei
     const product: OpsProduct = { id: l.productId, code: l.productCode, name: l.productName, category: l.category, baseUnit: l.baseUnit as OpsProduct["baseUnit"], piecesPerCarton: l.piecesPerCarton, trackBatches: l.trackBatches, trackExpiry: l.trackExpiry, sensitiveHandling: l.sensitiveHandling ?? false, handlingNotes: l.handlingNotes ?? null };
     return { key: l.id, product, batchId: l.batchId, batchCode: l.batchCode ?? "", productionDate: l.productionDate ?? "", expiryDate: l.expiryDate ?? "", expected: savedQuantity(l.expectedQuantity, l.unit, product), accepted: savedQuantity(l.acceptedQuantity, l.unit, product), held: savedQuantity(l.quarantinedQuantity, l.unit, product), rejected: savedQuantity(l.rejectedQuantity, l.unit, product), rejectionReason: l.rejectionReason };
   }) ?? []);
+  const [linePage, setLinePage] = useState(1), [focusLine, setFocusLine] = useState<string | null>(null);
+  useEffect(() => { if (focusLine) document.getElementById(focusLine)?.focus(); }, [focusLine, linePage, lines.length]);
   const update = (key: string, patch: Partial<ReceiptDraft>) => setLines(rows => rows.map(l => l.key === key ? { ...l, ...patch } : l));
   const linePayload = (l: ReceiptDraft) => ({ productId: l.product.id, batchId: l.batchId, batchCode: l.batchId ? null : l.batchCode || null, productionDate: l.batchId ? null : l.productionDate || null, expiryDate: l.batchId ? null : l.expiryDate || null, unit: "BASE" as const, expectedQuantity: draftValue(l.expected, l.product.baseUnit, l.product.piecesPerCarton) ?? "", acceptedQuantity: draftValue(l.accepted, l.product.baseUnit, l.product.piecesPerCarton) ?? "", quarantinedQuantity: draftValue(l.held, l.product.baseUnit, l.product.piecesPerCarton) ?? "", rejectedQuantity: draftValue(l.rejected, l.product.baseUnit, l.product.piecesPerCarton) ?? "", rejectionReason: l.rejectionReason });
   const body = () => ({ reference, supplierName, supplierReference, lines: lines.map(linePayload), note: note || "Receiving document", idempotencyKey: key,
@@ -84,12 +87,21 @@ export function SupplierReceiptEditor({ warehouse, warehouseName, company, recei
   function save(event: FormEvent) {
     event.preventDefault();
     const parsed = (receipt && !procurement ? wmsReceiptEditSchema : wmsReceiptInputSchema).safeParse(body());
-    const valid = parsed.success && lines.every(l => { const p = linePayload(l); return !receiptQuantityError(p.expectedQuantity, p.acceptedQuantity, p.quarantinedQuantity, p.rejectedQuantity, p.rejectionReason); });
+    const invalidLine = lines.findIndex(l => { const p = linePayload(l); return receiptQuantityError(p.expectedQuantity, p.acceptedQuantity, p.quarantinedQuantity, p.rejectedQuantity, p.rejectionReason)
+      || (!l.batchId && l.product.trackBatches && !l.batchCode.trim()) || (!l.batchId && l.product.trackExpiry && !l.expiryDate); });
+    const valid = parsed.success && invalidLine < 0;
+    if (!valid) {
+      const path = parsed.success ? undefined : parsed.error.issues.find(issue => issue.path[0] === "lines")?.path[1];
+      const index = invalidLine >= 0 ? invalidLine : typeof path === "number" ? path : -1;
+      if (index >= 0) setLinePage(Math.floor(index / SUPPLIER_DOCUMENT_VISIBLE_ROWS) + 1);
+    }
     setInvalid(!valid); if (valid) mutation.mutate();
   }
   function add(product: OpsProduct) {
-    if (lines.length >= 20) return;
-    setLines(rows => [...rows, { key: crypto.randomUUID(), product, batchId: null, batchCode: "", productionDate: "", expiryDate: "", expected: zeroQuantity(), accepted: zeroQuantity(), held: zeroQuantity(), rejected: zeroQuantity(), rejectionReason: "" }]);
+    const rowKey = crypto.randomUUID();
+    setLinePage(Math.floor(lines.length / SUPPLIER_DOCUMENT_VISIBLE_ROWS) + 1);
+    setFocusLine(`receipt-expected-${rowKey}-${product.baseUnit === "PIECE" ? "cartons" : "base"}`);
+    setLines(rows => [...rows, { key: rowKey, product, batchId: null, batchCode: "", productionDate: "", expiryDate: "", expected: zeroQuantity(), accepted: zeroQuantity(), held: zeroQuantity(), rejected: zeroQuantity(), rejectionReason: "" }]);
   }
   return <section className="min-w-0 space-y-4" aria-label={t("wms.receive_goods")}>
     <div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-semibold">{t(receipt && !procurement ? "wms.edit_receiving_draft" : "wms.receive_goods")}</h2><p className="mt-1 text-sm text-muted-foreground">{t("suppliers.draftSafety")}</p></div><Button type="button" variant="outline" disabled={mutation.isPending} onClick={onClose}>{t("wms.cancel")}</Button></div>
@@ -102,10 +114,10 @@ export function SupplierReceiptEditor({ warehouse, warehouseName, company, recei
         {procurement ? <Field id="receipt-supplier" label={t("wms.supplier")}><Input id="receipt-supplier" readOnly value={supplierName} /></Field>
           : <SupplierPicker warehouse={warehouse} company={company} value={supplierId} currentName={supplierName} onChoose={supplier => { setSupplierId(supplier.id); setSupplierName(supplier.name); }} t={t} disabled={mutation.isPending} />}
       </InvoiceSection>
-      {!procurement && <InvoiceSection title={t("suppliers.addProducts")}><SupplierProductSearch warehouse={warehouse} company={company} onChoose={add} t={t} disabled={lines.length >= 20 || mutation.isPending} />{lines.length >= 20 && <p className="text-sm text-muted-foreground">{t("suppliers.receiptLineLimit")}</p>}</InvoiceSection>}
+      {!procurement && <InvoiceSection title={t("suppliers.addProducts")}><SupplierProductSearch warehouse={warehouse} company={company} onChoose={add} t={t} disabled={mutation.isPending} /></InvoiceSection>}
       <InvoiceSection title={t("suppliers.selectedProducts") + ` (${lines.length})`}>
         {!lines.length && <p className="py-6 text-center text-sm text-muted-foreground">{t("suppliers.selectProductsHint")}</p>}
-        {lines.map((l, index) => <article key={l.key} className="space-y-4 rounded-lg border border-border/60 p-3 sm:p-4">
+        <SupplierDocumentRows items={lines} page={linePage} onPageChange={setLinePage} t={t} renderItem={(l, index) => <article key={l.key} className="space-y-4 rounded-lg border border-border/60 p-3 sm:p-4">
           <div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-sm font-semibold">{index + 1}. {l.product.name}</h3><bdi className="text-xs text-muted-foreground">{l.product.code}</bdi></div><Button type="button" variant="ghost" size="sm" onClick={() => setLines(rows => rows.filter(row => row.key !== l.key))}>{t("wms.remove_line")}</Button></div>
           <HandlingNote sensitive={l.product.sensitiveHandling} note={l.product.handlingNotes} t={t} />
           <div className="grid gap-4 lg:grid-cols-2"><SupplierQuantityFields id={`receipt-expected-${l.key}`} label={t("wms.expected_quantity")} value={l.expected} onChange={expected => update(l.key, { expected })} baseUnit={l.product.baseUnit} factor={l.product.piecesPerCarton} t={t} />
@@ -120,7 +132,7 @@ export function SupplierReceiptEditor({ warehouse, warehouseName, company, recei
             <Field id={`receipt-lot-${l.key}`} label={t("wms.lot_code")}><Input id={`receipt-lot-${l.key}`} required maxLength={80} value={l.batchCode} onChange={e => update(l.key, { batchCode: e.target.value })} /></Field>
             <Field id={`receipt-production-${l.key}`} label={t("wms.production_date_if_known")}><Input id={`receipt-production-${l.key}`} type="date" value={l.productionDate} onChange={e => update(l.key, { productionDate: e.target.value })} /></Field>
             <Field id={`receipt-expiry-${l.key}`} label={t("wms.expiry_date")}><Input id={`receipt-expiry-${l.key}`} type="date" required={l.product.trackExpiry} value={l.expiryDate} onChange={e => update(l.key, { expiryDate: e.target.value })} /></Field></div>)}
-        </article>)}
+        </article>} />
       </InvoiceSection>
       <InvoiceSection title={t("suppliers.documentSummary")}>
         <ReceiptSummary lines={lines} t={t} />
@@ -152,25 +164,27 @@ export function SupplierReturnEditor({ warehouse, warehouseName, company, kind, 
   const source = useQuery({ queryKey: ["wms", company, warehouse, "return-source", kind, sourceId], queryFn: () => api.returnSource(warehouse, kind, sourceId), enabled: !!sourceId, ...operationQueryOptions });
   const body = () => ({ reference, sourceId, note, idempotencyKey: key, lines: lines.map(l => ({ sourceLineId: l.source.sourceLineId, declaredQuantity: draftValue(l.declared, l.source.baseUnit, l.source.piecesPerCarton) ?? "", actualQuantity: draftValue(l.actual, l.source.baseUnit, l.source.piecesPerCarton) ?? "", unit: "BASE", quality: l.quality, fromQuarantine: l.fromQuarantine, discrepancyReason: l.discrepancyReason })) });
   const mutation = useMutation({ mutationFn: () => api.command(warehouse, kind === "SUPPLIER" ? "supplier.create" : "rep-return.create", body()), onSuccess: async result => { await client.invalidateQueries({ queryKey: ["wms", company] }); onSaved(result.id); onClose(); } });
+  const [linePage, setLinePage] = useState(1), [focusLine, setFocusLine] = useState<string | null>(null);
+  useEffect(() => { if (focusLine) document.getElementById(focusLine)?.focus(); }, [focusLine, linePage, lines.length]);
   const update = (id: string, patch: Partial<ReturnDraft>) => setLines(rows => rows.map(l => l.source.sourceLineId === id ? { ...l, ...patch } : l));
   const lookup = () => { setSearch(input.trim()); setPage(1); };
   return <section className="min-w-0 space-y-4" aria-label={t("wms.new_supplier_return")}><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-xl font-semibold">{t(kind === "SUPPLIER" ? "wms.new_supplier_return" : "wms.new_rep_return")}</h2><p className="mt-1 text-sm text-muted-foreground">{t("wms.choose_the_original_document_and_lot_stock_changes_only_after_review_and_posting")}</p></div><Button type="button" variant="outline" disabled={mutation.isPending} onClick={onClose}>{t("wms.cancel")}</Button></div>
-    <form className="space-y-4" onSubmit={e => { e.preventDefault(); const parsed = wmsReturnInputSchema.safeParse(body()); const valid = parsed.success && lines.every(l => { const declared = draftValue(l.declared, l.source.baseUnit, l.source.piecesPerCarton); const actual = draftValue(l.actual, l.source.baseUnit, l.source.piecesPerCarton); return declared === actual || l.discrepancyReason.trim().length >= 3; }); setInvalid(!valid); if (valid) mutation.mutate(); }}>
+    <form className="space-y-4" onSubmit={e => { e.preventDefault(); const parsed = (kind === "SUPPLIER" ? wmsSupplierReturnInputSchema : wmsReturnInputSchema).safeParse(body()); const invalidLine = lines.findIndex(l => { const declared = draftValue(l.declared, l.source.baseUnit, l.source.piecesPerCarton); const actual = draftValue(l.actual, l.source.baseUnit, l.source.piecesPerCarton); return declared !== actual && l.discrepancyReason.trim().length < 3; }); const valid = parsed.success && invalidLine < 0; if (!valid) { const path = parsed.success ? undefined : parsed.error.issues.find(issue => issue.path[0] === "lines")?.path[1]; const index = invalidLine >= 0 ? invalidLine : typeof path === "number" ? path : -1; if (index >= 0) setLinePage(Math.floor(index / SUPPLIER_DOCUMENT_VISIBLE_ROWS) + 1); } setInvalid(!valid); if (valid) mutation.mutate(); }}>
       <fieldset disabled={mutation.isPending} className="min-w-0 space-y-4"><InvoiceSection title={t("suppliers.documentHeader")}>
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3"><Field id="return-reference" label={t("wms.return_reference")}><Input id="return-reference" required maxLength={80} value={reference} onChange={e => setReference(e.target.value)} /></Field><Field id="return-created-date" label={t("suppliers.creationDate")}><Input id="return-created-date" type="date" readOnly value={today()} /></Field><Field id="return-warehouse" label={t("wms.warehouse_scope")}><Input id="return-warehouse" readOnly value={warehouseName ?? warehouse} /></Field></div>
         <div className="flex flex-wrap items-end gap-2"><div className="min-w-0 flex-1"><Field id="return-source-search" label={t("suppliers.search")}><Input id="return-source-search" maxLength={80} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); lookup(); } }} /></Field></div><Button type="button" variant="outline" onClick={lookup}>{t("wms.search")}</Button></div>
-        {sources.isPending ? <Skeleton className="h-16" /> : sources.isError ? <ErrorBox error={sources.error} retry={() => void sources.refetch()} t={t} /> : <><Field id="return-source" label={t("wms.source_document")}><Choice id="return-source" value={sourceId} onChange={value => { setSourceId(value); setLines([]); }} options={sources.data.items.map(s => ({ value: s.id, label: `${s.reference} · ${s.partyName}` }))} /></Field><Pager page={page} hasMore={sources.data.hasMore} busy={sources.isFetching} onChange={setPage} t={t} /></>}
+        {sources.isPending ? <Skeleton className="h-16" /> : sources.isError ? <ErrorBox error={sources.error} retry={() => void sources.refetch()} t={t} /> : <><Field id="return-source" label={t("wms.source_document")}><Choice id="return-source" value={sourceId} onChange={value => { setSourceId(value); setLines([]); setLinePage(1); setFocusLine(null); }} options={sources.data.items.map(s => ({ value: s.id, label: `${s.reference} · ${s.partyName}` }))} /></Field><Pager page={page} hasMore={sources.data.hasMore} busy={sources.isFetching} onChange={setPage} t={t} /></>}
         {source.data && <p className="text-sm font-semibold">{t("wms.supplier")}: {source.data.partyName} · <bdi>{source.data.reference}</bdi></p>}
       </InvoiceSection>
-      <InvoiceSection title={t("suppliers.sourceProducts")}>{!sourceId ? <p className="text-sm text-muted-foreground">{t("suppliers.chooseSourceFirst")}</p> : source.isPending ? <Skeleton className="h-20" /> : source.isError ? <ErrorBox error={source.error} retry={() => void source.refetch()} t={t} /> : <SourceLines source={source.data} lines={lines} add={s => setLines(rows => [...rows, { source: s, declared: zeroQuantity(), actual: zeroQuantity(), quality: "GOOD", fromQuarantine: false, discrepancyReason: "" }])} t={t} />}</InvoiceSection>
+      <InvoiceSection title={t("suppliers.sourceProducts")}>{!sourceId ? <p className="text-sm text-muted-foreground">{t("suppliers.chooseSourceFirst")}</p> : source.isPending ? <Skeleton className="h-20" /> : source.isError ? <ErrorBox error={source.error} retry={() => void source.refetch()} t={t} /> : <SupplierReturnSourceLines source={source.data} kind={kind} lines={lines} add={s => { setLinePage(Math.floor(lines.length / SUPPLIER_DOCUMENT_VISIBLE_ROWS) + 1); setFocusLine(`return-declared-${s.sourceLineId}-${s.baseUnit === "PIECE" ? "cartons" : "base"}`); setLines(rows => [...rows, { source: s, declared: zeroQuantity(), actual: zeroQuantity(), quality: "GOOD", fromQuarantine: false, discrepancyReason: "" }]); }} t={t} />}</InvoiceSection>
       <InvoiceSection title={t("suppliers.selectedProducts") + ` (${lines.length})`}>{!lines.length && <p className="py-6 text-center text-sm text-muted-foreground">{t("suppliers.selectReturnHint")}</p>}
-        {lines.map(l => <article key={l.source.sourceLineId} className="space-y-4 rounded-lg border border-border/60 p-3 sm:p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-sm font-semibold">{l.source.productName}</h3><bdi className="text-xs text-muted-foreground">{l.source.batchCode}</bdi></div><Button type="button" variant="ghost" size="sm" onClick={() => setLines(rows => rows.filter(row => row.source.sourceLineId !== l.source.sourceLineId))}>{t("wms.remove_line")}</Button></div>
+        <SupplierDocumentRows items={lines} page={linePage} onPageChange={setLinePage} t={t} renderItem={l => <article key={l.source.sourceLineId} className="space-y-4 rounded-lg border border-border/60 p-3 sm:p-4"><div className="flex flex-wrap items-start justify-between gap-2"><div><h3 className="text-sm font-semibold">{l.source.productName}</h3><bdi className="text-xs text-muted-foreground">{l.source.batchCode}</bdi></div><Button type="button" variant="ghost" size="sm" onClick={() => setLines(rows => rows.filter(row => row.source.sourceLineId !== l.source.sourceLineId))}>{t("wms.remove_line")}</Button></div>
           <HandlingNote sensitive={l.source.sensitiveHandling} note={l.source.handlingNotes} t={t} />
           <div className="grid gap-4 lg:grid-cols-2"><SupplierQuantityFields id={`return-declared-${l.source.sourceLineId}`} label={t("wms.declared_quantity")} value={l.declared} onChange={declared => update(l.source.sourceLineId, { declared })} baseUnit={l.source.baseUnit} factor={l.source.piecesPerCarton} t={t} /><SupplierQuantityFields id={`return-actual-${l.source.sourceLineId}`} label={t("wms.actual_returned_quantity")} value={l.actual} onChange={actual => update(l.source.sourceLineId, { actual })} baseUnit={l.source.baseUnit} factor={l.source.piecesPerCarton} t={t} /></div>
           <details><summary className="cursor-pointer rounded text-sm font-medium focus-visible:ring-2 focus-visible:ring-ring">{t("suppliers.optionalQuality")}</summary><div className="mt-3 space-y-3"><Field id={`return-quality-${l.source.sourceLineId}`} label={t("wms.quality_condition")}><Choice id={`return-quality-${l.source.sourceLineId}`} value={l.quality} onChange={quality => update(l.source.sourceLineId, { quality: quality as ReturnDraft["quality"] })} options={["GOOD", "DAMAGED", "EXPIRED", "QUARANTINED"].map(value => ({ value, label: qualityText(value, t) }))} /></Field>
           {kind === "SUPPLIER" && <div className="flex items-center justify-between gap-3"><Label htmlFor={`return-held-${l.source.sourceLineId}`}>{t("wms.withdraw_from_quarantine")}</Label><Switch id={`return-held-${l.source.sourceLineId}`} checked={l.fromQuarantine} onCheckedChange={fromQuarantine => update(l.source.sourceLineId, { fromQuarantine })} /></div>}</div></details>
           <Field id={`return-reason-${l.source.sourceLineId}`} label={t("wms.reason_for_any_declared_actual_difference")}><Input id={`return-reason-${l.source.sourceLineId}`} maxLength={300} value={l.discrepancyReason} onChange={e => update(l.source.sourceLineId, { discrepancyReason: e.target.value })} /></Field>
-        </article>)}
+        </article>} />
       </InvoiceSection>
       <InvoiceSection title={t("suppliers.documentSummary")}><p className="text-sm font-semibold">{t("suppliers.selectedProducts")}: <bdi>{lines.length}</bdi></p>
         {(["PIECE", "KG", "LITRE"] as const).filter(unit => lines.some(l => l.source.baseUnit === unit)).map(unit => <p key={unit} className="text-sm">{t("wms.actual_returned_quantity")}: <bdi>{decimalSum(lines.filter(l => l.source.baseUnit === unit).map(l => draftValue(l.actual, unit, l.source.piecesPerCarton) ?? "")) ?? "—"}</bdi> {unitLabel(unit, t)}</p>)}
@@ -181,8 +195,10 @@ export function SupplierReturnEditor({ warehouse, warehouseName, company, kind, 
     </form>
   </section>;
 }
-function SourceLines({ source, lines, add, t }: { source: WmsReturnSource; lines: ReturnDraft[]; add: (source: WmsReturnSourceLine) => void; t: Text }) {
-  return <div className="space-y-2">{source.lines.map(s => <div key={s.sourceLineId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 p-3"><div className="min-w-0 space-y-1 text-xs"><p className="text-sm font-semibold">{s.productName}</p><p><bdi>{s.batchCode}</bdi> · <bdi>{s.expiryDate ?? t("wms.no_expiry")}</bdi></p><p>{t("wms.source_remaining_available_held_custody")}: <bdi>{quantity(s.remainingBase)} / {quantity(s.available)} / {quantity(s.quarantined)} / {quantity(s.custody)}</bdi> {unitLabel(s.baseUnit, t)}</p></div><Button type="button" size="sm" variant="outline" disabled={lines.length >= 20 || lines.some(l => l.source.sourceLineId === s.sourceLineId)} onClick={() => add(s)}>{t("wms.add_to_return")}</Button></div>)}</div>;
+export function SupplierReturnSourceLines({ source, kind, lines, add, t }: { source: WmsReturnSource; kind: WmsReturnKind; lines: Pick<ReturnDraft, "source">[]; add: (source: WmsReturnSourceLine) => void; t: Text }) {
+  const selectedIds = new Set(lines.map(line => line.source.sourceLineId));
+  const [page, setPage] = useState(1);
+  return <SupplierDocumentRows items={source.lines} page={page} onPageChange={setPage} t={t} renderItem={s => <div key={s.sourceLineId} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border/60 p-3"><div className="min-w-0 space-y-1 text-xs"><p className="text-sm font-semibold">{s.productName}</p><p><bdi>{s.batchCode}</bdi> · <bdi>{s.expiryDate ?? t("wms.no_expiry")}</bdi></p><p>{t("wms.source_remaining_available_held_custody")}: <bdi>{quantity(s.remainingBase)} / {quantity(s.available)} / {quantity(s.quarantined)} / {quantity(s.custody)}</bdi> {unitLabel(s.baseUnit, t)}</p></div><Button type="button" size="sm" variant="outline" disabled={(kind === "REP" && lines.length >= 20) || selectedIds.has(s.sourceLineId)} onClick={() => add(s)}>{t("wms.add_to_return")}</Button></div>} />;
 }
 export function SupplierReturnAction({doc,operation,warehouse,company,t,onClose}:{doc:WmsReturnDocument;operation:WmsOperation;warehouse:string;company:string;t:Text;onClose:()=>void}){
  const client=useQueryClient(),[note,setNote]=useState(""),[handover,setHandover]=useState(""),[confirmed,setConfirmed]=useState(false),[key]=useState(()=>crypto.randomUUID());const mutation=useMutation({mutationFn:()=>api.command(warehouse,operation,{id:doc.id,version:doc.version,note,idempotencyKey:key,...(operation==="supplier.confirm"?{handoverReference:handover}:{})}),onSuccess:async()=>{await client.invalidateQueries({queryKey:["wms",company]});onClose();}});

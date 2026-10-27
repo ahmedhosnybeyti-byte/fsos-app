@@ -172,11 +172,14 @@ export class WmsOperationsService {
       FROM wms_receipts d LEFT JOIN wms_receipt_supplier_metadata m ON m.company_id=d.company_id AND m.receipt_id=d.id
       WHERE d.company_id=${c} AND d.warehouse_id=${warehouse} AND d.id=${id}`);
     if(!rows[0])throw new NotFoundException("Receipt not found");
+    // Explicit complete-one-document exception: company + warehouse + header
+    // have already been authorized. Fetch only this receipt's projected lines;
+    // lists/catalogues remain paged and no client-side page stitching is used.
     const lines=await this.prisma.$queryRaw<WmsReceipt["lines"]>(Prisma.sql`SELECT l.id,l.product_id AS "productId",p.name AS "productName",${productCategory(Prisma.sql`p.company_id`,Prisma.sql`p.code`)} AS category,p.sensitive_handling AS "sensitiveHandling",p.handling_notes AS "handlingNotes",p.code AS "productCode",p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",p.track_batches AS "trackBatches",p.track_expiry AS "trackExpiry",p.pieces_per_carton AS "piecesPerCarton",l.batch_id AS "batchId",COALESCE(b.code,l.batch_code) AS "batchCode",
       to_char(COALESCE(b.production_date,l.production_date),'YYYY-MM-DD') AS "productionDate",to_char(COALESCE(b.expiry_date,l.expiry_date),'YYYY-MM-DD') AS "expiryDate",
       l.input_unit AS unit,l.conversion_factor AS "conversionFactor",l.expected_quantity::text AS "expectedQuantity",l.accepted_quantity::text AS "acceptedQuantity",l.quarantined_quantity::text AS "quarantinedQuantity",l.rejected_quantity::text AS "rejectedQuantity",l.rejection_reason AS "rejectionReason"
       FROM wms_receipt_lines l JOIN wms_products p ON p.company_id=${c} AND p.id=l.product_id LEFT JOIN wms_batches b ON b.company_id=${c} AND b.id=l.batch_id
-      WHERE l.company_id=${c} AND l.receipt_id=${id} ORDER BY l.id LIMIT 20`);
+      WHERE l.company_id=${c} AND l.receipt_id=${id} ORDER BY l.id`);
     return {...rows[0],lines,events:await this.events(c,id,"receipt")};
   }
   async load(user:AuthenticatedUser,warehouse:string,id:string):Promise<WmsLoad> {

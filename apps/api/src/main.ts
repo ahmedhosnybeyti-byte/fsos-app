@@ -3,6 +3,7 @@ import "reflect-metadata";
 import { randomUUID } from "node:crypto";
 import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
+import type { NestExpressApplication } from "@nestjs/platform-express";
 import { DocumentBuilder, SwaggerModule } from "@nestjs/swagger";
 import helmet from "helmet";
 import compression from "compression";
@@ -15,9 +16,11 @@ import { API_VERSION_PREFIX } from "@field-sales-os/schemas";
 import { DrainingService, rejectNewWorkWhileDraining } from "./common/runtime/draining.service";
 import { classifyRieHttpAction, completeRieRequest, markRieRequestCancelled, runWithRieRequestContext } from "./common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./modules/rie/rie-execution-coordinator.service";
+import { configureSupplierDocumentJson } from "./common/http/supplier-document-json";
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { cors: false });
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, { cors: false });
+  configureSupplierDocumentJson(app);
   const config = app.get(AppConfigService).values;
   const draining = app.get(DrainingService);
   const rieExecutionCoordinator = app.get(RieExecutionCoordinatorService);
