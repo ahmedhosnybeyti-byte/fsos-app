@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      APPLICATION_CANDIDATE: '152ef09dcf8785ed42f01440c41b0b24b2e7c1f4'
+      APPLICATION_CANDIDATE: '2f64b92cc92e9f4ffbe988c79d24274b4f5bbbc8'
       CI: 'true'
       NEXT_TELEMETRY_DISABLED: '1'
       TURBO_TELEMETRY_DISABLED: '1'
@@ -28,7 +28,7 @@ jobs:
       - name: Verify frozen application source and record runtime
         run: |
           mkdir -p .quality/linux-node22
-          git diff --exit-code 152ef09dcf8785ed42f01440c41b0b24b2e7c1f4 HEAD -- apps packages pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json Dockerfile.api Dockerfile.web railway.api.json railway.web.json
+          git diff --exit-code 2f64b92cc92e9f4ffbe988c79d24274b4f5bbbc8 HEAD -- apps packages pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json Dockerfile.api Dockerfile.web railway.api.json railway.web.json
           node -e "console.log(JSON.stringify({sha:process.env.GITHUB_SHA,node:process.version,platform:process.platform,arch:process.arch}))" | tee .quality/linux-node22/runtime.json
       - name: Install frozen existing dependencies
         run: |
