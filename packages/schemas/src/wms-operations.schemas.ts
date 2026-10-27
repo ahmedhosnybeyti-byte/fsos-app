@@ -15,7 +15,7 @@ export const wmsReceiptLineSchema=z.object({
   rejectionReason:z.string().trim().max(300).default(""),
 }).strict().refine(v=>!(v.batchId&&v.batchCode),"Use existing lot or new lot metadata")
   .refine(v=>!v.productionDate||!v.expiryDate||v.expiryDate>v.productionDate,"Expiry must follow production");
-export const wmsReceiptInputSchema=z.object({reference:z.string().trim().min(1).max(80),supplierName:z.string().trim().min(1).max(160),supplierReference:z.string().trim().min(1).max(80),supplierId:id.optional(),documentDate:date.optional(),lines:z.array(wmsReceiptLineSchema).min(1).max(20),note:note.default("Receiving document"),idempotencyKey:key}).strict();
+export const wmsReceiptInputSchema=z.object({reference:z.string().trim().min(1).max(80),supplierName:z.string().trim().min(1).max(160),supplierReference:z.string().trim().min(1).max(80),supplierId:id.optional(),documentDate:date.optional(),lines:z.array(wmsReceiptLineSchema).min(1),note:note.default("Receiving document"),idempotencyKey:key}).strict();
 export const wmsReceiptEditSchema=wmsReceiptInputSchema.extend({id,version:z.number().int().positive()});
 export const wmsLoadLineSchema=z.object({productId:id.optional(),productCode:z.string().trim().min(1).max(40).optional(),quantity:wmsPositive,unit:z.enum(["BASE","CARTON"])}).strict().refine(v=>!!v.productId!==!!v.productCode,"Exactly one product identity required");
 export const wmsLoadInputSchema=z.object({reference:z.string().trim().min(1).max(80),source:z.enum(["MANUAL","SMART_LOADING"]),proposalId:id.optional(),recipientId:id,customerCode:z.string().trim().min(1).max(80).nullable().default(null),targetDate:date,lines:z.array(wmsLoadLineSchema).min(1),note:note.default("Warehouse loading"),idempotencyKey:key}).strict();
