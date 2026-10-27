@@ -24,10 +24,12 @@ import { ErrorBox, Field, HandlingNote, Pager, Search, quantity, unitLabel, type
 import { operationQueryOptions as options } from "../wms/operation-editors";
 import { operationText } from "../wms/operation-labels";
 import { SupplierReceiptEditor, SupplierReturnEditor, SupplierReturnAction } from "./supplier-editors";
+import { SupplierDirectory } from "./supplier-directory";
+import { printSupplierDocument } from "./supplier-document-print";
 
 // All data comes from the existing company/warehouse-scoped WMS endpoints.
 // Never traverse result pages to manufacture global indicators.
-export function SupplierScreen({ initialWarehouseId = "" }: { initialWarehouseId?: string }) {
+export function SupplierScreen({ initialWarehouseId = "", initialTab = "receipts" }: { initialWarehouseId?: string; initialTab?:"receipts"|"returns" }) {
   const { user, isLoading } = useAuth();
   const { t, locale } = useTranslation();
   const company = user?.companyId;
@@ -71,20 +73,23 @@ export function SupplierScreen({ initialWarehouseId = "" }: { initialWarehouseId
       </div>
     </details></CardContent></Card>
     {warehouse ? <SupplierWorkspace key={company + warehouse} warehouse={warehouse} company={company!}
+      initialTab={initialTab}
+      warehouseName={warehouses.data?.items.find(w => w.id === warehouse)?.name}
       permissions={user?.role.code === "COMPANY_ADMIN" ? [] : user?.permissions ?? []} t={t} locale={locale} />
       : <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">{t("wms.choose_a_warehouse_to_begin")}</CardContent></Card>}
   </div>;
 }
 
-function SupplierWorkspace({ warehouse, company, permissions, t, locale }: {
-  warehouse: string; company: string; permissions: string[]; t: Text; locale: string;
+function SupplierWorkspace({ warehouse, warehouseName, company, permissions, t, locale, initialTab }: {
+  warehouse: string; warehouseName?:string; company: string; permissions: string[]; t: Text; locale: string; initialTab:"receipts"|"returns";
 }) {
   const client = useQueryClient();
-  const [tab, setTab] = useState<"receipts" | "returns">("receipts");
+  const [tab, setTab] = useState<"receipts" | "returns">(initialTab);
   const [page, setPage] = useState(1), [input, setInput] = useState(""), [search, setSearch] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [editor, setEditor] = useState<"create" | "edit" | null>(null);
   const [action, setAction] = useState<WmsOperation | null>(null);
+  const [printBlocked, setPrintBlocked] = useState(false);
   const prefix = ["wms", company, warehouse];
   const receipts = useQuery({
     queryKey: [...prefix, "documents", "receipts", page, search],
@@ -109,12 +114,18 @@ function SupplierWorkspace({ warehouse, company, permissions, t, locale }: {
   const canCreate = can(tab === "receipts" ? "receipt.create" : "supplier.create");
   const refresh = () => client.invalidateQueries({ queryKey: prefix });
   function changeTab(value: typeof tab) {
-    setTab(value); setPage(1); setInput(""); setSearch(""); setSelected(null); setEditor(null); setAction(null);
+    setTab(value); setPage(1); setInput(""); setSearch(""); setSelected(null); setEditor(null); setAction(null); setPrintBlocked(false);
   }
   const actions: WmsOperation[] = tab === "receipts"
     ? receiptActions(receipt.data?.status)
     : returnActions(returned.data?.status);
+  const canEdit = editor === "edit" && tab === "receipts" && can("receipt.edit") && receipt.data?.status === "DRAFT";
+  if (editor && (editor === "create" ? canCreate : canEdit)) return tab === "receipts"
+    ? <SupplierReceiptEditor warehouse={warehouse} warehouseName={warehouseName} company={company} t={t}
+      receipt={editor === "edit" ? receipt.data : undefined} onClose={() => setEditor(null)} onSaved={setSelected} />
+    : <SupplierReturnEditor warehouse={warehouse} warehouseName={warehouseName} company={company} kind="SUPPLIER" t={t} onClose={() => setEditor(null)} onSaved={setSelected} />;
   return <section className="min-w-0 space-y-4">
+    <SupplierDirectory warehouse={warehouse} company={company} t={t}/>
     <div className="flex flex-wrap items-center justify-between gap-3">
       <nav aria-label={t("suppliers.title")} className="flex flex-wrap gap-2">
         <Button variant={tab === "receipts" ? "default" : "outline"} aria-pressed={tab === "receipts"} onClick={() => changeTab("receipts")}><PackageCheck className="h-4 w-4" />{t("suppliers.receipts")}</Button>
@@ -157,17 +168,20 @@ function SupplierWorkspace({ warehouse, company, permissions, t, locale }: {
             <Pager page={page} hasMore={list.data?.hasMore ?? false} busy={list.isFetching} onChange={p => { setPage(p); setSelected(null); }} t={t} /></>}
       </CardContent></Card>
     <p className="text-xs text-muted-foreground">{t("suppliers.attachmentsDeferred")}</p>
-    {selected && !editor && <Dialog open onOpenChange={open => { if (!open && !action) setSelected(null); }}>
-      <DialogContent className="max-w-3xl"><DialogHeader><DialogTitle>{detail.data?.reference ?? t("suppliers.open")}</DialogTitle>
-        <DialogDescription>{t(tab === "receipts" ? "suppliers.receipts" : "suppliers.returns")}</DialogDescription></DialogHeader>
+    {selected && !editor && <Card>
+      <CardHeader><div className="flex flex-wrap items-center justify-between gap-2"><CardTitle>{detail.data?.reference ?? t("suppliers.open")}</CardTitle>
+        <Button variant="outline" onClick={()=>setSelected(null)}>{t("common.close")}</Button></div>
+        <p className="text-sm text-muted-foreground">{t(tab === "receipts" ? "suppliers.receipts" : "suppliers.returns")}</p></CardHeader><CardContent>
         {detail.isPending ? <Skeleton className="h-64" /> : detail.isError ? <ErrorBox error={detail.error} retry={() => void detail.refetch()} t={t} />
           : detail.data && <div className="space-y-4">
             <DocumentStatus status={detail.data.status} t={t} />
             {tab === "receipts" && receipt.data ? <ReceiptLines doc={receipt.data} t={t} /> : returned.data && <ReturnLines doc={returned.data} t={t} />}
             <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={()=>setPrintBlocked(!printSupplierDocument(detail.data!,tab==="receipts"?"receipt":"return",warehouseName??warehouse,t,locale))}>{t("suppliers.print.document")}</Button>
               {tab === "receipts" && receipt.data?.status === "DRAFT" && can("receipt.edit") && <Button variant="outline" onClick={() => setEditor("edit")}>{t("wms.edit_draft")}</Button>}
               {actions.filter(can).map(op => <Button key={op} variant={op.endsWith("cancel") || op.endsWith("reverse") || op.endsWith("return-draft") ? "outline" : "default"} onClick={() => setAction(op)}>{operationText(op, t)}</Button>)}
             </div>
+            {printBlocked&&<p role="alert" className="text-sm text-destructive">{t("suppliers.print.blocked")}</p>}
             {tab === "returns" && <p className="text-xs text-muted-foreground">{t("suppliers.returnCorrectionUnavailable")}</p>}
             <details className="rounded-md border border-border p-3"><summary className="cursor-pointer text-sm font-semibold">{t("wms.workflow_ledger_latest_20_events")}</summary>
               <ol className="mt-3 space-y-3">{detail.data.events.map(e => <li key={e.id} className="border-s-2 border-primary/30 ps-3 text-xs">
@@ -176,11 +190,8 @@ function SupplierWorkspace({ warehouse, company, permissions, t, locale }: {
               </li>)}</ol>
             </details>
           </div>}
-      </DialogContent>
-    </Dialog>}
-    {editor && canCreate && (tab === "receipts" ? <SupplierReceiptEditor warehouse={warehouse} company={company} t={t}
-      receipt={editor === "edit" ? receipt.data : undefined} onClose={() => setEditor(null)} onSaved={setSelected} />
-      : <SupplierReturnEditor warehouse={warehouse} company={company} kind="SUPPLIER" t={t} onClose={() => setEditor(null)} onSaved={setSelected} />)}
+      </CardContent>
+    </Card>}
     {action && can(action) && (tab === "receipts" && receipt.data
       ? <ReceiptAction key={action + receipt.data.id} operation={action} doc={receipt.data} warehouse={warehouse} company={company} t={t} onClose={() => setAction(null)} />
       : returned.data && <SupplierReturnAction key={action + returned.data.id} operation={action} doc={returned.data} warehouse={warehouse} company={company} t={t} onClose={() => setAction(null)} />)}
@@ -211,6 +222,7 @@ function DocumentStatus({ status, t }: { status: string; t: Text }) {
 }
 function ReceiptLines({ doc, t }: { doc: WmsReceipt; t: Text }) {
   return <div className="space-y-3"><p className="text-sm">{doc.supplierName} · <bdi>{doc.supplierReference}</bdi></p>
+    {doc.documentDate && <p className="text-sm text-muted-foreground">{t("suppliers.documentDate")}: <bdi>{doc.documentDate}</bdi></p>}
     {doc.partial && <p className="text-sm text-warning">{t("wms.partial_delivery_undelivered_quantities_never_enter_stock")}</p>}
     {doc.lines.map(l => <Card key={l.id}><CardContent className="space-y-3 pt-4 sm:pt-6"><h3 className="font-semibold">{l.productName}</h3>
       <HandlingNote sensitive={l.sensitiveHandling} note={l.handlingNotes} t={t} />

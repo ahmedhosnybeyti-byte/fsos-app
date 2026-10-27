@@ -3,7 +3,7 @@ import test from "node:test";
 import {readFileSync} from "node:fs";
 import {randomUUID} from "node:crypto";
 import {ForbiddenException,NotFoundException} from "@nestjs/common";
-import {WMS_OPERATION_PERMISSIONS} from "@field-sales-os/schemas";
+import {WMS_OPERATION_PERMISSIONS,warehouseManagerPermissions} from "@field-sales-os/schemas";
 import {wmsFixture,wmsPersistence,wmsUser} from "./wms-test-fixture";
 import {WmsService} from "./wms.service";
 import {WmsOperationsService} from "./wms-operations.service";
@@ -14,11 +14,11 @@ async function fixture(t:any,stock="10",requested="7",productCount=1,Service= Wm
  const {PGlite}=require(process.env.RIE_TEST_PGLITE_MODULE!),db=new PGlite();t.after(()=>db.close());await wmsFixture(db);await db.exec(readFileSync("packages/database/sql/wms-complete-loading-functions.sql","utf8"));
  await db.exec(`ALTER TABLE companies ADD COLUMN feature_access jsonb DEFAULT '{"warehouse-core":"ENABLED"}';
  UPDATE company_operating_settings SET operating_mode='FULL_ERP';
- CREATE TABLE roles(id text PRIMARY KEY,code text);INSERT INTO roles VALUES('keeper','WAREHOUSE_KEEPER'),('rep','SALES_REP');
+ CREATE TABLE roles(id text PRIMARY KEY,code text);INSERT INTO roles VALUES('keeper','WAREHOUSE_KEEPER'),('rep','SALES_REP'),('manager','WAREHOUSE_MANAGER'),('setup','MANAGER');
  ALTER TABLE users ADD COLUMN role_id text;UPDATE users SET role_id=CASE WHEN id='clerk-a' THEN 'rep' ELSE 'keeper' END;
  UPDATE users SET email='rep@example.invalid' WHERE id='clerk-a';
- INSERT INTO users(id,company_id,full_name,email,role_id) VALUES('other-rep','a','Other','other@example.invalid','rep'),('rep-b','b','B','b@example.invalid','rep');
- INSERT INTO wms_warehouse_access(company_id,warehouse_id,user_id) VALUES('a','wa','actor-a'),('b','wb','actor-b');
+ INSERT INTO users(id,company_id,full_name,email,role_id) VALUES('other-rep','a','Other','other@example.invalid','rep'),('rep-b','b','B','b@example.invalid','rep'),('manager-a','a','Review manager','manager@example.invalid','manager'),('setup-a','a','Fixture setup','setup@example.invalid','setup');
+ INSERT INTO wms_warehouse_access(company_id,warehouse_id,user_id) VALUES('a','wa','actor-a'),('b','wb','actor-b'),('a','wa','manager-a'),('a','wa','setup-a');
  INSERT INTO rie_canonical_entity_rows(company_id,entity_name,entity_key,data) VALUES
  ('a','Branches','BR-05','{"BranchID":"BR-05","Status":"Active"}'),
  ('a','Employees','REP','{"Email":"rep@example.invalid","BranchID":"BR-05","Status":"Active"}'),
@@ -27,17 +27,19 @@ async function fixture(t:any,stock="10",requested="7",productCount=1,Service= Wm
  const prisma=wmsPersistence(db),audit=new AuditLogService(prisma),core=new WmsService(prisma,audit),ops=new Service(prisma,core,audit);
  const keeper={...wmsUser("a","actor-a","WAREHOUSE_KEEPER"),permissions:[...new Set([...Object.values(WMS_OPERATION_PERMISSIONS),"sfa.access","wms.read","wms.products.manage","wms.opening.post"])]};
  const rep={...wmsUser("a","clerk-a","SALES_REP"),permissions:["sfa.access"]};
- const product=await core.saveProduct(keeper,"wa",{code:"WATER",name:"Water",piecesPerCarton:12});
- await core.postOpening(keeper,"wa",{productId:product.id,quantity:stock,unit:"CARTON",quarantined:false,reference:"SYNTHETIC",reason:"Isolated opening",idempotencyKey:randomUUID()});
+ const setup={...wmsUser("a","setup-a","MANAGER"),permissions:["sfa.access","wms.read","wms.products.manage","wms.opening.post"]};
+ const manager={...wmsUser("a","manager-a","WAREHOUSE_MANAGER"),permissions:[...warehouseManagerPermissions]};
+ const product=await core.saveProduct(setup,"wa",{code:"WATER",name:"Water",piecesPerCarton:12});
+ await core.postOpening(setup,"wa",{productId:product.id,quantity:stock,unit:"CARTON",quarantined:false,reference:"SYNTHETIC",reason:"Isolated opening",idempotencyKey:randomUUID()});
  const lines=[{productCode:"WATER",quantity:requested,unit:"CARTON"}];
  for(let i=1;i<productCount;i++){
-  const extra=await core.saveProduct(keeper,"wa",{code:"WATER-"+i,name:"Water "+i,piecesPerCarton:12});
-  await core.postOpening(keeper,"wa",{productId:extra.id,quantity:stock,unit:"CARTON",quarantined:false,reference:"SYNTHETIC",reason:"Isolated opening",idempotencyKey:randomUUID()});
+  const extra=await core.saveProduct(setup,"wa",{code:"WATER-"+i,name:"Water "+i,piecesPerCarton:12});
+  await core.postOpening(setup,"wa",{productId:extra.id,quantity:stock,unit:"CARTON",quarantined:false,reference:"SYNTHETIC",reason:"Isolated opening",idempotencyKey:randomUUID()});
   lines.push({productCode:"WATER-"+i,quantity:requested,unit:"CARTON"});
  }
  const created=await ops.smartLoadingRequest(rep,"wa",{targetDate:"2098-01-01",lines,idempotencyKey:randomUUID(),proposalKey:randomUUID()});
  const doc=()=>ops.load(keeper,"wa",created.id);
- const step=async(operation:string,extra:any={})=>ops.command(keeper,"wa",{operation,input:{id:created.id,version:(await doc()).version,note:"Isolated workflow action",idempotencyKey:randomUUID(),...extra}});
+ const step=async(operation:string,extra:any={})=>ops.command(["load.review","load.approve"].includes(operation)?manager:keeper,"wa",{operation,input:{id:created.id,version:(await doc()).version,note:"Isolated workflow action",idempotencyKey:randomUUID(),...extra}});
  const state=async()=>JSON.stringify((await db.query(`SELECT jsonb_build_object('stock',(SELECT jsonb_agg(to_jsonb(p)) FROM wms_positions p),'custody',(SELECT jsonb_agg(to_jsonb(c)) FROM wms_custody_positions c),'movements',(SELECT jsonb_agg(to_jsonb(m) ORDER BY id) FROM wms_movements m)) s`)).rows[0].s);
  const prepare=async(actualBase?:string)=>{await step("load.reserve");const d=await doc();await step("load.pick",{allocations:d.allocations.map(a=>({id:a.id,quantity:actualBase??a.reservedQuantity})),discrepancyReason:actualBase?"Prepared shortage reviewed":""});await step("load.review");await step("load.approve");};
  const decision=async(confirmed=true)=>ops.recipientDecision(rep,"wa",created.id,{version:(await doc()).version,confirmed,note:confirmed?"Reviewed actual quantities and consent":"Please prepare these quantities again",idempotencyKey:randomUUID()});

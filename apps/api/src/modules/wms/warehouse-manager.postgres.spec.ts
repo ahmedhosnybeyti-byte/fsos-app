@@ -25,8 +25,7 @@ async function fixture(t: any) {
   await wmsFixture(db);
   await db.exec(migration("20261021200000_wms_physical_counts"));
   await db.exec(`CREATE TABLE roles(id text PRIMARY KEY,code text UNIQUE,name text,description text,"isSystem" boolean DEFAULT true,created_at timestamp DEFAULT now(),updated_at timestamp DEFAULT now());
-    CREATE TABLE company_operating_settings(company_id text PRIMARY KEY,operating_mode text);
-    INSERT INTO company_operating_settings VALUES('a','SFA'),('b','SFA');
+    -- Company mode rows are owned by wmsFixture; retain its existing SFA setup.
     CREATE TABLE role_permissions(role_id text REFERENCES roles(id),permission_id text REFERENCES permissions(id),PRIMARY KEY(role_id,permission_id));
     ALTER TABLE users ADD COLUMN role_id text REFERENCES roles(id);
     ALTER TABLE companies ADD COLUMN status text DEFAULT 'ACTIVE';
