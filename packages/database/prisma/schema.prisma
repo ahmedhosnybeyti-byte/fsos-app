@@ -502,19 +502,6 @@ model WmsWarehouseAccess {
   @@map("wms_warehouse_access")
 }
 
-// Stable company BranchID, validated against current RIE Branches on both
-// configuration and request admission; not an FK to rebuildable projection IDs.
-model WmsWarehouseBranch {
-  companyId String @map("company_id")
-  warehouseId String @map("warehouse_id")
-  branchId String @map("branch_id")
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
-  warehouse Warehouse @relation(fields: [companyId,warehouseId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
-  @@id([companyId,warehouseId,branchId])
-  @@index([companyId,branchId,warehouseId], map: "wms_warehouse_branches_company_branch_warehouse")
-  @@map("wms_warehouse_branches")
-}
-
 model WmsPosition {
   companyId String @map("company_id")
   warehouseId String @map("warehouse_id")
@@ -2602,4 +2589,18 @@ model ErpProductLink {
   @@id([companyId,sourceCode])
   @@unique([companyId,productId])
   @@map("erp_product_links")
+}
+
+
+// Stable company BranchID, validated against current RIE Branches on both
+// configuration and request admission; not an FK to rebuildable projection IDs.
+model WmsWarehouseBranch {
+  companyId String @map("company_id")
+  warehouseId String @map("warehouse_id")
+  branchId String @map("branch_id")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamp(3)
+  warehouse Warehouse @relation(fields: [companyId,warehouseId], references: [companyId,id], onDelete: Restrict, onUpdate: NoAction)
+  @@id([companyId,warehouseId,branchId])
+  @@index([companyId,branchId,warehouseId], map: "wms_warehouse_branches_company_branch_warehouse")
+  @@map("wms_warehouse_branches")
 }

@@ -35,7 +35,8 @@ async function fixture(t: any, enforce = true) {
     ALTER TABLE users ADD COLUMN role_id text REFERENCES roles(id); UPDATE users SET role_id='keeper';
     ALTER TABLE companies ADD COLUMN status text DEFAULT 'ACTIVE';
     ALTER TABLE companies ADD COLUMN feature_access jsonb DEFAULT '{"warehouse-core":"ENABLED"}';
-    -- Company mode rows are owned by wmsFixture; retain its existing SFA setup.
+    CREATE TABLE company_operating_settings(company_id text PRIMARY KEY,operating_mode text);
+    INSERT INTO company_operating_settings VALUES('a','SFA'),('b','SFA');
     INSERT INTO users(id,company_id,status,full_name,role_id) VALUES('platform',NULL,'ACTIVE','Synthetic platform','platform'),
       ('manager-a','a','ACTIVE','Synthetic manager A','manager'),('manager-b','b','ACTIVE','Synthetic manager B','manager');
     INSERT INTO wms_warehouse_access(company_id,warehouse_id,user_id) VALUES('a','wa','actor-a');`);

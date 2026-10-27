@@ -11,27 +11,6 @@ async function fixture(t:any) {
 }
 const product={code:"WATER",name:"Water",piecesPerCarton:24,trackBatches:true,trackExpiry:true};
 const opening=(productId:string,batchId:string|null=null,extra={})=>({productId,batchId,quantity:"2",unit:"CARTON",reference:randomUUID(),reason:"Verified opening count",idempotencyKey:randomUUID(),...extra});
-test("WMS category ordering stays scoped and paged; carton totals divide before summing mixed packaging",options,async t=>{
- const {db,service,user}=await fixture(t);
- const a=await service.saveProduct(user,"wa",{code:"MILK",name:"Milk",piecesPerCarton:12});
- const b=await service.saveProduct(user,"wa",{code:"SNACK",name:"Snack",piecesPerCarton:24});
- await service.postOpening(user,"wa",opening(a.id,null,{quantity:"100"}));
- await service.postOpening(user,"wa",opening(b.id,null,{quantity:"100"}));
- await db.exec(`INSERT INTO rie_canonical_entity_rows VALUES('a','Products','MILK','{"Category":"Dairy"}'),('a','Products','SNACK','{"Category":"Snacks"}'),('b','Products','MILK','{"Category":"FOREIGN"}');`);
- const products=await service.products(user,"wa",{});
- assert.deepEqual(products.items.map(p=>[p.code,p.category]),[["MILK","Dairy"],["SNACK","Snacks"]]);
- assert.equal(products.items[0]!.physical,"1200.000000");assert.equal(products.items[1]!.physical,"2400.000000");
- const summary=await service.summary(user,"wa",{});
- assert.equal(Number(summary.cartons!.physical),200);assert.equal(Number(summary.cartons!.available),200);
- assert.equal(Number(summary.units[0]!.physical),3600);
- assert.equal((await service.products(user,"wa",{search:"SNACK"})).items.length,1);
- assert.equal((await service.batches(user,"wa",{})).items[0]!.piecesPerCarton!==undefined,true);
- assert.equal((await service.movements(user,"wa",{})).items[0]!.piecesPerCarton!==undefined,true);
- await db.exec(`INSERT INTO wms_products(id,company_id,code,name,pieces_per_carton) SELECT 'extra-'||i,'a','EXTRA-'||i,'Extra '||i,12 FROM generate_series(1,22) i`);
- const first=await service.products(user,"wa",{}),second=await service.products(user,"wa",{page:2});
- assert.equal(first.items.length,20);assert.equal(first.hasMore,true);assert.equal(second.items.length,4);assert.equal(second.hasMore,false);
- assert.equal(new Set([...first.items,...second.items].map(p=>p.id)).size,24);
-});
 async function tracked(service:any,user:any,extra={}) {
   const p=await service.saveProduct(user,"wa",{...product,...extra});
   const b=await service.createBatch(user,"wa",{productId:p.id,code:"L1",productionDate:"2026-01-01",expiryDate:"2099-01-01"});return {p,b};

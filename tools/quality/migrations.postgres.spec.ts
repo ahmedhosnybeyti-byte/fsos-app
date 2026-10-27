@@ -2,11 +2,10 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import test from "node:test";
 import { SfaSetupService } from "../../apps/api/src/modules/sfa-setup/sfa-setup.service";
-import { warehouseManagerPermissions, warehouseKeeperPermissions } from "../../packages/schemas/src/operational-role-policy";
 
 const options = { skip: process.env.RIE_TEST_PGLITE_MODULE ? false : "Isolated PostgreSQL runtime required" };
 
-test("all committed migrations apply without tenant activation or user assignment and retain exactly the reviewed warehouse role profiles", options, async (t) => {
+test("all committed migrations apply to a fresh isolated database without tenant activation or role grants", options, async (t) => {
   const { PGlite } = require(process.env.RIE_TEST_PGLITE_MODULE!);
   const db = new PGlite(); t.after(() => db.close());
   const folder = "packages/database/prisma/migrations";
@@ -18,15 +17,7 @@ test("all committed migrations apply without tenant activation or user assignmen
   for (const table of ["companies", "users", "warehouses", "company_operating_settings", "wms_products", "wms_batches", "wms_positions", "wms_movements", "wms_warehouse_access", "wms_receipts", "wms_receipt_lines", "wms_load_requests", "wms_load_lines", "wms_allocations", "wms_customer_policies", "wms_custody_positions", "wms_operation_events", "wms_commands", "wms_returns", "wms_return_lines", "wms_loading_proposals", "wms_proposal_lines"]) {
     assert.equal((await db.query(`SELECT count(*)::int AS count FROM ${table}`)).rows[0].count, 0);
   }
-  const grants = (await db.query(`SELECT r.code AS role,p.code AS permission FROM role_permissions rp JOIN roles r ON r.id=rp.role_id JOIN permissions p ON p.id=rp.permission_id
-    WHERE p.code='sfa.access' OR p.code LIKE 'wms.%' ORDER BY r.code,p.code`)).rows;
-  const expected = [
-    ...warehouseKeeperPermissions.map(permission => ({role:"WAREHOUSE_KEEPER",permission})),
-    ...warehouseManagerPermissions.map(permission => ({role:"WAREHOUSE_MANAGER",permission})),
-  ].sort((a,b)=>a.role.localeCompare(b.role)||a.permission.localeCompare(b.permission));
-  assert.deepEqual(grants,expected);
-  for (const table of ["wms_suppliers","wms_receipt_supplier_metadata"])
-    assert.equal((await db.query(`SELECT count(*)::int AS count FROM ${table}`)).rows[0].count,0);
+  assert.equal((await db.query(`SELECT count(*)::int AS count FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE p.code = 'sfa.access' OR p.code LIKE 'wms.%'`)).rows[0].count, 0);
 });
 
 test("warehouse service rolls back its write when audit persistence fails in the same SQL transaction", options, async (t) => {

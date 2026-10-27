@@ -79,20 +79,6 @@ CI's `Engineering reliability / required` reports failure automatically. Enforci
 
 ## Mandatory handoff result
 
-### Permanent scalability acceptance
-
-For impactful API/PostgreSQL/RIE/WMS/inventory/custody/accounting/analytics/import
-or data-fetching work, read [SCALABILITY_GATE.md](../../../docs/engineering/SCALABILITY_GATE.md)
-before acceptance. Extend existing scoped query/race/plan tests, then retain
-comparable synthetic evidence via `pnpm quality:scalability`; the normal quality
-runner also assesses it. Missing baseline is UNVERIFIED/WARN; approved-budget
-regressions and critical test failures are BLOCK. Do not promote Foundation
-002-A/002-B1 serial observations or proposed budgets into approved capacity/SLOs.
-Report `Scalability Gate: PASS / WARN / BLOCK` with measured scenario, data size,
-actual concurrency, SQL count, API p95, bottleneck and untested risks. For changes
-without performance impact report `Scalability Gate: N/A` with a short reason.
-Keep local functional acceptance separate from release/capacity readiness.
-
 Report succinctly:
 - `System Design Gate: PASS / WARN / BLOCK` and why.
 - Most significant scalability/availability/consistency trade-off.

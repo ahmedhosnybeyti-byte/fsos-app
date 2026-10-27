@@ -5,7 +5,6 @@ import { getInitialProductionSuperAdmin } from "./seed-security";
 const prisma = new PrismaClient();
 
 const PERMISSIONS = [
-  { code: "erp.admin.read", description: "Company administrator read-only inventory, purchase orders and treasury balances" },
   { code: "sfa.access", description: "Access enabled company SFA operations" },
   { code: "platform.admin", description: "Full platform access (super admin)" },
   { code: "company.manage", description: "Manage own company profile" },

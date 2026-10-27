@@ -12,11 +12,12 @@ async function fixture(t:any) {
   assert.ok(process.env.RIE_TEST_PGLITE_MODULE);
   const {PGlite}=require(process.env.RIE_TEST_PGLITE_MODULE!);const db=new PGlite();t.after(()=>db.close());
   const access=await wmsFixture(db);await db.exec(procurementSeed);await db.exec(readFileSync(procurementMigration,"utf8"));
-  await db.exec(`CREATE TABLE erp_product_links(company_id text,product_id text,source_code text,source_uom jsonb);
+  await db.exec(`CREATE TABLE rie_canonical_entity_rows(company_id text,entity_name text,data jsonb);
+    CREATE TABLE erp_product_links(company_id text,product_id text,source_code text,source_uom jsonb);
     INSERT INTO erp_product_links VALUES('a','p','SKU','{"CartonQty":12,"PackQty":3,"PieceQty":1}');`);
   const coordinator=new RieExecutionCoordinatorService();
   function rie(allowed:Set<string>|null=null){return new RieWmsCoverageQueryService(wmsPersistence(db),{resolveAllowedRouteIds:async()=>allowed} as never,coordinator);}
-  async function row(entity:string,data:any,company="a"){await db.query("INSERT INTO rie_canonical_entity_rows(company_id,entity_name,data) VALUES($1,$2,$3)",[company,entity,JSON.stringify(data)]);}
+  async function row(entity:string,data:any,company="a"){await db.query("INSERT INTO rie_canonical_entity_rows VALUES($1,$2,$3)",[company,entity,JSON.stringify(data)]);}
   async function sale(id:string,day:string,quantity:any,unit="Carton",extra:any={},company="a",route="R1"){
     await row("Invoices",{InvoiceNo:id,InvoiceDate:day,InvoiceStatus:"Confirmed",InvoiceType:"Sale",RouteID:route,...extra},company);
     await row("Invoice Items",{InvoiceNo:id,ProductCode:"SKU",RouteID:route,Quantity:quantity,FreeQuantity:0,Unit:unit},company);
@@ -68,10 +69,7 @@ test("coverage service retains warehouse/tenant/permission boundary, bounded pag
  const f=await fixture(t),service=new WmsCoverageService(f.access,f.rie());
  await assert.rejects(service.coverage({...wmsUser(),permissions:[]},"wa",{}),ForbiddenException);
  await assert.rejects(service.coverage(wmsUser(),"wb",{}),NotFoundException);
- // The procurement seed intentionally assigns clerk-a to wa; use a truly
- // unassigned actor to exercise the warehouse boundary.
- await f.db.exec("INSERT INTO users(id,company_id,full_name) VALUES('unassigned-a','a','Unassigned')");
- await assert.rejects(service.coverage(wmsUser("a","unassigned-a","MANAGER"),"wa",{}),NotFoundException);
+ await assert.rejects(service.coverage(wmsUser("a","clerk-a","MANAGER"),"wa",{}),NotFoundException);
  const r=await service.coverage(wmsUser(),"wa",{});assert.equal(r!.page,1);assert.ok(r!.items.length<=20);
  assert.equal(Date.parse(r!.to)-Date.parse(r!.from),29*86400000);assert.ok(Date.parse(r!.to)<Date.parse(r!.stockAsOf));
 });

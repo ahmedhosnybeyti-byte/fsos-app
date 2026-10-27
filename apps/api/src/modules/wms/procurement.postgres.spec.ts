@@ -21,18 +21,6 @@ async function fixture(t:any){
  const stock=async()=>Number((await db.query("SELECT sum(physical)::text AS n FROM wms_positions WHERE company_id='a' AND warehouse_id='wa'")).rows[0].n);
  return {db,s,wms,make,u,approver,command,draft,order,receipt,post,stock};
 }
-
-test("company admin reads purchase orders only, even when request filters or draft IDs are supplied",async t=>{
- const f=await fixture(t),draft=await f.s.command(f.u,"wa",f.draft());
- const admin={...f.u,roleCode:"COMPANY_ADMIN" as const,permissions:["sfa.access","erp.admin.read"]};
- assert.equal((await f.s.list(admin,"wa",{kind:"all"})).items.length,0);
- await assert.rejects(f.s.detail(admin,"wa",draft.id),NotFoundException);
- const ordered=await f.order();
- const rows=await f.s.list(admin,"wa",{kind:"requests"});assert.equal(rows.items.length,1);assert.equal(rows.items[0]!.id,ordered);
- assert.equal((await f.s.detail(admin,"wa",ordered)).orderId!==null,true);
- assert.equal((await f.s.summary(admin,"wa")).pending,0);
- await assert.rejects(f.s.list({...admin,companyId:"b",userId:"actor-b"},"wa",{}),NotFoundException);
-});
 test("Procurement 40 cartons: request/approval/order inert; WMS 25 + 15; retries once; reversal reopens supply",async t=>{
  const f=await fixture(t),before=await f.stock(),id=await f.order();assert.equal(await f.stock(),before);
  let d=await f.s.detail(f.u,"wa",id);assert.equal(d.status,"OPEN");assert.equal(d.lines[0]!.price,null);

@@ -12,12 +12,7 @@ import {loadingRecipientDecisionSchema,type LoadingRecipientSummary,type Loading
 function parse<T>(schema:ZodType<T,ZodTypeDef,unknown>,input:unknown):T {const r=schema.safeParse(input);if(!r.success)throw new BadRequestException({message:"WMS_INVALID_INPUT",errors:r.error.flatten()});return r.data;}
 const time=(column:Prisma.Sql)=>Prisma.sql`to_char(${column},'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
 const pageSize=20;
-
-function cartonSuggestionToWholeBase(quantity:string,piecesPerCarton:number):string {
-  const [whole,fraction=""]=quantity.split(".");
-  const scale=10n**BigInt(fraction.length);
-  return ((BigInt(`${whole}${fraction}`)*BigInt(piecesPerCarton)+scale-1n)/scale).toString();
-}
+function cartonSuggestionToWholeBase(quantity:string,piecesPerCarton:number):string {const [whole,fraction=""]=quantity.split(".");const scale=10n**BigInt(fraction.length);return ((BigInt(`${whole}${fraction}`)*BigInt(piecesPerCarton)+scale-1n)/scale).toString();}
 
 @Injectable()
 export class WmsOperationsService {
@@ -76,15 +71,9 @@ export class WmsOperationsService {
     // Both immutable proposal and REQUESTED load use the existing WMS engine,
     // audit and replay ledger in one transaction. No reserve/dispatch command.
     return this.access.authorizedLoadingRequestTransaction(user,warehouse,async(tx,company)=>{
-      const factors=await tx.$queryRaw<{code:string;piecesPerCarton:number}[]>(Prisma.sql`SELECT p.code,p.pieces_per_carton AS "piecesPerCarton"
-        FROM wms_products p JOIN jsonb_array_elements(${JSON.stringify(data.lines)}::jsonb) input ON p.code=upper(input->>'productCode')
-        WHERE p.company_id=${company} AND p.is_active FOR SHARE`);
+      const factors=await tx.$queryRaw<{code:string;piecesPerCarton:number}[]>(Prisma.sql`SELECT p.code,p.pieces_per_carton AS "piecesPerCarton" FROM wms_products p JOIN jsonb_array_elements(${JSON.stringify(data.lines)}::jsonb) input ON p.code=upper(input->>'productCode') WHERE p.company_id=${company} AND p.is_active FOR SHARE`);
       const byCode=new Map(factors.map(row=>[row.code.toUpperCase(),row.piecesPerCarton]));
-      const lines=data.lines.map(line=>{
-        const factor=byCode.get(line.productCode.toUpperCase());
-        if(!factor)throw new BadRequestException("WMS_PRODUCT_MAPPING_REQUIRED");
-        return {productCode:line.productCode,quantity:cartonSuggestionToWholeBase(line.quantity,factor),unit:"BASE" as const};
-      });
+      const lines=data.lines.map(line=>{const factor=byCode.get(line.productCode.toUpperCase());if(!factor)throw new BadRequestException("WMS_PRODUCT_MAPPING_REQUIRED");return {productCode:line.productCode,quantity:cartonSuggestionToWholeBase(line.quantity,factor),unit:"BASE" as const};});
       const {idempotencyKey:proposalKey,...proposal}=wmsProposalInputSchema.parse({targetDate:data.targetDate,lines,note:"Confirmed Smart Loading proposal",idempotencyKey:data.proposalKey});
       const snapshot=await this.executeCommand(tx,user,company,warehouse,"proposal.create",proposal,proposalKey);
       const {idempotencyKey,...load}=wmsLoadInputSchema.parse({reference:`SL-${data.idempotencyKey}`,source:"SMART_LOADING",proposalId:snapshot.id,

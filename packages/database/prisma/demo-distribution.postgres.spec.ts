@@ -15,7 +15,6 @@ async function fixture(t: {after:(fn:()=>Promise<void>)=>void}) {
 test("synthetic Canonical demo imports as third tenant, publishes history once and never posts opening/financial ledgers",async t=>{
   const db=await fixture(t),bundle=prepareDemoDistribution();
   const before=(await db.query(`SELECT * FROM companies ORDER BY id`)).rows;
-  const grantsBefore=(await db.query(`SELECT role_id,permission_id FROM role_permissions ORDER BY role_id,permission_id`)).rows;
   const first=await importDemoDistribution(db,bundle);assert.equal(first.status,"IMPORTED");assert.ok(first.rows>100);
   assert.equal((await db.query(`SELECT count(*)::int n FROM companies`)).rows[0]!.n,3);
   const counts=await db.query(`SELECT entity_name,count(*)::int n FROM rie_canonical_entity_rows WHERE company_id=$1 GROUP BY entity_name`,[DEMO_COMPANY.id]);
@@ -25,9 +24,8 @@ test("synthetic Canonical demo imports as third tenant, publishes history once a
   assert.equal((await db.query(`SELECT operating_mode FROM company_operating_settings WHERE company_id=$1`,[DEMO_COMPANY.id])).rows[0]!.operating_mode,"FULL_ERP");
   const second=await importDemoDistribution(db,bundle);assert.equal(second.status,"UNCHANGED");
   assert.deepEqual((await db.query(`SELECT * FROM companies WHERE id<>$1 ORDER BY id`,[DEMO_COMPANY.id])).rows,before);
-  for(const table of ["wms_movements","wms_positions","payments","wms_warehouse_access"])
+  for(const table of ["wms_movements","wms_positions","payments","role_permissions"])
     assert.equal((await db.query(`SELECT count(*)::int n FROM ${table}`)).rows[0]!.n,0);
-  assert.deepEqual((await db.query(`SELECT role_id,permission_id FROM role_permissions ORDER BY role_id,permission_id`)).rows,grantsBefore);
   const totals=await db.query(`SELECT entity_name,sum((data->>'TotalAfterVAT')::numeric) invoices,sum((data->>'LineTotal')::numeric) lines,sum((data->>'Amount')::numeric) collections FROM rie_canonical_entity_rows WHERE company_id=$1 GROUP BY entity_name`,[DEMO_COMPANY.id]);
   assert.equal(totals.rows.find(r=>r.entity_name==="Invoices")?.invoices,"552");
   assert.equal(totals.rows.find(r=>r.entity_name==="Invoice Items")?.lines,"552.0");

@@ -63,25 +63,6 @@ After an important verified engineering fix, update `RESOLVED_ISSUES.md` with th
     - absence of dangerous Full Reads
 
 
-## Mandatory Murshidak Scalability Gate
-
-Every impactful API, PostgreSQL/Prisma, RIE, WMS, inventory/custody, accounting,
-analytics or ingestion/data-fetching change must assess performance before local
-engineering acceptance. Use `.agents/skills/murshidak-system-design/SKILL.md`
-and [the executable scalability contract](docs/engineering/SCALABILITY_GATE.md).
-Run `pnpm quality --base <actual-review-base>`; its scalability assessment is
-mandatory, separate from functional success. Preserve comparable synthetic local
-measurements; an approved-budget regression is BLOCK, absent/untrusted baseline
-or unmeasured relevant waits/capacity is UNVERIFIED/WARN, never invented PASS.
-
-Every impactful handoff must report `Scalability Gate: PASS / WARN / BLOCK`,
-scenario, dataset size, actual concurrency, SQL count, API p95, bottleneck and
-untested risks. Use `Scalability Gate: N/A — <reason>` for changes without
-performance impact. One serial request never proves 150-user capacity. Local
-functional acceptance is separate from deployment/capacity readiness; WARN cannot
-waive critical failures. No large load tests on every edit, new infrastructure,
-Production access or increased RIE concurrency are authorized by this policy.
-
 ## Murshidak mandatory engineering gates
 
 - Before any task that creates or modifies Murshidak UI, including minor text/style changes, read and apply `.codex/skills/murshidak-ui-design-system/SKILL.md` automatically, without waiting for a prompt reminder.
@@ -98,10 +79,3 @@ Production access or increased RIE concurrency are authorized by this policy.
 - Critical failures, missing test runtimes, skips, TODOs, timeouts and failed typechecks mean **BLOCK**. Do not mark a release ready, remove a test or raise a budget to conceal failure. `WARN` must identify an uncovered risk; it cannot waive a critical failure.
 - GitHub Actions `Engineering reliability / required` is the required review check. Branch protection and Railway deployment gating are external settings: do not claim they are enabled without verification/authorization. Keep current Railway/Docker startup and separate migration behavior intact.
 - No new infrastructure or dependencies without approval. PGlite 0.5.8 is approved for isolated tests only in `packages/quality-gates`; API/web must not depend on that workspace. No Production/customer data, network services, pushes, deployments or Production migrations are authorized by these commands.
-
-## Credential handling and incident logs
-
-- Never print environment dumps, raw Railway variable responses, database URLs containing credentials, tokens, or private keys into tool output, reports, screenshots, or chat.
-- Capture secret-bearing command output in memory, return only explicitly selected non-secret fields, and suppress raw errors that could repeat credentials. Pass credentials through stdin or a child process environment; never embed them in command arguments or shell interpolation.
-- Do not use `railway ssh -- sh -c` with separately quoted script arguments: CLI argument joining can execute `set` without its intended arguments and disclose the environment. Prefer a fixed executable and stdin; never use `set`, `env`, `printenv`, or shell tracing to diagnose Production credentials.
-- Store any necessary recovery state encrypted with restricted filesystem access. Restrict incident logs to their owner and SYSTEM; do not copy exposed values into replacement logs. Never claim local file ACLs also redact server-side conversation history.

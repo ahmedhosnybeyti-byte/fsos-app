@@ -24,8 +24,6 @@ export const critical = [
   'tools/quality/policy.test.mjs',
   'tools/quality/repository-contracts.test.mjs',
   'tools/quality/admission.spec.ts',
-  'tools/quality/scalability.test.mjs',
-  'tools/quality/scalability-query-count.spec.ts',
 ];
 
 export function isPostgresSpec(file, read = readFileSync) {
@@ -47,20 +45,11 @@ export function classify(files) {
   const tooling = files.some((f) => /^tools\/quality\/|^\.github\/|^(package\.json|pnpm-lock\.yaml)/.test(f));
   const api = tooling || code.some((f) => /^apps\/api\/|^packages\//.test(f));
   const web = tooling || code.some((f) => /^apps\/web\/|^packages\/schemas\/|^packages\/config\//.test(f));
-  const scalability = tooling || files.some((f) =>
-    /^(apps\/api\/src\/|packages\/(database|schemas)\/)/.test(f)
-    || /^apps\/web\/src\/(lib\/api|hooks|services)\//.test(f)
-    || /\.(sql|prisma)$/.test(f));
-  return { database, ai, erp, api, web, tooling, scalability };
+  return { database, ai, erp, api, web, tooling };
 }
 
 export function selectTests(files, specs, mode = 'changed', read = readFileSync) {
   const risk = classify(files);
-  risk.scalability ||= files.some((file) => {
-    if (!/^apps\/web\/src\/.*\.tsx?$/.test(file) || file.endsWith('.spec.ts')) return false;
-    try { return /\bfetch\s*\(|\buse(Query|InfiniteQuery|SWR)\b|from\s+["'][^"']*\/api[\/"']/.test(read(file, 'utf8')); }
-    catch { return true; }
-  });
   // SQL/data-access services also live outside the rie module. Inspect source,
   // and retain path classification for deleted files. This is not a SQL linter.
   risk.database ||= files.some((file) => {
@@ -85,9 +74,4 @@ export function selectTests(files, specs, mode = 'changed', read = readFileSync)
 
 export function isSuccessful(counts) {
   return counts.passed > 0 && counts.failed === 0 && counts.skipped === 0 && counts.todo === 0 && counts.cancelled === 0;
-}
-
-export function acceptanceResult(functionalPassed, scalabilityStatus, mode) {
-  const passed = functionalPassed && scalabilityStatus !== 'BLOCK' && (mode !== 'release' || scalabilityStatus === 'PASS');
-  return { passed, status: !passed ? 'BLOCK' : scalabilityStatus === 'WARN' ? 'WARN' : 'PASS' };
 }
