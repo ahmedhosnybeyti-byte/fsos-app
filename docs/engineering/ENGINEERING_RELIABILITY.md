@@ -614,3 +614,24 @@ System Design Gate: **WARN**, local functional **PASS**; Scalability Gate:
 verified release/capacity evidence) has not been claimed. Additive supplier
 migration must precede any future new API rollout, subject to owner approval.
 Full result and agent/commit ledger: `SUPPLIER_RECEIVING_DELIVERY_20261027.md`.
+
+## 2026-10-27 — supplier receiving release-readiness follow-up
+
+Final source `300667f1398f8889cf7944a44f67cf99d33cad07` removes the inherited
+supplier document count ceiling end-to-end, retaining existing stock/approval/
+replay rules, company scope and REP/Smart Loading contracts. Additive uncap
+migration follows supplier master migration `20261027150000_wms_suppliers`.
+Native PostgreSQL 18.6 applies all 64 migrations and passes 21/83/1,000-line real
+HTTP journeys, legacy/foreign-key checks, actual independent two-client retries
+and post-effect audit rollback. Maximum driver SQL is 15; mixed five-operation
+p95 observations are 53.87 / 71.37 / 748.64 ms. These are not capacity/SLO proof;
+internal function SQL, native plans/scans and pool/lock/server metrics remain
+unverified, with no approved comparable baseline. No budgets were altered.
+
+`quality:release` executes **796 passing cases**, zero failures/skips/TODOs and
+four passing typechecks, but correctly exits **BLOCK** on Scalability **WARN**.
+CLI API/web builds and standalone page + supplier bundle HTTP 200 pass on Windows
+Node 24.18.0. The owner switched to CLI instead of Docker; no Docker build or
+Linux/Railway runtime proof is claimed. No Production migration/deployment,
+new dependency/infrastructure or backup was introduced. Full evidence, identity
+linkage decision and remaining acceptance: `SUPPLIER_RECEIVING_RELEASE_READINESS_20261027.md`.

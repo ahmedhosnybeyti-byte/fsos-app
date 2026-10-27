@@ -1,5 +1,13 @@
 # Murshidak Resolved Engineering Issues
 
+## 2026-10-27 — complete supplier documents without the inherited 20-line ceiling
+
+- Symptom/root cause: receipt/supplier-return schemas, UI guards and SQL still rejected line 21, and detail/source reads truncated one document at 20/100 lines. Nest's default JSON byte admission also rejected a valid 1,000-line HTTP document before validation.
+- Fix: additive migration `20261027160000_wms_complete_supplier_documents` removes only supplier document admission ceilings in the existing functions; exact stock/approval/replay rules remain. Complete scoped document projections, unbounded supplier-specific schemas, local 25-row DOM windows with full payload/summary, and supplier-command-only byte admission. REP/Smart Loading rules and transport limits are preserved; the existing company/receipt-line index is reused. Supplier master stays operational; future tenant-scoped one-to-one accounting identity linkage is documented without a rebuild.
+- Commit: `300667f1398f8889cf7944a44f67cf99d33cad07`, local `codex/supplier-receiving-release`; original working branch/WIP retained. No Production action or new backup.
+- Verification: SQL/API and UI admission 21/83/1,000 pass; UI saves all 1,000 and accepts line 1,001. Native PostgreSQL 18.6 full 64-migration chain, HTTP, actual two-client retries, stock parity, legacy compatibility and audit-failure atomic rollback pass. Required release regression command: 796 passed, zero failures/skips/TODOs and four types pass. Windows CLI API/web builds and standalone page/bundle HTTP 200 pass. Overall release remains BLOCK for unverified scalability; Linux proof is absent after owner's no-Docker/CLI instruction.
+- Prevention: test the entire path through real HTTP and every document read, including final-line failures and retries; a schema/UI-only cap removal is insufficient. A rendered page size must never truncate business payloads. Do not confuse Windows packaging with Linux acceptance or mixed low-concurrency observations with approved capacity. See `SUPPLIER_RECEIVING_RELEASE_READINESS_20261027.md` for evidence and remaining gates.
+
 ## 2026-10-27 — supplier receiving workspace and replay-safe document metadata (local)
 
 - Symptom/root cause: supplier receiving used a free-text supplier and an old drawer with raw unit quantities; no operational supplier identity or independently persisted document date existed. Existing financial supplier creation required GL setup. Role-separation changes also left older fixture setup using keeper privileges for product/opening/approval duties and repeated shared settings DDL.
