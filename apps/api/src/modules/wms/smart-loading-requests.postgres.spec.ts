@@ -18,28 +18,30 @@ async function fixture(t:any){
  const {PGlite}=require(process.env.RIE_TEST_PGLITE_MODULE!);const db=new PGlite();t.after(()=>db.close());await wmsFixture(db);
  await db.exec(`ALTER TABLE companies ADD COLUMN feature_access jsonb DEFAULT '{"warehouse-core":"ENABLED"}';
  UPDATE company_operating_settings SET operating_mode='FULL_ERP';
- CREATE TABLE roles(id text PRIMARY KEY,code text);INSERT INTO roles VALUES('keeper','WAREHOUSE_KEEPER'),('rep','SALES_REP');
+ CREATE TABLE roles(id text PRIMARY KEY,code text);INSERT INTO roles VALUES('keeper','WAREHOUSE_KEEPER'),('rep','SALES_REP'),('setup','MANAGER');
  ALTER TABLE users ADD COLUMN role_id text;UPDATE users SET role_id=CASE WHEN id='clerk-a' THEN 'rep' ELSE 'keeper' END;
- INSERT INTO users(id,company_id,full_name,role_id) VALUES('clerk-b','b','Rep B','rep'),('unassigned','a','Unassigned','rep');
- INSERT INTO wms_warehouse_access(company_id,warehouse_id,user_id) VALUES('a','wa','actor-a'),('a','wa','clerk-a'),('b','wb','actor-b'),('b','wb','clerk-b');`);
+ INSERT INTO users(id,company_id,full_name,role_id) VALUES('clerk-b','b','Rep B','rep'),('unassigned','a','Unassigned','rep'),('setup-a','a','Fixture setup A','setup'),('setup-b','b','Fixture setup B','setup');
+ INSERT INTO wms_warehouse_access(company_id,warehouse_id,user_id) VALUES('a','wa','actor-a'),('a','wa','clerk-a'),('b','wb','actor-b'),('b','wb','clerk-b'),('a','wa','setup-a'),('b','wb','setup-b');`);
  const statements={count:0};
  const connection=(dbConnection:any)=>({query:(...args:any[])=>{statements.count++;return dbConnection.query(...args);}});
  const measuredDb={...connection(db),transaction:(work:any)=>db.transaction((tx:any)=>work(connection(tx)))};
  const prisma=wmsPersistence(measuredDb),audit=new AuditLogService(prisma),core=new WmsService(prisma,audit),ops=new WmsOperationsService(prisma,core,audit);
  const keeper=(company="a")=>({...wmsUser(company,`actor-${company}`,"WAREHOUSE_KEEPER"),permissions});
  const rep=(company="a")=>({...wmsUser(company,`clerk-${company}`,"SALES_REP"),permissions:["sfa.access"]});
- const product=async(company="a",code="P-12")=>core.saveProduct(keeper(company),`w${company}`,{code,name:code,piecesPerCarton:12,trackBatches:false,trackExpiry:false});
+ // Registry/opening setup is separate from the keeper and rep actors under test.
+ const setup=(company="a")=>({...wmsUser(company,`setup-${company}`,"MANAGER"),permissions:["sfa.access","wms.read","wms.products.manage","wms.opening.post"]});
+ const product=async(company="a",code="P-12")=>core.saveProduct(setup(company),`w${company}`,{code,name:code,piecesPerCarton:12,trackBatches:false,trackExpiry:false});
  const body=(quantity="2",code="P-12")=>({targetDate:"2098-01-01",lines:[{productCode:code,quantity,unit:"CARTON"}],idempotencyKey:randomUUID(),proposalKey:randomUUID()});
  const balances=async()=>((await db.query(`SELECT (SELECT coalesce(jsonb_agg(to_jsonb(p) ORDER BY p.company_id,p.warehouse_id,p.batch_id),'[]') FROM wms_positions p) positions,
  (SELECT coalesce(jsonb_agg(to_jsonb(m) ORDER BY m.id),'[]') FROM wms_movements m) movements,
  (SELECT coalesce(jsonb_agg(to_jsonb(a) ORDER BY a.id),'[]') FROM wms_allocations a) allocations,
  (SELECT coalesce(jsonb_agg(to_jsonb(c) ORDER BY c.company_id,c.warehouse_id,c.recipient_id,c.batch_id),'[]') FROM wms_custody_positions c) custody`)).rows);
- return {db,prisma,audit,core,ops,keeper,rep,product,body,balances,statements};
+ return {db,prisma,audit,core,ops,keeper,rep,setup,product,body,balances,statements};
 }
 
 test("Smart Loading request-only: assigned rep without warehouse permissions creates one real request, visible to keeper; stock/custody unchanged",options,async t=>{
  const f=await fixture(t),p=await f.product();
- await f.core.postOpening(f.keeper(),"wa",{productId:p.id,quantity:"10",unit:"CARTON",quarantined:false,reference:"SYNTHETIC-OPEN",reason:"Synthetic opening stock",idempotencyKey:randomUUID()});
+ await f.core.postOpening(f.setup(),"wa",{productId:p.id,quantity:"10",unit:"CARTON",quarantined:false,reference:"SYNTHETIC-OPEN",reason:"Synthetic opening stock",idempotencyKey:randomUUID()});
  const before=await f.balances(),body=f.body("2.5");
  const list=await f.core.loadingRequestWarehouses(f.rep(),{});assert.deepEqual(list.items.map(w=>w.id),["wa"]);assert.deepEqual(Object.keys(list.items[0]!).sort(),["code","id","name"]);
  const saved=await f.ops.smartLoadingRequest(f.rep(),"wa",body);assert.equal(saved.status,"REQUESTED");

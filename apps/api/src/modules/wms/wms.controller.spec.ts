@@ -9,7 +9,9 @@ import { SfaAccessGuard } from "../../common/guards/sfa-access.guard";
 import { RolesGuard } from "../../common/guards/roles.guard";
 import { CompanyScreenAccessGuard } from "../../common/guards/company-screen-access.guard";
 import { wmsPermissions,wmsUser as legacyWmsUser } from "./wms-test-fixture";
-const wmsUser = (companyId="a",userId="actor-a",roleCode="WAREHOUSE_KEEPER") => legacyWmsUser(companyId,userId,roleCode);
+// Generic admission tests need a generic operational actor, not a keeper
+// whose reviewed profile deliberately excludes registry/opening/access duties.
+const wmsUser = (companyId="a",userId="actor-a",roleCode="MANAGER") => legacyWmsUser(companyId,userId,roleCode);
 
 const operations={coverage:[],warehouses:[],summary:[],products:[],batches:[],movements:[],createProduct:["wms.products.manage"],updateProduct:["wms.products.manage"],createBatch:["wms.products.manage"],opening:["wms.opening.post"],reverse:["wms.opening.post"],accessUsers:["wms.access.manage"],access:["wms.access.manage"]};
 test("every WMS API fails closed for missing mode, company screen, operation permission or tenant",async()=>{
