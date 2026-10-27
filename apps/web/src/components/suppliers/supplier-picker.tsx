@@ -43,7 +43,8 @@ export function SupplierPicker({ warehouse, company, value, currentName, onChoos
       <Button type="button" variant="outline" disabled={disabled || create.isPending} onClick={() => { setSearch(input.trim()); setPage(1); }}>{t("wms.search")}</Button>
       {canCreate && <Button type="button" variant="outline" disabled={disabled || create.isPending} aria-expanded={creating} onClick={() => setCreating(open => !open)}><Plus className="h-4 w-4" />{text("suppliers.master.new")}</Button>}
     </div>
-    {creating && canCreate && <section className="glass-surface space-y-3 p-3" aria-label={text("suppliers.master.new")}>
+    {creating && canCreate && <section className="glass-surface space-y-3 p-3" aria-label={text("suppliers.master.new")}
+      onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); if (!disabled && !create.isPending) save(); } }}>
       <div className="grid gap-3 sm:grid-cols-2"><Field id={`${id}-code`} label={text("suppliers.master.code")}><Input id={`${id}-code`} dir="ltr" maxLength={20} value={code} disabled={disabled || create.isPending} onChange={event => { setCode(event.target.value.toUpperCase()); setKey(crypto.randomUUID()); }} /></Field>
         <Field id={`${id}-name`} label={text("suppliers.master.name")}><Input id={`${id}-name`} maxLength={160} value={name} disabled={disabled || create.isPending} onChange={event => { setName(event.target.value); setKey(crypto.randomUUID()); }} /></Field></div>
       <p className="text-xs text-muted-foreground">{text("suppliers.master.codeHint")}</p>
