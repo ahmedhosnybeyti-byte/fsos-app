@@ -166,7 +166,9 @@ export class WmsService {
       SELECT ${productFields},NULLIF(trim(source.data->>'Category'),'') AS category FROM wms_products p
       LEFT JOIN rie_canonical_entity_rows source ON source.company_id=${company} AND source.entity_name='Products' AND source.entity_key=p.code
       WHERE p.company_id=${company}
-      AND (position(lower(${search}) in lower(p.name))>0 OR position(lower(${search}) in lower(p.code))>0 OR p.barcode=${search})
+      AND (position(lower(${search}) in lower(p.name))>0 OR position(lower(${search}) in lower(p.code))>0 OR p.barcode=${search}
+        OR position(lower(${search}) in lower(concat_ws(' ',source.data->>'ProductName',source.data->>'ProductNameAr',source.data->>'ProductNameEn',
+          source.data->>'NameAr',source.data->>'NameEn',source.data->>'AlternateNames',source.data->>'Aliases')))>0)
       ORDER BY category NULLS LAST,p.code,p.id LIMIT ${pageSize+1} OFFSET ${(n-1)*pageSize}
     ) SELECT p.*,COALESCE(s.physical,0)::text AS physical,COALESCE(s.available,0)::text AS available,
       COALESCE(s.reserved,0)::text AS reserved,COALESCE(s.quarantined,0)::text AS quarantined,COALESCE(s.in_transit,0)::text AS "inTransit"

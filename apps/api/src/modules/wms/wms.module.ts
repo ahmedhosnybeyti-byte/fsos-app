@@ -19,5 +19,7 @@ import { WmsService } from "./wms.service";
 import { WmsOperationsController } from "./wms-operations.controller";
 import { WmsOperationsService } from "./wms-operations.service";
 import { SmartLoadingRequestsController } from "./smart-loading-requests.controller";
-@Module({imports:[AuditLogModule,RieModule],controllers:[ProcurementController,WmsController,WmsOperationsController,WmsCoreController,WmsCountController,WmsQuarantineController,SmartLoadingRequestsController,WarehouseManagementController,WarehouseBootstrapController],providers:[WmsCoverageService,ProcurementService,WmsService,WmsOperationsService,WmsCoreService,WmsCountService,WmsQuarantineService,WarehouseManagementService,WarehouseBootstrapService]})
+import { SupplierMasterController } from "./supplier-master.controller";
+import { SupplierMasterService } from "./supplier-master.service";
+@Module({imports:[AuditLogModule,RieModule],controllers:[SupplierMasterController,ProcurementController,WmsController,WmsOperationsController,WmsCoreController,WmsCountController,WmsQuarantineController,SmartLoadingRequestsController,WarehouseManagementController,WarehouseBootstrapController],providers:[SupplierMasterService,WmsCoverageService,ProcurementService,WmsService,WmsOperationsService,WmsCoreService,WmsCountService,WmsQuarantineService,WarehouseManagementService,WarehouseBootstrapService]})
 export class WmsModule {}

@@ -40,7 +40,12 @@ export function WarehouseScreen({initialWarehouseId,initialReceiptId}:{initialWa
   const [section,setSection]=useState<WarehouseSection>(initialReceiptId&&!readOnly?"receiving":"home");
   useEffect(()=>{if(readOnly&&["receiving","loading","ledger"].includes(section))setSection("home");},[readOnly,section]);
   const [workflowTab,setWorkflowTab]=useState<WarehouseWorkflowTab>("receipts");
-  function openSection(next:WarehouseSection){setSection(next);if(next==="receiving")setWorkflowTab("receipts");if(next==="loading")setWorkflowTab("loads");}
+  function openSection(next:WarehouseSection){
+    // Supplier receiving navigation only: retain the shared loading and WMS
+    // panels and every existing command; use the dedicated supplier workspace.
+    if(next==="receiving"&&warehouse){window.location.assign(`/sfa/warehouse/suppliers?warehouseId=${encodeURIComponent(warehouse.id)}`);return;}
+    setSection(next);if(next==="loading")setWorkflowTab("loads");
+  }
   const [pickerPage,setPickerPage]=useState(1); const [pickerInput,setPickerInput]=useState(""); const [pickerSearch,setPickerSearch]=useState("");
   const warehouses=useQuery({queryKey:["wms",company,"warehouses",pickerPage,pickerSearch],queryFn:()=>wmsApi.warehouses(pickerPage,pickerSearch),enabled,...queryOptions});
   useEffect(()=>{const found=warehouses.data?.items.find(w=>w.id===initialWarehouseId);if(found&&warehouse?.id===found.id&&warehouse.name===initialWarehouseId)setWarehouse(found);},[warehouses.data,initialWarehouseId,warehouse]);

@@ -33,7 +33,7 @@ export function WmsOperationsPanel({warehouse,company,userId,permissions,t,initi
   const documents=useQuery({queryKey:["wms",company,warehouse,"documents",tab,page,search],queryFn:()=>api.list(warehouse,tab==="receipts"?"receipts":"loads",page,search),enabled:tab!=="policies",...operationQueryOptions});
   const receipt=useQuery({queryKey:["wms",company,warehouse,"receipt",selected],queryFn:()=>api.receipt(warehouse,selected!),enabled:tab==="receipts"&&!!selected,...operationQueryOptions});
   const load=useQuery({queryKey:["wms",company,warehouse,"load",selected],queryFn:()=>api.load(warehouse,selected!),enabled:tab==="loads"&&!!selected,...operationQueryOptions});
-  function changeTab(next:typeof tab){setTab(next);onTabChange?.(next);setPage(1);setSelected(null);setSearch("");setSearchInput("");setAction(null);}
+  function changeTab(next:typeof tab){if(next==="receipts"){window.location.assign(`/sfa/warehouse/suppliers?warehouseId=${encodeURIComponent(warehouse)}`);return;}setTab(next);onTabChange?.(next);setPage(1);setSelected(null);setSearch("");setSearchInput("");setAction(null);}
   const can=(p:string)=>permissions.includes(p);
   const available=load.data?.status==='RESERVED'?reservedByProduct(load.data):undefined;
   function button(op:WmsOperation){return can(WMS_OPERATION_PERMISSIONS[op])?<Button key={op} size="sm" disabled={op==="load.dispatch"&&load.data?.requiresRecipientConsent&&!load.data.recipientConfirmed} variant={op.includes("cancel")||op.includes("reverse")||op.includes("reject")?"outline":"default"} onClick={()=>setAction(op)}>{operationText(op,t)}</Button>:null;}

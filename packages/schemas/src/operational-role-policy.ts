@@ -38,7 +38,7 @@ export function permitsOperationalRole(role: string, required: readonly string[]
     if (!required.some(sensitive)) return true;
     const path = (request?.path ?? "").split("?")[0]!.replace(/^\/api\/v1(?=\/)/, "");
     return request?.method === "GET" && required.every(p => adminReadPermissions.includes(p)) && (
-      path === "/sfa/wms/warehouses" || /^\/sfa\/wms\/warehouses\/[^/]+\/(summary|products|batches)$/.test(path)
+      path === "/sfa/wms/warehouses" || /^\/sfa\/wms\/warehouses\/[^/]+\/(summary|products|batches|suppliers)$/.test(path)
       || /^\/sfa\/procurement\/warehouses\/[^/]+\/(summary|requests(?:\/[^/]+)?)$/.test(path)
       || path === "/sfa/accounting/treasury");
   }

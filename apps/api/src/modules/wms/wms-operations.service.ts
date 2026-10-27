@@ -24,7 +24,28 @@ export class WmsOperationsService {
     if(!data.success)throw new BadRequestException({message:"WMS_INVALID_INPUT",errors:data.error.flatten()});
     const {idempotencyKey,...payload}=data.data;
     return this.access.authorizedTransaction(user,warehouse,WMS_OPERATION_PERMISSIONS[operation],async(tx,company)=>{
+      const receiptMetadata = (operation === "receipt.create" || operation === "receipt.edit")
+        && ("supplierId" in payload || "documentDate" in payload);
+      let metadataReplay = false;
+      if (receiptMetadata) {
+        // Share the engine's replay lock. Replaying an older create/edit must
+        // never overwrite metadata belonging to a later successful edit.
+        await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${company}||':command:'||${idempotencyKey},0))::text`);
+        const replay = await tx.$queryRaw<{exists:boolean}[]>(Prisma.sql`SELECT EXISTS(SELECT 1 FROM wms_commands WHERE company_id=${company} AND idempotency_key=${idempotencyKey}) AS exists`);
+        metadataReplay = replay[0]!.exists;
+        if ("supplierId" in payload && payload.supplierId) {
+          const supplier = await tx.$queryRaw<{name:string}[]>(Prisma.sql`SELECT name FROM wms_suppliers WHERE company_id=${company} AND id=${payload.supplierId} FOR SHARE`);
+          if (!supplier.length || supplier[0]!.name !== (payload as {supplierName:string}).supplierName)
+            throw new BadRequestException("WMS_SUPPLIER_NOT_FOUND");
+        }
+      }
       const result=await this.executeCommand(tx,user,company,warehouse,operation,payload,idempotencyKey);
+      if (receiptMetadata && !metadataReplay) {
+        const fields = payload as {supplierId?:string;documentDate?:string};
+        await tx.$executeRaw(Prisma.sql`INSERT INTO wms_receipt_supplier_metadata(company_id,receipt_id,supplier_id,document_date)
+          VALUES(${company},${result.id},${fields.supplierId ?? null},COALESCE(${fields.documentDate ?? null}::date,(CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Riyadh')::date))
+          ON CONFLICT(company_id,receipt_id) DO UPDATE SET supplier_id=COALESCE(EXCLUDED.supplier_id,wms_receipt_supplier_metadata.supplier_id),document_date=EXCLUDED.document_date`);
+      }
       if(operation!=="load.dispatch")return result;
       // Fulfil recorded recipient consent within this transaction; no login
       // impersonation or warehouse permission is granted to the recipient.
@@ -135,14 +156,19 @@ export class WmsOperationsService {
   async receipt(user:AuthenticatedUser,warehouse:string,id:string):Promise<WmsReceipt> {
     const c=await this.access.authorizedRead(user,warehouse);
     const rows=await this.prisma.$queryRaw<Omit<WmsReceipt,"lines"|"events">[]>(Prisma.sql`SELECT d.id,d.reference,d.supplier_name AS "supplierName",d.supplier_reference AS "supplierReference",d.status,d.version,
+      m.supplier_id AS "supplierId",to_char(m.document_date,'YYYY-MM-DD') AS "documentDate",
       ${time(Prisma.sql`d.created_at`)} AS "createdAt",EXISTS(SELECT 1 FROM wms_receipt_lines l WHERE l.company_id=${c} AND l.receipt_id=d.id AND l.accepted_quantity+l.quarantined_quantity+l.rejected_quantity<l.expected_quantity) AS partial
-      FROM wms_receipts d WHERE d.company_id=${c} AND d.warehouse_id=${warehouse} AND d.id=${id}`);
+      FROM wms_receipts d LEFT JOIN wms_receipt_supplier_metadata m ON m.company_id=d.company_id AND m.receipt_id=d.id
+      WHERE d.company_id=${c} AND d.warehouse_id=${warehouse} AND d.id=${id}`);
     if(!rows[0])throw new NotFoundException("Receipt not found");
+    // Explicit complete-one-document exception: company + warehouse + header
+    // have already been authorized. Fetch only this receipt's projected lines;
+    // lists/catalogues remain paged and no client-side page stitching is used.
     const lines=await this.prisma.$queryRaw<WmsReceipt["lines"]>(Prisma.sql`SELECT l.id,l.product_id AS "productId",p.name AS "productName",${productCategory(Prisma.sql`p.company_id`,Prisma.sql`p.code`)} AS category,p.sensitive_handling AS "sensitiveHandling",p.handling_notes AS "handlingNotes",p.code AS "productCode",p.base_unit AS "baseUnit",p.pieces_per_carton AS "piecesPerCarton",p.track_batches AS "trackBatches",p.track_expiry AS "trackExpiry",p.pieces_per_carton AS "piecesPerCarton",l.batch_id AS "batchId",COALESCE(b.code,l.batch_code) AS "batchCode",
       to_char(COALESCE(b.production_date,l.production_date),'YYYY-MM-DD') AS "productionDate",to_char(COALESCE(b.expiry_date,l.expiry_date),'YYYY-MM-DD') AS "expiryDate",
       l.input_unit AS unit,l.conversion_factor AS "conversionFactor",l.expected_quantity::text AS "expectedQuantity",l.accepted_quantity::text AS "acceptedQuantity",l.quarantined_quantity::text AS "quarantinedQuantity",l.rejected_quantity::text AS "rejectedQuantity",l.rejection_reason AS "rejectionReason"
       FROM wms_receipt_lines l JOIN wms_products p ON p.company_id=${c} AND p.id=l.product_id LEFT JOIN wms_batches b ON b.company_id=${c} AND b.id=l.batch_id
-      WHERE l.company_id=${c} AND l.receipt_id=${id} ORDER BY l.id LIMIT 20`);
+      WHERE l.company_id=${c} AND l.receipt_id=${id} ORDER BY l.id`);
     return {...rows[0],lines,events:await this.events(c,id,"receipt")};
   }
   async load(user:AuthenticatedUser,warehouse:string,id:string):Promise<WmsLoad> {
