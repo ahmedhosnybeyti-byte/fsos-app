@@ -3,6 +3,7 @@ name: Engineering reliability
 on:
   pull_request:
   push:
+    branches-ignore: [codex/supplier-linux-node22-verification-20261027]
   workflow_dispatch:
 
 permissions:

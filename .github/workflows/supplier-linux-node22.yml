@@ -1,0 +1,46 @@
+name: Supplier Linux Node22 build only
+on:
+  push:
+    branches: [codex/supplier-linux-node22-verification-20261027]
+permissions:
+  contents: read
+concurrency:
+  group: supplier-linux-node22-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: 'true'
+      NEXT_TELEMETRY_DISABLED: '1'
+      TURBO_TELEMETRY_DISABLED: '1'
+      DATABASE_URL: postgresql://ci@127.0.0.1:54321/postgres
+      NEXT_PUBLIC_API_URL: http://127.0.0.1:54322/api/v1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Verify frozen application source and record runtime
+        run: |
+          mkdir -p .quality/linux-node22
+          git diff --exit-code 300667f1398f8889cf7944a44f67cf99d33cad07 HEAD -- apps packages pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json Dockerfile.api Dockerfile.web railway.api.json railway.web.json
+          node -e "console.log(JSON.stringify({sha:process.env.GITHUB_SHA,node:process.version,platform:process.platform,arch:process.arch}))" | tee .quality/linux-node22/runtime.json
+      - name: Install frozen existing dependencies
+        run: |
+          npm install -g pnpm@11.11.0
+          pnpm install --frozen-lockfile
+      - name: Generate Linux Prisma client without connecting to a database
+        run: pnpm --filter @field-sales-os/database generate
+      - name: Build API and web outputs without using cached builds
+        run: pnpm exec turbo run build --filter=@field-sales-os/api... --filter=@field-sales-os/web... --force 2>&1 | tee .quality/linux-node22/build.log
+      - name: Start compiled API and packaged web on loopback without migrations
+        run: node tools/quality/supplier-linux-artifact-smoke.cjs
+      - name: Keep build and startup evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supplier-linux-node22-${{ github.sha }}
+          path: .quality/linux-node22/
+          if-no-files-found: error
