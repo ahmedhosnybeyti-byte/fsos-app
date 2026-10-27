@@ -581,3 +581,36 @@ report `WMS_RECIPIENT_HANDOVER_20261025.md`.
 System Design Gate: PASS for the verified owner-approved scope and real handover.
 Scalability Gate: WARN for unverified comparable baseline and capacity. Functional
 end-to-end success does not certify 150-user capacity.
+
+## 2026-10-27 — local supplier master and receiving/return workspace
+
+Candidate code `aa6d5bed6dc38e63abadd2d830ffe5f011477f5c` merges three isolated
+agent worktrees above baseline `cc620884581ad1164959f7566a871ac3b585964a`.
+No deployment, operating migration, backup, dependency or infrastructure action.
+Existing WMS stock/approval SQL, role grants and Smart Loading runtime remain
+unchanged. Supplier/date metadata shares the command transaction and replay lock;
+old create/edit retries cannot clobber later metadata. Financial parties are not
+created as a side effect of operational supplier entry.
+
+Final quality: **781 passed**, zero failures/skips/TODOs, and all four selected
+typechecks pass. The original 32 failing cases came from baseline test setup and
+stale approved-role expectations; focused fixture corrections pass 34 cases,
+including 1,000-product and actual 83-product package handovers, without weakening
+authorization/stock checks. The mandatory isolated PostgreSQL gate passes
+**239 cases**, zero failures/skips/TODOs; its receipt is retained separately in
+`.quality/supplier-redesign/postgres-final.json`.
+
+Synthetic PGlite supplier lookup, 1 versus 1,000 suppliers, two companies / three
+warehouses, serial concurrency **1**, one excluded warmup and ten samples per size:
+exactly **3 SQL statements** per service call; at most **20 returned**; service p95
+**8.94 / 14.83 ms**, response maximum **100 / 1,426 bytes**. This includes service
+warehouse/mode/user admission, excludes HTTP guards, and has no PL/pgSQL/transaction
+on the read path. API p95, native plans/scans/lock/pool waits, approved comparable
+baseline, bottleneck and mixed concurrent capacity remain unmeasured. It cannot
+establish 150-user readiness.
+
+System Design Gate: **WARN**, local functional **PASS**; Scalability Gate:
+**WARN / UNVERIFIED**. Release preflight (`quality:release`, Linux packaging and
+verified release/capacity evidence) has not been claimed. Additive supplier
+migration must precede any future new API rollout, subject to owner approval.
+Full result and agent/commit ledger: `SUPPLIER_RECEIVING_DELIVERY_20261027.md`.

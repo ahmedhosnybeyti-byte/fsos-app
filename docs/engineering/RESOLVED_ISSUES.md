@@ -1,5 +1,13 @@
 # Murshidak Resolved Engineering Issues
 
+## 2026-10-27 — supplier receiving workspace and replay-safe document metadata (local)
+
+- Symptom/root cause: supplier receiving used a free-text supplier and an old drawer with raw unit quantities; no operational supplier identity or independently persisted document date existed. Existing financial supplier creation required GL setup. Role-separation changes also left older fixture setup using keeper privileges for product/opening/approval duties and repeated shared settings DDL.
+- Fix: minimal company-scoped operational supplier master; invoice-style inline receiving/source returns; exact product-specific carton/piece editing; bounded SQL alias lookup; safe local printing. Optional supplier/date metadata is written atomically with the existing command. Reuse its advisory/replay key and skip metadata mutation on old retries, retaining the entire command envelope. Cast the lock result to text for Prisma. No stock engine, Smart Loading runtime, financial setup or permission grants changed. Correct only stale regression setup and assert exact approved role profiles/unchanged demo grants.
+- Commit: merge `630d9e8c14e4f8f0a972bbc65741474092927593`; final code `aa6d5bed6dc38e63abadd2d830ffe5f011477f5c`, candidate branch `codex/supplier-receiving-integrated`. Original checkout/WIP preserved; no push, deployment, Production data or operating migration.
+- Verification: new 5 quantity + 3 isolated SQL + 3 print cases pass; affected fixture suites 34/34; final quality 781 passed, zero failures/skips/TODOs and four passing typechecks; separate mandatory PostgreSQL gate 239 passed, zero failures/skips/TODOs. Receipts and limits are recorded in `SUPPLIER_RECEIVING_DELIVERY_20261027.md`. System Design Gate WARN with functional PASS; Scalability WARN, not release/capacity approval.
+- Prevention: operational supplier entry must not create accounting configuration. Never assume PackQty equals CartonQty, sum unlike units, or mutate newer metadata during an old successful command replay. Shared fixtures own shared DDL; separate test-setup identities from real keeper/manager actors. Preserve negative permission assertions and source-linked stock/retry/rollback checks.
+
 ## 2026-10-27 — isolated fixture ownership and UI regression expectations
 
 - Symptom: quality failed on duplicate users.email/company_operating_settings setup, obsolete 20-line/100-allocation limits, and saved product/coverage content missing from static renders.
