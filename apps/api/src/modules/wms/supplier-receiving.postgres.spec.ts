@@ -10,6 +10,12 @@ import { WmsOperationsService } from "./wms-operations.service";
 import { WmsCoreService } from "./wms-core.service";
 import { AuditLogService } from "../audit-log/audit-log.service";
 
+// No position returns COALESCE's "0"; a stored numeric position can return
+// "0.000000". Both are exact zero without converting quantities to Number.
+function assertZeroQuantity(value: string) {
+  assert.match(value, /^0(?:\.0{1,6})?$/);
+}
+
 async function fixture(t: any) {
   const { PGlite } = require(process.env.RIE_TEST_PGLITE_MODULE!);
   const db = new PGlite();
@@ -47,7 +53,7 @@ async function fixture(t: any) {
 test("supplier receiving: create supplier, inert draft/edit/submit/review, manager posting, source-linked return", async t => {
   const f = await fixture(t), create = f.receipt();
   const r = await f.command("receipt.create", create);
-  assert.equal((await f.stock()).physical, "0.000000");
+  assertZeroQuantity((await f.stock()).physical);
   assert.equal((await f.ops.receipt(f.keeper, "wa", r.id)).supplierId, f.supplier.id);
   assert.equal((await f.ops.receipt(f.keeper, "wa", r.id)).documentDate, "2026-10-27");
   const edit = { ...create, id: r.id, version: 1, documentDate: "2026-10-28", idempotencyKey: randomUUID() };
@@ -63,7 +69,7 @@ test("supplier receiving: create supplier, inert draft/edit/submit/review, manag
   await f.step("receipt.submit", r.id);
   await assert.rejects(f.step("receipt.review", r.id), ForbiddenException);
   await f.step("receipt.review", r.id, f.manager);
-  assert.equal((await f.stock()).physical, "0.000000");
+  assertZeroQuantity((await f.stock()).physical);
   await assert.rejects(f.step("receipt.approve", r.id), ForbiddenException);
   await f.step("receipt.approve", r.id, f.manager);
   const a = await f.stock(), b = await f.stock("water6");
@@ -95,7 +101,7 @@ test("supplier receiving metadata rejects foreign suppliers and forged names; au
   await assert.rejects(broken.command(f.keeper, "wa", { operation: "receipt.create", input: f.receipt() }), /synthetic audit failure/);
   assert.equal((await f.db.query("SELECT count(*)::int n FROM wms_receipts")).rows[0].n, 0);
   assert.equal((await f.db.query("SELECT count(*)::int n FROM wms_receipt_supplier_metadata")).rows[0].n, 0);
-  assert.equal((await f.stock()).physical, "0.000000");
+  assertZeroQuantity((await f.stock()).physical);
 });
 
 test("receiving product search supports registered Arabic/English aliases and literal special characters with company isolation", async t => {
