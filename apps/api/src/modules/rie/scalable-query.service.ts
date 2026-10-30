@@ -8,6 +8,7 @@ import type { RieAssistantCustomerMentionQuery, RieAssistantDatasetQuery, RieAss
 import { fingerprintRieQueryShape, observeRiePostgres, recordActiveVersionResolution } from "../../common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 import { assistantDatasetFields } from "./assistant-dataset-query.data";
+import type { RieDecisionSalesFactsQuery, RieDecisionSalesFactsResult, RieQueryProjection } from "./scalable-query.types";
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
@@ -158,6 +159,123 @@ export class RieScalableQueryService {
     `);
     const hasMore = input.unboundedFinalResult ? false : rows.length > page.limit;
     return { records: hasMore ? rows.slice(0, page.limit) : rows, page: { ...page, hasMore } };
+  }
+
+  /**
+   * Decision Analytics sales facts in ONE coordinated PostgreSQL statement (one RIE admission).
+   *
+   * The company / current-state / hierarchy / filter scoped Invoice Items relation is compiled with the
+   * SAME helpers `query()` uses (so the demo guard, hierarchy routes and scoped-join semantics are
+   * identical) over the UNION of the current and prior windows, projected once into narrow scalar
+   * columns, and then aggregated per window with FILTER. It replaces five statements that each
+   * re-scanned and re-materialised the same wide JSONB set. `query()` itself is untouched; the old
+   * five-call path stays available for comparison and rollback in the Decision service.
+   */
+  async queryDecisionSalesFacts(input: RieDecisionSalesFactsQuery): Promise<RieDecisionSalesFactsResult> {
+    if (!input.companyId?.trim()) throw new Error("RIE decision sales facts require companyId.");
+    if (input.scope.date || input.scope.dateAny) throw new Error("RIE decision sales facts take their date windows from current/prior, not scope.date.");
+    if (!Number.isInteger(input.limit) || input.limit < 1 || input.limit > MAX_PAGE_SIZE) throw new Error(`RIE decision sales facts limit must be an integer between 1 and ${MAX_PAGE_SIZE}.`);
+    const aliases = new Set<string>(["base"]);
+    const joins = input.joins;
+    for (const join of joins) {
+      assertIdentifier(join.alias, "join alias");
+      if (aliases.has(join.alias)) throw new Error(`RIE decision sales facts have duplicate alias "${join.alias}".`);
+      assertField(join.on.left, aliases);
+      assertIdentifier(join.on.rightField, "join field");
+      aliases.add(join.alias);
+    }
+    for (const field of [input.dateField, input.hierarchyRoute, input.customerField, { field: input.amountField }, { field: input.orderField }]) assertField(field, aliases);
+    for (const group of [input.dimension, input.heatmap]) {
+      if (!group.projection.length || group.projection.length !== group.groupBy.length) throw new Error("RIE decision sales facts need a non-empty projection and groupBy of the same length.");
+      group.projection.forEach((field, index) => {
+        const grouped = group.groupBy[index]!;
+        assertField(field, aliases);
+        assertField(grouped, aliases);
+        assertIdentifier(field.as ?? field.field, "projection alias");
+        if (field.field !== grouped.field || (field.source ?? "base") !== (grouped.source ?? "base")) throw new Error("RIE decision sales facts projection[i] must equal groupBy[i].");
+      });
+    }
+    const { joins: _joins, hierarchyRoute, scope, dateField, current, prior, amountField, orderField, customerField, dimension, heatmap, limit, ...context } = input;
+    const bounds = [normalizeDate(current.from), normalizeDate(current.to), normalizeDate(prior.from), normalizeDate(prior.to)].sort();
+    // Same compile pipeline as query(), over the union window; only the final SELECT differs.
+    const shape: RieScalableQuery = {
+      ...context,
+      entityName: "Invoice Items",
+      projection: [],
+      joins,
+      hierarchyRoute,
+      aggregates: [{ op: "count", as: "n" }],
+      scope: { ...scope, date: { ...dateField, from: bounds[0]!, to: bounds[3]! } },
+    };
+    const predicates = await this.scopePredicates(shape, aliases);
+    const activeRows = [{ entityName: "Invoice Items", alias: "base" }, ...joins.map(({ entityName, alias }) => ({ entityName, alias }))];
+    const ctePredicates = new Map(await Promise.all(activeRows.map(async ({ alias }) => [alias, await this.scopePredicates(shape, aliases, alias)] as const)));
+    const scopedJoinAliases = new Set(joins.filter((join) => join.type !== "left" && ctePredicates.get(join.alias)?.length).map((join) => join.alias));
+    const orderedScopedAliases = orderScopedAliases(joins, scopedJoinAliases);
+    const orderedActiveRows = [...orderedScopedAliases.map((alias) => activeRows.find((row) => row.alias === alias)!), activeRows.find(({ alias }) => alias === "base")!, ...activeRows.filter(({ alias }) => alias !== "base" && !scopedJoinAliases.has(alias))];
+    const ctes = orderedActiveRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias, ctePredicates.get(alias) ?? [], scopedSemiJoinsFor(alias, joins, scopedJoinAliases), []));
+    const joinSql = joins.map((join) => Prisma.sql`${join.type === "left" ? Prisma.raw("LEFT JOIN") : Prisma.raw("INNER JOIN")} ${activeEntityRowsReference(join.alias)} ON ${normalizedField(join.on.left)} = ${normalizedField({ field: join.on.rightField, source: join.alias })}`);
+    const joinClause = joinSql.length ? Prisma.join(joinSql, " ") : Prisma.empty;
+    const where = predicates.length ? Prisma.sql` AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty;
+
+    const windowPredicate = (window: { from: string | number; to: string | number }) => datePredicate({ ...dateField, from: window.from, to: window.to }, aliases);
+    const valueColumns = (prefix: string, fields: readonly RieQueryProjection[]) => fields.map((field, index) => Prisma.sql`${textField(field)} AS ${quoted(`${prefix}${index}`)}`);
+    const columnList = (prefix: string, count: number) => Array.from({ length: count }, (_, index) => quoted(`${prefix}${index}`));
+    const objectKeys = (prefix: string, fields: readonly RieQueryProjection[]) => fields.flatMap((field, index) => [Prisma.raw(`'${field.as ?? field.field}'`), quoted(`${prefix}${index}`)]);
+    const baseFrom = Prisma.sql`FROM ${activeEntityRowsReference("base")} ${joinClause}`;
+    // Two narrow relations, each holding ONLY what its aggregates read: the current window keeps invoice/customer keys,
+    // dimension and heatmap columns; the prior window keeps just the amount and the dimension. Every branch then scans
+    // only its own rows (previously one wide union relation was re-read, and spilled, five times).
+    const currentFacts = Prisma.sql`facts_cur AS MATERIALIZED (
+      SELECT NULLIF(BTRIM(COALESCE(${textField({ field: orderField })}, '')), '') AS inv_no,
+        NULLIF(BTRIM(COALESCE(${textField(customerField)}, '')), '') AS cust_code,
+        ${numericField(textField({ field: amountField }))} AS line_total,
+        ${Prisma.join([...valueColumns("d", dimension.projection), ...valueColumns("h", heatmap.projection)])}
+      ${baseFrom}
+      WHERE TRUE${where} AND ${windowPredicate(current)}
+    )`;
+    const priorFacts = Prisma.sql`facts_prior AS MATERIALIZED (
+      SELECT ${numericField(textField({ field: amountField }))} AS line_total,
+        ${Prisma.join(valueColumns("d", dimension.projection))}
+      ${baseFrom}
+      WHERE TRUE${where} AND ${windowPredicate(prior)}
+    )`;
+    const salesCurrent = Prisma.sql`SUM(line_total)`;
+    const ordersCurrent = Prisma.sql`(COUNT(DISTINCT inv_no))::double precision`;
+    const customersCurrent = Prisma.sql`(COUNT(DISTINCT cust_code))::double precision`;
+    const salesPrior = Prisma.sql`SUM(line_total)`;
+    // Ordered, limited and serialised in SQL exactly like the grouped statements it replaces
+    // (HAVING reproduces "only groups that have rows inside that window").
+    const groupedArray = (table: string, prefix: string, fields: readonly RieQueryProjection[], aggregates: readonly Prisma.Sql[], rank: Prisma.Sql) => Prisma.sql`(
+      SELECT COALESCE(jsonb_agg(ranked.obj ORDER BY ranked.rn), '[]'::jsonb) FROM (
+        SELECT grouped.obj, grouped.rn FROM (
+          SELECT jsonb_build_object(${Prisma.join([...objectKeys(prefix, fields), ...aggregates])}) AS obj,
+            ROW_NUMBER() OVER (ORDER BY ${rank}) AS rn
+          FROM ${Prisma.raw(table)} GROUP BY ${Prisma.join(columnList(prefix, fields.length))}
+        ) grouped ORDER BY grouped.rn LIMIT ${limit + 1}
+      ) ranked
+    )`;
+    const groupKeys = (prefix: string, count: number) => Prisma.join(columnList(prefix, count));
+    const rows = await this.postgres<Array<{ currentKpi: EntityRecord; priorKpi: EntityRecord; currentChart: EntityRecord[]; priorChart: EntityRecord[]; heatmap: EntityRecord[] }>>(
+      "queryDecisionSalesFacts.sql",
+      { kind: "specialized", operation: "decisionSalesFacts", entityName: "Invoice Items", joins: joins.map((join) => ({ entityName: join.entityName, type: join.type ?? "inner" })), dimension: dimension.groupBy.map(({ field, source }) => ({ field, source: source ?? "base" })), heatmap: heatmap.groupBy.map(({ field, source }) => ({ field, source: source ?? "base" })) },
+      () => Prisma.sql`
+        WITH ${Prisma.join([...ctes, currentFacts, priorFacts], ", ")}
+        SELECT
+          (SELECT jsonb_build_object('sales', ${salesCurrent}, 'ordersCount', ${ordersCurrent}, 'activeCustomersCount', ${customersCurrent}) FROM facts_cur) AS "currentKpi",
+          (SELECT jsonb_build_object('salesPrior', ${salesPrior}) FROM facts_prior) AS "priorKpi",
+          ${groupedArray("facts_cur", "d", dimension.projection, [Prisma.raw("'sales'"), salesCurrent, Prisma.raw("'ordersCount'"), ordersCurrent, Prisma.raw("'activeCustomersCount'"), customersCurrent], Prisma.sql`${salesCurrent} DESC, ${groupKeys("d", dimension.projection.length)}`)} AS "currentChart",
+          ${groupedArray("facts_prior", "d", dimension.projection, [Prisma.raw("'salesPrior'"), salesPrior], groupKeys("d", dimension.projection.length))} AS "priorChart",
+          ${groupedArray("facts_cur", "h", heatmap.projection, [Prisma.raw("'sales'"), salesCurrent], groupKeys("h", heatmap.projection.length))} AS "heatmap"
+      `,
+    );
+    const row = rows[0];
+    if (!row) throw new Error("RIE decision sales facts returned no row.");
+    const cut = (list: EntityRecord[]) => ({ list: list.length > limit ? list.slice(0, limit) : list, truncated: list.length > limit });
+    const currentChart = cut(row.currentChart ?? []);
+    const priorChart = cut(row.priorChart ?? []);
+    const heat = cut(row.heatmap ?? []);
+    return { currentKpi: row.currentKpi ?? {}, priorKpi: row.priorKpi ?? {}, currentChart: currentChart.list, priorChart: priorChart.list, heatmap: heat.list, truncated: { currentChart: currentChart.truncated, priorChart: priorChart.truncated, heatmap: heat.truncated } };
   }
 
   /**

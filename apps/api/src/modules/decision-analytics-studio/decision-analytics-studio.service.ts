@@ -376,16 +376,27 @@ export class DecisionAnalyticsStudioService {
     const priorSalesScope = this.decisionScope(f, { field: "InvoiceDate", source: "invoice", from: priorFromTime, to: priorToTime }, true);
     const salesBase = { ...ctx, entityName: "Invoice Items", joins: salesJoins, hierarchyRoute: { field: "RouteID", source: "invoice" } } as const;
     const dimension = this.decisionDimension(input.analyzeBy);
-    const [invoicesAvailable, collectionsAvailable, returnsAvailable, visitsAvailable, currentKpis, priorKpis, currentChart, priorChart, heatmapRows, collectionsResult, returnsResult, visitsResult] = await Promise.all([
+    // Default: ONE coordinated statement builds the Invoice Items set once and returns KPI, chart and heatmap.
+    // DECISION_ANALYTICS_LEGACY_SALES_QUERIES=true restores the previous five-statement path (comparison / safe rollback).
+    const legacySales = async () => {
+      const [currentKpis, priorKpis, currentChart, priorChart, heatmapRows] = await Promise.all([
+        this.rieFacade.queryCanonicalRecords({ ...salesBase, projection: [], scope: salesScope, aggregates: [{ op: "sum", field: "LineTotal", as: "sales" }, { op: "countDistinct", field: "InvoiceNo", as: "ordersCount" }, { op: "countDistinct", field: "CustomerCode", source: "invoice", as: "activeCustomersCount" }], pagination: { limit: 1 } }),
+        this.rieFacade.queryCanonicalRecords({ ...salesBase, projection: [], scope: priorSalesScope, aggregates: [{ op: "sum", field: "LineTotal", as: "salesPrior" }], pagination: { limit: 1 } }),
+        this.rieFacade.queryCanonicalRecords({ ...salesBase, projection: dimension.projection, groupBy: dimension.groupBy, scope: salesScope, aggregates: [{ op: "sum", field: "LineTotal", as: "sales" }, { op: "countDistinct", field: "InvoiceNo", as: "ordersCount" }, { op: "countDistinct", field: "CustomerCode", source: "invoice", as: "activeCustomersCount" }], orderBy: [{ aggregate: "sales", direction: "desc" }], pagination: { limit: 5_000 } }),
+        this.rieFacade.queryCanonicalRecords({ ...salesBase, projection: dimension.projection, groupBy: dimension.groupBy, scope: priorSalesScope, aggregates: [{ op: "sum", field: "LineTotal", as: "salesPrior" }], pagination: { limit: 5_000 } }),
+        this.rieFacade.queryCanonicalRecords({ ...salesBase, projection: [{ field: "CustomerCode", source: "customer", as: "id" }, { field: "CustomerName", source: "customer", as: "name" }, { field: "City", source: "customer", as: "city" }, { field: "Latitude", source: "customer", as: "lat" }, { field: "Longitude", source: "customer", as: "lon" }], groupBy: [{ field: "CustomerCode", source: "customer" }, { field: "CustomerName", source: "customer" }, { field: "City", source: "customer" }, { field: "Latitude", source: "customer" }, { field: "Longitude", source: "customer" }], scope: salesScope, aggregates: [{ op: "sum", field: "LineTotal", as: "sales" }], pagination: { limit: 5_000 } }),
+      ]);
+      return { currentKpis, priorKpis, currentChart, priorChart, heatmapRows };
+    };
+    const salesFacts = process.env.DECISION_ANALYTICS_LEGACY_SALES_QUERIES === "true"
+      ? legacySales()
+      : this.singlePassSalesBundle(ctx, f, salesJoins, dimension, { fromTime, toTime, priorFromTime, priorToTime });
+    const [invoicesAvailable, collectionsAvailable, returnsAvailable, visitsAvailable, { currentKpis, priorKpis, currentChart, priorChart, heatmapRows }, collectionsResult, returnsResult, visitsResult] = await Promise.all([
       this.rieFacade.hasCanonicalEntitySources(ctx, ["Invoices", "Invoice Items"]),
       this.rieFacade.hasCanonicalEntitySources(ctx, ["Collections"]),
       this.rieFacade.hasCanonicalEntitySources(ctx, ["Returns"]),
       this.rieFacade.hasCanonicalEntitySources(ctx, ["Visits"]),
-      this.rieFacade.queryCanonicalRecords({ ...salesBase, projection: [], scope: salesScope, aggregates: [{ op: "sum", field: "LineTotal", as: "sales" }, { op: "countDistinct", field: "InvoiceNo", as: "ordersCount" }, { op: "countDistinct", field: "CustomerCode", source: "invoice", as: "activeCustomersCount" }], pagination: { limit: 1 } }),
-      this.rieFacade.queryCanonicalRecords({ ...salesBase, projection: [], scope: priorSalesScope, aggregates: [{ op: "sum", field: "LineTotal", as: "salesPrior" }], pagination: { limit: 1 } }),
-      this.rieFacade.queryCanonicalRecords({ ...salesBase, projection: dimension.projection, groupBy: dimension.groupBy, scope: salesScope, aggregates: [{ op: "sum", field: "LineTotal", as: "sales" }, { op: "countDistinct", field: "InvoiceNo", as: "ordersCount" }, { op: "countDistinct", field: "CustomerCode", source: "invoice", as: "activeCustomersCount" }], orderBy: [{ aggregate: "sales", direction: "desc" }], pagination: { limit: 5_000 } }),
-      this.rieFacade.queryCanonicalRecords({ ...salesBase, projection: dimension.projection, groupBy: dimension.groupBy, scope: priorSalesScope, aggregates: [{ op: "sum", field: "LineTotal", as: "salesPrior" }], pagination: { limit: 5_000 } }),
-      this.rieFacade.queryCanonicalRecords({ ...salesBase, projection: [{ field: "CustomerCode", source: "customer", as: "id" }, { field: "CustomerName", source: "customer", as: "name" }, { field: "City", source: "customer", as: "city" }, { field: "Latitude", source: "customer", as: "lat" }, { field: "Longitude", source: "customer", as: "lon" }], groupBy: [{ field: "CustomerCode", source: "customer" }, { field: "CustomerName", source: "customer" }, { field: "City", source: "customer" }, { field: "Latitude", source: "customer" }, { field: "Longitude", source: "customer" }], scope: salesScope, aggregates: [{ op: "sum", field: "LineTotal", as: "sales" }], pagination: { limit: 5_000 } }),
+      salesFacts,
       this.decisionAggregate(ctx, "Collections", "CollectionDate", "Amount", f, fromTime, toTime),
       this.decisionAggregate(ctx, "Returns", "ReturnDate", "TotalAmount", f, fromTime, toTime),
       this.decisionVisits(ctx, f, fromTime, toTime),
@@ -419,6 +430,29 @@ export class DecisionAnalyticsStudioService {
     const lostSalesValue = insights.lostSalesValue;
     const kpis: DecisionKpiSummary = { sales, salesGrowthPct: invoicesAvailable ? (salesPrior > 0 ? ((sales - salesPrior) / salesPrior) * 100 : null) : null, collections: collectionsAvailable ? toFiniteNumber(collectionsResult.records[0]?.value) ?? 0 : null, returns: returnsAvailable ? toFiniteNumber(returnsResult.records[0]?.value) ?? 0 : null, lostSalesValue, ordersCount, averageOrderValue: ordersCount > 0 ? sales / ordersCount : null, activeCustomersCount, coveragePct: visitsAvailable && scopedCustomers > 0 ? Math.round((toFiniteNumber(visit.visitedCustomers) ?? 0) / scopedCustomers * 100) : null, strikeRatePct: visitsAvailable && totalVisits > 0 ? Math.round(productiveVisits / totalVisits * 100) : null, productivity: visitsAvailable && productiveVisits > 0 ? sales / productiveVisits : null };
     return { kpis, chart, heatmap, insights: insights.items, generatedAt: new Date().toISOString(), datasetsAvailable: { invoices: invoicesAvailable, collections: collectionsAvailable, returns: returnsAvailable, visits: visitsAvailable } };
+  }
+
+  /** One RIE statement (one admission) for the same five results; see RieScalableQueryService.queryDecisionSalesFacts. */
+  private async singlePassSalesBundle(ctx: ReturnType<DecisionAnalyticsStudioService["rieContext"]>, f: ReturnType<DecisionAnalyticsStudioService["compileFilters"]>, salesJoins: ReturnType<DecisionAnalyticsStudioService["decisionSalesJoins"]>, dimension: ReturnType<DecisionAnalyticsStudioService["decisionDimension"]>, window: { fromTime: number; toTime: number; priorFromTime: number; priorToTime: number }) {
+    const facts = await this.rieFacade.queryDecisionSalesFacts({
+      ...ctx,
+      joins: salesJoins,
+      hierarchyRoute: { field: "RouteID", source: "invoice" },
+      scope: this.decisionScope(f, undefined, true),
+      dateField: { field: "InvoiceDate", source: "invoice" },
+      current: { from: window.fromTime, to: window.toTime },
+      prior: { from: window.priorFromTime, to: window.priorToTime },
+      amountField: "LineTotal",
+      orderField: "InvoiceNo",
+      customerField: { field: "CustomerCode", source: "invoice" },
+      dimension: { projection: dimension.projection, groupBy: dimension.groupBy },
+      heatmap: {
+        projection: [{ field: "CustomerCode", source: "customer", as: "id" }, { field: "CustomerName", source: "customer", as: "name" }, { field: "City", source: "customer", as: "city" }, { field: "Latitude", source: "customer", as: "lat" }, { field: "Longitude", source: "customer", as: "lon" }],
+        groupBy: [{ field: "CustomerCode", source: "customer" }, { field: "CustomerName", source: "customer" }, { field: "City", source: "customer" }, { field: "Latitude", source: "customer" }, { field: "Longitude", source: "customer" }],
+      },
+      limit: 5_000,
+    });
+    return { currentKpis: { records: [facts.currentKpi] }, priorKpis: { records: [facts.priorKpi] }, currentChart: { records: facts.currentChart }, priorChart: { records: facts.priorChart }, heatmapRows: { records: facts.heatmap } };
   }
 
   private decisionJoins() {

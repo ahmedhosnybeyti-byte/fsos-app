@@ -579,3 +579,36 @@ export interface RieScalableEntityRead extends EntityQueryContext {
   applyHierarchy?: boolean;
 }
 export type RieScalableEntityResult = EntityQueryResult;
+
+/**
+ * Decision Analytics sales facts in one coordinated statement: the current-state Invoice Items
+ * set (company, hierarchy, filters and BOTH date windows) is built once and aggregated into the KPI,
+ * chart and heatmap results that previously needed five separate scans. Additive; the generic
+ * `RieScalableQuery` surface is unchanged.
+ */
+export interface RieDecisionSalesFactsQuery extends EntityQueryContext {
+  joins: readonly RieQueryJoin[];
+  hierarchyRoute: RieQueryField;
+  /** Filters shared by every aggregate. Date windows are supplied via current/prior (no `date`/`dateAny` here). */
+  scope: RieScalableQueryScope;
+  dateField: RieQueryField;
+  current: { from: string | number; to: string | number };
+  prior: { from: string | number; to: string | number };
+  amountField: string;
+  orderField: string;
+  customerField: RieQueryField;
+  /** projection[i] and groupBy[i] must be the same field. */
+  dimension: { projection: readonly RieQueryProjection[]; groupBy: readonly RieQueryField[] };
+  heatmap: { projection: readonly RieQueryProjection[]; groupBy: readonly RieQueryField[] };
+  /** Page limit applied to each grouped result (default 5000, max 5000), exactly like the five statements it replaces. */
+  limit: number;
+}
+export interface RieDecisionSalesFactsResult {
+  currentKpi: EntityRecord;
+  priorKpi: EntityRecord;
+  currentChart: EntityRecord[];
+  priorChart: EntityRecord[];
+  heatmap: EntityRecord[];
+  /** True when a grouped result exceeded `limit` and was cut, exactly where the old statements would have been cut. */
+  truncated: { currentChart: boolean; priorChart: boolean; heatmap: boolean };
+}

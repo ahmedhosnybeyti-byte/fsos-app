@@ -22,6 +22,7 @@ import type { Fsos360ResolvedContext } from "../decision-analytics-studio/fsos-3
 import type { RieAssistantCustomerMentionQuery, RieAssistantDatasetQuery, RieAssistantDatasetResult, RieGeoEngineMapQuery, RieGeoEngineMapResult, RieGeoEngineTableQuery, RieGeoEngineTableResult, RieLocalDecisionCollectionsQuery, RieLocalDecisionCollectionsScope, RieLocalDecisionCollectionsSummary, RieManagementActiveVehicleRouteRow, RieManagementActiveVehicleRoutesQuery, RieManagementLoadingRiskQuery, RieManagementLoadingRiskRow, RieManagementLostOpportunitiesQuery, RieManagementLostOpportunitiesResult, RieManagementSmartLoadingBundle, RieManagementSmartLoadingBundleQuery, RieManagementStockAlignmentQuery, RieManagementStockAlignmentRow, RieManagementVehicleProductsQuery, RieManagementVehicleProductRow, RieProductFitData, RieProductFitQuery, RieRouteProductStalenessQuery, RieRouteProductStalenessRow, RieScalableEntityRead, RieScalableQuery, RieScalableQueryResult, RieSmartLoadingNetQuantityQuery, RieSmartLoadingNetQuantityRow, RieStalePurchaseRow, RieStalePurchasesQuery, RieVisitCopilotBriefingEntity, RieVisitCopilotCustomerBriefingFacts, RieVisitCopilotCustomerBriefingQuery, RieVisitCopilotLostOpportunitiesQuery, RieVisitCopilotLostOpportunitiesResult, RieVisitCopilotRouteExpectedSalesQuery, RieVisitCopilotRouteExpectedSalesResult } from "./scalable-query.types";
 import { fingerprintRieQueryShape, observeRieLogicalOperation, observeRiePostgres, recordActiveVersionResolution, scopeMetadata } from "../../common/observability/rie-observability";
 import { RieRequestPlannerService, type RieRequestPlanOptions } from "./rie-request-planner.service";
+import type { RieDecisionSalesFactsQuery, RieDecisionSalesFactsResult } from "./scalable-query.types";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 
 /**
@@ -210,6 +211,10 @@ export class RieFacade {
   /** Bounded PostgreSQL query surface for high-cardinality canonical data. */
   queryCanonicalRecords(query: RieScalableQuery): Promise<RieScalableQueryResult> {
     return observeRieLogicalOperation("queryCanonicalRecords", scopeMetadata(query), () => this.plannedOperation("queryCanonicalRecords", () => this.scalableQuery.query(query)));
+  }
+  /** Decision Analytics sales facts (KPI, chart, heatmap) in one coordinated statement; `queryCanonicalRecords` is unchanged. */
+  queryDecisionSalesFacts(query: RieDecisionSalesFactsQuery): Promise<RieDecisionSalesFactsResult> {
+    return observeRieLogicalOperation("queryDecisionSalesFacts", scopeMetadata({ ...query, scope: { ...query.scope, date: query.current } }), () => this.plannedOperation("queryDecisionSalesFacts", () => this.scalableQuery.queryDecisionSalesFacts(query)));
   }
 
   /** Compact PostgreSQL-first surface for Assistant's safe query_dataset subset. */
