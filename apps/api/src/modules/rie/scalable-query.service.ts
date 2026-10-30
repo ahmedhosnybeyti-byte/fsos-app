@@ -8,7 +8,7 @@ import type { RieAssistantCustomerMentionQuery, RieAssistantDatasetQuery, RieAss
 import { fingerprintRieQueryShape, observeRiePostgres, recordActiveVersionResolution } from "../../common/observability/rie-observability";
 import { RieExecutionCoordinatorService } from "./rie-execution-coordinator.service";
 import { assistantDatasetFields } from "./assistant-dataset-query.data";
-import type { RieDecisionSalesFactsQuery, RieDecisionSalesFactsResult, RieQueryProjection } from "./scalable-query.types";
+import type { RieDecisionSalesFactsQuery, RieDecisionSalesFactsResult, RieQueryProjection, RieScalableQueryScope } from "./scalable-query.types";
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_PAGE_SIZE = 5_000;
@@ -207,10 +207,23 @@ export class RieScalableQueryService {
       aggregates: [{ op: "count", as: "n" }],
       scope: { ...scope, date: { ...dateField, from: bounds[0]!, to: bounds[3]! } },
     };
-    const predicates = await this.scopePredicates(shape, aliases);
     const activeRows = [{ entityName: "Invoice Items", alias: "base" }, ...joins.map(({ entityName, alias }) => ({ entityName, alias }))];
     const ctePredicates = new Map(await Promise.all(activeRows.map(async ({ alias }) => [alias, await this.scopePredicates(shape, aliases, alias)] as const)));
     const scopedJoinAliases = new Set(joins.filter((join) => join.type !== "left" && ctePredicates.get(join.alias)?.length).map((join) => join.alias));
+    // A scoped INNER join already enforces its predicates inside its *_active CTE, so repeating them on the joined rows
+    // is redundant: it re-evaluates them per row AND counts their selectivity twice (the planner then expects ~1 customer
+    // instead of thousands and picks a nested loop that re-runs the whole fact join per customer). Left-joined aliases keep
+    // theirs: for those the WHERE is exactly what makes the join inner.
+    const enforcedByCte = scopedJoinAliases;
+    const { date: _sharedDate, ...scopeWithoutDate } = shape.scope!;
+    const finalScope: RieScalableQueryScope = {
+      ...scopeWithoutDate,
+      ...(enforcedByCte.has(dateField.source ?? "base") ? {} : { date: shape.scope!.date }),
+      fields: (scope.fields ?? []).filter((candidate) => !enforcedByCte.has(candidate.source ?? "base")),
+    };
+    const { requestingUser: _hierarchyUser, ...shapeWithoutUser } = shape;
+    const finalShape: RieScalableQuery = enforcedByCte.has(hierarchyRoute.source ?? "base") ? { ...shapeWithoutUser, scope: finalScope } : { ...shape, scope: finalScope };
+    const predicates = await this.scopePredicates(finalShape, aliases);
     const orderedScopedAliases = orderScopedAliases(joins, scopedJoinAliases);
     const orderedActiveRows = [...orderedScopedAliases.map((alias) => activeRows.find((row) => row.alias === alias)!), activeRows.find(({ alias }) => alias === "base")!, ...activeRows.filter(({ alias }) => alias !== "base" && !scopedJoinAliases.has(alias))];
     const ctes = orderedActiveRows.map(({ entityName, alias }) => activeEntityRowsCte(input.companyId, entityName, alias, ctePredicates.get(alias) ?? [], scopedSemiJoinsFor(alias, joins, scopedJoinAliases), []));
