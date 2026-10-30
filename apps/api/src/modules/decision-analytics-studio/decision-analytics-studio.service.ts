@@ -478,7 +478,7 @@ export class DecisionAnalyticsStudioService {
   }
 
   private decisionAggregate(ctx: ReturnType<DecisionAnalyticsStudioService["rieContext"]>, entityName: "Collections" | "Returns", dateField: string, amountField: string, f: ReturnType<DecisionAnalyticsStudioService["compileFilters"]>, from: number, to: number) {
-    return this.rieFacade.queryCanonicalRecords({ ...ctx, entityName, projection: [], scope: this.decisionScope(f, { field: dateField, source: "base", from, to }, false), joins: this.customerJoins(), hierarchyRoute: { field: "RouteID", source: "customer" }, aggregates: [{ op: "sum", field: amountField, as: "value" }], pagination: { limit: 1 } });
+    return this.rieFacade.queryCanonicalRecords({ ...ctx, entityName, projection: [], scope: this.decisionScope(f, { field: dateField, source: "base", from, to }, false), joins: this.customerJoins(), hierarchyRoute: { field: "RouteID", source: "customer" }, omitPredicatesEnforcedByScopedJoins: true, aggregates: [{ op: "sum", field: amountField, as: "value" }], pagination: { limit: 1 } });
   }
 
   private customerJoins() {
@@ -487,7 +487,7 @@ export class DecisionAnalyticsStudioService {
 
   private async decisionVisits(ctx: ReturnType<DecisionAnalyticsStudioService["rieContext"]>, f: ReturnType<DecisionAnalyticsStudioService["compileFilters"]>, from: number, to: number) {
     const joins = this.customerJoins();
-    const common = { ...ctx, entityName: "Visits", projection: [], joins, hierarchyRoute: { field: "RouteID", source: "customer" }, scope: this.decisionScope(f, { field: "VisitDate", source: "base", from, to }, false), pagination: { limit: 1 } } as const;
+    const common = { ...ctx, entityName: "Visits", projection: [], joins, hierarchyRoute: { field: "RouteID", source: "customer" }, omitPredicatesEnforcedByScopedJoins: true, scope: this.decisionScope(f, { field: "VisitDate", source: "base", from, to }, false), pagination: { limit: 1 } } as const;
     const customerScope = this.decisionScope(f, undefined, false, "base");
     const [visitCounts, customerCounts] = await Promise.all([
       this.rieFacade.queryCanonicalRecords({ ...common, aggregates: [{ op: "count", as: "totalVisits" }, { op: "countDistinct", field: "CustomerCode", as: "visitedCustomers" }, { op: "count", filterValues: { field: "VisitStatus", values: ["Productive"] }, as: "productiveVisits" }] }),
@@ -941,7 +941,7 @@ export class DecisionAnalyticsStudioService {
     ] };
     const joins = this.decisionJoins();
     const projection = [{ field: "InvoiceNo", as: "invoiceNo" }, { field: "LineNo", as: "lineNo" }, { field: "LineTotal", as: "amount" }, { field: "InvoiceDate", source: "invoice", as: "date" }, { field: "CustomerCode", source: "invoice", as: "customerCode" }, { field: "CustomerName", source: "customer", as: "customerName" }, { field: "City", source: "customer", as: "city" }, { field: "Channel", source: "customer", as: "channel" }, { field: "ProductCode", as: "productCode" }, { field: "ProductName", source: "product", as: "productName" }, { field: "Category", source: "product", as: "category" }, { field: "Brand", source: "product", as: "brand" }, { field: "EmployeeName", source: "rep", as: "repName" }, { field: "EmployeeName", source: "supervisor", as: "supervisorName" }];
-    const common = { ...ctx, entityName: "Invoice Items", joins, hierarchyRoute: { field: "RouteID", source: "invoice" }, scope };
+    const common = { ...ctx, entityName: "Invoice Items", joins, hierarchyRoute: { field: "RouteID", source: "invoice" }, scope, omitPredicatesEnforcedByScopedJoins: true };
     const pageResult = await this.rieFacade.queryCanonicalRecords({
       ...common,
       projection,

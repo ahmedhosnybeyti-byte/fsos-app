@@ -138,7 +138,8 @@ export class RieScalableQueryService {
       return Prisma.sql`${join.type === "left" ? Prisma.raw("LEFT JOIN") : Prisma.raw("INNER JOIN")} ${activeEntityRowsReference(join.alias)} ON ${normalizedField(join.on.left)} = ${normalizedField({ field: join.on.rightField, source: join.alias })}`;
     });
     const joinClause = joinSql.length ? Prisma.join(joinSql, " ") : Prisma.empty;
-    const where = !canCollapseScopedJoins && predicates.length ? Prisma.sql` AND ${Prisma.join(predicates, " AND ")}` : Prisma.empty;
+    const finalPredicates = input.omitPredicatesEnforcedByScopedJoins ? await this.scopePredicates(withoutEnforcedScopes(input, scopedJoinAliases), aliases) : predicates;
+    const where = !canCollapseScopedJoins && finalPredicates.length ? Prisma.sql` AND ${Prisma.join(finalPredicates, " AND ")}` : Prisma.empty;
     const grouping = input.groupBy?.length ? Prisma.sql` GROUP BY ${Prisma.join(input.groupBy.map(textField))}` : Prisma.empty;
     const ordering = input.orderBy?.length
       ? Prisma.sql` ORDER BY ${Prisma.join(input.orderBy.map((order) => Prisma.sql`${order.aggregate ? quoted(order.aggregate) : textField(order.field!)} ${Prisma.raw((order.direction ?? "asc").toUpperCase())}`))}`
@@ -4220,6 +4221,24 @@ function assertField(field: RieQueryField, aliases: Set<string>): void {
   if (field.source && !aliases.has(field.source)) throw new Error(`RIE scalable query references unknown alias "${field.source}".`);
 }
 function assertIdentifier(value: string, label: string): void { if (!SAFE_IDENTIFIER.test(value)) throw new Error(`RIE scalable query ${label} must be an alphanumeric identifier.`); }
+/** Copy of the query without the scope entries (and hierarchy) that the given scoped INNER-join CTEs already enforce; see RieScalableQuery.omitPredicatesEnforcedByScopedJoins. */
+function withoutEnforcedScopes(input: RieScalableQuery, enforced: ReadonlySet<string>): RieScalableQuery {
+  const sourceOf = (field: { source?: string }) => field.source ?? "base";
+  const { date: _date, route, rep, customer, product, fields, ...restScope } = input.scope ?? {};
+  const dates = asArray(input.scope?.date).filter((date) => !enforced.has(sourceOf(date)));
+  const keep = <T extends { source?: string }>(value: T | undefined): T | undefined => (value && !enforced.has(sourceOf(value)) ? value : undefined);
+  const scope: RieScalableQueryScope = {
+    ...restScope,
+    ...(dates.length ? { date: dates.length === 1 ? dates[0]! : dates } : {}),
+    ...(keep(route) ? { route: route! } : {}),
+    ...(keep(rep) ? { rep: rep! } : {}),
+    ...(keep(customer) ? { customer: customer! } : {}),
+    ...(keep(product) ? { product: product! } : {}),
+    fields: (fields ?? []).filter((candidate) => !enforced.has(sourceOf(candidate))),
+  };
+  const { requestingUser: _user, ...withoutUser } = input;
+  return enforced.has(input.hierarchyRoute?.source ?? "base") ? { ...withoutUser, scope } : { ...input, scope };
+}
 function asArray<T>(value: T | readonly T[] | undefined): readonly T[] {
   if (value === undefined) return [];
   return Array.isArray(value) ? value as readonly T[] : [value as T];

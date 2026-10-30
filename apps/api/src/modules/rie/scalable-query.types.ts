@@ -97,6 +97,12 @@ export interface RieScalableQuery extends EntityQueryContext {
    */
   internalAggregate?: boolean;
   /**
+   * Opt-in. Do not repeat in the final WHERE the predicates that a scoped INNER-join *_active CTE already enforces.
+   * Repeating them re-evaluates them per row and counts their selectivity twice, which can make the planner expect ~1 customer
+   * instead of thousands and pick a nested loop. Left-joined aliases always keep theirs. Default false = unchanged behavior.
+   */
+  omitPredicatesEnforcedByScopedJoins?: boolean;
+  /**
    * Explicit opt-in for a screen's final projected result when its complete
    * customer-level output is required. It does not permit raw fact reads.
    */
